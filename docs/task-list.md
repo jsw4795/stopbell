@@ -41,6 +41,46 @@ After:
 
 ------------------------------------------------------------------------
 
+# Task List Maintenance Rule
+
+모든 Task 완료 시 `task-list.md`의 상태를 반드시 업데이트한다.
+
+Workflow:
+
+1. Task 작업 시작
+2. 구현 또는 문서 작업 진행
+3. 검증 완료
+4. `task-list.md`의 해당 Task 상태 변경
+
+Before:
+
+```text
+- [ ] TASK-XXX
+```
+
+After:
+
+```text
+- [x] TASK-XXX
+```
+
+5. 변경된 `task-list.md`를 해당 Task Commit에 포함한다.
+
+규칙:
+
+- 완료된 Task는 반드시 `task-list.md`에 완료 표시한다.
+- 완료 표시 없는 Task 완료 Commit을 만들지 않는다.
+- `task-list.md` 업데이트는 별도의 나중 작업으로 미루지 않는다.
+- 실제 완료되지 않은 Task는 체크하지 않는다.
+
+목적:
+
+- Git History와 Task 진행 상태 일치
+- 프로젝트 진행 상황 추적 가능
+- Codex와 개발자가 동일한 진행 상태 공유
+
+------------------------------------------------------------------------
+
 # Phase 0 - Foundation
 
 목표:
