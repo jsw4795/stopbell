@@ -94,7 +94,7 @@ After:
 - [x] TASK-005 JPA / MyBatis 설정
 - [x] TASK-006 기본 Application configuration 분리
 - [x] TASK-007 Health endpoint 구현
-- [ ] TASK-008 `.env.example` 또는 동등한 설정 placeholder 작성
+- [x] TASK-008 `.env.example` 또는 동등한 설정 placeholder 작성
 
 ------------------------------------------------------------------------
 
