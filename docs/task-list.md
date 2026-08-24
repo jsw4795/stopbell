@@ -4,7 +4,40 @@
 
 이 문서는 Codex와 개발자가 StopBell을 단계적으로 구현하기 위한 Task 순서를 정의한다.
 
-모든 Task는 현재 미완료 상태이다. 실제 구현 전에 `requirements.md`, `architecture.md`, `database.md`, `domain-model.md`, 관련 ADR을 확인한다.
+Task 상태는 실제 완료 여부를 기준으로 관리한다. 실제 구현 전에 `requirements.md`, `architecture.md`, `database.md`, `domain-model.md`, 관련 ADR을 확인한다.
+
+------------------------------------------------------------------------
+
+# Task Completion Rule
+
+모든 Task 완료 시 다음 절차를 따른다.
+
+1. Task 구현 완료 여부를 검증한다.
+2. 관련 Test 또는 실행 확인이 필요한 경우 검증한다.
+3. 실제 완료된 경우 `task-list.md`의 해당 Task 상태를 변경한다.
+
+변경 형식:
+
+Before:
+
+```text
+- [ ] TASK-XXX
+```
+
+After:
+
+```text
+- [x] TASK-XXX
+```
+
+4. Task 완료 표시와 함께 필요하면 관련 문서 업데이트 여부를 확인한다.
+
+원칙:
+
+- 실제 완료되지 않은 Task는 체크하지 않는다.
+- 일부 구현만 완료된 경우 체크하지 않는다.
+- 문서 결정 Task와 구현 Task를 구분한다.
+- Task 완료 여부는 Git Commit 여부가 아니라 실제 작업 완료 여부 기준으로 판단한다.
 
 ------------------------------------------------------------------------
 
@@ -14,18 +47,14 @@
 
 프로젝트 기본 환경과 최소 실행 구조를 준비한다.
 
-- [ ] TASK-001 Repository Structure 생성
-- [ ] TASK-002 Spring Boot 프로젝트 생성
-- [ ] TASK-003 Flutter 프로젝트 생성
-- [ ] TASK-004 MySQL 8.4 LTS Docker Compose Development 환경 구성
-- [ ] TASK-005 JPA / MyBatis 설정
+- [x] TASK-001 Repository Structure 생성
+- [x] TASK-002 Spring Boot 프로젝트 생성
+- [x] TASK-003 Flutter 프로젝트 생성
+- [x] TASK-004 MySQL 8.4 LTS Docker Compose Development 환경 구성
+- [x] TASK-005 JPA / MyBatis 설정
 - [ ] TASK-006 기본 Application configuration 분리
 - [ ] TASK-007 Health endpoint 구현
 - [ ] TASK-008 `.env.example` 또는 동등한 설정 placeholder 작성
-
-Undecided:
-
-- Java, Spring Boot, Gradle, Flutter, Dart의 정확한 Version
 
 ------------------------------------------------------------------------
 
@@ -42,14 +71,13 @@ JPA를 사용하는 핵심 Domain과 Repository 기반 상태 관리를 준비�
 - [ ] TASK-105 Alarm JPA Repository 구현
 - [ ] TASK-106 NotificationHistory JPA Repository 구현
 - [ ] TASK-107 Alarm status와 상태 전이 규칙 구현
-- [ ] TASK-108 Database migration 또는 schema 관리 방식 결정
+- [x] TASK-108 Database migration 또는 schema 관리 방식 결정
 - [ ] TASK-109 Entity 및 Repository Test 작성
 
 Undecided:
 
 - Authentication provider
 - User identity의 상세 모델
-- schema migration tool
 
 ------------------------------------------------------------------------
 
