@@ -92,7 +92,7 @@ After:
 - [x] TASK-003 Flutter 프로젝트 생성
 - [x] TASK-004 MySQL 8.4 LTS Docker Compose Development 환경 구성
 - [x] TASK-005 JPA / MyBatis 설정
-- [ ] TASK-006 기본 Application configuration 분리
+- [x] TASK-006 기본 Application configuration 분리
 - [ ] TASK-007 Health endpoint 구현
 - [ ] TASK-008 `.env.example` 또는 동등한 설정 placeholder 작성
 
