@@ -1,0 +1,22 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-stopbell}
+      MYSQL_USER: ${DB_USERNAME:-stopbell}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD must be set}
+    ports:
+      - "${DB_PORT:-3307}:3306"
+    volumes:
+      - stopbell-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  stopbell-mysql-data:
