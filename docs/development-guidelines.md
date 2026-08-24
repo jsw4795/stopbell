@@ -27,6 +27,54 @@
 - MySQL Connector/J 9.7.0
 - MySQL 8.4 LTS
 
+### Java and Gradle Environment Verification
+
+StopBell Backend 개발 환경에서는 Java Version과 Gradle JVM Version이 동일해야 한다.
+
+Required Environment:
+
+- Java 21
+- Gradle Wrapper 8.14.3
+
+확인 방법:
+
+Java Version 확인:
+
+```text
+java -version
+```
+
+Gradle JVM 확인:
+
+```text
+./gradlew -version
+```
+
+두 결과가 모두 Java 21을 사용하는지 확인한다.
+
+#### JAVA_HOME 관련 규칙
+
+macOS 환경에서는 `JAVA_HOME` 설정으로 인해 Gradle 실행 Java Version이 달라질 수 있다.
+
+예를 들어 `java -version`은 Java 21을 표시하지만, `./gradlew -version`은 Java 17을 표시하는 Version 불일치가 발생할 수 있다.
+
+이 경우 코드 문제로 판단하기 전에 Java 환경을 먼저 확인한다.
+
+잘못된 `JAVA_HOME`이 설정된 경우 다음 명령으로 현재 Shell의 `JAVA_HOME` 영향을 제거하고 Gradle Wrapper를 실행할 수 있다.
+
+```text
+env -u JAVA_HOME ./gradlew test
+```
+
+또는 `JAVA_HOME`을 Java 21 경로로 수정한다.
+
+추가 규칙:
+
+- Backend 개발 및 Test 실행 전 Java Version을 확인한다.
+- Gradle 실행 시 Gradle Wrapper를 사용한다.
+- 시스템 Java Version과 Gradle JVM Version 불일치를 방지한다.
+- Java Version 관련 오류 발생 시 코드 수정 전에 개발 환경을 먼저 확인한다.
+
 ### 계층화
 
 다음과 같은 일반적 구조를 사용할 수 있다.
