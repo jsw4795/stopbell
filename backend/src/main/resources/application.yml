@@ -7,3 +7,12 @@ spring:
     hibernate:
       ddl-auto: none
     open-in-view: false
+
+management:
+  endpoint:
+    health:
+      enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health
