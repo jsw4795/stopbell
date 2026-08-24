@@ -65,6 +65,9 @@ Database
 - Database 데이터는 Docker Named Volume 기반 Persistence를 사용한다.
 - Container 재생성 시에도 Database 데이터가 유지되는지 확인한다.
 - Volume 삭제는 명시적인 데이터 삭제 작업으로 취급한다.
+- Database Schema 변경은 Flyway Migration으로 관리한다.
+- Hibernate `ddl-auto`를 통한 자동 Schema 변경은 사용하지 않는다.
+- Entity 변경만으로 Database Schema를 변경하지 않으며, Schema 변경 시 Migration 파일을 반드시 추가한다.
 
 ### 외부 API
 

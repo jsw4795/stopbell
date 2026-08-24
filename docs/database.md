@@ -21,7 +21,15 @@ Container를 삭제하거나 재생성해도 Docker Named Volume이 유지되는
 
 Docker Compose configuration file은 별도 Task에서 생성한다.
 
-## 3. 모델링 원칙
+## 3. Database Schema Migration
+
+Database Schema 변경은 Flyway Migration으로 관리한다.
+
+Hibernate `ddl-auto`를 통한 자동 Schema 변경은 사용하지 않는다. Entity 변경만으로 Database Schema를 변경하지 않으며, Schema 변경 시에는 Migration 파일을 반드시 추가한다.
+
+Migration 파일의 경로, 명명 규칙, 실행 설정은 구현 전에 별도로 정의한다.
+
+## 4. 모델링 원칙
 
 - 명확한 관계형 제약 조건을 우선한다.
 - 데이터베이스가 안전하게 강제할 수 있는 불변 조건에는 데이터베이스 제약을 사용한다.
@@ -29,7 +37,7 @@ Docker Compose configuration file은 별도 Task에서 생성한다.
 - 제공자 식별자는 제공자별 네임스페이스가 없으면 전역적으로 유일하다고 가정하지 않는다.
 - 타임스탬프는 일관되게 저장한다.
 
-## 4. Persistence Strategy
+## 5. Persistence Strategy
 
 JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `devices`, `alerts`, `notification_history`는 Repository 기반으로 관리한다.
 
@@ -37,7 +45,7 @@ MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적�
 
 JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡한 조회를 위해 Domain Entity의 상태 관리 책임을 MyBatis로 옮기지 않는다.
 
-## 5. 후보 핵심 테이블
+## 6. 후보 핵심 테이블
 
 다음 테이블은 개념적 설계이며 아직 확정되지 않았다.
 
@@ -123,7 +131,7 @@ error_code
 
 이 테이블을 V1에 포함할지는 구현 복잡도와 관측성 요구를 바탕으로 결정한다.
 
-## 6. 외부 교통 데이터
+## 7. 외부 교통 데이터
 
 `bus_routes`, `bus_stops` 마스터 테이블을 자동으로 만들지 않는다.
 
@@ -137,7 +145,7 @@ error_code
 
 교통 메타데이터를 영속화한다면 이유를 문서화하고 갱신/무효화 규칙을 정의한다.
 
-## 7. 인덱싱
+## 8. 인덱싱
 
 인덱스는 실제 쿼리 패턴을 기준으로 도입한다.
 
@@ -150,7 +158,7 @@ error_code
 
 지원하는 쿼리를 특정하지 않은 추측성 인덱스는 추가하지 않는다.
 
-## 8. 트랜잭션 고려 사항
+## 9. 트랜잭션 고려 사항
 
 향후 핵심 트랜잭션 질문:
 

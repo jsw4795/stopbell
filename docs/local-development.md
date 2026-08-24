@@ -141,7 +141,11 @@ Docker Compose configuration file은 별도 Task에서 생성한다.
 
 초기 schema는 `database.md`의 후보 테이블과 JPA Entity 설계를 기준으로 만든다.
 
-schema migration 방식은 Undecided이다. migration tool을 도입한다면 선택 이유와 운영 영향 범위를 기록한다.
+Database Schema 변경은 Flyway Migration으로 관리한다. Hibernate `ddl-auto`를 통한 자동 Schema 변경은 사용하지 않는다.
+
+Entity 변경만으로 Database Schema를 변경하지 않으며, Schema 변경 시 Migration 파일을 반드시 추가한다.
+
+Migration 파일의 경로, 명명 규칙, 실행 설정은 구현 전에 별도로 정의한다.
 
 ------------------------------------------------------------------------
 
