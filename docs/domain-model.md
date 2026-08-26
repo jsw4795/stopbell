@@ -38,31 +38,45 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
 
 ## Purpose
 
-서비스를 사용하는 사용자.
+서비스 내부에서 사용자를 식별하고 Alarm 소유자의 기준이 되는 최소 Domain이다.
 
 ## Responsibilities
 
--   사용자 식별
--   인증 정보 관리
--   등록한 Alarm 관리
+-   내부 사용자 식별
+-   Alarm 소유자 기준
+-   향후 Device 및 Authentication identity 연결 기준
 
 ## Main Attributes
 
     id
 
-    email
-
-    provider
-
     createdAt
 
     updatedAt
+
+## Identifier Policy
+
+Java에서는 `Long`을 사용한다.
+
+Database에서는 MySQL `BIGINT AUTO_INCREMENT`를 사용한다. JPA 구현 시에는 MySQL `AUTO_INCREMENT`와 호환되는 ID 생성 방식을 사용한다.
+
+현재 프로젝트 규모에서는 UUID 등 별도 식별 전략을 도입하지 않는다.
+
+## Timestamp Policy
+
+`createdAt`, `updatedAt`은 Java에서 `LocalDateTime`, Database에서 `DATETIME(6)`으로 관리한다. 두 컬럼은 `NOT NULL`을 기본 정책으로 한다.
+
+timestamp 자동 관리 방식은 아직 확정하지 않는다. TASK-101 구현 시 JPA lifecycle callback 또는 Spring Data Auditing 중 프로젝트의 단순성과 향후 공통 Entity 확장 가능성을 고려해 최소한의 방식을 선택한다.
+
+이번 단계에서는 timestamp 관리를 위해 `BaseEntity` 같은 공통 상속 구조를 도입하지 않는다.
 
 ## Relationship
 
     User 1 : N Alarm
 
 한 사용자는 여러 개의 Alarm을 등록할 수 있다.
+
+User Entity에는 `alarms` collection을 추가하지 않는다. Alarm 구현 시 Alarm이 User를 참조하는 방향을 우선하며, JPA 양방향 관계는 실제 필요가 생길 때 검토한다.
 
 ## Persistence
 
@@ -377,6 +391,12 @@ NotificationHistory는 알림 발송 기록의 저장과 상태 관리를 위해
 현재 결정하지 않는 사항.
 
 ## Authentication
+
+Authentication provider는 아직 Undecided이다.
+
+email 사용 여부와 정책도 Undecided이다. provider identity를 User에 포함할지, 별도 `AuthIdentity`로 분리할지도 Authentication 설계 시점에 확정한다.
+
+현재는 `email`, `provider`, `providerUserId`, `displayName`을 User의 속성으로 추가하지 않는다. Authentication provider와 `AuthIdentity` 구조도 미리 구현하거나 확정하지 않는다.
 
 후보:
 

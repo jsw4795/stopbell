@@ -51,17 +51,21 @@ JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡�
 
 ### users
 
-인증 도입 시 필요하다.
+내부 사용자 식별과 Alarm 소유자 기준을 위한 최소 테이블이다.
 
 후보 필드:
 
 ```text
-id
-created_at
-updated_at
+id BIGINT AUTO_INCREMENT PRIMARY KEY
+created_at DATETIME(6) NOT NULL
+updated_at DATETIME(6) NOT NULL
 ```
 
-OAuth 식별자 필드는 인증 설계에 따라 별도 identity 테이블에 둘 수 있다.
+현재 `users` 테이블에는 `email`, `provider`, `provider_user_id`, `display_name`을 추가하지 않는다. PK 외에 Authentication 관련 unique index도 만들지 않는다.
+
+Authentication 설계 시 `UNIQUE(provider, provider_user_id)` 제약과 provider identity를 별도 identity 테이블에 둘지 검토할 수 있다. 단, 현재 schema에는 적용하지 않는다.
+
+실제 `users` 테이블 생성과 Schema 변경은 Flyway Migration으로 관리한다. 이번 문서 작업에서는 Migration SQL을 작성하지 않으며, Hibernate `ddl-auto`로 Schema를 자동 생성하지 않는다.
 
 ### devices
 
