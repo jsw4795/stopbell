@@ -39,7 +39,7 @@ Migration 파일의 경로, 명명 규칙, 실행 설정은 구현 전에 별도
 
 ## 5. Persistence Strategy
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `devices`, `alerts`, `notification_history`는 Repository 기반으로 관리한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `devices`, `alarms`, `notification_history`는 Repository 기반으로 관리한다.
 
 MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에 사용한다. 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회와 Transit 상태 조회가 대상 예시이다.
 
@@ -88,33 +88,35 @@ updated_at
 - 한 사용자가 여러 기기를 가질 수 있는가? 아마 그렇다.
 - 푸시 토큰은 고유해야 하는가? 아마 그렇지만, 제공자의 생명주기를 검토해야 한다.
 
-### alerts
+### alarms
 
-사용자가 설정한 버스 알림을 저장한다.
+사용자가 설정한 Alarm의 공통 정보를 저장한다. Transit provider와 식별자 체계가 확정되기 전에는 Bus/Subway별 상세 대상 정보는 저장하지 않는다.
 
 후보 필드:
 
 ```text
 id
 user_id
-provider
-route_id
-stop_id
-status
-triggered_at
+transit_type
+active
 created_at
 updated_at
 ```
 
-가능한 상태:
+`transit_type`은 `BUS`, `SUBWAY` 문자열로 저장한다. `active`는 Alarm이 현재 감시 대상인지 여부만 표현하며, 새 Alarm의 기본값은 `false`이다.
+
+Transit API 조회 실패, Notification 발송 결과, Alarm trigger는 Alarm의 상태로 저장하지 않는다. 이력과 결과는 필요 시 `notification_history` 또는 별도 logging으로 분리한다.
+
+현재 확정 Schema:
 
 ```text
-ACTIVE
-TRIGGERED
-INACTIVE
+id BIGINT AUTO_INCREMENT PRIMARY KEY
+user_id BIGINT NOT NULL REFERENCES users(id)
+transit_type VARCHAR(20) NOT NULL
+active BOOLEAN NOT NULL
+created_at DATETIME(6) NOT NULL
+updated_at DATETIME(6) NOT NULL
 ```
-
-상태 이름과 생명주기는 확정되지 않았다.
 
 ### notification_history
 

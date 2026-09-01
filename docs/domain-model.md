@@ -18,14 +18,9 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
      |
      |
      └── Alarm
-            |
-            |
-            ├── TransitTarget
-            |
-            └── NotificationHistory
 
 
-    TransitTarget
+    Transit API
 
      |
      ├── BusRoute
@@ -90,7 +85,7 @@ User는 단순한 Domain CRUD와 Entity 상태 관리를 위해 JPA Repository �
 
 ## Purpose
 
-사용자가 원하는 알림 조건을 표현하는 핵심 Domain이다.
+사용자가 원하는 알림 조건의 공통 정보를 표현하는 핵심 Domain이다.
 
 예:
 
@@ -100,59 +95,32 @@ User는 단순한 Domain CRUD와 Entity 상태 관리를 위해 JPA Repository �
 
 ## Responsibilities
 
--   알림 조건 관리
+-   Alarm 공통 정보 관리
 -   활성 상태 관리
--   감시 대상 연결
 
 ## Main Attributes
 
     id
 
-    userId
+    user
 
     transitType
 
-    targetId
-
-    status
+    active
 
     createdAt
 
     updatedAt
 
-## Status
+## Active Status
 
-    ACTIVE
+`active`는 Alarm이 현재 감시 대상인지만 표현한다. 새 Alarm은 비활성 상태(`false`)로 생성한다.
 
-    PAUSED
+Transit API 조회 실패, Notification 발송 결과, Alarm trigger는 Alarm의 상태가 아니다. 이 정보는 필요 시 `NotificationHistory`, Application Log 또는 별도 이력으로 분리한다.
 
-    COMPLETED
+`transitType`은 `BUS`, `SUBWAY`를 표현하는 Enum으로 관리하며, Database에는 문자열로 저장한다.
 
-    DELETED
-
-## State Flow
-
-    사용자가 알림 생성
-
-            ↓
-
-    ACTIVE
-
-            ↓
-
-    버스 도착
-
-            ↓
-
-    COMPLETED
-
-            ↓
-
-    사용자 삭제
-
-            ↓
-
-    DELETED
+Transit provider와 실제 식별자 체계가 확정되기 전에는 route, stop, line, station, direction 같은 Transit-specific 속성을 Alarm에 추가하지 않는다.
 
 ## Persistence
 
@@ -355,22 +323,12 @@ NotificationHistory는 알림 발송 기록의 저장과 상태 관리를 위해
 
                      Alarm
 
-                      |
 
-              ┌───────┴────────┐
+    Transit API
 
-              |                |
+          |
 
-        TransitTarget     NotificationHistory
-
-
-              |
-
-         ┌────┴────┐
-
-         |         |
-
-    BusRoute   BusStop
+    BusRoute / BusStop
 
 
 
