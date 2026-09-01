@@ -8,3 +8,6 @@ temp/
 .settings/
 .factorypath
 bin/
+
+# Personal development log
+/docs/devlog/
