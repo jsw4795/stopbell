@@ -16,6 +16,7 @@ import com.stopbell.notification.entity.NotificationStatus;
 import com.stopbell.notification.repository.NotificationHistoryRepository;
 import com.stopbell.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -56,7 +57,8 @@ class RepositoryIntegrationTest {
     private DataSource dataSource;
 
     @Test
-    void testDataSourceUsesTheTestcontainerRandomPort() throws SQLException {
+    @DisplayName("테스트 데이터베이스는 Testcontainer의 랜덤 포트를 사용한다")
+    void test_data_source_uses_testcontainer_random_port() throws SQLException {
         try (Connection connection = dataSource.getConnection()) {
             String jdbcUrl = connection.getMetaData().getURL();
 
@@ -66,7 +68,8 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    void flywayAppliesAllSchemaMigrationsToTheTestcontainerDatabase() {
+    @DisplayName("Flyway Migration이 Testcontainer 데이터베이스에 모두 적용된다")
+    void flyway_applies_all_schema_migrations() {
         List<String> versions = jdbcTemplate.queryForList(
                 "select version from flyway_schema_history where success = true order by installed_rank",
                 String.class
@@ -76,7 +79,8 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    void savesAndFindsAUserWithPersistenceTimestamps() {
+    @DisplayName("User를 저장하면 ID와 생성 및 수정 시간이 생성되고 다시 조회할 수 있다")
+    void save_user_and_find_by_id() {
         User savedUser = userRepository.saveAndFlush(new User());
         entityManager.clear();
 
@@ -88,7 +92,8 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    void savesAndFindsAnAlarmWithItsUserRelationshipAndMappingValues() {
+    @DisplayName("Alarm을 저장하면 User 관계와 TransitType 및 상태가 유지된다")
+    void save_alarm_with_user_relation() {
         User user = userRepository.saveAndFlush(new User());
         Alarm savedAlarm = alarmRepository.saveAndFlush(new Alarm(user, TransitType.SUBWAY));
         entityManager.clear();
@@ -103,7 +108,8 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    void savesAndFindsASuccessNotificationHistoryWithANullFailureReason() {
+    @DisplayName("SUCCESS NotificationHistory는 실패 사유 없이 저장하고 조회할 수 있다")
+    void save_success_notification_history() {
         Alarm alarm = saveAlarm();
         NotificationHistory savedHistory = notificationHistoryRepository.saveAndFlush(
                 new NotificationHistory(alarm, NotificationStatus.SUCCESS, null)
@@ -119,7 +125,8 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    void savesAndFindsAFailureNotificationHistoryWithItsFailureReason() {
+    @DisplayName("FAILURE NotificationHistory는 실패 사유와 함께 저장하고 조회할 수 있다")
+    void save_failure_notification_history() {
         Alarm alarm = saveAlarm();
         NotificationHistory savedHistory = notificationHistoryRepository.saveAndFlush(
                 new NotificationHistory(alarm, NotificationStatus.FAILURE, "push provider rejected the request")
@@ -135,7 +142,8 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    void dirtyCheckingPersistsActivationAndUpdatesUpdatedAtWithoutCallingSaveAgain() {
+    @DisplayName("관리 중인 Alarm을 변경하면 save 없이 Dirty Checking으로 반영되고 수정 시간이 갱신된다")
+    void update_alarm_by_dirty_checking_without_save() {
         Alarm savedAlarm = saveAlarm();
         entityManager.clear();
 
@@ -153,7 +161,8 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    void activatingAnAlreadyActiveAlarmDoesNotUpdateUpdatedAt() {
+    @DisplayName("이미 활성화된 Alarm을 다시 활성화해도 상태와 수정 시간이 변경되지 않는다")
+    void activate_when_already_active() {
         Alarm alarm = saveAlarm();
         alarm.activate();
         entityManager.flush();

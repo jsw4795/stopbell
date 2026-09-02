@@ -157,6 +157,25 @@ V1에서 앱은 비교적 얇은 클라이언트로 유지한다.
 
 프레임워크 동작만 반복 검증하는 테스트는 피한다.
 
+### Test Naming Convention
+
+- Test Method는 영어 `snake_case`를 사용한다.
+- Production Method는 기존 Java `camelCase`를 유지한다.
+- 모든 `@Test` Method에는 한국어 자연어 문장으로 작성한 `@DisplayName`을 추가한다.
+- `@DisplayName`은 Test의 행동과 기대 결과를 명확히 표현한다.
+- Method 이름은 지나치게 길게 만들지 않고, 세부 설명은 `@DisplayName`에 맡긴다.
+- Test Variable은 Java `camelCase`를 유지하고, 문맥이 명확한 범위에서 간결하게 작성한다.
+
+예:
+
+```java
+@Test
+@DisplayName("비활성 알람을 활성화하면 활성 상태가 된다")
+void activate_when_inactive() {
+    // ...
+}
+```
+
 ## 6. Git / 커밋 규율
 
 ### Git Commit Message Convention
