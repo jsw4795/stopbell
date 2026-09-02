@@ -8,70 +8,36 @@ Task 상태는 실제 완료 여부를 기준으로 관리한다. 실제 구현 
 
 ------------------------------------------------------------------------
 
-# Task Completion Rule
+# Task Completion Workflow
 
 모든 Task 완료 시 다음 절차를 따른다.
 
-1. Task 구현 완료 여부를 검증한다.
-2. 관련 Test 또는 실행 확인이 필요한 경우 검증한다.
-3. 실제 완료된 경우 `task-list.md`의 해당 Task 상태를 변경한다.
+1. 현재 Task에 필요한 구현 또는 문서 작업을 완료한다.
+2. 관련 Test, 실행 확인 등 필요한 검증을 수행한다.
+3. 검증이 성공하고 Task가 실제로 완료된 경우에만 `task-list.md`의 해당 Task 상태를 변경한다.
 
-변경 형식:
+   Before:
 
-Before:
+   ```text
+   - [ ] TASK-XXX
+   ```
 
-```text
-- [ ] TASK-XXX
-```
+   After:
 
-After:
+   ```text
+   - [x] TASK-XXX
+   ```
 
-```text
-- [x] TASK-XXX
-```
-
-4. Task 완료 표시와 함께 필요하면 관련 문서 업데이트 여부를 확인한다.
+4. 필요한 관련 문서 업데이트 여부를 확인하고, 변경된 `task-list.md`를 해당 Task의 동일 Commit에 포함한다.
+5. Commit 전에 변경사항과 Task 완료 표시를 확인한다.
 
 원칙:
 
-- 실제 완료되지 않은 Task는 체크하지 않는다.
-- 일부 구현만 완료된 경우 체크하지 않는다.
+- Task 완료 여부는 Git Commit 여부가 아니라 실제 작업 완료 여부를 기준으로 판단한다.
+- 실제 완료되지 않았거나 일부만 구현된 Task는 체크하지 않는다.
 - 문서 결정 Task와 구현 Task를 구분한다.
-- Task 완료 여부는 Git Commit 여부가 아니라 실제 작업 완료 여부 기준으로 판단한다.
-
-------------------------------------------------------------------------
-
-# Task List Maintenance Rule
-
-모든 Task 완료 시 `task-list.md`의 상태를 반드시 업데이트한다.
-
-Workflow:
-
-1. Task 작업 시작
-2. 구현 또는 문서 작업 진행
-3. 검증 완료
-4. `task-list.md`의 해당 Task 상태 변경
-
-Before:
-
-```text
-- [ ] TASK-XXX
-```
-
-After:
-
-```text
-- [x] TASK-XXX
-```
-
-5. 변경된 `task-list.md`를 해당 Task Commit에 포함한다.
-
-규칙:
-
-- 완료된 Task는 반드시 `task-list.md`에 완료 표시한다.
-- 완료 표시 없는 Task 완료 Commit을 만들지 않는다.
-- `task-list.md` 업데이트는 별도의 나중 작업으로 미루지 않는다.
-- 실제 완료되지 않은 Task는 체크하지 않는다.
+- 완료된 Task는 반드시 `task-list.md`에 표시하며, 완료 표시 없는 Task 완료 Commit을 만들지 않는다.
+- `task-list.md` 업데이트를 별도의 나중 작업으로 미루지 않는다.
 
 목적:
 

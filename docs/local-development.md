@@ -58,9 +58,12 @@ Apple Silicon (ARM64) 환경에서 확인할 사항:
 
 ## Project Run
 
-Spring Boot project가 생성된 후, 선택한 Gradle wrapper를 사용해 Local Development profile로 실행한다.
+Backend 디렉터리에서 Gradle Wrapper를 사용해 실행한다. 기본 profile은 `local`이다.
 
-정확한 command와 profile 이름은 To be decided이다.
+```text
+cd backend
+./gradlew bootRun
+```
 
 실행 전 확인 사항:
 
@@ -82,7 +85,7 @@ DB_USERNAME
 DB_PASSWORD
 ```
 
-정확한 configuration key와 connection URL 형식은 Spring Boot 설정을 만들 때 확정한다.
+Local profile은 `backend/src/main/resources/application-local.yml`에서 위 환경 변수를 사용하며, 연결 URL은 `jdbc:mysql://${DB_HOST}:${DB_PORT}/${DB_NAME}` 형식이다.
 
 ## Environment Variable
 
@@ -128,7 +131,7 @@ Container lifecycle과 Database lifecycle은 분리한다. Container를 삭제�
 
 Container 내부에만 Database 데이터를 저장하지 않는다. 이 방식은 Container 삭제 시 데이터가 손실될 수 있다.
 
-Docker Compose configuration file은 별도 Task에서 생성한다.
+Docker Compose configuration은 저장소 루트의 `docker-compose.yml`에 있으며, 서비스 이름은 `mysql`이다.
 
 ## Database Management Notes
 
@@ -139,13 +142,11 @@ Docker Compose configuration file은 별도 Task에서 생성한다.
 
 ## Schema
 
-초기 schema는 `database.md`의 후보 테이블과 JPA Entity 설계를 기준으로 만든다.
-
 Database Schema 변경은 Flyway Migration으로 관리한다. Hibernate `ddl-auto`를 통한 자동 Schema 변경은 사용하지 않는다.
 
 Entity 변경만으로 Database Schema를 변경하지 않으며, Schema 변경 시 Migration 파일을 반드시 추가한다.
 
-Migration 파일의 경로, 명명 규칙, 실행 설정은 구현 전에 별도로 정의한다.
+Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{description}.sql` 형식으로 둔다. 애플리케이션과 MySQL Testcontainer 통합 테스트가 이를 적용한다.
 
 ------------------------------------------------------------------------
 
@@ -190,7 +191,7 @@ Local Device, emulator/simulator, Backend 실행 위치에 따라 host 주소가
 3. Spring Boot를 실행한다.
 4. 개발을 진행한다.
 
-정확한 Compose service 이름과 command 위치는 Docker Compose configuration을 작성할 때 확정한다.
+Compose file은 저장소 루트에 있으며, 서비스 이름은 `mysql`이다.
 
 ## Feature Workflow
 

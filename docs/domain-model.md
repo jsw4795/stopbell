@@ -61,9 +61,9 @@ Database에서는 MySQL `BIGINT AUTO_INCREMENT`를 사용한다. JPA 구현 시�
 
 `createdAt`, `updatedAt`은 Java에서 `LocalDateTime`, Database에서 `DATETIME(6)`으로 관리한다. 두 컬럼은 `NOT NULL`을 기본 정책으로 한다.
 
-timestamp 자동 관리 방식은 아직 확정하지 않는다. TASK-101 구현 시 JPA lifecycle callback 또는 Spring Data Auditing 중 프로젝트의 단순성과 향후 공통 Entity 확장 가능성을 고려해 최소한의 방식을 선택한다.
+timestamp는 JPA lifecycle callback으로 관리한다. `@PrePersist`에서 `createdAt`과 `updatedAt`을 초기화하고, `@PreUpdate`에서 `updatedAt`을 갱신한다.
 
-이번 단계에서는 timestamp 관리를 위해 `BaseEntity` 같은 공통 상속 구조를 도입하지 않는다.
+현재 단계에서는 Spring Data Auditing, `@CreatedDate`, `@LastModifiedDate`, `@EnableJpaAuditing`, `BaseEntity` 같은 공통 상속 구조를 도입하지 않는다. 현재 규모에서는 lifecycle callback 방식이 충분하며, 중복 또는 관리 비용이 실제 문제가 되면 별도로 재검토할 수 있다.
 
 ## Relationship
 

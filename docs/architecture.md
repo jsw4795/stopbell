@@ -51,7 +51,7 @@ Docker Named Volume
 
 Docker Container는 MySQL Process의 실행 환경이다. Database 데이터는 Docker Named Volume에 저장하므로 Container lifecycle과 Database lifecycle은 분리한다.
 
-Docker Compose configuration file은 별도 Task에서 생성한다.
+Docker Compose configuration은 저장소 루트의 `docker-compose.yml`에서 관리한다.
 
 ## 4. Persistence Strategy
 

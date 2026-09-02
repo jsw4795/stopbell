@@ -33,14 +33,15 @@ V1의 범위는 의도적으로 좁게 유지한다. 첫 번째 성공 기준은
 
 ```text
 stopbell/
-├── app/                    # Flutter 애플리케이션 (예정)
-├── backend/                # Spring Boot 애플리케이션 (예정)
+├── app/                    # Flutter 애플리케이션
+├── backend/                # Spring Boot 애플리케이션
 ├── docs/
 │   ├── adr/                # 아키텍처 결정 기록
 │   ├── api.md
 │   ├── architecture.md
 │   ├── database.md
 │   ├── development-guidelines.md
+│   ├── domain-model.md
 │   ├── local-development.md
 │   ├── package-structure.md
 │   ├── requirements.md
@@ -64,4 +65,4 @@ Codex 및 다른 코딩 에이전트를 위한 규칙:
 
 ## 현재 상태
 
-기획 / 아키텍처 정의 단계.
+기반 구현 단계. Phase 0과 Phase 1 - Domain Foundation의 완료 항목을 구현했으며, 이후 기능은 `docs/task-list.md`에서 관리한다.

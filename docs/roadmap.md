@@ -19,10 +19,10 @@
 
 목표: 실제 종단 간 버스 알림.
 
-- [ ] Flutter 기본 애플리케이션
-- [ ] Spring Boot 백엔드 골격
-- [ ] MySQL 8.4 LTS Docker Compose 개발 환경
-- [ ] JPA / MyBatis 설정
+- [x] Flutter 기본 애플리케이션
+- [x] Spring Boot 백엔드 골격
+- [x] MySQL 8.4 LTS Docker Compose 개발 환경
+- [x] JPA / MyBatis 설정
 - [ ] 버스 노선 검색
 - [ ] 정류장 선택
 - [ ] 알림 생성/목록/삭제

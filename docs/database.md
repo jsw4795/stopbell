@@ -19,7 +19,7 @@ Docker는 Database 실행 환경으로 사용한다. Database 데이터는 Docke
 
 Container를 삭제하거나 재생성해도 Docker Named Volume이 유지되는 한 Database 데이터는 유지되어야 한다. Volume 삭제는 명시적인 데이터 삭제 작업으로 취급한다.
 
-Docker Compose configuration file은 별도 Task에서 생성한다.
+Docker Compose configuration은 저장소 루트의 `docker-compose.yml`에서 관리한다.
 
 ## 3. Database Schema Migration
 
@@ -27,7 +27,7 @@ Database Schema 변경은 Flyway Migration으로 관리한다.
 
 Hibernate `ddl-auto`를 통한 자동 Schema 변경은 사용하지 않는다. Entity 변경만으로 Database Schema를 변경하지 않으며, Schema 변경 시에는 Migration 파일을 반드시 추가한다.
 
-Migration 파일의 경로, 명명 규칙, 실행 설정은 구현 전에 별도로 정의한다.
+Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{description}.sql` 형식으로 둔다. Flyway는 애플리케이션과 MySQL Testcontainer 통합 테스트에서 이 Migration을 적용한다.
 
 ## 4. 모델링 원칙
 
@@ -45,9 +45,9 @@ MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적�
 
 JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡한 조회를 위해 Domain Entity의 상태 관리 책임을 MyBatis로 옮기지 않는다.
 
-## 6. 후보 핵심 테이블
+## 6. 핵심 테이블
 
-다음 테이블은 개념적 설계이며 아직 확정되지 않았다.
+`users`, `alarms`, `notification_history`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 향후 Push 연동 시 검토할 후보 테이블이다.
 
 ### users
 
