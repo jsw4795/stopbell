@@ -149,6 +149,16 @@ Migration 파일의 경로, 명명 규칙, 실행 설정은 구현 전에 별도
 
 ------------------------------------------------------------------------
 
+# Test Strategy
+
+Alarm 상태 전이 같은 순수 Domain Business Rule은 Spring Context, Database, Docker 없이 JUnit Unit Test로 검증한다.
+
+JPA Entity Mapping과 Repository 동작은 H2 또는 Local Development MySQL이 아닌 MySQL Testcontainers 기반 Integration Test로 검증한다. Testcontainer는 MySQL `8.4.11` image를 사용하고, Spring Boot의 `@ServiceConnection`으로 Test DataSource에 연결한다.
+
+Test Schema는 Hibernate가 자동 생성하지 않는다. Test에서도 `ddl-auto: none`을 유지하며, 빈 MySQL Testcontainer에 Flyway Migration을 적용한다. Integration Test 실행에는 Docker Runtime이 필요하다.
+
+------------------------------------------------------------------------
+
 # Flutter Setup
 
 ## Project Run

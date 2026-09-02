@@ -112,7 +112,7 @@ JPA를 사용하는 핵심 Domain과 Repository 기반 상태 관리를 준비�
 - [x] TASK-106 NotificationHistory JPA Repository 구현
 - [x] TASK-107 Alarm status와 상태 전이 규칙 구현
 - [x] TASK-108 Database migration 또는 schema 관리 방식 결정
-- [ ] TASK-109 Entity 및 Repository Test 작성
+- [x] TASK-109 Entity 및 Repository Test 작성
 
 Undecided:
 
