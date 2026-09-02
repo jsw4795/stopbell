@@ -297,13 +297,25 @@ Good:
 
     id
 
-    alarmId
-
-    sentAt
+    alarm
 
     status
 
     failureReason
+
+    createdAt
+
+`status`는 `SUCCESS`, `FAILURE`만 가지는 Enum으로 표현하고 Database에는 문자열로 저장한다.
+
+`failureReason`은 실패 시 한 줄 수준의 간단한 원인을 기록할 수 있으며 `null`을 허용한다. Provider별 응답 구조나 FCM message ID는 현재 저장하지 않는다.
+
+`createdAt`은 발송 결과 History가 생성된 시각이다. History는 현재 생성 후 일반적으로 수정하지 않는 방향이므로 `updatedAt`은 두지 않는다.
+
+## Relationship
+
+    Alarm 1 : N NotificationHistory
+
+NotificationHistory가 `Alarm`을 참조하는 단방향 관계를 사용한다. Alarm Entity에는 NotificationHistory collection을 추가하지 않는다.
 
 ## Persistence
 

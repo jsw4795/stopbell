@@ -120,22 +120,21 @@ updated_at DATETIME(6) NOT NULL
 
 ### notification_history
 
-디버깅과 중복 방지에 선택적으로 유용할 수 있다.
+특정 Alarm에서 발생한 Notification 발송 결과를 기록한다. Alarm의 활성 상태나 Transit API 조회 실패 상태를 표현하지 않는다.
 
-후보 필드:
+현재 확정 Schema:
 
 ```text
-id
-alert_id
-device_id
-status
-provider_message_id
-requested_at
-completed_at
-error_code
+id BIGINT AUTO_INCREMENT PRIMARY KEY
+alarm_id BIGINT NOT NULL REFERENCES alarms(id)
+status VARCHAR(20) NOT NULL
+failure_reason VARCHAR(255) NULL
+created_at DATETIME(6) NOT NULL
 ```
 
-이 테이블을 V1에 포함할지는 구현 복잡도와 관측성 요구를 바탕으로 결정한다.
+`status`는 `SUCCESS`, `FAILURE` 문자열만 저장한다. `failure_reason`은 실패 시 간단한 원인을 기록할 수 있고 `null`을 허용한다. `created_at`은 생성 후 변경하지 않으며 `updated_at`은 추가하지 않는다.
+
+FCM message ID, device token, provider 응답, retry count, 전송 단계별 timestamp는 실제 Notification 전송 흐름이 확정될 때 필요성을 검토한다. NotificationHistory 저장 시점, retry 및 duplicate prevention 전략도 현재 결정하지 않는다.
 
 ## 7. 외부 교통 데이터
 
