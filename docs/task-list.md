@@ -108,7 +108,7 @@ JPA를 사용하는 핵심 Domain과 Repository 기반 상태 관리를 준비�
 - [x] TASK-102 Alarm Entity 구현
 - [x] TASK-103 NotificationHistory Entity 구현
 - [x] TASK-104 User JPA Repository 구현
-- [ ] TASK-105 Alarm JPA Repository 구현
+- [x] TASK-105 Alarm JPA Repository 구현
 - [ ] TASK-106 NotificationHistory JPA Repository 구현
 - [ ] TASK-107 Alarm status와 상태 전이 규칙 구현
 - [x] TASK-108 Database migration 또는 schema 관리 방식 결정
