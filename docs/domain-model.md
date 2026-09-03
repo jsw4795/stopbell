@@ -15,9 +15,9 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
 
     User
 
+     ├── Alarm
      |
-     |
-     └── Alarm
+     └── RefreshToken
 
 
     Transit API
@@ -39,11 +39,15 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
 
 -   내부 사용자 식별
 -   Alarm 소유자 기준
--   향후 Device 및 Authentication identity 연결 기준
+-   Google Social Identity 연결 기준
 
 ## Main Attributes
 
     id
+
+    provider
+
+    providerUserId
 
     createdAt
 
@@ -56,6 +60,12 @@ Java에서는 `Long`을 사용한다.
 Database에서는 MySQL `BIGINT AUTO_INCREMENT`를 사용한다. JPA 구현 시에는 MySQL `AUTO_INCREMENT`와 호환되는 ID 생성 방식을 사용한다.
 
 현재 프로젝트 규모에서는 UUID 등 별도 식별 전략을 도입하지 않는다.
+
+`User.id`는 StopBell 내부 PK이며 Alarm, Device 등 다른 Domain이 사용자를 참조할 때 사용한다. 외부 Social Identity는 User에 직접 저장하며, 별도 `AuthIdentity` Domain은 만들지 않는다.
+
+최초 Provider는 `GOOGLE`이고, Google OpenID Connect의 `sub`를 `providerUserId`로 사용한다. `provider`와 `providerUserId` 조합은 하나의 StopBell User를 유일하게 식별해야 한다.
+
+동일한 실제 사람이 서로 다른 Provider로 로그인하더라도 각각 별도 User로 처리한다. Account Linking과 Account Merge는 현재 범위에 포함하지 않는다.
 
 ## Timestamp Policy
 
@@ -78,6 +88,48 @@ User Entity에는 `alarms` collection을 추가하지 않는다. Alarm 구현 �
     JPA
 
 User는 단순한 Domain CRUD와 Entity 상태 관리를 위해 JPA Repository 기반으로 관리한다.
+
+------------------------------------------------------------------------
+
+# RefreshToken
+
+## Purpose
+
+StopBell의 장기 로그인 Authentication Session을 표현한다. Access Token 재발급에만 사용하며, Push Device와 직접 연결하지 않는다.
+
+## Main Attributes
+
+    id
+
+    user
+
+    tokenHash
+
+    expiresAt
+
+    createdAt
+
+`tokenHash`는 Client에 발급한 Refresh Token 원문을 SHA-256으로 Hash한 값이다. 원문은 Database에 저장하지 않는다.
+
+## Relationship
+
+    User 1 : N RefreshToken
+
+한 User는 여러 Device 또는 Login Session에 대응하는 여러 Refresh Token을 가질 수 있다.
+
+## Lifecycle
+
+Refresh Token 기본 수명은 발급 시점부터 30일이다. 재발급이 성공하면 기존 Token은 폐기하고, 새 Access Token 및 새 Refresh Token을 함께 발급한다. 새 Refresh Token의 수명은 새 발급 시점부터 다시 30일이다.
+
+Rotation 또는 Logout으로 무효화할 때는 해당 RefreshToken을 삭제한다. 별도 `revokedAt` 상태는 관리하지 않는다.
+
+`updatedAt`, `revokedAt`, `deviceId`, `lastUsedAt`, `tokenFamily`는 현재 추가하지 않는다.
+
+## Persistence
+
+    JPA
+
+RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refresh Token을 저장하지 않는다.
 
 ------------------------------------------------------------------------
 
@@ -329,11 +381,9 @@ NotificationHistory는 알림 발송 기록의 저장과 상태 관리를 위해
 
                      User
 
-                      |
+                 ┌────┴────┐
 
-                      |
-
-                     Alarm
+               Alarm   RefreshToken
 
 
     Transit API
@@ -355,24 +405,6 @@ NotificationHistory는 알림 발송 기록의 저장과 상태 관리를 위해
     Alarm Evaluation
 
 ------------------------------------------------------------------------
-
-# Undecided Items
-
-현재 결정하지 않는 사항.
-
-## Authentication
-
-Authentication provider는 아직 Undecided이다.
-
-email 사용 여부와 정책도 Undecided이다. provider identity를 User에 포함할지, 별도 `AuthIdentity`로 분리할지도 Authentication 설계 시점에 확정한다.
-
-현재는 `email`, `provider`, `providerUserId`, `displayName`을 User의 속성으로 추가하지 않는다. Authentication provider와 `AuthIdentity` 구조도 미리 구현하거나 확정하지 않는다.
-
-후보:
-
--   OAuth2
--   JWT
--   Session
 
 ## Alarm Trigger Rule
 

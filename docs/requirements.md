@@ -64,16 +64,15 @@ StopBell은 사용자가 교통 정보를 반복해서 확인해야 하는 필�
 
 ## 4. 인증
 
-인증은 바람직하지만, 첫 번째 로컬 PoC에는 필수 요구사항이 아니다.
+StopBell은 자체 ID/Password 회원가입을 제공하지 않고 Social Login만 지원한다. 최초 Provider는 Google이며, 추가 Provider는 실제 필요가 확인된 후 별도 범위로 검토한다.
 
-공개 배포 전에는 알림과 기기를 올바른 사용자에게 연결할 수 있도록 시스템이 사용자 식별을 지원해야 한다.
+Flutter는 Google ID Token으로 외부 Identity를 증명하고, Backend는 이를 검증한 뒤 StopBell 자체 Access Token과 Refresh Token을 발급한다. Google Token은 StopBell Application API의 장기 인증 Token으로 사용하지 않는다.
 
-가능한 방향:
+Application API는 JWT Access Token 기반으로 인증하며, Access Token 기본 수명은 1시간이다. Refresh Token은 Access Token 재발급에만 사용하고, 30일 수명 및 Rotation 정책으로 장기 로그인 유지를 지원한다. Refresh Token이 만료되거나 유효하지 않으면 다시 Google Login이 필요하다.
 
-- OAuth2 / 소셜 로그인
-- Spring Security
+공개 배포 전뿐 아니라 Alarm API 구현부터 인증된 StopBell User를 기준으로 Alarm 소유권을 처리한다. Client가 제공한 `userId`를 신뢰하지 않는다.
 
-정확한 제공자와 세션/토큰 전략은 **아직 결정되지 않았다**.
+인증 전략의 근거와 제약은 `adr/ADR-005-authentication-and-user-identity-strategy.md`를 따른다.
 
 ## 5. 비기능 요구사항
 

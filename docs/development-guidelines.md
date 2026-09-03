@@ -125,6 +125,14 @@ Database
 - API 시크릿을 로그에 남기지 않는다.
 - 제공자 지연/실패를 디버깅할 충분한 메타데이터를 보존한다.
 
+### Authentication
+
+- Application API는 Spring Security가 검증한 인증된 StopBell User를 기준으로 처리하며, Controller에서 JWT를 직접 parsing하거나 Client 제공 `userId`를 신뢰하지 않는다.
+- Access Token과 Refresh Token 원문, Google ID Token, Authorization Header는 로그에 남기지 않는다.
+- Refresh Token 원문은 Database에 저장하지 않고 SHA-256 Hash만 저장한다. Password용 BCryptPasswordEncoder를 Refresh Token Hash에 사용하지 않는다.
+- Flutter는 Access Token과 Refresh Token을 OS Secure Storage에 저장한다. 일반 Local Storage 또는 SharedPreferences에는 원문 Token을 저장하지 않는다.
+- 마지막 Social Login Provider는 인증 정보가 아닌 Client UX 정보이므로 일반 Local Storage에 저장할 수 있다.
+
 ### 스케줄러
 
 - 스케줄러 코드는 작업을 조율하고 모든 비즈니스 로직을 담지 않는다.

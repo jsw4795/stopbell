@@ -89,7 +89,7 @@ backend/
 - `entity`: User JPA Entity
 - `dto`: User API request/response DTO
 
-Authentication provider와 token/session 전략은 Undecided이다.
+`user`는 Google Social Identity를 가진 User와 RefreshToken Authentication Session을 함께 소유한다. Authentication API와 Google Token 검증, Refresh Token 발급·회전·무효화도 이 Domain의 책임으로 둔다.
 
 ### alarm
 
@@ -178,7 +178,6 @@ Infrastructure Layer는 JPA Repository, MyBatis Mapper, 외부 Transit API clien
 
 ## Future Consideration
 
-- 인증 전략이 결정되면 `user` Package에 identity 또는 authentication 관련 구조가 필요할 수 있다.
 - 여러 Transit provider를 지원하게 되면 provider별 client/DTO Package 분리를 검토할 수 있다.
 - Notification fan-out 또는 통계 기능이 실제 병목이 되면 별도 Query Package 또는 module을 검토할 수 있다.
 - Package 구조 변경이 Architecture Decision에 영향을 준다면 ADR로 기록한다.
@@ -212,7 +211,7 @@ Flutter 구조는 현재 확정된 Architecture가 아니다. V1의 얇은 clien
 
 사용자 기능을 기준으로 화면, 상태, API 연동 코드를 둔다.
 
-- `auth`: 인증이 도입될 경우의 로그인 및 사용자 상태
+- `auth`: Google Login, StopBell Token 저장, 인증 상태
 - `alarm`: Alarm 생성, 조회, 활성화/비활성화 화면
 - `transit`: Bus Route 검색과 Bus Stop 선택 화면
 - `notification`: Push permission, Push token 처리, 알림 진입 흐름

@@ -39,7 +39,7 @@ Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{
 
 ## 5. Persistence Strategy
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `devices`, `alarms`, `notification_history`는 Repository 기반으로 관리한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `notification_history`는 Repository 기반으로 관리한다.
 
 MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에 사용한다. 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회와 Transit 상태 조회가 대상 예시이다.
 
@@ -47,25 +47,48 @@ JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡�
 
 ## 6. 핵심 테이블
 
-`users`, `alarms`, `notification_history`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 향후 Push 연동 시 검토할 후보 테이블이다.
+`users`, `alarms`, `notification_history`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. Authentication Task에서 추가할 `refresh_tokens`와 `devices`는 별도 Migration으로 적용한다.
 
 ### users
 
-내부 사용자 식별과 Alarm 소유자 기준을 위한 최소 테이블이다.
+내부 사용자 식별과 Alarm 소유자 기준 테이블이다.
 
-후보 필드:
+Authentication 구현 후 Schema:
 
 ```text
 id BIGINT AUTO_INCREMENT PRIMARY KEY
+provider VARCHAR(20) NOT NULL
+provider_user_id VARCHAR(255) NOT NULL
 created_at DATETIME(6) NOT NULL
 updated_at DATETIME(6) NOT NULL
+UNIQUE(provider, provider_user_id)
 ```
 
-현재 `users` 테이블에는 `email`, `provider`, `provider_user_id`, `display_name`을 추가하지 않는다. PK 외에 Authentication 관련 unique index도 만들지 않는다.
+`provider`는 외부 Social Provider를, `provider_user_id`는 해당 Provider의 사용자 식별자를 저장한다. 최초 Google Login에서는 OpenID Connect `sub`를 `provider_user_id`로 사용한다. 같은 `provider`와 `provider_user_id` 조합은 반드시 하나의 User만 식별하도록 Unique Constraint를 둔다.
 
-Authentication 설계 시 `UNIQUE(provider, provider_user_id)` 제약과 provider identity를 별도 identity 테이블에 둘지 검토할 수 있다. 단, 현재 schema에는 적용하지 않는다.
+외부 Identity는 `users`에 직접 저장한다. `auth_identities` 같은 별도 identity 테이블, `email`, `display_name`은 현재 추가하지 않는다.
 
-실제 `users` 테이블 생성과 Schema 변경은 Flyway Migration으로 관리한다. 이번 문서 작업에서는 Migration SQL을 작성하지 않으며, Hibernate `ddl-auto`로 Schema를 자동 생성하지 않는다.
+현재 구현에는 이 변경이 아직 적용되지 않았다. `TASK-201`에서 User Entity 변경과 해당 Flyway Migration을 함께 추가한다. Hibernate `ddl-auto`로 Schema를 자동 생성하지 않는다.
+
+### refresh_tokens
+
+Authentication Session을 User와 분리해 저장하는 테이블이다.
+
+Authentication 구현 후 Schema:
+
+```text
+id BIGINT AUTO_INCREMENT PRIMARY KEY
+user_id BIGINT NOT NULL REFERENCES users(id)
+token_hash CHAR(64) NOT NULL
+expires_at DATETIME(6) NOT NULL
+created_at DATETIME(6) NOT NULL
+```
+
+`token_hash`에는 서버가 발급한 opaque Refresh Token 원문의 SHA-256 Hash를 저장한다. Refresh Token 원문은 저장하지 않으며, Password용 BCryptPasswordEncoder를 Refresh Token Hash에 사용하지 않는다.
+
+한 User가 여러 Refresh Token을 가질 수 있어 여러 Login Session을 허용한다. Rotation 또는 Logout으로 Token을 무효화할 때는 해당 행을 삭제한다. `updated_at`, `revoked_at`, `device_id`, `last_used_at`, `token_family`는 현재 추가하지 않는다.
+
+현재 구현에는 이 테이블이 아직 없다. `TASK-202`에서 Entity, Repository, Flyway Migration을 함께 추가한다.
 
 ### devices
 

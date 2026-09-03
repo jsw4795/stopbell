@@ -2,7 +2,7 @@
 
 ## 1. 상태
 
-이 문서는 초기 API 형태만 정의한다. 교통 데이터 제공자와 인증 모델이 확정된 후 엔드포인트는 변경될 수 있다.
+이 문서는 초기 API 형태만 정의한다. 교통 데이터 제공자가 확정된 후 관련 엔드포인트는 변경될 수 있다.
 
 StopBell Application API의 기본 접두사 후보:
 
@@ -139,6 +139,14 @@ POST /api/v1/devices
 
 ## 6. 인증
 
-인증 전략을 선택하기 전까지 인증 헤더와 토큰/세션 형식은 의도적으로 생략한다.
+StopBell Application API는 다음 형식의 StopBell 자체 JWT Access Token으로 인증한다.
 
-명시적인 결정 없이 JWT 아키텍처를 임의로 도입하지 않는다.
+```http
+Authorization: Bearer <Access Token>
+```
+
+Google ID Token은 로그인 시 외부 Identity를 확인하기 위해 Backend에 전달할 뿐, Application API의 인증 헤더에 사용하지 않는다. Access Token 기본 수명은 1시간이며, Refresh Token은 Access Token 재발급에만 사용한다.
+
+로그인, Refresh, Logout API의 정확한 endpoint 및 request/response DTO는 각각의 Authentication 구현 Task에서 이 문서에 정의한다.
+
+Alarm을 포함한 사용자 소유 Application API는 Client Request Body 또는 Query Parameter의 `userId`를 받지 않는다. Spring Security가 검증한 Access Token의 Principal에서 StopBell User를 식별한다.

@@ -64,6 +64,7 @@ Spring Boot
 │
 ├── JPA
 │   ├── User
+│   ├── RefreshToken (Authentication 구현 후)
 │   ├── Alarm
 │   └── NotificationHistory
 │
@@ -75,11 +76,47 @@ Spring Boot
       MySQL
 ```
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `Alarm`, `NotificationHistory`는 Repository 기반으로 관리한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `RefreshToken`, `Alarm`, `NotificationHistory`는 Repository 기반으로 관리한다.
 
 MyBatis는 복잡한 Query, 집계, 외부 Transit 데이터 처리 등 SQL 제어가 중요한 영역에서 사용한다. 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 통계 데이터 조회가 대상 예시이다.
 
-## 5. 초기 백엔드 경계
+## 5. Authentication Architecture
+
+Authentication 구현 후의 로그인 및 Application API 인증 흐름은 다음과 같다.
+
+```text
+Flutter
+  ↓ Google Login
+Google
+  ↓ ID Token
+Flutter
+  ↓ Google ID Token
+Spring Boot Backend
+  ↓ Google Token 검증 및 `sub` 확인
+User 조회 또는 생성
+  ↓
+StopBell Access Token (JWT) + Refresh Token 발급
+```
+
+Google은 외부 Identity 확인만 담당한다. Google ID Token을 StopBell API의 장기 인증 Token으로 재사용하지 않으며, 이후 Application API는 StopBell이 발급한 JWT Access Token으로 인증한다.
+
+```text
+HTTP Request
+  ↓ Authorization: Bearer <Access Token>
+Spring Security
+  ↓ JWT 검증
+인증된 StopBell User
+  ↓
+Controller / Service
+```
+
+Controller가 JWT를 직접 parsing하거나 Client가 전달한 `userId`를 신뢰하지 않는다. Alarm을 포함한 사용자 소유 리소스는 인증된 StopBell User를 기준으로 처리한다.
+
+Refresh Token은 서버가 저장한 SHA-256 Hash와 비교하는 opaque token이며, Access Token 재발급에만 사용한다. Rotation 시 새 Access Token과 새 Refresh Token을 함께 발급한다. Access Token blacklist, Redis 등 추가 인프라는 현재 도입하지 않는다.
+
+세부 결정과 재검토 조건은 `adr/ADR-005-authentication-and-user-identity-strategy.md`를 따른다.
+
+## 6. 초기 백엔드 경계
 
 권장하는 논리적 모듈/패키지:
 
@@ -113,7 +150,7 @@ common
 
 실제로 공유가 필요한 횡단 관심사를 둔다. `common`을 잡동사니 저장소로 만들지 않는다.
 
-## 6. 모니터링 모델
+## 7. 모니터링 모델
 
 첫 구현에서는 Spring 스케줄 작업으로 활성 알림을 주기적으로 평가할 수 있다.
 
@@ -136,7 +173,7 @@ common
 
 외부 API의 의미를 이해하기 전에는 하나를 선택하지 않는다.
 
-## 7. 알림 평가
+## 8. 알림 평가
 
 알림 평가는 스케줄러 코드에 묻지 말고, 명시적인 Domain/비즈니스 로직으로 표현해야 한다.
 
@@ -154,7 +191,7 @@ NOT_TRIGGERED / TRIGGERED / UNKNOWN
 
 `UNKNOWN` 또는 동등한 실패 상태는 일시적인 제공자 장애를 유효한 도착 이벤트로 해석하지 않도록 중요하다.
 
-## 8. 전달 의미론
+## 9. 전달 의미론
 
 V1은 분산 푸시 전달을 완벽히 제어할 수 없다는 점을 인정하면서, 알림 발생 건당 사용자에게 보이는 알림을 실용적인 최대 한 번으로 전달하는 것을 목표로 한다.
 
@@ -162,7 +199,7 @@ V1은 분산 푸시 전달을 완벽히 제어할 수 없다는 점을 인정하
 
 정확한 트랜잭션 전략은 아직 결정되지 않았다.
 
-## 9. 확장 경로 — 필요한 경우에만
+## 10. 확장 경로 — 필요한 경우에만
 
 ```text
 단일 Spring 인스턴스
@@ -179,7 +216,7 @@ V1은 분산 푸시 전달을 완벽히 제어할 수 없다는 점을 인정하
 
 Redis, Kafka, RabbitMQ, Kubernetes, 마이크로서비스는 **기본 요구사항이 아니다**.
 
-## 10. 배포 방향
+## 11. 배포 방향
 
 초기 목표:
 
@@ -192,7 +229,7 @@ Redis, Kafka, RabbitMQ, Kubernetes, 마이크로서비스는 **기본 요구사�
 
 초기 개발에서는 AWS 또는 더 단순한 관리형 플랫폼을 후보로 고려할 수 있다.
 
-## 11. 아키텍처 원칙
+## 12. 아키텍처 원칙
 
 1. 규모 과시보다 정확성을 우선한다.
 2. 최적화 전에 측정한다.

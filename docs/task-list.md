@@ -80,59 +80,68 @@ JPA를 사용하는 핵심 Domain과 Repository 기반 상태 관리를 준비�
 - [x] TASK-108 Database migration 또는 schema 관리 방식 결정
 - [x] TASK-109 Entity 및 Repository Test 작성
 
-Undecided:
+------------------------------------------------------------------------
 
-- Authentication provider
-- User identity의 상세 모델
+# Phase 2 - Authentication
+
+목표:
+
+StopBell의 사용자 식별과 장기 로그인 유지에 필요한 최소 Authentication 기반을 구현하고, 이후 Alarm API가 Client 제공 userId가 아닌 인증된 User를 기준으로 동작할 수 있게 한다.
+
+- [x] TASK-200 Authentication 및 User Identity 전략 결정
+- [ ] TASK-201 User Identity 모델 구현
+- [ ] TASK-202 RefreshToken Entity 및 Repository 구현
+- [ ] TASK-203 JWT Access Token 발급 및 검증 구현
+- [ ] TASK-204 Spring Security Authentication 구조 구현
+- [ ] TASK-205 Google Social Login Backend 연동
+- [ ] TASK-206 Refresh Token 발급, Rotation 및 재발급 구현
+- [ ] TASK-207 Logout 및 Refresh Token 무효화 구현
+- [ ] TASK-208 Flutter Google Login 및 Token Secure Storage 구현
+- [ ] TASK-209 Authentication Test 작성
 
 ------------------------------------------------------------------------
 
-# Phase 2 - Alarm Feature
+# Phase 3 - Alarm Feature
 
 목표:
 
 사용자가 Alarm을 생성하고 관리할 수 있는 최소 API와 화면 흐름을 만든다.
 
-- [ ] TASK-200 Authentication 및 User Identity 전략 결정
-  - Session/Token/JWT 방식, Access/Refresh Token 정책, Social Login 및 OAuth2/OIDC와 StopBell 인증의 책임 분리를 요구사항 기준으로 비교하고 선택 근거를 기록한다.
-  - User와 외부 인증 Identity의 연결 모델, Spring Security의 책임, 인증된 사용자 식별 방식, Flutter의 인증 정보 관리 방식을 결정한다.
-  - Authentication 구현 전 Alarm API의 임시 userId 계약과, 인증 적용 후 인증된 사용자 정보로 전환하는 방향을 명시한다.
-  - 결정된 구조의 실제 구현을 위한 후속 Task를 어느 Phase에 배치할지 확정한다.
-- [ ] TASK-201 Alarm 생성 API 정의 및 구현
-- [ ] TASK-202 Alarm 목록 조회 API 정의 및 구현
-- [ ] TASK-203 Alarm 상세 조회 API 정의 및 구현
-- [ ] TASK-204 Alarm 삭제 API 정의 및 구현
-- [ ] TASK-205 Alarm 활성화 API 정의 및 구현
-- [ ] TASK-206 Alarm 비활성화 API 정의 및 구현
-- [ ] TASK-207 Alarm request/response DTO 정의
-- [ ] TASK-208 API validation 및 Error response 처리
-- [ ] TASK-209 Alarm API Test 작성
-- [ ] TASK-210 Flutter Alarm 생성 및 활성 알림 화면 구현
+- [ ] TASK-301 Alarm 생성 API 정의 및 구현
+- [ ] TASK-302 Alarm 목록 조회 API 정의 및 구현
+- [ ] TASK-303 Alarm 상세 조회 API 정의 및 구현
+- [ ] TASK-304 Alarm 삭제 API 정의 및 구현
+- [ ] TASK-305 Alarm 활성화 API 정의 및 구현
+- [ ] TASK-306 Alarm 비활성화 API 정의 및 구현
+- [ ] TASK-307 Alarm request/response DTO 정의
+- [ ] TASK-308 API validation 및 Error response 처리
+- [ ] TASK-309 Alarm API Test 작성
+- [ ] TASK-310 Flutter Alarm 생성 및 활성 알림 화면 구현
 
 Transit provider가 확정되기 전에는 실제 Bus Route / Bus Stop 선택 흐름을 임의로 구현하지 않는다.
 
 ------------------------------------------------------------------------
 
-# Phase 3 - Transit Integration
+# Phase 4 - Transit Integration
 
 목표:
 
 실제 Transit 데이터를 조회하고 Alarm 조건을 평가할 수 있게 한다.
 
-- [ ] TASK-301 대상 지역과 Transit API 조사
-- [ ] TASK-302 API 약관, rate limit, identifier, update frequency 확인
-- [ ] TASK-303 Transit provider client interface 정의
-- [ ] TASK-304 Transit API Client 구현
-- [ ] TASK-305 provider response DTO 정의
-- [ ] TASK-306 StopBell Transit DTO와 `TransitEvent` 변환 구현
-- [ ] TASK-307 Bus Route 검색 Query 구현
-- [ ] TASK-308 Bus Stop 조회 Query 구현
-- [ ] TASK-309 MyBatis Transit Query Mapper 구현
-- [ ] TASK-310 Alarm 그룹 조회 Query 구현
-- [ ] TASK-311 Alarm Evaluation Logic 구현
-- [ ] TASK-312 Scheduler 실행 모델 결정 및 구현
-- [ ] TASK-313 Transit API failure를 `UNKNOWN` 상태로 처리
-- [ ] TASK-314 Transit Integration Test 작성
+- [ ] TASK-401 대상 지역과 Transit API 조사
+- [ ] TASK-402 API 약관, rate limit, identifier, update frequency 확인
+- [ ] TASK-403 Transit provider client interface 정의
+- [ ] TASK-404 Transit API Client 구현
+- [ ] TASK-405 provider response DTO 정의
+- [ ] TASK-406 StopBell Transit DTO와 `TransitEvent` 변환 구현
+- [ ] TASK-407 Bus Route 검색 Query 구현
+- [ ] TASK-408 Bus Stop 조회 Query 구현
+- [ ] TASK-409 MyBatis Transit Query Mapper 구현
+- [ ] TASK-410 Alarm 그룹 조회 Query 구현
+- [ ] TASK-411 Alarm Evaluation Logic 구현
+- [ ] TASK-412 Scheduler 실행 모델 결정 및 구현
+- [ ] TASK-413 Transit API failure를 `UNKNOWN` 상태로 처리
+- [ ] TASK-414 Transit Integration Test 작성
 
 Undecided:
 
@@ -144,23 +153,23 @@ Undecided:
 
 ------------------------------------------------------------------------
 
-# Phase 4 - Notification
+# Phase 5 - Notification
 
 목표:
 
 Alarm 조건 충족 시 실제 기기에 중복 없이 Push notification을 전송한다.
 
-- [ ] TASK-401 Device registration contract 정의
-- [ ] TASK-402 Device registration API 구현
-- [ ] TASK-403 Push token lifecycle 정의
-- [ ] TASK-404 FCM Integration 조사 및 설정
-- [ ] TASK-405 Push provider client 구현
-- [ ] TASK-406 Notification Service 구현
-- [ ] TASK-407 NotificationHistory 저장 구현
-- [ ] TASK-408 Duplicate Prevention 전략 결정 및 구현
-- [ ] TASK-409 Notification failure 처리 구현
-- [ ] TASK-410 실제 기기 Push notification 검증
-- [ ] TASK-411 Notification Test 작성
+- [ ] TASK-501 Device registration contract 정의
+- [ ] TASK-502 Device registration API 구현
+- [ ] TASK-503 Push token lifecycle 정의
+- [ ] TASK-504 FCM Integration 조사 및 설정
+- [ ] TASK-505 Push provider client 구현
+- [ ] TASK-506 Notification Service 구현
+- [ ] TASK-507 NotificationHistory 저장 구현
+- [ ] TASK-508 Duplicate Prevention 전략 결정 및 구현
+- [ ] TASK-509 Notification failure 처리 구현
+- [ ] TASK-510 실제 기기 Push notification 검증
+- [ ] TASK-511 Notification Test 작성
 
 Undecided:
 
@@ -170,23 +179,23 @@ Undecided:
 
 ------------------------------------------------------------------------
 
-# Phase 5 - Quality and Operations
+# Phase 6 - Quality and Operations
 
 목표:
 
 사용자에게 실패를 일으킬 수 있는 동작을 검증하고, 운영에 필요한 최소 품질을 갖춘다.
 
-- [ ] TASK-501 Alarm Evaluation Test 보강
-- [ ] TASK-502 Duplicate Prevention Test 보강
-- [ ] TASK-503 외부 provider response mapping Test 보강
-- [ ] TASK-504 API validation/error handling Test 보강
-- [ ] TASK-505 구조화된 Logging 추가
-- [ ] TASK-506 Secret 관리 검토
-- [ ] TASK-507 Health check 검증
-- [ ] TASK-508 Dockerize Backend
-- [ ] TASK-509 CI build/test 구성
-- [ ] TASK-510 실제 환경에서 notification delay 측정
-- [ ] TASK-511 server restart 안전성 검증
+- [ ] TASK-601 Alarm Evaluation Test 보강
+- [ ] TASK-602 Duplicate Prevention Test 보강
+- [ ] TASK-603 외부 provider response mapping Test 보강
+- [ ] TASK-604 API validation/error handling Test 보강
+- [ ] TASK-605 구조화된 Logging 추가
+- [ ] TASK-606 Secret 관리 검토
+- [ ] TASK-607 Health check 검증
+- [ ] TASK-608 Dockerize Backend
+- [ ] TASK-609 CI build/test 구성
+- [ ] TASK-610 실제 환경에서 notification delay 측정
+- [ ] TASK-611 server restart 안전성 검증
 
 Future Consideration:
 
