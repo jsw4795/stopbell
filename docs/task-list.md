@@ -93,6 +93,11 @@ Undecided:
 
 사용자가 Alarm을 생성하고 관리할 수 있는 최소 API와 화면 흐름을 만든다.
 
+- [ ] TASK-200 Authentication 및 User Identity 전략 결정
+  - Session/Token/JWT 방식, Access/Refresh Token 정책, Social Login 및 OAuth2/OIDC와 StopBell 인증의 책임 분리를 요구사항 기준으로 비교하고 선택 근거를 기록한다.
+  - User와 외부 인증 Identity의 연결 모델, Spring Security의 책임, 인증된 사용자 식별 방식, Flutter의 인증 정보 관리 방식을 결정한다.
+  - Authentication 구현 전 Alarm API의 임시 userId 계약과, 인증 적용 후 인증된 사용자 정보로 전환하는 방향을 명시한다.
+  - 결정된 구조의 실제 구현을 위한 후속 Task를 어느 Phase에 배치할지 확정한다.
 - [ ] TASK-201 Alarm 생성 API 정의 및 구현
 - [ ] TASK-202 Alarm 목록 조회 API 정의 및 구현
 - [ ] TASK-203 Alarm 상세 조회 API 정의 및 구현
