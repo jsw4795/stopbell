@@ -108,6 +108,15 @@ class JwtTokenServiceTest {
     }
 
     @Test
+    @DisplayName("exp Claim이 없는 Access Token은 검증에 실패한다")
+    void reject_access_token_without_expiration_claim() {
+        String accessToken = createTokenWithoutExpiration(secretKey(SECRET), ISSUER, "42", NOW);
+
+        assertThatThrownBy(() -> jwtTokenService.extractUserId(accessToken))
+                .isInstanceOf(JwtException.class);
+    }
+
+    @Test
     @DisplayName("다른 issuer를 가진 Access Token은 검증에 실패한다")
     void reject_access_token_with_invalid_issuer() {
         String accessToken = createToken(secretKey(SECRET), "another-issuer", "42", NOW, NOW.plus(Duration.ofHours(1)));
@@ -134,6 +143,7 @@ class JwtTokenServiceTest {
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
         JwtTimestampValidator timestampValidator = new JwtTimestampValidator();
+        timestampValidator.setAllowEmptyExpiryClaim(false);
         timestampValidator.setClock(CLOCK);
         jwtDecoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
                 timestampValidator,
@@ -148,6 +158,19 @@ class JwtTokenServiceTest {
                 .subject(subject)
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
+                .build();
+
+        return jwtEncoder(secretKey).encode(JwtEncoderParameters.from(
+                JwsHeader.with(MacAlgorithm.HS256).build(),
+                claims
+        )).getTokenValue();
+    }
+
+    private String createTokenWithoutExpiration(SecretKey secretKey, String issuer, String subject, Instant issuedAt) {
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(issuer)
+                .subject(subject)
+                .issuedAt(issuedAt)
                 .build();
 
         return jwtEncoder(secretKey).encode(JwtEncoderParameters.from(

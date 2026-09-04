@@ -47,6 +47,7 @@ public class JwtConfiguration {
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
         JwtTimestampValidator timestampValidator = new JwtTimestampValidator();
+        timestampValidator.setAllowEmptyExpiryClaim(false);
         timestampValidator.setClock(jwtClock);
         jwtDecoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(
                 timestampValidator,

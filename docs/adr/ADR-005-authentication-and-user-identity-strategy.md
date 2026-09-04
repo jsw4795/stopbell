@@ -54,7 +54,7 @@ StopBell은 자체 ID/Password 계정 없이 Social Login만 지원하며, 최�
 
 Flutter는 Google Login으로 ID Token을 받고 이를 Backend에 전달한다. Backend는 Google ID Token의 유효성과 대상 Application을 검증하고 `sub`를 `providerUserId`로 사용해 User를 조회 또는 생성한다. 그 뒤 StopBell 자체 Access Token과 Refresh Token을 발급한다. Google Token은 StopBell Application API의 장기 인증 Token으로 사용하지 않는다.
 
-Access Token은 JWT이며 기본 수명은 1시간이다. 서버 Database에 저장하지 않고 Spring Security가 검증해 StopBell User를 Principal로 식별한다. Logout 때 Access Token blacklist는 만들지 않으며, 이미 발급된 Access Token은 만료 시점까지 유효할 수 있다.
+Access Token은 HS256으로 서명하는 JWT이며 기본 수명은 1시간이다. 서명 Secret은 `JWT_SECRET` 환경 변수로 주입하고 최소 256bit 이상이어야 하며, 서버 Database에는 저장하지 않는다. `sub`에는 StopBell 내부 `User.id`를, `iss`에는 `stopbell`을 사용하고 `iat`와 필수 `exp`를 포함한다. JWT Payload는 암호화되지 않으므로 민감정보를 넣지 않는다. Spring Security가 이를 검증해 StopBell User를 Principal로 식별하며, Logout 때 Access Token blacklist는 만들지 않아 이미 발급된 Access Token은 만료 시점까지 유효할 수 있다.
 
 Refresh Token은 충분히 높은 Entropy의 Secure Random opaque token으로 발급한다. 기본 수명은 발급 시점부터 30일이며, 재발급에 성공할 때 새 Access Token과 새 Refresh Token을 함께 발급하고 기존 Token을 폐기한다. 새 Refresh Token의 수명은 새 발급 시점부터 30일이다. 만료되거나 유효하지 않으면 다시 Google Login이 필요하다.
 
