@@ -109,7 +109,7 @@ StopBell의 장기 로그인 Authentication Session을 표현한다. Access Toke
 
     createdAt
 
-`tokenHash`는 Client에 발급한 Refresh Token 원문을 SHA-256으로 Hash한 값이다. 원문은 Database에 저장하지 않는다.
+`tokenHash`는 Client에 발급한 Refresh Token 원문을 SHA-256으로 Hash한 값이다. 원문은 Database에 저장하지 않으며, 서로 다른 RefreshToken은 같은 `tokenHash`를 가질 수 없도록 Database Unique Constraint로 강제한다.
 
 ## Relationship
 

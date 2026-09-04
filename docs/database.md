@@ -82,9 +82,10 @@ user_id BIGINT NOT NULL REFERENCES users(id)
 token_hash CHAR(64) NOT NULL
 expires_at DATETIME(6) NOT NULL
 created_at DATETIME(6) NOT NULL
+UNIQUE(token_hash)
 ```
 
-`token_hash`에는 서버가 발급한 opaque Refresh Token 원문의 SHA-256 Hash를 저장한다. Refresh Token 원문은 저장하지 않으며, Password용 BCryptPasswordEncoder를 Refresh Token Hash에 사용하지 않는다.
+`token_hash`에는 서버가 발급한 opaque Refresh Token 원문의 SHA-256 Hash를 저장한다. Refresh Token 원문은 저장하지 않으며, Password용 BCryptPasswordEncoder를 Refresh Token Hash에 사용하지 않는다. 서로 다른 RefreshToken row가 같은 `token_hash`를 가지는 것은 정상 상태가 아니므로 Database Unique Constraint로 강제한다.
 
 한 User가 여러 Refresh Token을 가질 수 있어 여러 Login Session을 허용한다. Rotation 또는 Logout으로 Token을 무효화할 때는 해당 행을 삭제한다. `updated_at`, `revoked_at`, `device_id`, `last_used_at`, `token_family`는 현재 추가하지 않는다.
 

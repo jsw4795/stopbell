@@ -60,7 +60,7 @@ Refresh Token은 충분히 높은 Entropy의 Secure Random opaque token으로 �
 
 User는 내부 `id`를 유지하고 `authProvider`, `providerUserId`를 직접 가진다. `authProvider`는 `GOOGLE`, `APPLE`, `KAKAO`, `NAVER` 값을 갖는 Enum이며 Database에는 문자열로 저장한다. `(authProvider, providerUserId)`에는 Database Unique Constraint를 둔다. 별도 AuthIdentity Entity, Account Linking, Account Merge는 현재 만들지 않는다. 서로 다른 Provider 계정은 동일한 실제 사용자가 사용하더라도 별도 User로 취급한다.
 
-Refresh Token은 User와 분리된 Entity에 원문의 SHA-256 Hash만 저장한다. User별 여러 Refresh Token을 허용해 여러 Login Session을 지원하고, RefreshToken과 Push Device는 직접 연결하지 않는다.
+Refresh Token은 User와 분리된 Entity에 원문의 SHA-256 Hash만 저장하고, 같은 Hash가 중복 저장되지 않도록 Database Unique Constraint를 둔다. User별 여러 Refresh Token을 허용해 여러 Login Session을 지원하고, RefreshToken과 Push Device는 직접 연결하지 않는다.
 
 Flutter는 Access Token과 Refresh Token을 OS Secure Storage에 저장한다. 마지막 Login Provider는 민감한 인증 정보가 아닌 UX 정보이므로 일반 Local Storage에 저장할 수 있다.
 

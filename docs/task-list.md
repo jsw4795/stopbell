@@ -90,7 +90,7 @@ StopBell의 사용자 식별과 장기 로그인 유지에 필요한 최소 Auth
 
 - [x] TASK-200 Authentication 및 User Identity 전략 결정
 - [x] TASK-201 User Identity 모델 구현
-- [ ] TASK-202 RefreshToken Entity 및 Repository 구현
+- [x] TASK-202 RefreshToken Entity 및 Repository 구현
 - [ ] TASK-203 JWT Access Token 발급 및 검증 구현
 - [ ] TASK-204 Spring Security Authentication 구조 구현
 - [ ] TASK-205 Google Social Login Backend 연동

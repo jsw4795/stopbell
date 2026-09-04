@@ -15,6 +15,7 @@ import com.stopbell.alarm.repository.AlarmRepository;
 import com.stopbell.notification.entity.NotificationHistory;
 import com.stopbell.notification.entity.NotificationStatus;
 import com.stopbell.notification.repository.NotificationHistoryRepository;
+import com.stopbell.user.repository.RefreshTokenRepository;
 import com.stopbell.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
@@ -42,6 +43,9 @@ class RepositoryIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
     private AlarmRepository alarmRepository;
@@ -77,7 +81,7 @@ class RepositoryIntegrationTest {
                 String.class
         );
 
-        assertThat(versions).contains("1", "2", "3", "4");
+        assertThat(versions).contains("1", "2", "3", "4", "5");
     }
 
     @Test
@@ -113,6 +117,57 @@ class RepositoryIntegrationTest {
         assertThat(googleUser.getId()).isNotNull();
         assertThat(kakaoUser.getId()).isNotNull();
         assertThat(kakaoUser.getId()).isNotEqualTo(googleUser.getId());
+    }
+
+    @Test
+    @DisplayName("RefreshToken을 저장하면 User 관계와 해시 및 만료 시각이 유지되고 생성 시간이 생성된다")
+    void save_refresh_token_with_user_relation() {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-refresh-token-user"));
+        LocalDateTime expiresAt = LocalDateTime.of(2026, 10, 4, 12, 0);
+        RefreshToken savedRefreshToken = refreshTokenRepository.saveAndFlush(
+                new RefreshToken(user, "a".repeat(64), expiresAt)
+        );
+        entityManager.clear();
+
+        RefreshToken foundRefreshToken = refreshTokenRepository.findById(savedRefreshToken.getId()).orElseThrow();
+
+        assertThat(foundRefreshToken.getId()).isNotNull();
+        assertThat(foundRefreshToken.getUser().getId()).isEqualTo(user.getId());
+        assertThat(foundRefreshToken.getTokenHash()).isEqualTo("a".repeat(64));
+        assertThat(foundRefreshToken.getExpiresAt()).isEqualTo(expiresAt);
+        assertThat(foundRefreshToken.getCreatedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("한 User에 서로 다른 해시를 가진 여러 RefreshToken을 저장할 수 있다")
+    void save_multiple_refresh_tokens_for_same_user() {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-multiple-refresh-token-user"));
+
+        RefreshToken firstRefreshToken = refreshTokenRepository.saveAndFlush(
+                new RefreshToken(user, "b".repeat(64), LocalDateTime.of(2026, 10, 5, 12, 0))
+        );
+        RefreshToken secondRefreshToken = refreshTokenRepository.saveAndFlush(
+                new RefreshToken(user, "c".repeat(64), LocalDateTime.of(2026, 10, 6, 12, 0))
+        );
+
+        assertThat(firstRefreshToken.getId()).isNotNull();
+        assertThat(secondRefreshToken.getId()).isNotNull();
+        assertThat(secondRefreshToken.getId()).isNotEqualTo(firstRefreshToken.getId());
+    }
+
+    @Test
+    @DisplayName("동일한 RefreshToken 해시는 데이터베이스 Unique Constraint로 중복 저장할 수 없다")
+    void save_same_refresh_token_hash_fails() {
+        User firstUser = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-first-refresh-token-user"));
+        User secondUser = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-second-refresh-token-user"));
+        String tokenHash = "d".repeat(64);
+        refreshTokenRepository.saveAndFlush(
+                new RefreshToken(firstUser, tokenHash, LocalDateTime.of(2026, 10, 5, 12, 0))
+        );
+
+        assertThatThrownBy(() -> refreshTokenRepository.saveAndFlush(
+                new RefreshToken(secondUser, tokenHash, LocalDateTime.of(2026, 10, 6, 12, 0))
+        )).isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
