@@ -89,7 +89,7 @@ JPA를 사용하는 핵심 Domain과 Repository 기반 상태 관리를 준비�
 StopBell의 사용자 식별과 장기 로그인 유지에 필요한 최소 Authentication 기반을 구현하고, 이후 Alarm API가 Client 제공 userId가 아닌 인증된 User를 기준으로 동작할 수 있게 한다.
 
 - [x] TASK-200 Authentication 및 User Identity 전략 결정
-- [ ] TASK-201 User Identity 모델 구현
+- [x] TASK-201 User Identity 모델 구현
 - [ ] TASK-202 RefreshToken Entity 및 Repository 구현
 - [ ] TASK-203 JWT Access Token 발급 및 검증 구현
 - [ ] TASK-204 Spring Security Authentication 구조 구현

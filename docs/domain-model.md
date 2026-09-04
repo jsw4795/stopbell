@@ -45,7 +45,7 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
 
     id
 
-    provider
+    authProvider
 
     providerUserId
 
@@ -63,7 +63,7 @@ Database에서는 MySQL `BIGINT AUTO_INCREMENT`를 사용한다. JPA 구현 시�
 
 `User.id`는 StopBell 내부 PK이며 Alarm, Device 등 다른 Domain이 사용자를 참조할 때 사용한다. 외부 Social Identity는 User에 직접 저장하며, 별도 `AuthIdentity` Domain은 만들지 않는다.
 
-최초 Provider는 `GOOGLE`이고, Google OpenID Connect의 `sub`를 `providerUserId`로 사용한다. `provider`와 `providerUserId` 조합은 하나의 StopBell User를 유일하게 식별해야 한다.
+`authProvider`는 `GOOGLE`, `APPLE`, `KAKAO`, `NAVER` 값을 갖는 `AuthProvider` Enum이며, JPA와 Database에는 문자열로 저장한다. 최초 Provider는 `GOOGLE`이고, Google OpenID Connect의 `sub`를 `providerUserId`로 사용한다. `authProvider`와 `providerUserId` 조합은 하나의 StopBell User를 유일하게 식별해야 한다.
 
 동일한 실제 사람이 서로 다른 Provider로 로그인하더라도 각각 별도 User로 처리한다. Account Linking과 Account Merge는 현재 범위에 포함하지 않는다.
 

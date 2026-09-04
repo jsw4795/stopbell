@@ -1,6 +1,7 @@
 package com.stopbell.user.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,26 +77,48 @@ class RepositoryIntegrationTest {
                 String.class
         );
 
-        assertThat(versions).contains("1", "2", "3");
+        assertThat(versions).contains("1", "2", "3", "4");
     }
 
     @Test
-    @DisplayName("User를 저장하면 ID와 생성 및 수정 시간이 생성되고 다시 조회할 수 있다")
-    void save_user_and_find_by_id() {
-        User savedUser = userRepository.saveAndFlush(new User());
+    @DisplayName("User Identity를 저장하면 ID와 Identity 및 생성 및 수정 시간이 생성되고 다시 조회할 수 있다")
+    void save_user_identity_and_find_by_id() {
+        User savedUser = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-user-123"));
         entityManager.clear();
 
         User foundUser = userRepository.findById(savedUser.getId()).orElseThrow();
 
         assertThat(foundUser.getId()).isNotNull();
+        assertThat(foundUser.getAuthProvider()).isEqualTo(AuthProvider.GOOGLE);
+        assertThat(foundUser.getProviderUserId()).isEqualTo("google-user-123");
         assertThat(foundUser.getCreatedAt()).isNotNull();
         assertThat(foundUser.getUpdatedAt()).isNotNull();
     }
 
     @Test
+    @DisplayName("동일한 Provider와 Provider 사용자 식별자는 중복 저장할 수 없다")
+    void save_same_user_identity_fails() {
+        userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "same-user"));
+
+        assertThatThrownBy(() -> userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "same-user")))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    @DisplayName("Provider가 다르면 같은 Provider 사용자 식별자를 저장할 수 있다")
+    void save_same_provider_user_id_with_different_provider() {
+        User googleUser = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "same-user"));
+        User kakaoUser = userRepository.saveAndFlush(new User(AuthProvider.KAKAO, "same-user"));
+
+        assertThat(googleUser.getId()).isNotNull();
+        assertThat(kakaoUser.getId()).isNotNull();
+        assertThat(kakaoUser.getId()).isNotEqualTo(googleUser.getId());
+    }
+
+    @Test
     @DisplayName("Alarm을 저장하면 User 관계와 TransitType 및 상태가 유지된다")
     void save_alarm_with_user_relation() {
-        User user = userRepository.saveAndFlush(new User());
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-alarm-user"));
         Alarm savedAlarm = alarmRepository.saveAndFlush(new Alarm(user, TransitType.SUBWAY));
         entityManager.clear();
 
@@ -182,7 +206,7 @@ class RepositoryIntegrationTest {
     }
 
     private Alarm saveAlarm() {
-        User user = userRepository.saveAndFlush(new User());
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-notification-user"));
         return alarmRepository.saveAndFlush(new Alarm(user, TransitType.BUS));
     }
 }

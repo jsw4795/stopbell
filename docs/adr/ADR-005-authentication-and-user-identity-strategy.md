@@ -58,7 +58,7 @@ Access Token은 JWT이며 기본 수명은 1시간이다. 서버 Database에 저
 
 Refresh Token은 충분히 높은 Entropy의 Secure Random opaque token으로 발급한다. 기본 수명은 발급 시점부터 30일이며, 재발급에 성공할 때 새 Access Token과 새 Refresh Token을 함께 발급하고 기존 Token을 폐기한다. 새 Refresh Token의 수명은 새 발급 시점부터 30일이다. 만료되거나 유효하지 않으면 다시 Google Login이 필요하다.
 
-User는 내부 `id`를 유지하고 `provider`, `providerUserId`를 직접 가진다. `(provider, providerUserId)`에는 Database Unique Constraint를 둔다. 별도 AuthIdentity Entity, Account Linking, Account Merge는 현재 만들지 않는다. 서로 다른 Provider 계정은 동일한 실제 사용자가 사용하더라도 별도 User로 취급한다.
+User는 내부 `id`를 유지하고 `authProvider`, `providerUserId`를 직접 가진다. `authProvider`는 `GOOGLE`, `APPLE`, `KAKAO`, `NAVER` 값을 갖는 Enum이며 Database에는 문자열로 저장한다. `(authProvider, providerUserId)`에는 Database Unique Constraint를 둔다. 별도 AuthIdentity Entity, Account Linking, Account Merge는 현재 만들지 않는다. 서로 다른 Provider 계정은 동일한 실제 사용자가 사용하더라도 별도 User로 취급한다.
 
 Refresh Token은 User와 분리된 Entity에 원문의 SHA-256 Hash만 저장한다. User별 여러 Refresh Token을 허용해 여러 Login Session을 지원하고, RefreshToken과 Push Device는 직접 연결하지 않는다.
 

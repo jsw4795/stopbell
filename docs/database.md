@@ -57,18 +57,18 @@ Authentication 구현 후 Schema:
 
 ```text
 id BIGINT AUTO_INCREMENT PRIMARY KEY
-provider VARCHAR(20) NOT NULL
+auth_provider VARCHAR(20) NOT NULL
 provider_user_id VARCHAR(255) NOT NULL
 created_at DATETIME(6) NOT NULL
 updated_at DATETIME(6) NOT NULL
-UNIQUE(provider, provider_user_id)
+UNIQUE(auth_provider, provider_user_id)
 ```
 
-`provider`는 외부 Social Provider를, `provider_user_id`는 해당 Provider의 사용자 식별자를 저장한다. 최초 Google Login에서는 OpenID Connect `sub`를 `provider_user_id`로 사용한다. 같은 `provider`와 `provider_user_id` 조합은 반드시 하나의 User만 식별하도록 Unique Constraint를 둔다.
+`auth_provider`는 외부 Social Provider를, `provider_user_id`는 해당 Provider의 사용자 식별자를 저장한다. `auth_provider`는 `GOOGLE`, `APPLE`, `KAKAO`, `NAVER` 문자열 중 하나를 저장한다. 최초 Google Login에서는 OpenID Connect `sub`를 `provider_user_id`로 사용한다. 같은 `auth_provider`와 `provider_user_id` 조합은 반드시 하나의 User만 식별하도록 Unique Constraint를 둔다.
 
 외부 Identity는 `users`에 직접 저장한다. `auth_identities` 같은 별도 identity 테이블, `email`, `display_name`은 현재 추가하지 않는다.
 
-현재 구현에는 이 변경이 아직 적용되지 않았다. `TASK-201`에서 User Entity 변경과 해당 Flyway Migration을 함께 추가한다. Hibernate `ddl-auto`로 Schema를 자동 생성하지 않는다.
+이 Schema는 `TASK-201`의 V4 Flyway Migration으로 적용한다. Hibernate `ddl-auto`로 Schema를 자동 생성하지 않는다.
 
 ### refresh_tokens
 
