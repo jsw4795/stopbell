@@ -95,6 +95,7 @@ Local profile은 `backend/src/main/resources/application-local.yml`에서 위 �
 
 ```text
 DB_PASSWORD
+JWT_SECRET
 TRANSIT_API_KEY
 FCM_SERVICE_CREDENTIAL
 OAUTH_CLIENT_SECRET

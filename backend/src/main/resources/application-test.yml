@@ -2,3 +2,6 @@ spring:
   config:
     activate:
       on-profile: test
+
+jwt:
+  secret: test-secret-key-with-at-least-thirty-two-bytes

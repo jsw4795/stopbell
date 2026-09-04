@@ -8,6 +8,11 @@ spring:
       ddl-auto: none
     open-in-view: false
 
+jwt:
+  secret: ${JWT_SECRET}
+  issuer: stopbell
+  access-token-expiration: PT1H
+
 management:
   endpoint:
     health:
