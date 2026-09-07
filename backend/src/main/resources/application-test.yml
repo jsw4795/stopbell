@@ -5,3 +5,6 @@ spring:
 
 jwt:
   secret: test-secret-key-with-at-least-thirty-two-bytes
+
+google:
+  server-client-id: test-google-server-client-id

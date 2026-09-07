@@ -98,6 +98,8 @@ User 조회 또는 생성
 StopBell Access Token (JWT) + Refresh Token 발급
 ```
 
+현재 TASK-205의 Google Login Endpoint는 Access Token만 발급한다. Refresh Token 발급과 재발급 흐름은 TASK-206에서 추가한다.
+
 Google은 외부 Identity 확인만 담당한다. Google ID Token을 StopBell API의 장기 인증 Token으로 재사용하지 않으며, 이후 Application API는 StopBell이 발급한 JWT Access Token으로 인증한다.
 
 ```text

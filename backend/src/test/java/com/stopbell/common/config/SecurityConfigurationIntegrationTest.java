@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.Base64;
 
 import com.stopbell.user.service.JwtTokenService;
+import com.stopbell.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,13 +30,18 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import static org.mockito.Mockito.mock;
+
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
         + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration,"
         + "org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import(SecurityConfigurationIntegrationTest.TestEndpointConfiguration.class)
+@Import({
+        SecurityConfigurationIntegrationTest.TestEndpointConfiguration.class,
+        SecurityConfigurationIntegrationTest.TestRepositoryConfiguration.class
+})
 class SecurityConfigurationIntegrationTest {
 
     @Autowired
@@ -127,6 +133,15 @@ class SecurityConfigurationIntegrationTest {
         @Bean
         TestAuthenticationController testAuthenticationController() {
             return new TestAuthenticationController();
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TestRepositoryConfiguration {
+
+        @Bean
+        UserRepository userRepository() {
+            return mock(UserRepository.class);
         }
     }
 

@@ -19,6 +19,7 @@
 - JPA: Spring Data JPA / Hibernate ORM 7.4.5.Final
 - MyBatis: MyBatis Spring Boot Starter 4.1.0
 - MySQL Connector/J Version: 9.7.0
+- Google API Client for Java Version: 2.9.0
 - MySQL Version: 8.4 LTS
 - Database execution: Docker Compose
 - Database data persistence: Docker Named Volume
@@ -96,12 +97,15 @@ Local profile은 `backend/src/main/resources/application-local.yml`에서 위 �
 ```text
 DB_PASSWORD
 JWT_SECRET
+GOOGLE_SERVER_CLIENT_ID
 TRANSIT_API_KEY
 FCM_SERVICE_CREDENTIAL
 OAUTH_CLIENT_SECRET
 ```
 
 `.env.example` 또는 동등한 placeholder file에는 값이 아닌 필요한 key만 기록한다.
+
+`GOOGLE_SERVER_CLIENT_ID`에는 iOS Client ID가 아니라 Backend Authentication audience 검증에 사용할 Google Cloud Web application(Server) Client ID를 설정한다.
 
 Environment Variable을 Spring Boot에 전달하는 방법은 To be decided이다. Local file, IDE run configuration, shell Environment Variable 중 하나를 선택할 때는 시크릿 노출 위험과 팀 사용성을 함께 검토한다.
 

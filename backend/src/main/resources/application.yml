@@ -13,6 +13,9 @@ jwt:
   issuer: stopbell
   access-token-expiration: PT1H
 
+google:
+  server-client-id: ${GOOGLE_SERVER_CLIENT_ID}
+
 management:
   endpoint:
     health:

@@ -147,6 +147,31 @@ Authorization: Bearer <Access Token>
 
 Google ID Token은 로그인 시 외부 Identity를 확인하기 위해 Backend에 전달할 뿐, Application API의 인증 헤더에 사용하지 않는다. Access Token 기본 수명은 1시간이며, Refresh Token은 Access Token 재발급에만 사용한다.
 
-로그인, Refresh, Logout API의 정확한 endpoint 및 request/response DTO는 각각의 Authentication 구현 Task에서 이 문서에 정의한다.
+### Google 로그인
+
+```http
+POST /auth/google
+Content-Type: application/json
+```
+
+요청 본문:
+
+```json
+{
+  "idToken": "<Google ID Token>"
+}
+```
+
+Backend는 `GOOGLE_SERVER_CLIENT_ID`에 설정한 Backend용 Google Server Client ID를 audience로 하여 Google ID Token을 검증한다. 검증된 Google OpenID Connect `sub`를 `providerUserId`로 사용해 StopBell User를 조회하거나 생성한 뒤, StopBell 내부 `User.id`를 `sub`로 하는 Access Token을 반환한다.
+
+응답 본문:
+
+```json
+{
+  "accessToken": "<StopBell Access Token>"
+}
+```
+
+이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. Google ID Token이 검증되지 않거나 `sub`가 없으면 `401 Unauthorized`를 반환한다. Refresh Token 및 Refresh/Logout Endpoint는 각각의 후속 Authentication Task에서 정의한다.
 
 Alarm을 포함한 사용자 소유 Application API는 Client Request Body 또는 Query Parameter의 `userId`를 받지 않는다. Spring Security가 검증한 Access Token의 Principal에서 StopBell User를 식별한다.

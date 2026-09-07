@@ -17,6 +17,9 @@ import com.stopbell.notification.entity.NotificationStatus;
 import com.stopbell.notification.repository.NotificationHistoryRepository;
 import com.stopbell.user.repository.RefreshTokenRepository;
 import com.stopbell.user.repository.UserRepository;
+import com.stopbell.user.service.ExternalIdentity;
+import com.stopbell.user.service.JwtTokenService;
+import com.stopbell.user.service.LoginService;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,6 +46,12 @@ class RepositoryIntegrationTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private LoginService loginService;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
 
     @Autowired
     private RefreshTokenRepository refreshTokenRepository;
@@ -117,6 +126,30 @@ class RepositoryIntegrationTest {
         assertThat(googleUser.getId()).isNotNull();
         assertThat(kakaoUser.getId()).isNotNull();
         assertThat(kakaoUser.getId()).isNotEqualTo(googleUser.getId());
+    }
+
+    @Test
+    @DisplayName("신규 Google Identity 로그인은 User를 생성하고 내부 User ID subject의 Access Token을 발급한다")
+    void login_new_google_identity_creates_user_and_access_token() {
+        String accessToken = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, "google-login-user"));
+
+        User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, "google-login-user")
+                .orElseThrow();
+
+        assertThat(user.getAuthProvider()).isEqualTo(AuthProvider.GOOGLE);
+        assertThat(user.getProviderUserId()).isEqualTo("google-login-user");
+        assertThat(jwtTokenService.extractUserId(accessToken)).isEqualTo(user.getId());
+    }
+
+    @Test
+    @DisplayName("기존 Google Identity 로그인은 기존 User를 재사용한다")
+    void login_existing_google_identity_reuses_user() {
+        User existingUser = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-existing-login-user"));
+
+        String accessToken = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, "google-existing-login-user"));
+
+        assertThat(userRepository.count()).isEqualTo(1);
+        assertThat(jwtTokenService.extractUserId(accessToken)).isEqualTo(existingUser.getId());
     }
 
     @Test
