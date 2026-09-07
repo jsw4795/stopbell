@@ -9,7 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Base64;
 
-import com.stopbell.user.service.JwtTokenService;
+import com.stopbell.user.auth.service.JwtTokenService;
 import com.stopbell.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

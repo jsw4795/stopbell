@@ -1,4 +1,4 @@
-package com.stopbell.user.service;
+package com.stopbell.user.auth.identity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -11,6 +11,8 @@ import java.security.GeneralSecurityException;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.stopbell.user.entity.AuthProvider;
+import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
+import com.stopbell.user.auth.exception.SocialIdentityVerificationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

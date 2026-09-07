@@ -1,9 +1,9 @@
-package com.stopbell.user.service;
+package com.stopbell.user.auth.service;
 
 import java.time.Clock;
 import java.time.Instant;
 
-import com.stopbell.common.config.JwtProperties;
+import com.stopbell.user.auth.config.JwtProperties;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;

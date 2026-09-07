@@ -1,9 +1,9 @@
-package com.stopbell.user.controller;
+package com.stopbell.user.auth.controller;
 
-import com.stopbell.user.dto.AccessTokenResponse;
-import com.stopbell.user.dto.GoogleLoginRequest;
-import com.stopbell.user.service.GoogleIdentityVerifier;
-import com.stopbell.user.service.LoginService;
+import com.stopbell.user.auth.dto.AccessTokenResponse;
+import com.stopbell.user.auth.dto.GoogleLoginRequest;
+import com.stopbell.user.auth.identity.GoogleIdentityVerifier;
+import com.stopbell.user.auth.service.LoginService;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;

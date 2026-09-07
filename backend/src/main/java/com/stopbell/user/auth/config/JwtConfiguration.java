@@ -1,4 +1,4 @@
-package com.stopbell.common.config;
+package com.stopbell.user.auth.config;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;

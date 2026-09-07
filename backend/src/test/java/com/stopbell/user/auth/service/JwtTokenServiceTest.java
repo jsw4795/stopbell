@@ -1,4 +1,4 @@
-package com.stopbell.user.service;
+package com.stopbell.user.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -16,7 +16,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.nimbusds.jose.proc.SecurityContext;
-import com.stopbell.common.config.JwtProperties;
+import com.stopbell.user.auth.config.JwtProperties;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;

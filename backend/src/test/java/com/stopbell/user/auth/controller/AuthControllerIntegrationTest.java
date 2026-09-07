@@ -1,4 +1,4 @@
-package com.stopbell.user.controller;
+package com.stopbell.user.auth.controller;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
@@ -14,10 +14,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.io.IOException;
 
 import com.stopbell.user.entity.AuthProvider;
-import com.stopbell.user.service.ExternalIdentity;
-import com.stopbell.user.service.GoogleIdentityVerifier;
-import com.stopbell.user.service.InvalidSocialCredentialException;
-import com.stopbell.user.service.SocialIdentityVerificationException;
+import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
+import com.stopbell.user.auth.exception.SocialIdentityVerificationException;
+import com.stopbell.user.auth.identity.ExternalIdentity;
+import com.stopbell.user.auth.identity.GoogleIdentityVerifier;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

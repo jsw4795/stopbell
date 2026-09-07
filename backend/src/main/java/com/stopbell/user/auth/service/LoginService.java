@@ -1,5 +1,6 @@
-package com.stopbell.user.service;
+package com.stopbell.user.auth.service;
 
+import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.UserRepository;
 import jakarta.transaction.Transactional;

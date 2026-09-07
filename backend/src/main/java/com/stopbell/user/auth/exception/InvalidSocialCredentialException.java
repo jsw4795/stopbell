@@ -1,4 +1,4 @@
-package com.stopbell.user.service;
+package com.stopbell.user.auth.exception;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ResponseStatus;

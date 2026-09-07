@@ -1,4 +1,4 @@
-package com.stopbell.user.service;
+package com.stopbell.user.auth.identity;
 
 public interface SocialIdentityVerifier {
 

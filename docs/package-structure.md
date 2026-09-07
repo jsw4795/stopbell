@@ -35,11 +35,15 @@ backend/
     │   └── web/
     │
     ├── user/
-    │   ├── controller/
-    │   ├── service/
+    │   ├── auth/
+    │   │   ├── config/
+    │   │   ├── controller/
+    │   │   ├── dto/
+    │   │   ├── service/
+    │   │   ├── identity/
+    │   │   └── exception/
     │   ├── repository/
-    │   ├── entity/
-    │   └── dto/
+    │   └── entity/
     │
     ├── alarm/
     │   ├── controller/
@@ -73,23 +77,36 @@ backend/
 
 예:
 
-- Spring configuration
+- Application-wide Spring configuration
 - 공통 예외 및 Error response 처리
 - 공통 Web 설정
 
 `common`은 Domain 규칙, Transit provider 구현, 또는 임의의 utility를 모으는 장소가 아니다.
 
+`SecurityConfiguration`은 모든 Application Request의 Security Policy를 담당하므로 `common.config`에 둔다. JWT 및 Google Identity 검증처럼 Authentication에만 종속된 Configuration은 `user.auth.config`에 둔다.
+
 ### user
 
 사용자 식별 및 인증이 도입된 이후의 사용자 관련 책임을 둔다.
 
-- `controller`: User API 요청과 응답
-- `service`: User Domain의 application logic
 - `repository`: User Entity의 JPA Repository
 - `entity`: User JPA Entity
-- `dto`: User API request/response DTO
+- `auth`: Authentication API와 Google Identity 검증, StopBell Token 발급 책임
 
 `user`는 Google Social Identity를 가진 User와 RefreshToken Authentication Session을 함께 소유한다. Authentication API와 Google Token 검증, Refresh Token 발급·회전·무효화도 이 Domain의 책임으로 둔다.
+
+### user.auth
+
+Authentication 기능은 `user.auth` 하위 Feature Package로 구성한다.
+
+- `config`: `JwtConfiguration`, `JwtProperties`, Google Identity 검증 Configuration과 Properties
+- `controller`: Authentication API entry point인 `AuthController`
+- `dto`: Google Login 요청과 Access Token 응답 DTO
+- `service`: Login use case와 JWT Token application logic
+- `identity`: 외부 Social Provider에서 검증된 Identity 획득
+- `exception`: Authentication use case와 Social Identity 검증 예외
+
+`user.auth`는 User Domain을 소유하지 않는다. `User`, `AuthProvider`, `RefreshToken`은 `user.entity`에, 해당 JPA Repository는 `user.repository`에 유지한다.
 
 ### alarm
 
@@ -160,7 +177,7 @@ MyBatis는 Transit 관련 Query, Complex Query, Statistics Query, 성능 최적�
 DTO는 사용하는 Domain Package 안에 둔다.
 
 ```text
-user/dto/
+user/auth/dto/
 alarm/dto/
 transit/dto/
 notification/dto/

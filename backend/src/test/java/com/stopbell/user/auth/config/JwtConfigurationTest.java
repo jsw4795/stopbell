@@ -1,4 +1,4 @@
-package com.stopbell.common.config;
+package com.stopbell.user.auth.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
