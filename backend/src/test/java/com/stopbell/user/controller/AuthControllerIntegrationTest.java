@@ -1,17 +1,23 @@
 package com.stopbell.user.controller;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.io.IOException;
 
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.service.ExternalIdentity;
 import com.stopbell.user.service.GoogleIdentityVerifier;
 import com.stopbell.user.service.InvalidSocialCredentialException;
+import com.stopbell.user.service.SocialIdentityVerificationException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -69,6 +75,20 @@ class AuthControllerIntegrationTest {
                         .contentType("application/json")
                         .content("{\"idToken\":\"invalid-google-id-token\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("Google Identity 검증 I/O 실패는 503 Service Unavailable을 반환한다")
+    void return_service_unavailable_when_google_identity_verification_fails() throws Exception {
+        doThrow(new SocialIdentityVerificationException(new IOException("Google public keys unavailable")))
+                .when(googleIdentityVerifier)
+                .verify("unavailable-google-id-token");
+
+        mockMvc.perform(post("/auth/google")
+                        .contentType("application/json")
+                        .content("{\"idToken\":\"unavailable-google-id-token\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(content().string(not(containsString("Google public keys unavailable"))));
     }
 
     @Test

@@ -172,6 +172,6 @@ Backend는 `GOOGLE_SERVER_CLIENT_ID`에 설정한 Backend용 Google Server Clien
 }
 ```
 
-이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. Google ID Token이 검증되지 않거나 `sub`가 없으면 `401 Unauthorized`를 반환한다. Refresh Token 및 Refresh/Logout Endpoint는 각각의 후속 Authentication Task에서 정의한다.
+이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. 잘못된 Google Credential, 검증 실패, 또는 누락된 `sub`에는 `401 Unauthorized`를 반환한다. Google 공개키 조회 등 Google Identity 검증 Infrastructure의 I/O 실패에는 Credential 오류로 처리하지 않고 `503 Service Unavailable`을 반환한다. Refresh Token 및 Refresh/Logout Endpoint는 각각의 후속 Authentication Task에서 정의한다.
 
 Alarm을 포함한 사용자 소유 Application API는 Client Request Body 또는 Query Parameter의 `userId`를 받지 않는다. Spring Security가 검증한 Access Token의 Principal에서 StopBell User를 식별한다.

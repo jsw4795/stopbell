@@ -35,7 +35,9 @@ public class GoogleIdentityVerifier implements SocialIdentityVerifier {
             }
 
             return new ExternalIdentity(AuthProvider.GOOGLE, providerUserId);
-        } catch (IOException | GeneralSecurityException exception) {
+        } catch (IOException exception) {
+            throw new SocialIdentityVerificationException(exception);
+        } catch (GeneralSecurityException exception) {
             throw new InvalidSocialCredentialException(exception);
         }
     }

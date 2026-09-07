@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.io.IOException;
 import java.security.GeneralSecurityException;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
@@ -37,6 +38,17 @@ class GoogleIdentityVerifierTest {
 
         assertThatThrownBy(() -> googleIdentityVerifier.verify("invalid-google-id-token"))
                 .isInstanceOf(InvalidSocialCredentialException.class);
+    }
+
+    @Test
+    @DisplayName("Google ID Token 검증 중 I/O 실패는 외부 검증 실패로 변환한다")
+    void convert_io_failure_to_social_identity_verification_exception() throws Exception {
+        when(googleIdTokenVerifier.verify("unavailable-google-id-token"))
+                .thenThrow(new IOException("Google public keys unavailable"));
+
+        assertThatThrownBy(() -> googleIdentityVerifier.verify("unavailable-google-id-token"))
+                .isInstanceOf(SocialIdentityVerificationException.class)
+                .isNotInstanceOf(InvalidSocialCredentialException.class);
     }
 
     @Test
