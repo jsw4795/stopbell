@@ -1,68 +1,53 @@
 # StopBell
 
-StopBell은 사용자가 교통 정보를 계속 확인하지 않아도, 행동이 필요한 시점에 알림을 보내는 모바일 교통 알림 서비스이다.
+StopBell은 사용자가 교통 정보를 계속 확인하지 않아도, 행동이 필요한 시점에 알림을 보내는 모바일 교통 알림 서비스입니다.
 
-## 문제
+## 해결하려는 문제
 
-이 프로젝트는 반복적으로 발생하는 다음 두 가지 교통 문제에서 출발한다.
-
-1. 사용자는 특정 버스가 선택한 정류장에 도착하거나 지나갈 때 집에서 출발하고 싶지만, 교통 앱을 계속 확인하고 싶지는 않다.
-2. 피곤한 지하철 승객은 목적지 역을 지나칠 걱정 없이 잠들고 싶다.
+- 특정 버스가 선택한 정류장에 도착하거나 지나갈 때 출발하고 싶지만, 교통 앱을 계속 확인하고 싶지 않은 상황
+- 지하철 승객이 목적지 역을 지나칠 걱정 없이 이동하고 싶은 상황
 
 ## 제품 방향
 
-프로젝트는 점진적으로 개발한다.
+- **V1 — 버스 도착·통과 알림:** 버스와 목표 정류장을 선택하고, 조건이 충족되면 푸시 알림을 받는 흐름에 집중합니다.
+- **V2 — 지하철 목적지 기상 알림:** V1이 신뢰성 있게 동작한 뒤 검토합니다.
 
-- **V1:** 버스 도착/통과 알림
-- **V2:** 지하철 목적지 기상 알림
+V1의 첫 성공 기준은 사용자가 알림을 설정하고, 조건이 충족되었을 때 실제 휴대폰에서 신뢰할 수 있게 푸시 알림을 받는 것입니다.
 
-V1의 범위는 의도적으로 좁게 유지한다. 첫 번째 성공 기준은 실제 사용자가 버스 알림을 설정하고, 설정한 조건이 충족되었을 때 실제 휴대폰에서 신뢰할 수 있게 푸시 알림을 받는 것이다.
+## 현재 개발 상태
 
-## 초기 기술 방향
+기반 구현 단계입니다. Phase 0 환경 구성, Phase 1 도메인·Repository, Phase 2 인증의 주요 구현 항목을 완료했습니다. 알림 API, 실제 교통 데이터 연동, 푸시 전송 흐름은 아직 구현 전입니다. 자세한 진행 상태는 [Task List](docs/task-list.md)에서 관리합니다.
 
-- 모바일 클라이언트: Flutter / Dart
-- 백엔드: Spring Boot / Java
-- 영속성 저장소: MySQL
-- 데이터 접근: JPA + MyBatis
-- 푸시 알림: 검증을 전제로 한 Firebase Cloud Messaging(FCM)
-- 외부 데이터: 가능한 경우 공식/공공 교통 API
+## 기술 스택
 
-이는 초기 선택 사항이며 변경 불가능한 제약은 아니다. 아키텍처 결정은 `docs/adr/` 아래에 기록한다.
+- 모바일: Flutter / Dart
+- 백엔드: Java / Spring Boot, Spring Security
+- 저장소: MySQL (로컬 Docker), JPA + MyBatis
+- 인증: Google ID Token 검증, JWT Access Token, Refresh Token Rotation
 
-## 저장소 구조
+FCM과 교통 데이터 제공자는 V1 구현 전에 실제 요구사항과 제공 조건을 검증할 예정입니다.
+
+## 시스템 및 저장소 구조
 
 ```text
-stopbell/
-├── app/                    # Flutter 애플리케이션
-├── backend/                # Spring Boot 애플리케이션
-├── docs/
-│   ├── adr/                # 아키텍처 결정 기록
-│   ├── api.md
-│   ├── architecture.md
-│   ├── database.md
-│   ├── development-guidelines.md
-│   ├── domain-model.md
-│   ├── local-development.md
-│   ├── package-structure.md
-│   ├── requirements.md
-│   ├── roadmap.md
-│   └── task-list.md
-└── README.md
+Flutter 앱
+  └─ HTTPS / JSON ─> Spring Boot 백엔드 ─> MySQL
+                         ├─ JPA: 도메인 CRUD와 상태 관리
+                         └─ MyBatis: 복잡한 조회·집계와 교통 데이터 처리
 ```
 
-## 문서 우선
+```text
+app/        Flutter 애플리케이션
+backend/    Spring Boot 애플리케이션
+docs/       요구사항, 아키텍처, API, 데이터 모델, ADR
+```
 
-구현하기 전에 `docs/`의 문서를 읽는다.
+## 주요 문서
 
-Codex 및 다른 코딩 에이전트를 위한 규칙:
+- [요구사항](docs/requirements.md) · [아키텍처](docs/architecture.md) · [도메인 모델](docs/domain-model.md)
+- [API](docs/api.md) · [데이터베이스](docs/database.md) · [로컬 개발](docs/local-development.md)
+- [ADR 목록](docs/adr/README.md) · [로드맵](docs/roadmap.md) · [Task List](docs/task-list.md)
 
-1. 문서화되지 않은 제품 요구사항을 임의로 만들지 않는다.
-2. 아키텍처 결정을 알리지 않고 변경하지 않는다.
-3. 필요한 결정이 빠져 있다면 구현 전에 선택지와 트레이드오프를 제시한다.
-4. 현재 버전의 요구사항을 충족하는 가장 단순한 설계를 우선한다.
-5. 포트폴리오를 위한 목적으로만 인프라를 추가하지 않는다.
-6. 동작 또는 아키텍처가 변경되면 관련 문서를 업데이트한다.
+## 개발 규칙
 
-## 현재 상태
-
-기반 구현 단계. Phase 0과 Phase 1 - Domain Foundation의 완료 항목을 구현했으며, 이후 기능은 `docs/task-list.md`에서 관리한다.
+구현 전 요구사항과 관련 ADR을 확인하고, 문서화되지 않은 제품 요구사항이나 아키텍처 결정을 임의로 추가하지 않습니다. 세부 규칙은 [개발 가이드](docs/development-guidelines.md)와 [Task List](docs/task-list.md)를 따릅니다.
