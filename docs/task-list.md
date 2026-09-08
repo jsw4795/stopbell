@@ -96,7 +96,7 @@ StopBell의 사용자 식별과 장기 로그인 유지에 필요한 Backend Aut
 - [x] TASK-205 Google Social Login Backend 연동
 - [x] TASK-206 Refresh Token 발급, Rotation 및 재발급 구현
 - [x] TASK-207 Logout 및 Refresh Token 무효화 구현
-- [ ] TASK-208 Authentication Test 작성
+- [x] TASK-208 Authentication Test 작성
 
 ------------------------------------------------------------------------
 

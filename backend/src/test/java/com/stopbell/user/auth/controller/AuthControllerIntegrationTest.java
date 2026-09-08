@@ -43,9 +43,12 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.security.core.Authentication;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -54,7 +57,10 @@ import org.testcontainers.mysql.MySQLContainer;
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Testcontainers
-@Import(AuthControllerIntegrationTest.TestGoogleIdentityVerifierConfiguration.class)
+@Import({
+        AuthControllerIntegrationTest.TestGoogleIdentityVerifierConfiguration.class,
+        AuthControllerIntegrationTest.TestProtectedEndpointConfiguration.class
+})
 class AuthControllerIntegrationTest {
 
     @Container
@@ -102,6 +108,92 @@ class AuthControllerIntegrationTest {
         RefreshToken storedRefreshToken = refreshTokenRepository.findByTokenHash(sha256(refreshToken)).orElseThrow();
         assertThat(storedRefreshToken.getUser().getId()).isEqualTo(user.getId());
         assertThat(storedRefreshToken.getTokenHash()).isNotEqualTo(refreshToken);
+    }
+
+    @Test
+    @DisplayName("Google Login으로 발급된 Access Token은 실제 Security Filter Chain을 통과해 내부 User를 식별한다")
+    void authenticate_protected_endpoint_with_access_token_issued_by_google_login() throws Exception {
+        TokenPair tokenPair = loginWithGoogle("protected-endpoint-google-id-token", "protected-endpoint-user");
+        User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, "protected-endpoint-user")
+                .orElseThrow();
+
+        assertThat(jwtTokenService.extractUserId(tokenPair.accessToken())).isEqualTo(user.getId());
+
+        mockMvc.perform(get("/test/authentication")
+                        .header("Authorization", "Bearer " + tokenPair.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(user.getId().toString()));
+    }
+
+    @Test
+    @DisplayName("동일한 Google Identity 재로그인은 기존 User와 기존 Refresh Session을 유지한다")
+    void reuse_user_and_keep_existing_refresh_session_when_google_user_logs_in_again() throws Exception {
+        long userCountBeforeLogin = userRepository.count();
+        TokenPair firstTokenPair = loginWithGoogle("relogin-google-id-token", "relogin-google-user");
+        TokenPair secondTokenPair = loginWithGoogle("relogin-google-id-token", "relogin-google-user");
+        User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, "relogin-google-user")
+                .orElseThrow();
+
+        assertThat(userRepository.count()).isEqualTo(userCountBeforeLogin + 1);
+        assertThat(jwtTokenService.extractUserId(firstTokenPair.accessToken())).isEqualTo(user.getId());
+        assertThat(jwtTokenService.extractUserId(secondTokenPair.accessToken())).isEqualTo(user.getId());
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstTokenPair.refreshToken()))).isPresent();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(secondTokenPair.refreshToken()))).isPresent();
+    }
+
+    @Test
+    @DisplayName("Login Session을 Rotation하면 기존 Token 재사용을 막고 다른 Session은 유지한다")
+    void rotate_login_session_prevents_reuse_and_keeps_other_session() throws Exception {
+        TokenPair firstLogin = loginWithGoogle("rotation-flow-google-id-token", "rotation-flow-user");
+        TokenPair secondLogin = loginWithGoogle("rotation-flow-google-id-token", "rotation-flow-user");
+
+        TokenPair rotatedTokenPair = refresh(firstLogin.refreshToken());
+
+        assertThat(rotatedTokenPair.refreshToken()).isNotEqualTo(firstLogin.refreshToken());
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstLogin.refreshToken()))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(rotatedTokenPair.refreshToken()))).isPresent();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(secondLogin.refreshToken()))).isPresent();
+
+        mockMvc.perform(get("/test/authentication")
+                        .header("Authorization", "Bearer " + rotatedTokenPair.accessToken()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + firstLogin.refreshToken() + "\"}"))
+                .andExpect(status().isUnauthorized());
+
+        TokenPair refreshedAgainTokenPair = refresh(rotatedTokenPair.refreshToken());
+        assertThat(refreshedAgainTokenPair.refreshToken()).isNotEqualTo(rotatedTokenPair.refreshToken());
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(rotatedTokenPair.refreshToken()))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(refreshedAgainTokenPair.refreshToken()))).isPresent();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(secondLogin.refreshToken()))).isPresent();
+    }
+
+    @Test
+    @DisplayName("Logout은 현재 Session만 삭제하고 이미 발급된 Access Token과 다른 Session은 유지한다")
+    void logout_current_session_keeps_existing_access_token_and_other_session() throws Exception {
+        TokenPair firstLogin = loginWithGoogle("logout-flow-google-id-token", "logout-flow-user");
+        TokenPair secondLogin = loginWithGoogle("logout-flow-google-id-token", "logout-flow-user");
+
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + firstLogin.refreshToken() + "\"}"))
+                .andExpect(status().isNoContent());
+
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstLogin.refreshToken()))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(secondLogin.refreshToken()))).isPresent();
+
+        mockMvc.perform(get("/test/authentication")
+                        .header("Authorization", "Bearer " + firstLogin.accessToken()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + firstLogin.refreshToken() + "\"}"))
+                .andExpect(status().isUnauthorized());
+
+        refresh(secondLogin.refreshToken());
     }
 
     @Test
@@ -374,6 +466,37 @@ class AuthControllerIntegrationTest {
         return matcher.group(1);
     }
 
+    private TokenPair loginWithGoogle(String googleIdToken, String providerUserId) throws Exception {
+        when(googleIdentityVerifier.verify(googleIdToken))
+                .thenReturn(new ExternalIdentity(AuthProvider.GOOGLE, providerUserId));
+
+        MvcResult result = mockMvc.perform(post("/auth/google")
+                        .contentType("application/json")
+                        .content("{\"idToken\":\"" + googleIdToken + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        return tokenPair(result);
+    }
+
+    private TokenPair refresh(String refreshToken) throws Exception {
+        MvcResult result = mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        return tokenPair(result);
+    }
+
+    private TokenPair tokenPair(MvcResult result) throws Exception {
+        String responseBody = result.getResponse().getContentAsString();
+        return new TokenPair(
+                responseValue(responseBody, "accessToken"),
+                responseValue(responseBody, "refreshToken")
+        );
+    }
+
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(Instant.now(), ZoneOffset.UTC);
     }
@@ -386,5 +509,29 @@ class AuthControllerIntegrationTest {
         GoogleIdentityVerifier googleIdentityVerifier() {
             return mock(GoogleIdentityVerifier.class);
         }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class TestProtectedEndpointConfiguration {
+
+        @Bean
+        TestAuthenticationController testAuthenticationController() {
+            return new TestAuthenticationController();
+        }
+    }
+
+    @RestController
+    static class TestAuthenticationController {
+
+        @GetMapping("/test/authentication")
+        AuthenticationResponse authentication(Authentication authentication) {
+            return new AuthenticationResponse(authentication.getName());
+        }
+    }
+
+    record TokenPair(String accessToken, String refreshToken) {
+    }
+
+    record AuthenticationResponse(String userId) {
     }
 }
