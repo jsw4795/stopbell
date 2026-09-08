@@ -75,6 +75,15 @@ public class RefreshTokenService {
         return new TokenResponse(accessToken, rotatedRefreshToken);
     }
 
+    @Transactional
+    public void invalidate(String refreshToken) {
+        if (refreshToken == null || refreshToken.isBlank()) {
+            return;
+        }
+
+        refreshTokenRepository.deleteByTokenHash(hash(refreshToken));
+    }
+
     private String hash(String refreshToken) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")

@@ -47,13 +47,13 @@ JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡�
 
 ## 6. 핵심 테이블
 
-`users`, `alarms`, `notification_history`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. Authentication Task에서 추가할 `refresh_tokens`와 `devices`는 별도 Migration으로 적용한다.
+`users`, `refresh_tokens`, `alarms`, `notification_history`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 Push 연동이 확정될 때 별도 Migration으로 추가한다.
 
 ### users
 
 내부 사용자 식별과 Alarm 소유자 기준 테이블이다.
 
-Authentication 구현 후 Schema:
+현재 Schema:
 
 ```text
 id BIGINT AUTO_INCREMENT PRIMARY KEY
@@ -74,7 +74,7 @@ UNIQUE(auth_provider, provider_user_id)
 
 Authentication Session을 User와 분리해 저장하는 테이블이다.
 
-Authentication 구현 후 Schema:
+현재 Schema:
 
 ```text
 id BIGINT AUTO_INCREMENT PRIMARY KEY
@@ -87,9 +87,7 @@ UNIQUE(token_hash)
 
 `token_hash`에는 서버가 SecureRandom으로 생성한 256-bit URL-safe Base64 opaque Refresh Token 원문의 SHA-256 Hash를 64-char lowercase hex로 저장한다. Refresh Token 원문은 저장하지 않으며, Password용 BCryptPasswordEncoder를 Refresh Token Hash에 사용하지 않는다. 서로 다른 RefreshToken row가 같은 `token_hash`를 가지는 것은 정상 상태가 아니므로 Database Unique Constraint로 강제한다.
 
-한 User가 여러 Refresh Token을 가질 수 있어 여러 Login Session을 허용한다. Rotation 또는 Logout으로 Token을 무효화할 때는 해당 행을 삭제한다. `updated_at`, `revoked_at`, `device_id`, `last_used_at`, `token_family`는 현재 추가하지 않는다.
-
-현재 구현에는 이 테이블이 아직 없다. `TASK-202`에서 Entity, Repository, Flyway Migration을 함께 추가한다.
+한 User가 여러 Refresh Token을 가질 수 있어 여러 Login Session을 허용한다. Rotation 또는 Logout으로 Token을 무효화할 때는 `token_hash`로 해당 행 하나만 삭제한다. Logout은 만료 여부를 검증하거나 User를 먼저 조회하지 않으며, 삭제 대상이 없어도 성공으로 처리한다. `updated_at`, `revoked_at`, `device_id`, `last_used_at`, `token_family`는 현재 추가하지 않는다.
 
 ### devices
 

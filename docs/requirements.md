@@ -68,7 +68,7 @@ StopBell은 자체 ID/Password 회원가입을 제공하지 않고 Social Login�
 
 Flutter는 Google ID Token으로 외부 Identity를 증명하고, Backend는 이를 검증한 뒤 StopBell 자체 Access Token과 Refresh Token을 발급한다. Google Token은 StopBell Application API의 장기 인증 Token으로 사용하지 않는다.
 
-Application API는 JWT Access Token 기반으로 인증하며, Access Token 기본 수명은 1시간이다. Refresh Token은 Access Token 재발급에만 사용하고, 30일 수명 및 Rotation 정책으로 장기 로그인 유지를 지원한다. Refresh Token이 만료되거나 유효하지 않으면 다시 Google Login이 필요하다.
+Application API는 JWT Access Token 기반으로 인증하며, Access Token 기본 수명은 1시간이다. Refresh Token은 Access Token 재발급과 현재 Session Logout에 사용하고, 30일 수명 및 Rotation 정책으로 장기 로그인 유지를 지원한다. Logout은 해당 Refresh Token Session만 삭제하며 이미 발급된 Access Token은 만료 시점까지 유효할 수 있다. Refresh Token이 만료되거나 유효하지 않으면 다시 Google Login이 필요하다.
 
 공개 배포 전뿐 아니라 Alarm API 구현부터 인증된 StopBell User를 기준으로 Alarm 소유권을 처리한다. Client가 제공한 `userId`를 신뢰하지 않는다.
 

@@ -246,6 +246,122 @@ class AuthControllerIntegrationTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    @Test
+    @DisplayName("Access Token 없이 Logout하면 현재 Refresh Token Session을 삭제하고 204를 반환한다")
+    void logout_deletes_current_refresh_token_session() throws Exception {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "logout-api-user"));
+        String refreshToken = refreshTokenService.issue(user);
+        String tokenHash = sha256(refreshToken);
+
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+
+        assertThat(refreshTokenRepository.findByTokenHash(tokenHash)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Logout된 Refresh Token으로 재발급을 요청하면 401 Unauthorized를 반환한다")
+    void reject_refresh_after_logout() throws Exception {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "logout-then-refresh-user"));
+        String refreshToken = refreshTokenService.issue(user);
+
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("동일한 Refresh Token을 다시 Logout해도 204를 반환한다")
+    void logout_is_idempotent() throws Exception {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "idempotent-logout-user"));
+        String refreshToken = refreshTokenService.issue(user);
+
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 Refresh Token Logout은 DB 변경 없이 204를 반환한다")
+    void logout_unknown_refresh_token() throws Exception {
+        long refreshTokenCount = refreshTokenRepository.count();
+
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"unknown-refresh-token-for-logout\"}"))
+                .andExpect(status().isNoContent());
+
+        assertThat(refreshTokenRepository.count()).isEqualTo(refreshTokenCount);
+    }
+
+    @Test
+    @DisplayName("만료된 Refresh Token Logout은 Session을 삭제하고 204를 반환한다")
+    void logout_deletes_expired_refresh_token() throws Exception {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "expired-logout-user"));
+        String expiredToken = "expired-refresh-token-for-logout";
+        String expiredTokenHash = sha256(expiredToken);
+        refreshTokenRepository.saveAndFlush(new RefreshToken(user, expiredTokenHash, now().minusSeconds(1)));
+
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + expiredToken + "\"}"))
+                .andExpect(status().isNoContent());
+
+        assertThat(refreshTokenRepository.findByTokenHash(expiredTokenHash)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("null 또는 blank Refresh Token Logout은 204를 반환한다")
+    void logout_accepts_null_or_blank_refresh_token() throws Exception {
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":null}"))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"\"}"))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
+    @DisplayName("한 Refresh Token을 Logout해도 같은 User의 다른 Session은 유지된다")
+    void retain_other_refresh_token_sessions_when_logging_out() throws Exception {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "multiple-logout-session-user"));
+        String firstRefreshToken = refreshTokenService.issue(user);
+        String secondRefreshToken = refreshTokenService.issue(user);
+
+        mockMvc.perform(post("/auth/logout")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + firstRefreshToken + "\"}"))
+                .andExpect(status().isNoContent());
+
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstRefreshToken))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(secondRefreshToken))).isPresent();
+    }
+
+    @Test
+    @DisplayName("GET Logout 경로는 인증 없이 접근할 수 없다")
+    void keep_non_post_logout_path_protected() throws Exception {
+        mockMvc.perform(get("/auth/logout"))
+                .andExpect(status().isUnauthorized());
+    }
+
     private String sha256(String value) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                 .digest(value.getBytes(StandardCharsets.UTF_8)));

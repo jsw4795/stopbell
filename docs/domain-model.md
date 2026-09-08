@@ -95,7 +95,7 @@ User는 단순한 Domain CRUD와 Entity 상태 관리를 위해 JPA Repository �
 
 ## Purpose
 
-StopBell의 장기 로그인 Authentication Session을 표현한다. Access Token 재발급에만 사용하며, Push Device와 직접 연결하지 않는다.
+StopBell의 장기 로그인 Authentication Session을 표현한다. Access Token 재발급과 현재 Session Logout에 사용하며, Push Device와 직접 연결하지 않는다.
 
 ## Main Attributes
 
@@ -121,7 +121,7 @@ StopBell의 장기 로그인 Authentication Session을 표현한다. Access Toke
 
 Refresh Token 기본 수명은 발급 시점부터 30일이다. 재발급이 성공하면 기존 Token은 폐기하고, 새 Access Token 및 새 Refresh Token을 함께 발급한다. 새 Refresh Token의 수명은 새 발급 시점부터 다시 30일이다.
 
-Rotation 또는 Logout으로 무효화할 때는 해당 RefreshToken을 삭제한다. 별도 `revokedAt` 상태는 관리하지 않는다.
+Rotation 또는 Logout으로 무효화할 때는 해당 RefreshToken을 삭제한다. Logout은 제시된 Refresh Token의 Hash와 일치하는 현재 Session만 삭제하며, 만료·존재 여부와 관계없이 성공으로 처리한다. 같은 User의 다른 Refresh Token Session은 유지한다. 별도 `revokedAt` 상태는 관리하지 않는다.
 
 `updatedAt`, `revokedAt`, `deviceId`, `lastUsedAt`, `tokenFamily`는 현재 추가하지 않는다.
 

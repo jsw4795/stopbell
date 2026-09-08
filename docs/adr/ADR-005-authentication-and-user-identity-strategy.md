@@ -56,7 +56,7 @@ Flutter는 Google Login으로 ID Token을 받고 이를 Backend에 전달한다.
 
 Access Token은 HS256으로 서명하는 JWT이며 기본 수명은 1시간이다. 서명 Secret은 `JWT_SECRET` 환경 변수로 주입하고 최소 256bit 이상이어야 하며, 서버 Database에는 저장하지 않는다. `sub`에는 StopBell 내부 `User.id`를, `iss`에는 `stopbell`을 사용하고 `iat`와 필수 `exp`를 포함한다. JWT Payload는 암호화되지 않으므로 민감정보를 넣지 않는다. Spring Security가 이를 검증해 StopBell User를 Principal로 식별하며, Logout 때 Access Token blacklist는 만들지 않아 이미 발급된 Access Token은 만료 시점까지 유효할 수 있다.
 
-Refresh Token은 SecureRandom으로 생성한 32 bytes(256-bit)를 padding 없는 URL-safe Base64로 인코딩한 opaque token으로 발급한다. 원문은 SHA-256 Hash의 64-char lowercase hex 값만 Database에 저장한다. 기본 수명은 발급 시점부터 30일이며, 재발급에 성공할 때 새 Access Token과 새 Refresh Token을 함께 발급하고 기존 Token을 폐기한다. 새 Refresh Token의 수명은 새 발급 시점부터 30일이다. 만료되거나 유효하지 않으면 다시 Google Login이 필요하며 Backend는 Client Login 화면으로 redirect하지 않고 `401 Unauthorized`를 반환한다.
+Refresh Token은 SecureRandom으로 생성한 32 bytes(256-bit)를 padding 없는 URL-safe Base64로 인코딩한 opaque token으로 발급한다. 원문은 SHA-256 Hash의 64-char lowercase hex 값만 Database에 저장한다. 기본 수명은 발급 시점부터 30일이며, 재발급에 성공할 때 새 Access Token과 새 Refresh Token을 함께 발급하고 기존 Token을 폐기한다. 새 Refresh Token의 수명은 새 발급 시점부터 30일이다. 만료되거나 유효하지 않으면 다시 Google Login이 필요하며 Backend는 Client Login 화면으로 redirect하지 않고 `401 Unauthorized`를 반환한다. Logout은 Access Token 인증 없이 현재 Refresh Token Hash의 Session만 삭제하고 `204 No Content`를 반환한다. 존재하지 않거나 만료된 Token도 성공으로 처리하며, 같은 User의 다른 Session은 유지한다.
 
 User는 내부 `id`를 유지하고 `authProvider`, `providerUserId`를 직접 가진다. `authProvider`는 `GOOGLE`, `APPLE`, `KAKAO`, `NAVER` 값을 갖는 Enum이며 Database에는 문자열로 저장한다. `(authProvider, providerUserId)`에는 Database Unique Constraint를 둔다. 별도 AuthIdentity Entity, Account Linking, Account Merge는 현재 만들지 않는다. 서로 다른 Provider 계정은 동일한 실제 사용자가 사용하더라도 별도 User로 취급한다.
 

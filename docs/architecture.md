@@ -64,7 +64,7 @@ Spring Boot
 │
 ├── JPA
 │   ├── User
-│   ├── RefreshToken (Authentication 구현 후)
+│   ├── RefreshToken
 │   ├── Alarm
 │   └── NotificationHistory
 │
@@ -82,7 +82,7 @@ MyBatis는 복잡한 Query, 집계, 외부 Transit 데이터 처리 등 SQL 제�
 
 ## 5. Authentication Architecture
 
-Authentication 구현 후의 로그인 및 Application API 인증 흐름은 다음과 같다.
+현재 로그인 및 Application API 인증 흐름은 다음과 같다.
 
 ```text
 Flutter
@@ -112,7 +112,7 @@ Controller / Service
 
 Controller가 JWT를 직접 parsing하거나 Client가 전달한 `userId`를 신뢰하지 않는다. Alarm을 포함한 사용자 소유 리소스는 인증된 StopBell User를 기준으로 처리한다.
 
-Refresh Token은 SecureRandom으로 생성한 256-bit opaque token이며, 서버가 저장한 SHA-256 Hash와 비교해 Access Token 재발급에만 사용한다. Rotation 시 기존 Token을 삭제하고 새 Access Token과 새 Refresh Token을 함께 발급하며, 새 Refresh Token은 다시 30일 동안 유효하다. Access Token blacklist, Redis 등 추가 인프라는 현재 도입하지 않는다.
+Refresh Token은 SecureRandom으로 생성한 256-bit opaque token이며, 서버가 저장한 SHA-256 Hash와 비교해 Access Token 재발급과 현재 Session Logout에 사용한다. Rotation 시 기존 Token을 삭제하고 새 Access Token과 새 Refresh Token을 함께 발급하며, 새 Refresh Token은 다시 30일 동안 유효하다. Logout은 Access Token 인증 없이 제시된 Token Hash의 Session 하나만 삭제하고 `204 No Content`를 반환한다. Access Token blacklist, Redis 등 추가 인프라는 현재 도입하지 않으므로 이미 발급된 Access Token은 만료 시점까지 유효할 수 있다.
 
 세부 결정과 재검토 조건은 `adr/ADR-005-authentication-and-user-identity-strategy.md`를 따른다.
 

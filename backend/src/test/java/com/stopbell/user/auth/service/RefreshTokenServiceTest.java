@@ -3,6 +3,8 @@ package com.stopbell.user.auth.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
@@ -69,6 +71,39 @@ class RefreshTokenServiceTest {
         String secondToken = refreshTokenService.issue(user);
 
         assertThat(firstToken).isNotEqualTo(secondToken);
+    }
+
+    @Test
+    @DisplayName("Logout 무효화는 Refresh Token 해시로만 삭제한다")
+    void invalidate_deletes_by_token_hash() throws Exception {
+        RefreshTokenRepository refreshTokenRepository = mock(RefreshTokenRepository.class);
+        RefreshTokenService refreshTokenService = new RefreshTokenService(
+                refreshTokenRepository,
+                mock(JwtTokenService.class),
+                Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+        String plaintextToken = "refresh-token-for-logout";
+
+        refreshTokenService.invalidate(plaintextToken);
+
+        verify(refreshTokenRepository).deleteByTokenHash(sha256(plaintextToken));
+    }
+
+    @Test
+    @DisplayName("null 또는 blank Refresh Token Logout은 Repository를 호출하지 않는다")
+    void invalidate_skips_null_or_blank_token() {
+        RefreshTokenRepository refreshTokenRepository = mock(RefreshTokenRepository.class);
+        RefreshTokenService refreshTokenService = new RefreshTokenService(
+                refreshTokenRepository,
+                mock(JwtTokenService.class),
+                Clock.fixed(NOW, ZoneOffset.UTC)
+        );
+
+        refreshTokenService.invalidate(null);
+        refreshTokenService.invalidate("");
+        refreshTokenService.invalidate("  ");
+
+        verifyNoInteractions(refreshTokenRepository);
     }
 
     private String sha256(String value) throws Exception {
