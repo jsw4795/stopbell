@@ -82,11 +82,11 @@ JPA를 사용하는 핵심 Domain과 Repository 기반 상태 관리를 준비�
 
 ------------------------------------------------------------------------
 
-# Phase 2 - Authentication
+# Phase 2 - Backend Authentication
 
 목표:
 
-StopBell의 사용자 식별과 장기 로그인 유지에 필요한 최소 Authentication 기반을 구현하고, 이후 Alarm API가 Client 제공 userId가 아닌 인증된 User를 기준으로 동작할 수 있게 한다.
+StopBell의 사용자 식별과 장기 로그인 유지에 필요한 Backend Authentication 기반을 구현하고, 이후 Alarm API가 Client 제공 userId가 아닌 인증된 User를 기준으로 동작할 수 있게 한다.
 
 - [x] TASK-200 Authentication 및 User Identity 전략 결정
 - [x] TASK-201 User Identity 모델 구현
@@ -96,16 +96,15 @@ StopBell의 사용자 식별과 장기 로그인 유지에 필요한 최소 Auth
 - [x] TASK-205 Google Social Login Backend 연동
 - [x] TASK-206 Refresh Token 발급, Rotation 및 재발급 구현
 - [x] TASK-207 Logout 및 Refresh Token 무효화 구현
-- [ ] TASK-208 Flutter Google Login 및 Token Secure Storage 구현
-- [ ] TASK-209 Authentication Test 작성
+- [ ] TASK-208 Authentication Test 작성
 
 ------------------------------------------------------------------------
 
-# Phase 3 - Alarm Feature
+# Phase 3 - Alarm Backend
 
 목표:
 
-사용자가 Alarm을 생성하고 관리할 수 있는 최소 API와 화면 흐름을 만든다.
+인증된 User를 기준으로 Alarm을 생성하고 관리할 수 있는 Backend API를 완성한다.
 
 - [ ] TASK-301 Alarm 생성 API 정의 및 구현
 - [ ] TASK-302 Alarm 목록 조회 API 정의 및 구현
@@ -116,7 +115,6 @@ StopBell의 사용자 식별과 장기 로그인 유지에 필요한 최소 Auth
 - [ ] TASK-307 Alarm request/response DTO 정의
 - [ ] TASK-308 API validation 및 Error response 처리
 - [ ] TASK-309 Alarm API Test 작성
-- [ ] TASK-310 Flutter Alarm 생성 및 활성 알림 화면 구현
 
 Transit provider가 확정되기 전에는 실제 Bus Route / Bus Stop 선택 흐름을 임의로 구현하지 않는다.
 
@@ -153,23 +151,41 @@ Undecided:
 
 ------------------------------------------------------------------------
 
-# Phase 5 - Notification
+# Phase 5 - Flutter Client
+
+목표:
+
+Backend Authentication, Alarm, Transit 기능이 준비된 상태에서 Flutter Client를 실제 Backend API와 연결하고, Mobile Authentication 및 기본 Alarm 사용 흐름을 구현한다.
+
+- [ ] TASK-501 Flutter Google Login 및 Backend 인증 연동
+- [ ] TASK-502 Access/Refresh Token Secure Storage 및 인증 상태 복구 구현
+- [ ] TASK-503 인증 API Client 및 Access Token 적용 구현
+- [ ] TASK-504 Access Token 만료 시 Refresh Token Rotation 연동
+- [ ] TASK-505 Flutter Logout 구현
+- [ ] TASK-506 Flutter Alarm API 연동 및 기본 Alarm 화면 구현
+- [ ] TASK-507 Flutter Client Authentication / API 연동 Test 보강
+
+Transit provider가 확정되기 전에는 실제 Bus Route / Bus Stop 선택 흐름을 임의로 구현하지 않는다.
+
+------------------------------------------------------------------------
+
+# Phase 6 - Notification
 
 목표:
 
 Alarm 조건 충족 시 실제 기기에 중복 없이 Push notification을 전송한다.
 
-- [ ] TASK-501 Device registration contract 정의
-- [ ] TASK-502 Device registration API 구현
-- [ ] TASK-503 Push token lifecycle 정의
-- [ ] TASK-504 FCM Integration 조사 및 설정
-- [ ] TASK-505 Push provider client 구현
-- [ ] TASK-506 Notification Service 구현
-- [ ] TASK-507 NotificationHistory 저장 구현
-- [ ] TASK-508 Duplicate Prevention 전략 결정 및 구현
-- [ ] TASK-509 Notification failure 처리 구현
-- [ ] TASK-510 실제 기기 Push notification 검증
-- [ ] TASK-511 Notification Test 작성
+- [ ] TASK-601 Device registration contract 정의
+- [ ] TASK-602 Device registration API 구현
+- [ ] TASK-603 Push token lifecycle 정의
+- [ ] TASK-604 FCM Integration 조사 및 설정
+- [ ] TASK-605 Push provider client 구현
+- [ ] TASK-606 Notification Service 구현
+- [ ] TASK-607 NotificationHistory 저장 구현
+- [ ] TASK-608 Duplicate Prevention 전략 결정 및 구현
+- [ ] TASK-609 Notification failure 처리 구현
+- [ ] TASK-610 실제 기기 Push notification 검증
+- [ ] TASK-611 Notification Test 작성
 
 Undecided:
 
@@ -179,23 +195,23 @@ Undecided:
 
 ------------------------------------------------------------------------
 
-# Phase 6 - Quality and Operations
+# Phase 7 - Quality and Operations
 
 목표:
 
 사용자에게 실패를 일으킬 수 있는 동작을 검증하고, 운영에 필요한 최소 품질을 갖춘다.
 
-- [ ] TASK-601 Alarm Evaluation Test 보강
-- [ ] TASK-602 Duplicate Prevention Test 보강
-- [ ] TASK-603 외부 provider response mapping Test 보강
-- [ ] TASK-604 API validation/error handling Test 보강
-- [ ] TASK-605 구조화된 Logging 추가
-- [ ] TASK-606 Secret 관리 검토
-- [ ] TASK-607 Health check 검증
-- [ ] TASK-608 Dockerize Backend
-- [ ] TASK-609 CI build/test 구성
-- [ ] TASK-610 실제 환경에서 notification delay 측정
-- [ ] TASK-611 server restart 안전성 검증
+- [ ] TASK-701 Alarm Evaluation Test 보강
+- [ ] TASK-702 Duplicate Prevention Test 보강
+- [ ] TASK-703 외부 provider response mapping Test 보강
+- [ ] TASK-704 API validation/error handling Test 보강
+- [ ] TASK-705 구조화된 Logging 추가
+- [ ] TASK-706 Secret 관리 검토
+- [ ] TASK-707 Health check 검증
+- [ ] TASK-708 Dockerize Backend
+- [ ] TASK-709 CI build/test 구성
+- [ ] TASK-710 실제 환경에서 notification delay 측정
+- [ ] TASK-711 server restart 안전성 검증
 
 Future Consideration:
 

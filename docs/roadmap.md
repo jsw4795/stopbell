@@ -15,15 +15,16 @@
 
 개발자가 실제 교통 데이터를 관찰하고 테스트 휴대폰에 독립적으로 푸시 알림을 보낼 수 있다.
 
-## Authentication 기반
+## Backend Authentication 기반
 
 Alarm 기능보다 먼저 Google Social Login과 StopBell 자체 Token 기반 인증을 구현한다.
 
 - [x] Google Login 및 Backend Google ID Token 검증
 - [x] StopBell JWT Access Token과 Refresh Token 발급·회전·무효화
 - [x] Spring Security 기반 인증된 User 식별
-- [ ] Flutter Secure Storage 기반 로그인 상태 유지
 - [ ] 인증된 User 기준 Alarm 소유권 처리
+
+Flutter Google Login, Secure Storage 기반 로그인 상태 유지, Token 갱신 및 Logout 연동은 Backend Alarm과 Transit Integration 이후 Flutter Client 단계에서 진행한다.
 
 ## Phase 1 — 버스 알림 MVP
 
