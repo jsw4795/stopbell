@@ -12,6 +12,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.stopbell.user.repository.UserRepository;
+import com.stopbell.user.repository.RefreshTokenRepository;
 
 import static org.mockito.Mockito.mock;
 
@@ -50,6 +51,11 @@ class StopBellApplicationTests {
         @Bean
         UserRepository userRepository() {
             return mock(UserRepository.class);
+        }
+
+        @Bean
+        RefreshTokenRepository refreshTokenRepository() {
+            return mock(RefreshTokenRepository.class);
         }
     }
 }

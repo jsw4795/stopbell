@@ -5,8 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.HexFormat;
 import javax.sql.DataSource;
 
 import com.stopbell.alarm.entity.Alarm;
@@ -18,6 +21,7 @@ import com.stopbell.notification.repository.NotificationHistoryRepository;
 import com.stopbell.user.repository.RefreshTokenRepository;
 import com.stopbell.user.repository.UserRepository;
 import com.stopbell.user.auth.identity.ExternalIdentity;
+import com.stopbell.user.auth.dto.TokenResponse;
 import com.stopbell.user.auth.service.JwtTokenService;
 import com.stopbell.user.auth.service.LoginService;
 import jakarta.persistence.EntityManager;
@@ -129,27 +133,33 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("신규 Google Identity 로그인은 User를 생성하고 내부 User ID subject의 Access Token을 발급한다")
-    void login_new_google_identity_creates_user_and_access_token() {
-        String accessToken = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, "google-login-user"));
+    @DisplayName("신규 Google Identity 로그인은 User를 생성하고 Access Token과 해시 저장 Refresh Token을 발급한다")
+    void login_new_google_identity_creates_user_and_token_pair() throws Exception {
+        TokenResponse tokenResponse = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, "google-login-user"));
 
         User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, "google-login-user")
                 .orElseThrow();
 
         assertThat(user.getAuthProvider()).isEqualTo(AuthProvider.GOOGLE);
         assertThat(user.getProviderUserId()).isEqualTo("google-login-user");
-        assertThat(jwtTokenService.extractUserId(accessToken)).isEqualTo(user.getId());
+        assertThat(jwtTokenService.extractUserId(tokenResponse.accessToken())).isEqualTo(user.getId());
+        assertThat(tokenResponse.refreshToken()).isNotBlank();
+        RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(sha256(tokenResponse.refreshToken()))
+                .orElseThrow();
+        assertThat(refreshToken.getUser().getId()).isEqualTo(user.getId());
+        assertThat(refreshToken.getTokenHash()).isNotEqualTo(tokenResponse.refreshToken());
     }
 
     @Test
-    @DisplayName("기존 Google Identity 로그인은 기존 User를 재사용한다")
+    @DisplayName("기존 Google Identity 로그인은 기존 User를 재사용하고 새 Refresh Token Session을 발급한다")
     void login_existing_google_identity_reuses_user() {
         User existingUser = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-existing-login-user"));
 
-        String accessToken = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, "google-existing-login-user"));
+        TokenResponse tokenResponse = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, "google-existing-login-user"));
 
         assertThat(userRepository.count()).isEqualTo(1);
-        assertThat(jwtTokenService.extractUserId(accessToken)).isEqualTo(existingUser.getId());
+        assertThat(jwtTokenService.extractUserId(tokenResponse.accessToken())).isEqualTo(existingUser.getId());
+        assertThat(refreshTokenRepository.findByTokenHash(sha256Unchecked(tokenResponse.refreshToken()))).isPresent();
     }
 
     @Test
@@ -296,5 +306,18 @@ class RepositoryIntegrationTest {
     private Alarm saveAlarm() {
         User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-notification-user"));
         return alarmRepository.saveAndFlush(new Alarm(user, TransitType.BUS));
+    }
+
+    private String sha256(String value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private String sha256Unchecked(String value) {
+        try {
+            return sha256(value);
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 }

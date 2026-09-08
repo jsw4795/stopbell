@@ -98,8 +98,6 @@ User 조회 또는 생성
 StopBell Access Token (JWT) + Refresh Token 발급
 ```
 
-현재 TASK-205의 Google Login Endpoint는 Access Token만 발급한다. Refresh Token 발급과 재발급 흐름은 TASK-206에서 추가한다.
-
 Google은 외부 Identity 확인만 담당한다. Google ID Token을 StopBell API의 장기 인증 Token으로 재사용하지 않으며, 이후 Application API는 StopBell이 발급한 JWT Access Token으로 인증한다.
 
 ```text
@@ -114,7 +112,7 @@ Controller / Service
 
 Controller가 JWT를 직접 parsing하거나 Client가 전달한 `userId`를 신뢰하지 않는다. Alarm을 포함한 사용자 소유 리소스는 인증된 StopBell User를 기준으로 처리한다.
 
-Refresh Token은 서버가 저장한 SHA-256 Hash와 비교하는 opaque token이며, Access Token 재발급에만 사용한다. Rotation 시 새 Access Token과 새 Refresh Token을 함께 발급한다. Access Token blacklist, Redis 등 추가 인프라는 현재 도입하지 않는다.
+Refresh Token은 SecureRandom으로 생성한 256-bit opaque token이며, 서버가 저장한 SHA-256 Hash와 비교해 Access Token 재발급에만 사용한다. Rotation 시 기존 Token을 삭제하고 새 Access Token과 새 Refresh Token을 함께 발급하며, 새 Refresh Token은 다시 30일 동안 유효하다. Access Token blacklist, Redis 등 추가 인프라는 현재 도입하지 않는다.
 
 세부 결정과 재검토 조건은 `adr/ADR-005-authentication-and-user-identity-strategy.md`를 따른다.
 

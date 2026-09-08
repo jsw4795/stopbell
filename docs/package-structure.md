@@ -101,7 +101,7 @@ Authentication 기능은 `user.auth` 하위 Feature Package로 구성한다.
 
 - `config`: `JwtConfiguration`, `JwtProperties`, Google Identity 검증 Configuration과 Properties
 - `controller`: Authentication API entry point인 `AuthController`
-- `dto`: Google Login 요청과 Access Token 응답 DTO
+- `dto`: Google Login 및 Refresh 요청과 Access/Refresh Token Pair 응답 DTO
 - `service`: Login use case와 JWT Token application logic
 - `identity`: 외부 Social Provider에서 검증된 Identity 획득
 - `exception`: Authentication use case와 Social Identity 검증 예외

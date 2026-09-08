@@ -2,6 +2,7 @@ package com.stopbell.user.auth.controller;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -12,12 +13,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.HexFormat;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.stopbell.user.entity.AuthProvider;
+import com.stopbell.user.entity.RefreshToken;
+import com.stopbell.user.entity.User;
 import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
 import com.stopbell.user.auth.exception.SocialIdentityVerificationException;
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.identity.GoogleIdentityVerifier;
+import com.stopbell.user.auth.service.JwtTokenService;
+import com.stopbell.user.auth.service.RefreshTokenService;
+import com.stopbell.user.repository.RefreshTokenRepository;
+import com.stopbell.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +45,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -51,17 +67,41 @@ class AuthControllerIntegrationTest {
     @Autowired
     private GoogleIdentityVerifier googleIdentityVerifier;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @Autowired
+    private RefreshTokenService refreshTokenService;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
+
     @Test
-    @DisplayName("Access Token 없이 Google Login Endpoint에 접근해 Access Token을 받는다")
+    @DisplayName("Access Token 없이 Google Login Endpoint에 접근해 Token Pair와 해시 저장 Refresh Token을 받는다")
     void allow_unauthenticated_google_login() throws Exception {
         when(googleIdentityVerifier.verify("valid-google-id-token"))
                 .thenReturn(new ExternalIdentity(AuthProvider.GOOGLE, "controller-google-user"));
 
-        mockMvc.perform(post("/auth/google")
+        MvcResult result = mockMvc.perform(post("/auth/google")
                         .contentType("application/json")
                         .content("{\"idToken\":\"valid-google-id-token\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.accessToken").isNotEmpty());
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
+                .andReturn();
+
+        String responseBody = result.getResponse().getContentAsString();
+        String refreshToken = responseValue(responseBody, "refreshToken");
+        User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, "controller-google-user")
+                .orElseThrow();
+
+        assertThat(jwtTokenService.extractUserId(responseValue(responseBody, "accessToken"))).isEqualTo(user.getId());
+        RefreshToken storedRefreshToken = refreshTokenRepository.findByTokenHash(sha256(refreshToken)).orElseThrow();
+        assertThat(storedRefreshToken.getUser().getId()).isEqualTo(user.getId());
+        assertThat(storedRefreshToken.getTokenHash()).isNotEqualTo(refreshToken);
     }
 
     @Test
@@ -96,6 +136,130 @@ class AuthControllerIntegrationTest {
     void keep_non_post_google_login_path_protected() throws Exception {
         mockMvc.perform(get("/auth/google"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("유효한 Refresh Token은 Access Token과 Rotation된 Refresh Token을 반환한다")
+    void rotate_valid_refresh_token() throws Exception {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "refresh-api-user"));
+        String firstRefreshToken = refreshTokenService.issue(user);
+
+        MvcResult result = mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + firstRefreshToken + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accessToken").isNotEmpty())
+                .andExpect(jsonPath("$.refreshToken").isNotEmpty())
+                .andReturn();
+
+        String responseBody = result.getResponse().getContentAsString();
+        String secondRefreshToken = responseValue(responseBody, "refreshToken");
+
+        assertThat(secondRefreshToken).isNotEqualTo(firstRefreshToken);
+        assertThat(jwtTokenService.extractUserId(responseValue(responseBody, "accessToken"))).isEqualTo(user.getId());
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstRefreshToken))).isEmpty();
+        RefreshToken rotatedRefreshToken = refreshTokenRepository.findByTokenHash(sha256(secondRefreshToken)).orElseThrow();
+        assertThat(rotatedRefreshToken.getUser().getId()).isEqualTo(user.getId());
+        assertThat(rotatedRefreshToken.getExpiresAt()).isAfter(now().plusDays(29));
+        assertThat(rotatedRefreshToken.getExpiresAt()).isBefore(now().plusDays(31));
+    }
+
+    @Test
+    @DisplayName("Rotation된 기존 Refresh Token을 다시 사용하면 401 Unauthorized를 반환한다")
+    void reject_reused_refresh_token() throws Exception {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "reused-refresh-token-user"));
+        String refreshToken = refreshTokenService.issue(user);
+
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("만료된 Refresh Token은 401 Unauthorized를 반환하고 저장된 Token을 삭제한다")
+    void reject_expired_refresh_token() throws Exception {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "expired-refresh-token-user"));
+        String expiredToken = "expired-refresh-token";
+        String expiredTokenHash = sha256(expiredToken);
+        refreshTokenRepository.saveAndFlush(new RefreshToken(user, expiredTokenHash, now().minusSeconds(1)));
+
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + expiredToken + "\"}"))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(refreshTokenRepository.findByTokenHash(expiredTokenHash)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 Refresh Token은 401 Unauthorized를 반환한다")
+    void reject_unknown_refresh_token() throws Exception {
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"unknown-refresh-token\"}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("비어 있거나 null인 Refresh Token은 401 Unauthorized를 반환한다")
+    void reject_blank_or_null_refresh_token() throws Exception {
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"\"}"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":null}"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("한 Refresh Token을 Rotation해도 같은 User의 다른 Session은 유지된다")
+    void retain_other_refresh_token_sessions_when_rotating() throws Exception {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "multiple-refresh-session-user"));
+        String firstRefreshToken = refreshTokenService.issue(user);
+        String secondRefreshToken = refreshTokenService.issue(user);
+
+        MvcResult result = mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + firstRefreshToken + "\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        String rotatedRefreshToken = responseValue(result.getResponse().getContentAsString(), "refreshToken");
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstRefreshToken))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(rotatedRefreshToken))).isPresent();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(secondRefreshToken))).isPresent();
+    }
+
+    @Test
+    @DisplayName("GET Refresh 경로는 인증 없이 접근할 수 없다")
+    void keep_non_post_refresh_path_protected() throws Exception {
+        mockMvc.perform(get("/auth/refresh"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    private String sha256(String value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private String responseValue(String responseBody, String fieldName) {
+        Matcher matcher = Pattern.compile("\\\"" + fieldName + "\\\":\\\"([^\\\"]+)\\\"")
+                .matcher(responseBody);
+        assertThat(matcher.find()).isTrue();
+        return matcher.group(1);
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.ofInstant(Instant.now(), ZoneOffset.UTC);
     }
 
     @TestConfiguration(proxyBeanMethods = false)

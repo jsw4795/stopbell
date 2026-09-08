@@ -94,7 +94,7 @@ StopBell의 사용자 식별과 장기 로그인 유지에 필요한 최소 Auth
 - [x] TASK-203 JWT Access Token 발급 및 검증 구현
 - [x] TASK-204 Spring Security Authentication 구조 구현
 - [x] TASK-205 Google Social Login Backend 연동
-- [ ] TASK-206 Refresh Token 발급, Rotation 및 재발급 구현
+- [x] TASK-206 Refresh Token 발급, Rotation 및 재발급 구현
 - [ ] TASK-207 Logout 및 Refresh Token 무효화 구현
 - [ ] TASK-208 Flutter Google Login 및 Token Secure Storage 구현
 - [ ] TASK-209 Authentication Test 작성
