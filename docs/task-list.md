@@ -106,11 +106,27 @@ StopBell의 사용자 식별과 장기 로그인 유지에 필요한 Backend Aut
 
 실제 Alarm Schema와 API를 설계하기 전에 V1 대상 Transit API를 직접 조사하고 실제 응답을 확인하여, StopBell이 사용할 provider, identifier, 관측 데이터의 의미를 결정한다.
 
-- [ ] TASK-301 대상 지역 및 Transit API 후보 조사
+- [x] TASK-301 대상 지역 및 Transit API 후보 조사
 - [ ] TASK-302 API 약관, rate limit, identifier 안정성, 검색 기능, update frequency 확인
 - [ ] TASK-303 실제 Transit API 호출 PoC 및 Bus Route / Bus Stop / 실시간 데이터 응답 구조 확인
 - [ ] TASK-304 V1 Transit provider 및 identifier 전략 결정
 - [ ] TASK-305 도착/통과 판단에 필요한 Transit 관측 모델과 Alarm Transit Target 계약 결정
+
+Transit Foundation은 다음 순서로 진행한다.
+
+```text
+TASK-301 서울 + 경기 지원 범위와 API 후보 선정
+        ↓
+TASK-302 약관 / rate limit / identifier / 검색 / update frequency 조사
+        ↓
+TASK-303 실제 TAGO 등 API 호출 PoC 및 서울·경기 응답 구조 확인
+        ↓
+TASK-304 V1 Provider 및 identifier 전략 최종 결정
+        ↓
+TASK-305 Transit 관측 모델 및 Alarm Transit Target 계약 결정
+```
+
+TASK-301은 서울특별시와 경기도를 V1 초기 지원 범위로 정하고, 국토교통부 TAGO를 1순위 후보로 기록한다. TAGO는 이 Task에서 최종 Provider로 채택하지 않는다. 경기도 버스정보 API는 경기 데이터의 비교 또는 fallback 후보이며, 서울시 버스 API는 기존 API가 존재하지만 신규 프로젝트의 인증키 발급 제약으로 우선순위가 낮은 기능적 후보이다.
 
 TASK-303은 Production Transit Client를 구현하는 Task가 아니다. 실제 Provider 응답에서 route identifier, stop identifier, direction, stop sequence, vehicle identifier, arrival information, vehicle location, provider namespace와 검색 가능 여부를 확인한다. 필요한 값은 조사 결과를 보고 판단하며, TASK-304와 TASK-305 전에는 `routeId + stopId` 또는 다른 식별자 구조를 확정하지 않는다.
 

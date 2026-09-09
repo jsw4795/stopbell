@@ -62,6 +62,25 @@ StopBell은 사용자가 교통 정보를 반복해서 확인해야 하는 필�
 
 사용자는 더 이상 필요 없는 알림을 제거할 수 있다.
 
+### V1 초기 Transit 지원 범위
+
+V1의 초기 버스 지원 대상 지역은 다음과 같다.
+
+- 서울특별시
+- 경기도
+
+사용자의 실제 이동 범위가 서울과 경기에 걸쳐 있으므로 두 지역을 V1부터 함께 지원한다. 이 결정은 전국 지원을 V1 제품 요구사항으로 확장하는 것이 아니다.
+
+### Transit API 후보
+
+TASK-301 조사 기준의 1순위 후보는 국토교통부 TAGO이다. 서울과 경기를 하나의 Provider로 처리할 수 있는 전국 단위 통합 API이므로, Bus Route, Bus Stop, Bus Arrival, Bus Location 기능을 확인 대상으로 둔다.
+
+TAGO는 아직 V1의 최종 Transit Provider가 아니다. 서울·경기 데이터 품질, identifier 연결 관계, update frequency, rate limit 및 실제 응답은 TASK-302와 TASK-303에서 검증한 뒤 TASK-304에서 결정한다.
+
+경기도 버스정보 API는 경기도 영역의 Route, Stop, Arrival, Location 정보를 제공하는 대안 후보이다. TAGO의 경기 데이터가 StopBell 요구사항에 충분하지 않을 경우 비교 또는 fallback 후보가 될 수 있으나, 현재 별도 경기 Provider 구현을 결정하지 않는다.
+
+서울시 버스 API도 기능적 후보로 조사되었다. 다만 신규 StopBell 프로젝트에서는 인증키 발급 관련 제약이 확인되어 V1 우선 후보에서는 낮게 둔다. 이는 서울시 API가 존재하지 않거나 폐지되었다는 의미가 아니다.
+
 ## 4. 인증
 
 StopBell은 자체 ID/Password 회원가입을 제공하지 않고 Social Login만 지원한다. 최초 Provider는 Google이며, 추가 Provider는 실제 필요가 확인된 후 별도 범위로 검토한다.
@@ -133,7 +152,10 @@ Application API는 JWT Access Token 기반으로 인증하며, Access Token 기�
 
 운영 구현 전에 다음을 조사하거나 결정해야 한다.
 
-- 목표 지역에서 신뢰할 수 있는 버스 위치/도착 데이터를 제공하는 한국 교통 API는 무엇인가?
+- V1 최종 Transit Provider는 무엇인가?
+- route identifier와 stop identifier를 어떤 구조로 저장할 것인가?
+- provider namespace, direction, stop sequence, vehicle identifier가 필요한가?
+- Transit metadata persistence와 MyBatis가 실제로 필요한가?
 - 각 제공자의 데이터 모델에서 정확히 무엇을 “도착” 또는 “통과”로 볼 것인가?
 - 어떤 폴링 주기가 허용되며 유용한가?
 - 어떤 요청 제한이 적용되는가?

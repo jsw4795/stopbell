@@ -4,11 +4,11 @@
 
 목표: 핵심 아이디어가 기술적으로 실현 가능한지 증명한다.
 
-- [ ] 초기 버스 지원 대상 지역 식별
-- [ ] 공식/공공 교통 데이터 API 선택
-- [ ] API 약관, 요청 제한, 식별자, 갱신 주기 확인
-- [ ] 로컬 백엔드 스크립트 또는 테스트 엔드포인트로 실제 버스/정류장 조회
-- [ ] 신뢰할 수 있는 V1 알림 실행 규칙 정의
+- [x] 서울특별시·경기도 초기 지원 범위 및 Transit API 후보 조사 (TASK-301)
+- [ ] API 약관, 요청 제한, 식별자, 검색 기능, 갱신 주기 확인 (TASK-302)
+- [ ] 실제 Transit API 호출 PoC 및 서울·경기 응답 구조 확인 (TASK-303)
+- [ ] V1 Transit Provider 및 identifier 전략 최종 결정 (TASK-304)
+- [ ] 신뢰할 수 있는 V1 알림 실행 규칙과 Transit 관측 모델 정의 (TASK-305)
 - [ ] 실제 기기에 테스트 FCM 푸시 알림 전송
 
 완료 기준:
@@ -25,6 +25,22 @@ Alarm 기능보다 먼저 Google Social Login과 StopBell 자체 Token 기반 �
 - [ ] 인증된 User 기준 Alarm 소유권 처리
 
 Transit API 조사와 실제 응답 관찰은 Transit Foundation에서 먼저 수행한다. 이후 V1 구현은 Alarm Backend, Transit Integration, Flutter Client, Notification 순으로 진행한다. Flutter Google Login, Secure Storage 기반 로그인 상태 유지, Token 갱신 및 Logout 연동은 이 흐름에서 Flutter Client 단계에 포함한다.
+
+Transit Foundation의 결정 흐름은 다음과 같다.
+
+```text
+TASK-301 서울 + 경기 지원 범위와 API 후보 선정
+        ↓
+TASK-302 약관 / rate limit / identifier / 검색 / update frequency 조사
+        ↓
+TASK-303 실제 TAGO 등 API 호출 PoC 및 서울·경기 응답 구조 확인
+        ↓
+TASK-304 V1 Provider 및 identifier 전략 최종 결정
+        ↓
+TASK-305 Transit 관측 모델 및 Alarm Transit Target 계약 결정
+```
+
+TASK-301의 1순위 후보는 국토교통부 TAGO이지만, 최종 Provider 결정은 TASK-304까지 유보한다. 경기도 버스정보 API는 경기 데이터의 비교 또는 fallback 후보이며, 서울시 버스 API는 기존 API가 존재하나 신규 프로젝트의 인증키 발급 제약을 고려해 우선순위가 낮다.
 
 ## Phase 1 — 버스 알림 MVP
 
