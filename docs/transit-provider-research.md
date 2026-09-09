@@ -292,3 +292,95 @@ TAGO 수원 표본에서 `routeid`와 `nodeid`는 모두 영문 provider prefix�
 경기 TAGO는 복수 경기 cityCode에서 Route / Stop / Location / Arrival 연결과 핵심 field 변화를 제공했고, 서울 버스위치정보조회 서비스는 실제 서울 Route의 여러 운행 차량, 차량 연속 identifier, 정류소순번·구간 진행, `stopFlag` 기반 직접 도착 상태 및 target Stop 통과를 제공했다. 따라서 서울·경기의 실시간 관측 특성을 TASK-304와 TASK-305의 판단 근거로 사용할 수준으로 확인했다.
 
 서울 Route/Stop 검색 metadata의 별도 서비스 권한·source, `stOrd` 통과 판단의 회차/방향 예외, identifier 장기 안정성 및 provider routing은 여전히 미확정이다. TAGO 또는 서울 API를 V1 Provider로 확정하지 않으며, 해당 결정과 Algorithm/Schema는 TASK-304~305의 범위다.
+
+## 서울·경기 First Stop Arrival 보충 PoC
+
+### 목적과 범위
+
+2026-09-09 KST에 “노선의 다음 운행 차량이 첫 정류장 또는 노선 초반 정류장에 도착하면 알림”이라는 StopBell 사용 시나리오를 보충 실측했다. 기존 TASK-303의 경기 TAGO 및 서울 버스위치 결과를 변경하지 않고, 첫 정류장 상태가 실제 Location 응답에 노출되는지와 같은 차량의 초반 진행을 별도로 확인했다. Service Key는 기존과 같이 process environment로만 로드했고, 원문은 출력·저장하지 않았다.
+
+### 경기 TAGO
+
+#### Test Route / First Stop
+
+수원시 `cityCode=31010`의 현재 운행 Route `routeid=GGB200000112`, `routeno=7000`을 선택했다. Route → Stop 조회에서 첫 Stop을 식별하고, Route → Location 조회에서는 당시 13개 vehicle item을 받았다. 첫 Stop은 다음과 같았다.
+
+| field | 실제 값 |
+| --- | --- |
+| `nodeid` | `GGB228001174` |
+| `nodenm` | 사색의광장 |
+| `nodeord` | 1 |
+| `gpslati` / `gpslong` | 37.2402833 / 127.0824 |
+
+#### First-stop 차량 관찰
+
+초기 Location 스냅샷에서 `vehicleno=경기70바5770`이 `nodeid=GGB228001174`, `nodeord=1`, GPS 37.24038 / 127.0825로 반환됐다. Stop의 GPS와 약 수십 m 이내였고, `nodeId`와 `nodeOrd`도 첫 Stop과 정확히 일치했다. 즉 TAGO가 차량을 첫 Stop 상태에서 이미 노출하는 실제 표본은 확보했다.
+
+동일 `vehicleno`를 후속 5초 간격 Location 관찰에서 추적했을 때 19:41:05~19:41:31 KST에는 모두 `nodeid=GGB228000703`, `nodeord=3`, GPS 37.24454 / 127.07924로 유지됐다. 첫 Stop 스냅샷과 다음 관찰 사이에 1→3 진행은 확인됐지만, 이 제한된 표본에서는 `nodeord=1` 반복 체류나 정확한 1→2 전환을 연속 polling으로 포착하지 못했다. 따라서 API 최초 등장 시점이 첫 Stop 이전·도착 시점·출발 후 중 어느 경우인지와 첫 Stop 체류시간은 미확정이다.
+
+같은 시간에 소수의 수원 노선을 재확인했을 때 Route 300, 310, 13에서 `nodeord=3` 차량을 확인했다. 이는 초반 fallback 후보도 Location의 동일 `nodeid`/`nodeord` 계약으로 관측됨을 보인 단일 스냅샷이며, 첫 Stop 관찰을 대체하거나 nodeOrd 2~3의 안정성을 증명하지는 않는다.
+
+#### Arrival API
+
+첫 Stop `nodeid=GGB228001174`의 Arrival 조회는 HTTP 200 / `resultCode=00`, `totalCount=2`였다. 그러나 두 item은 모두 `routeid=GGB200000103`, `routeno=9`이고 `arrprevstationcnt`는 13·31, `arrtime`은 1113·2746초였다. 해당 시점 Location에서 첫 Stop에 있던 Route 7000 item은 Arrival 응답에 없었다. `arrprevstationcnt=0`은 관찰하지 못했고 Arrival item에는 기존 표본과 같이 차량 identifier가 없었다.
+
+이는 첫 Stop의 정상 Arrival 응답이더라도 모든 Location Route를 반환하거나 특정 차량과 직접 연결됨을 보장하지 않는 실제 사례다. Route 7000의 첫 Stop 도착 판단에 Arrival을 필수 근거로 삼을 수는 없었다.
+
+#### 경기 판단 후보와 사용성
+
+| 후보 | 이번 실측 판단 |
+| --- | --- |
+| A: `vehicle.nodeId == firstStop.nodeId` + `nodeOrd == 1` | 실제 성립. 첫 Stop 상태를 직접 가리키는 가장 기본 후보 |
+| B: A + first Stop GPS 근접 | 실제 성립. GPS가 Stop 좌표와 수십 m 이내였음 |
+| C: 없음/초반 → 1 → 2 이상 상태 전이 | 1→3은 확인했으나 연속된 1 체류와 1→2는 미확보 |
+| D: Location + Arrival 보조 | 첫 Stop Arrival에는 Route 7000 item이 없어 보조 근거로 불충분 |
+
+경기 first-stop 감지 등급은 **B — 조건부 감지 가능**이다. 직접 arrival flag는 없지만 실제 `nodeId`/`nodeOrd=1`과 GPS가 첫 Stop을 가리켰다. 다만 첫 Stop 체류·출발을 반복 표본으로 확인하지 못했고 Arrival Route 누락이 있었으므로, 후속 TASK-305에서는 동일 차량의 연속 state transition과 GPS/시간 조건을 함께 검토해야 한다.
+
+### 서울 Bus Location
+
+#### 현재 공식 Contract 및 Test Route
+
+보충 PoC 직전에 [공공데이터포털 현재 상세 페이지](https://www.data.go.kr/data/15000332/openapi.do)를 다시 확인했다. 현재 페이지는 `getBusPosByRouteSt`를 노선 ID와 `startOrd`/`endOrd` 구간으로 차량 위치를 조회하는 상세기능으로 제시한다. 이 endpoint는 `sectOrd`, `sectDist`, `stopFlag` (`1=도착`, `0=운행중`), `sectionId`, `dataTm`, `vehId`, `plainNo`, WGS84 `tmX`/`tmY`, `routeId`를 반환한다. 이전 활용가이드에 적힌 `stId`/`stOrd`를 이 현재 endpoint 응답에서 받는다고 가정하지 않았다.
+
+기존 공식 가이드 예시의 manual `busRouteId=100100118`을 다시 사용했다. 별도 공식 metadata service 권한은 기존 TASK-303과 같이 확보하지 못했으므로, first Stop 이름·`stId`는 이번 응답만으로 확인하지 못했다. 아래의 first stop은 `sectOrd=1`인 노선 첫 구간이라는 뜻이며, 사용자 검색용 Stop metadata를 해결한 것은 아니다.
+
+#### First-stop 차량 관찰 및 체류 → 출발
+
+`startOrd=1`, `endOrd=3`으로 19:43:26~19:43:51 KST에 5초 간격 6회 조회했을 때는 모두 `headerCd=4` / `결과가 없습니다.` / 빈 item이었다. 이는 정상적인 현재 해당 구간 차량 없음이며 HTTP/authentication 실패가 아니다.
+
+이후 `startOrd=1`, `endOrd=10` 반복 조회에서 `vehId=111033424`, `plainNo=서울74사4521`이 19:45:13 KST부터 `sectOrd=1`, `sectionId=111700219`, `stopFlag=0`, `sectDist=0`, GPS 126.912234 / 37.614271로 나타났다. 같은 차량은 19:46:40 KST까지 첫 구간에서 `stopFlag=0`으로 관찰됐고, 마지막 갱신에서는 `sectDist=163`, GPS 126.912829 / 37.61498로 이동했다.
+
+19:46:49 KST에는 같은 `vehId`가 `sectOrd=2`, `sectionId=111700685`, `stopFlag=1`, `sectDist=0`, GPS 126.913707 / 37.615796로 변경됐다. 즉 이 표본은 차량이 첫 구간에 노출된 뒤 이동하여 다음 구간 정류소 도착 flag를 내는 `sectOrd=1 / stopFlag=0 → sectOrd=2 / stopFlag=1` 상태 전이를 실제로 보여 준다.
+
+이번 관찰에서 **`sectOrd=1 AND stopFlag=1`은 포착하지 못했다**. 따라서 첫 Stop에서 `stopFlag=1 → 0 → sectOrd=2`가 반복된다고 결론내릴 수 없으며, 첫 구간의 `stopFlag=0`이 첫 정류장 출발 직후인지 첫 구간 운행 중인지도 이 endpoint만으로 확정할 수 없다. 다만 first-section 차량은 second stop 이후가 아니라 `sectOrd=1`에서 나타났고, 약 96초 동안 동일 `vehId`로 연속 관찰됐다.
+
+#### 서울 판단과 metadata 한계
+
+서울 first-stop 감지 등급은 **B — 조건부 감지 가능**이다. 현재 공식 endpoint에서 `sectOrd=1` 차량의 연속 식별과 다음 구간 `stopFlag=1` 전환을 실측했으므로 노선 초반 진행 감시는 가능해 보인다. 그러나 actual first-stop direct arrival flag, `stId`/first Stop 이름, `stOrd=1`의 명시적 대응은 이번 현재 Contract에서 확보하지 못했다. 첫 정류장 “도착” 자체를 A로 판정하려면 해당 metadata source와 `sectOrd=1 / stopFlag=1` 반복 표본이 추가로 필요하다.
+
+### 서울 / 경기 비교
+
+| 항목 | 경기 TAGO | 서울 Bus Location 현재 endpoint |
+| --- | --- | --- |
+| Route identifier | `GGB200000112` | `100100118` |
+| Stop identifier | `nodeId=GGB228001174` | 현재 응답에 first `stId` 없음 |
+| Stop order | `nodeOrd=1` | `sectOrd=1` (구간순번) |
+| Vehicle identifier | `vehicleno=경기70바5770` | `vehId=111033424`, `plainNo=서울74사4521` |
+| GPS | 첫 Stop GPS와 차량 GPS 근접 | `tmX`/`tmY` WGS84 반환 |
+| 직접 도착 flag | 없음 | `stopFlag` 있음; first 구간 flag=1 표본은 미확보, second 구간 flag=1 실측 |
+| first Stop 노출 | `nodeId`/`nodeOrd=1` 실제 관찰 | `sectOrd=1` 실제 관찰 |
+| first → second 진행 | 1→3 후속 상태만 확인 | 1→2와 second `stopFlag=1` 직접 관찰 |
+| Arrival 보조 API | 첫 Stop에서 Route 7000 item 누락 | 이번 보충 PoC의 필수 범위 아님 |
+| 사용자 Route/Stop metadata | TAGO Route → Stop 가능 | 별도 공식 source/권한 필요 |
+
+서울은 `stopFlag`라는 직접 field를 제공하지만 이번 first-stop 표본에는 1이 없었다. 경기는 `nodeId`/`nodeOrd`와 GPS로 첫 Stop 자체를 직접 식별할 수 있었지만 arrival flag와 차량별 Arrival 연결이 없다. 따라서 어느 Provider도 이번 보충 표본만으로 첫 정류장 도착 Rule을 확정할 수 없고, 서울은 direct flag potential, 경기는 Stop identifier/GPS 직접성이라는 서로 다른 근거를 제공한다.
+
+### TASK-304 / TASK-305에 넘길 근거와 남은 불확실성
+
+- 사용자가 선택한 첫 Stop 또는 노선 초반 Stop을 polling 대상으로 삼는 것은 두 Provider 모두에서 실제 차량 노출과 sequence 진행으로 관찰 가능했다.
+- 경기에서는 `nodeId == targetNodeId`, `nodeOrd == targetNodeOrd`, GPS 근접, 그리고 동일 `vehicleno`의 전후 순서 변화를 조합하는 조건부 판단이 필요하다. 첫 Stop Arrival API는 항상 같은 Route/차량을 보조하지 않았다.
+- 서울 현재 Contract에서는 `vehId` 연속성, `sectOrd`, `stopFlag`, `sectionId`, GPS를 조합할 수 있다. 그러나 `sectOrd`를 사용자 목표 Stop과 안정적으로 연결할 공식 metadata 및 first-section `stopFlag=1` 반복 표본이 남아 있다.
+- 경기의 첫 Stop 체류시간·1→2 연속 표본, 서울의 first `stopFlag=1 → 0 → 2` 표본, 회차/방향 전환·정류소 재방문 처리, identifier의 장기 안정성은 미확정이다.
+
+이 보충 PoC는 Provider routing, Alarm Schema, common DTO, polling frequency, grouping key, GPS threshold 또는 최종 도착/통과 Algorithm을 결정하지 않는다. TASK-303, TASK-304, TASK-305의 체크 상태도 변경하지 않는다.
