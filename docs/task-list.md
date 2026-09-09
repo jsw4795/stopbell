@@ -146,8 +146,8 @@ TASK-401은 현재 Alarm의 공통 정보에 Phase 3에서 실제로 필요하�
 Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 Alarm을 실제 Transit 데이터로 평가할 수 있게 한다.
 
 - [ ] TASK-501 Transit provider client interface 정의
-- [ ] TASK-502 Transit API Client 구현
-- [ ] TASK-503 provider response DTO 정의
+- [ ] TASK-502 provider response DTO 정의
+- [ ] TASK-503 Transit API Client 구현
 - [ ] TASK-504 StopBell Transit DTO 및 `TransitEvent` 변환 구현
 - [ ] TASK-505 Bus Route 검색 구현
 - [ ] TASK-506 Bus Stop 조회 구현
