@@ -142,6 +142,10 @@ common
 
 외부 교통 데이터 제공자와의 통신을 담당하고, 필요할 때 제공자별 데이터를 정규화한다.
 
+V1은 하나의 전국 Provider를 강제하지 않는다. 경기는 TAGO가 Route metadata, Stop metadata, realtime Location, Arrival 보조 정보를 맡고, 서울은 서울특별시 노선정보조회 서비스가 Route/Stop metadata를, 서울특별시 버스위치정보조회 서비스가 realtime Location을 맡는다. 두 Provider의 raw external ID는 provider namespace와 opaque String으로 처리하고, Route number·Stop name·Stop order를 identity로 사용하지 않는다. Provider client/DTO를 구현할 때 이 역할 구분을 따르되 범용 plugin 또는 dynamic provider registry를 만들지 않는다.
+
+선택된 Provider와 identifier 정책의 근거·제약은 `adr/ADR-006-v1-transit-provider-and-external-identifier-strategy.md`를 따른다.
+
 ### notification
 
 푸시 알림 요청과 알림 결과 처리를 담당한다.

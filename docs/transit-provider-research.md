@@ -384,3 +384,83 @@ TAGO 수원 표본에서 `routeid`와 `nodeid`는 모두 영문 provider prefix�
 - 경기의 첫 Stop 체류시간·1→2 연속 표본, 서울의 first `stopFlag=1 → 0 → 2` 표본, 회차/방향 전환·정류소 재방문 처리, identifier의 장기 안정성은 미확정이다.
 
 이 보충 PoC는 Provider routing, Alarm Schema, common DTO, polling frequency, grouping key, GPS threshold 또는 최종 도착/통과 Algorithm을 결정하지 않는다. TASK-303, TASK-304, TASK-305의 체크 상태도 변경하지 않는다.
+
+## TASK-304 V1 Provider / Identifier Decision
+
+### Decision scope
+
+이 결정은 서울특별시와 경기도의 V1 버스 Route 검색, Stop metadata, 실시간 차량 위치, Arrival 보조 정보의 Provider와 external identifier의 의미만 다룬다. Alarm Target Schema, TransitObservation DTO, 도착/통과 Rule, polling interval 및 scheduler grouping은 TASK-305 이후의 범위다.
+
+### V1 Provider Strategy
+
+#### Gyeonggi
+
+| 역할 | V1 Provider | 결정 근거 |
+| --- | --- | --- |
+| Route 검색 / metadata | 국토교통부 TAGO 버스노선정보 | `cityCode`와 `routeNo`로 Route 검색, `routeId`/`routeNo` 반환을 실측했다. |
+| Stop 목록 / metadata | 국토교통부 TAGO 버스노선정보 | Route → Stop에서 `nodeId`, `nodeName`, `nodeOrd`, GPS를 실측했다. |
+| 실시간 Vehicle Location | 국토교통부 TAGO 버스위치정보 | Route → Location에서 `vehicleno`, `nodeId`, `nodeOrd`, GPS를 확인했고 Stop 목록과 실제 연결했다. |
+| Arrival 보조 정보 | 국토교통부 TAGO 버스도착정보 | Stop → Arrival에서 `routeId`, `arrprevstationcnt`, `arrtime`을 확인했다. 차량 ID가 없으므로 특정 Location 차량과 1:1 매칭하는 primary source로 쓰지 않는다. |
+
+경기 TAGO는 Route 검색, Route → Stop, Route → Location, Stop → Arrival의 전체 V1 흐름과 복수 cityCode, first Stop의 `nodeId`/`nodeOrd`/GPS 연결을 실제로 제공했다. 현재 근거에는 이를 채택하지 못할 blocker가 없다. 경기 버스정보 API를 V1 fallback이나 별도 Provider로 추가하지 않는다.
+
+#### Seoul
+
+| 역할 | V1 Provider | 결정 근거 |
+| --- | --- | --- |
+| Route 검색 / metadata | 서울특별시 노선정보조회 서비스 | 공식 `getBusRouteList`의 노선명 검색과 `getStaionByRoute(busRouteId)`를 사용한다. 후자는 `busRouteId`, `busRouteNm`, `seq`, `station`, `stationNm`, WGS84 `gpsX`/`gpsY`를 계약한다. |
+| Stop 목록 / metadata | 서울특별시 노선정보조회 서비스 | 위 Route별 경유 정류소 응답으로 사용자 Stop 목록을 제공한다. |
+| 실시간 Vehicle Location | 서울특별시 버스위치정보조회 서비스 | Route별 차량 조회, `vehId` 연속 식별, `stId`/`stOrd`/`sectOrd`/`sectionId`/`stopFlag`/GPS/`dataTm` 및 실제 정류소 도착·출발·다음 Stop 진행을 확인했다. |
+| Arrival 보조 정보 | V1에서 별도 Provider를 추가하지 않음 | 서울 Bus Location의 직접 `stopFlag`를 monitoring source로 사용한다. Arrival 전용 source는 TASK-304에서 필요한 근거가 없다. |
+
+서울 metadata는 [공공데이터포털의 서울특별시 노선정보조회 서비스](https://www.data.go.kr/data/15000193/openapi.do)로 해결한다. 이 서비스는 현재 무료, 개발·운영 자동승인, 개발계정 1,000 호출로 표시되며 신규 프로젝트가 활용신청할 수 있다. Route별 Stop 기능은 `busRouteId`를 요청하고 동일 Route ID, 순번, 정류소 ID·명칭·WGS84 좌표를 응답한다. `busRouteId`는 서울 Bus Location 요청 parameter와 같으므로 Route metadata ↔ realtime 연결은 공식 계약상 성립한다.
+
+Stop ID는 metadata의 `station`(정류소 고유 ID)과 Bus Location의 `stId`(정류소 ID)를 같은 서울 Provider의 연결 identifier로 취급한다. 현재 local Service Key는 노선정보조회 서비스에 등록되어 있지 않아 `getStaionByRoute`의 live row와 Bus Location의 같은 `stId`를 직접 대조하지 못했다. 따라서 이는 공식 contract와 신규 활용 가능성에 근거한 V1 결정이며, 실제 client 구현 전 service enrollment 뒤 `station == stId` 및 `seq`/`stOrd` 표본을 한 번 확인해야 하는 알려진 검증 항목이다. 이 제한은 V1 metadata source의 부재 blocker가 아니다.
+
+T-DATA, 서울 열린데이터광장/TOPIS의 다른 공개 데이터, 과거 API는 V1 핵심 dependency로 추가하지 않는다. 현재 공공데이터포털의 노선정보조회와 버스위치정보조회만으로 필요한 역할이 충족된다.
+
+서울과 경기는 하나의 전국 Provider로 통합하지 않는다. 실제 TAGO 공통 API에서는 서울 Route flow를 확보하지 못했고, 서울 Bus Location은 직접적인 `stopFlag`와 차량 연속성이라는 별도 강점을 제공한다. 반면 경기는 TAGO가 metadata·Location·Arrival을 모두 제공한다. 지역별 두 공식 Provider가 V1의 최소 Provider 수로 각 역할을 충족한다.
+
+### Provider Namespace
+
+Provider namespace는 필요하다. V1 external Route/Stop reference는 개념적으로 `(provider, externalRouteId)` 및 `(provider, externalStopId)`로 다룬다. V1 provider 값은 `TAGO`와 `SEOUL_BUS`이며, raw identifier만을 전역적으로 유일하다고 가정하지 않는다.
+
+### Route Identifier Strategy
+
+- 경기 Route identity는 `provider=TAGO`와 TAGO `routeId`의 조합이다.
+- 서울 Route identity는 `provider=SEOUL_BUS`와 서울 `busRouteId`의 조합이다.
+- 두 값은 숫자처럼 보이거나 prefix를 포함하더라도 모두 opaque String이다. 형식을 parsing하거나 numeric arithmetic, prefix 의미에 의존하지 않는다.
+- `routeNo`, `routeno`, `busRouteNm`은 사용자 검색·표시 metadata이며 Route identity가 아니다. 같은 번호, 방향 또는 노선 개편을 Route identity로 축약하지 않는다.
+
+### Stop Identifier Strategy
+
+- 경기 Stop identity는 `provider=TAGO`와 TAGO `nodeId`의 조합이다.
+- 서울 Stop identity는 `provider=SEOUL_BUS`와 서울 metadata `station` / Bus Location `stId`의 조합이다.
+- 두 값은 opaque String이다. `nodeName`, `stationNm`, `stNm`은 display metadata이며 Stop identity가 아니다.
+
+### Stop Order Semantics
+
+`nodeOrd`, `seq`, `stOrd`, `sectOrd`는 Route 내 진행 위치와 관측값을 target Stop에 연결하는 sequence metadata다. Stop 자체의 identity나 장기 불변 key로 취급하지 않는다. 특히 서울 `sectOrd`는 구간순번이고 `stOrd`와 같은 의미로 단정하지 않는다. 회차, 방향 전환, 순환 노선, 재방문 시의 판단은 TASK-305에서 결정한다.
+
+### Vehicle Identifier Semantics
+
+경기 `vehicleno`, 서울 `vehId`와 `plainNo`는 한 monitoring run 안에서 같은 차량 관측을 이어 붙이는 realtime identifier다. 사용자의 Alarm target은 “이 차량”이 아니라 “이 Route의 다음 차량이 target Stop에 도달”이므로 Vehicle ID를 Alarm의 영구 target identity로 저장하지 않는다. `vehId`와 `plainNo` 중 어느 값을 primary transient correlation key로 쓸지, 재사용·변경 대응과 상태 보존은 TASK-305에서 결정한다.
+
+### TAGO cityCode Semantics
+
+경기 TAGO `cityCode`는 Route 검색 범위와 Route/Stop/Location/Arrival API 요청을 재현하기 위한 Provider request context다. 경기도가 시·군별 코드로 나뉜다는 실측 근거가 있으며, Route 검색 결과와 함께 보존되어야 할 metadata다. 그러나 현재 공식 계약과 PoC만으로 `cityCode + routeId`를 Route identity의 무조건적인 composite key로 승격하지 않는다. DB field 구조는 TASK-305에서 결정한다.
+
+### Identifier Stability
+
+Provider ID는 현재 Provider API를 연결하는 external reference이지, 장기간 절대 변경되지 않는 StopBell business identifier라는 보장은 없다. 노선 개편·정류소 변경 뒤 stale target이 생길 수 있음을 V1의 알려진 제한으로 둔다. 이번 Task에서 reconciliation system이나 metadata persistence를 만들지 않으며, stale target 처리의 구체 정책은 실제 필요가 확인될 때 결정한다.
+
+### Known Limitations
+
+- 경기 TAGO Arrival에는 vehicle identifier가 없고 first Stop Arrival에서 Location의 같은 Route가 누락된 표본이 있다. Arrival은 보조 정보다.
+- 경기와 서울의 first-stop 감지 평가는 모두 B — 조건부 감지 가능이다. 이는 Provider·identifier 결정이지 최종 Alarm Rule이 아니다.
+- 서울 노선정보조회 서비스는 공식 contract와 자동승인 조건을 확인했지만, 현 local key의 서비스 권한 부재로 `station`/`stId`의 live row 대조는 아직 없다.
+- Provider identifier의 장기 변경 정책은 확인되지 않았다.
+
+### TASK-305 Handoff
+
+TASK-305는 이 Provider 역할과 opaque external reference를 입력으로 사용한다. 이 Task가 아직 결정할 항목은 Alarm Transit Target의 record/DB 구조, observation DTO, 도착·통과·first-stop rule, GPS threshold, polling interval, duplicate-event state, scheduler grouping이다.

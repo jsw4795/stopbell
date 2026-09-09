@@ -71,15 +71,11 @@ V1의 초기 버스 지원 대상 지역은 다음과 같다.
 
 사용자의 실제 이동 범위가 서울과 경기에 걸쳐 있으므로 두 지역을 V1부터 함께 지원한다. 이 결정은 전국 지원을 V1 제품 요구사항으로 확장하는 것이 아니다.
 
-### Transit API 후보
+### V1 Transit Provider
 
-TASK-301 조사 기준의 1순위 후보는 국토교통부 TAGO이다. 서울과 경기를 하나의 Provider로 처리할 수 있는 전국 단위 통합 API이므로, Bus Route, Bus Stop, Bus Arrival, Bus Location 기능을 확인 대상으로 둔다.
+V1은 지역별 공식 Provider를 사용한다. 경기도는 국토교통부 TAGO가 Route/Stop metadata, realtime Location, Arrival 보조 정보를 제공한다. 서울특별시는 서울특별시 노선정보조회 서비스가 Route/Stop metadata를, 서울특별시 버스위치정보조회 서비스가 realtime Location을 제공한다.
 
-TAGO는 아직 V1의 최종 Transit Provider가 아니다. 서울·경기 데이터 품질, identifier 연결 관계, update frequency, rate limit 및 실제 응답은 TASK-302와 TASK-303에서 검증한 뒤 TASK-304에서 결정한다.
-
-경기도 버스정보 API는 경기도 영역의 Route, Stop, Arrival, Location 정보를 제공하는 대안 후보이다. TAGO의 경기 데이터가 StopBell 요구사항에 충분하지 않을 경우 비교 또는 fallback 후보가 될 수 있으나, 현재 별도 경기 Provider 구현을 결정하지 않는다.
-
-서울시 버스 API도 기능적 후보로 조사되었다. 다만 신규 StopBell 프로젝트에서는 인증키 발급 관련 제약이 확인되어 V1 우선 후보에서는 낮게 둔다. 이는 서울시 API가 존재하지 않거나 폐지되었다는 의미가 아니다.
+Provider external Route/Stop ID는 provider namespace 안의 opaque String이다. 노선번호와 정류소명은 검색·표시 metadata이고, Stop order는 Route 진행 metadata이며 identity가 아니다. 세부 근거와 제한은 `adr/ADR-006-v1-transit-provider-and-external-identifier-strategy.md`를 따른다.
 
 ## 4. 인증
 
@@ -152,9 +148,6 @@ Application API는 JWT Access Token 기반으로 인증하며, Access Token 기�
 
 운영 구현 전에 다음을 조사하거나 결정해야 한다.
 
-- V1 최종 Transit Provider는 무엇인가?
-- route identifier와 stop identifier를 어떤 구조로 저장할 것인가?
-- provider namespace, direction, stop sequence, vehicle identifier가 필요한가?
 - Transit metadata persistence와 MyBatis가 실제로 필요한가?
 - 각 제공자의 데이터 모델에서 정확히 무엇을 “도착” 또는 “통과”로 볼 것인가?
 - 어떤 폴링 주기가 허용되며 유용한가?

@@ -6,8 +6,8 @@
 
 - [x] 서울특별시·경기도 초기 지원 범위 및 Transit API 후보 조사 (TASK-301)
 - [x] API 약관, 요청 제한, 식별자, 검색 기능, 갱신 주기 확인 (TASK-302)
-- [ ] 실제 Transit API 호출 PoC 및 서울·경기 응답 구조 확인 (TASK-303)
-- [ ] V1 Transit Provider 및 identifier 전략 최종 결정 (TASK-304)
+- [x] 실제 Transit API 호출 PoC 및 서울·경기 응답 구조 확인 (TASK-303)
+- [x] V1 Transit Provider 및 identifier 전략 최종 결정 (TASK-304)
 - [ ] 신뢰할 수 있는 V1 알림 실행 규칙과 Transit 관측 모델 정의 (TASK-305)
 - [ ] 실제 기기에 테스트 FCM 푸시 알림 전송
 
@@ -40,7 +40,7 @@ TASK-304 V1 Provider 및 identifier 전략 최종 결정
 TASK-305 Transit 관측 모델 및 Alarm Transit Target 계약 결정
 ```
 
-TASK-301의 1순위 후보는 국토교통부 TAGO이지만, 최종 Provider 결정은 TASK-304까지 유보한다. 경기도 버스정보 API는 경기 데이터의 비교 또는 fallback 후보이며, 서울시 버스 API는 기존 API가 존재하나 신규 프로젝트의 인증키 발급 제약을 고려해 우선순위가 낮다.
+TASK-304는 경기 TAGO를 Route/Stop metadata·realtime Location·Arrival 보조 Provider로, 서울특별시 노선정보조회 서비스를 Route/Stop metadata source로, 서울특별시 버스위치정보조회 서비스를 realtime Location Provider로 결정했다. Provider external identifier는 provider namespace 안의 opaque String으로 처리한다. 관측 모델과 Alarm Transit Target 계약은 TASK-305에서 계속 결정한다.
 
 ## Phase 1 — 버스 알림 MVP
 
