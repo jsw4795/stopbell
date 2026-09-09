@@ -5,7 +5,7 @@
 목표: 핵심 아이디어가 기술적으로 실현 가능한지 증명한다.
 
 - [x] 서울특별시·경기도 초기 지원 범위 및 Transit API 후보 조사 (TASK-301)
-- [ ] API 약관, 요청 제한, 식별자, 검색 기능, 갱신 주기 확인 (TASK-302)
+- [x] API 약관, 요청 제한, 식별자, 검색 기능, 갱신 주기 확인 (TASK-302)
 - [ ] 실제 Transit API 호출 PoC 및 서울·경기 응답 구조 확인 (TASK-303)
 - [ ] V1 Transit Provider 및 identifier 전략 최종 결정 (TASK-304)
 - [ ] 신뢰할 수 있는 V1 알림 실행 규칙과 Transit 관측 모델 정의 (TASK-305)
