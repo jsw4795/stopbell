@@ -108,7 +108,7 @@ StopBell의 사용자 식별과 장기 로그인 유지에 필요한 Backend Aut
 
 - [x] TASK-301 대상 지역 및 Transit API 후보 조사
 - [x] TASK-302 API 약관, rate limit, identifier 안정성, 검색 기능, update frequency 확인
-- [ ] TASK-303 실제 Transit API 호출 PoC 및 Bus Route / Bus Stop / 실시간 데이터 응답 구조 확인
+- [x] TASK-303 실제 Transit API 호출 PoC 및 Bus Route / Bus Stop / 실시간 데이터 응답 구조 확인
 - [ ] TASK-304 V1 Transit provider 및 identifier 전략 결정
 - [ ] TASK-305 도착/통과 판단에 필요한 Transit 관측 모델과 Alarm Transit Target 계약 결정
 
