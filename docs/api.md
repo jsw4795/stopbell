@@ -51,7 +51,7 @@ GET /api/v1/bus-routes?query={query}
 GET /api/v1/bus-routes/{routeId}/stops
 ```
 
-정확한 route identifier 의미와 request/response DTO는 Transit Foundation의 실제 Provider 조사 뒤 결정한다.
+Route identifier는 Provider namespace 안의 opaque external reference다. 이를 path/query/response에 표현하는 정확한 형태는 Transit API 구현 Task에서 결정한다.
 
 ### 알림 생성
 
@@ -60,7 +60,7 @@ POST /api/v1/alarms
 Content-Type: application/json
 ```
 
-Alarm 생성 Request는 Transit Foundation에서 실제 Provider와 identifier 전략을 결정한 뒤 TASK-402에서 확정한다. V1 요구사항의 Bus Route 식별과 Target Stop 식별은 유지하지만, Provider 조사 전에는 이를 `routeId`와 `stopId` 또는 다른 JSON 구조로 확정하지 않는다. 미래 확장을 이유로 필드를 추가하지 않는다.
+Alarm 생성 Request의 구체적인 JSON은 TASK-402에서 확정한다. 의미상 Provider namespace 안의 Route/Target Stop external reference, target Stop order snapshot, 표시 metadata, 필요한 Provider request context와 서로 독립적인 before/after option을 표현해야 한다. first Stop의 before option 및 last Stop의 after option은 Backend에서도 invalid request로 처리할 수 있어야 하지만 구체적인 field naming과 HTTP error는 아직 확정하지 않는다. 미래 확장을 이유로 필드를 추가하지 않는다.
 
 ### 알림 목록 조회
 

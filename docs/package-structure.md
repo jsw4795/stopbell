@@ -118,7 +118,7 @@ Alarm 설정, 상태 전이, 활성화/비활성화 책임을 둔다.
 - `entity`: Alarm JPA Entity
 - `dto`: Alarm API request/response DTO
 
-Alarm Evaluation은 scheduler에 묻지 않는다. Transit 관측값을 받아 Alarm 조건을 판단하는 Domain/비즈니스 로직은 `alarm`의 책임으로 둔다.
+Alarm Evaluation은 scheduler에 묻지 않는다. provider-neutral `TransitObservation`과 Alarm Transit Target을 받아 위치 관계 및 `TransitEvent` 후보를 판단하는 Domain/비즈니스 로직은 `alarm`의 책임으로 둔다.
 
 ### transit
 
@@ -128,11 +128,13 @@ Alarm Evaluation은 scheduler에 묻지 않는다. Transit 관측값을 받아 A
 - `service`: Transit 데이터 조회와 정규화
 - `mapper`: MyBatis Mapper 및 SQL
 - `dto`: provider 응답 및 내부 Transit DTO
-- `domain`: `TransitEvent` 등 Transit 관련 Domain Model
+- `domain`: `TransitObservation`, `TransitEvent` 등 Transit 관련 Domain Model
 
 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 복잡한 Transit 검색은 SQL 제어가 실제로 필요한 경우 MyBatis를 사용한다. Provider API가 검색과 Route별 Stop 조회를 제공하면 이를 우선 사용하며, metadata persistence나 grouping query가 필요한지는 Transit Foundation 조사 뒤 결정한다.
 
 V1 Provider는 경기 TAGO와 서울특별시 노선정보조회/버스위치정보조회 서비스로 결정됐다. 구현 시 provider별 client와 response DTO를 `transit` 경계 안에서 역할에 맞게 분리할 수 있지만, generic multi-provider framework나 동적 registry를 만들지 않는다. grouping key와 Transit metadata의 영속화 여부는 Undecided이다.
+
+Provider별 raw DTO를 Alarm Evaluation에 직접 전달하지 않는다. `transit`이 raw field를 `TransitObservation`의 공통 의미로 변환하고, Provider failure는 정상 Observation과 구분한다. 차량별 tracking lifecycle과 Alarm active 전이는 `alarm`이 소유하며 scheduler는 이를 실행만 한다.
 
 ### notification
 

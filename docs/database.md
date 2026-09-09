@@ -112,7 +112,7 @@ updated_at
 
 ### alarms
 
-사용자가 설정한 Alarm의 공통 정보를 저장한다. Transit provider와 식별자 체계가 확정되기 전에는 Bus/Subway별 상세 대상 정보는 저장하지 않는다.
+사용자가 설정한 Alarm의 현재 공통 정보를 저장한다. Phase 3에서 Bus Alarm Transit Target의 개념 계약은 확정됐지만 실제 column, 관계, Embeddable/Entity 구조와 follow-up tracking persistence는 TASK-401에서 결정하고 Migration으로 반영한다.
 
 후보 필드:
 

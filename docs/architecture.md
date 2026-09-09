@@ -136,7 +136,7 @@ common
 
 ### alarm
 
-알림 설정과 알림 생명주기를 담당한다.
+알림 설정과 알림 생명주기를 담당한다. Alarm Evaluation은 provider-neutral `TransitObservation`을 입력으로 받아 target과 차량 진행을 판단한다. Provider raw field나 외부 호출 실패를 scheduler에 직접 섞지 않는다.
 
 ### transit
 
@@ -145,6 +145,8 @@ common
 V1은 하나의 전국 Provider를 강제하지 않는다. 경기는 TAGO가 Route metadata, Stop metadata, realtime Location, Arrival 보조 정보를 맡고, 서울은 서울특별시 노선정보조회 서비스가 Route/Stop metadata를, 서울특별시 버스위치정보조회 서비스가 realtime Location을 맡는다. 두 Provider의 raw external ID는 provider namespace와 opaque String으로 처리하고, Route number·Stop name·Stop order를 identity로 사용하지 않는다. Provider client/DTO를 구현할 때 이 역할 구분을 따르되 범용 plugin 또는 dynamic provider registry를 만들지 않는다.
 
 선택된 Provider와 identifier 정책의 근거·제약은 `adr/ADR-006-v1-transit-provider-and-external-identifier-strategy.md`를 따른다.
+
+Provider mapper는 raw response를 한 차량의 관측 사실인 `TransitObservation`으로 변환한다. 공통 의미에는 Provider/Route reference, transient vehicle tracking reference, 현재 Stop/진행 순서, 선택적인 위치·시간·방향/구간 문맥, 그리고 `ARRIVED`/`MOVING`/`UNAVAILABLE`로 구분한 직접 도착 근거가 포함된다. Provider에 없는 값을 가짜 값으로 채우지 않는다.
 
 ### notification
 
@@ -181,19 +183,33 @@ V1은 하나의 전국 Provider를 강제하지 않는다. 경기는 TAGO가 Rou
 
 알림 평가는 스케줄러 코드에 묻지 말고, 명시적인 Domain/비즈니스 로직으로 표현해야 한다.
 
-개념적으로:
+위치 관계와 사용자에게 보낼 Event 후보를 분리한다.
 
 ```text
-교통 관측값
-        ↓
-알림 평가
-        ↓
-NOT_TRIGGERED / TRIGGERED / UNKNOWN
-        ↓
-알림 전송 결정
+Provider raw response
+        ↓ provider별 mapping
+TransitObservation
+        ↓ 이전 동일 차량 Observation + Alarm Transit Target
+위치 관계: BEFORE_TARGET / AT_TARGET / AFTER_TARGET / UNKNOWN
+        ↓ tracking lifecycle과 option 적용
+Event 후보: ONE_STOP_BEFORE / ARRIVED / PASSED / ONE_STOP_AFTER / 없음
+        ↓ 한 transition에서 하나 선택
+Notification 전송 결정 또는 UNKNOWN 대기
 ```
 
-`UNKNOWN` 또는 동등한 실패 상태는 일시적인 제공자 장애를 유효한 도착 이벤트로 해석하지 않도록 중요하다.
+`UNKNOWN`은 Notification Event가 아니라 판단 불가 결과다. 정상 응답 안의 애매한 관측과 timeout·HTTP/provider error 같은 Provider failure는 원인이 다르지만 둘 다 거짓 ARRIVED/PASSED Event를 만들지 않는다.
+
+일반 tracking의 Event precedence는 target에서 도착을 충분히 관찰한 `ARRIVED`, target 이전에서 이후로 건너뛴 `PASSED`, `ONE_STOP_BEFORE` 순이다. ARRIVED 후 동일 차량 follow-up에서는 `ONE_STOP_AFTER`만 평가하며 PASSED로 재분류하지 않는다. Stop order는 같은 방향·Route traversal 문맥에서 비교할 수 있을 때만 사용한다.
+
+### Alarm과 Vehicle Tracking lifecycle
+
+Alarm 활성화 시 현재 Route 차량을 baseline으로 분류한다. Target 이전 차량은 추적 후보이고, Target 차량은 충분한 근거가 있으면 즉시 ARRIVED이며, 이미 Target 이후인 차량은 기존 passed vehicle로 무시한다.
+
+PASSED는 해당 Vehicle tracking만 종료하고 Alarm은 ACTIVE로 유지한다. ARRIVED는 Alarm 성공 Event이며 Notification 뒤 Alarm을 비활성화하고 다른 Vehicle tracking을 종료한다. after 옵션이 켜진 경우에도 Alarm은 비활성화하되, ARRIVED를 발생시킨 동일 차량만 다음 Stop 도달·통과까지 short follow-up 한다. 따라서 Alarm의 `active`와 follow-up tracking state는 같은 의미가 아니며, 별도 persisted state가 필요한지는 TASK-401/509에서 결정한다.
+
+동일 Alarm·Vehicle·Event Type은 같은 tracking cycle에서 한 번만 의미가 있다. 저장소와 동시성 기반 중복 방지는 TASK-708에서 결정한다.
+
+구체적인 Observation과 Event 의미는 `adr/ADR-007-bus-alarm-transit-observation-and-event-semantics.md`를 따른다.
 
 ## 9. 전달 의미론
 

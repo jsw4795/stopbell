@@ -32,9 +32,11 @@ StopBell은 사용자가 교통 정보를 반복해서 확인해야 하는 필�
 
 사용자는 최소한 다음을 포함하는 알림을 만들 수 있다.
 
-- 버스 노선 식별자
-- 목표 정류장 식별자
+- Provider namespace 안의 버스 노선 식별자
+- 같은 Provider namespace 안의 목표 정류장 식별자
+- 선택한 Route traversal에서 목표 정류장의 진행 순서
 - 알림 상태
+- 서로 독립적인 한 정거장 전 / 한 정거장 후 추가 알림 옵션
 
 추가 필드는 필요할 때만 도입한다.
 
@@ -76,6 +78,23 @@ V1의 초기 버스 지원 대상 지역은 다음과 같다.
 V1은 지역별 공식 Provider를 사용한다. 경기도는 국토교통부 TAGO가 Route/Stop metadata, realtime Location, Arrival 보조 정보를 제공한다. 서울특별시는 서울특별시 노선정보조회 서비스가 Route/Stop metadata를, 서울특별시 버스위치정보조회 서비스가 realtime Location을 제공한다.
 
 Provider external Route/Stop ID는 provider namespace 안의 opaque String이다. 노선번호와 정류소명은 검색·표시 metadata이고, Stop order는 Route 진행 metadata이며 identity가 아니다. 세부 근거와 제한은 `adr/ADR-006-v1-transit-provider-and-external-identifier-strategy.md`를 따른다.
+
+### V1 Bus Alarm 실행 규칙
+
+- 사용자는 Bus Route와 자신에게 필요한 Target Stop을 직접 선택한다. First Stop은 `targetStopOrder`가 해당 Route traversal의 첫 순서인 일반 Target 사례이며 hard-coded target이 아니다.
+- 추적 차량이 Target Stop에 도착했다고 충분히 판단되면 `ARRIVED` Notification을 보내고 Alarm을 성공 처리해 자동 비활성화한다.
+- Alarm 활성화 순간 이미 Target Stop에 있는 차량도 충분한 도착 근거가 있으면 즉시 `ARRIVED`로 처리한다.
+- 활성화 당시 이미 Target을 지난 차량은 baseline existing vehicle로 보고 PASSED 알림을 만들지 않는다.
+- 활성화 뒤 Target 이전부터 추적한 동일 차량이 직접 도착 관측 없이 Target을 건너뛰었다는 충분한 진행 근거가 있으면 `PASSED` Notification을 보낸다. 가능한 경우 정류장명 등 최근 확인된 위치와 Target에서 지난 정거장 수를 함께 안내한다.
+- `PASSED`는 Alarm 성공 또는 종료가 아니다. 해당 차량 추적만 끝내고 Alarm은 ACTIVE로 유지해 다음 차량을 계속 감시한다.
+- 사용자는 `notifyOneStopBefore`와 `notifyOneStopAfter` 의미의 추가 알림을 서로 독립적으로 선택할 수 있다. 구체적인 API field naming은 TASK-402에서 확정한다.
+- Target이 Route traversal의 첫 Stop이면 before 옵션을, 마지막 Stop이면 after 옵션을 사용할 수 없다. Client UX와 별개로 Backend 생성 계약도 이를 검증할 수 있어야 한다.
+- before/after의 인접 Stop은 단순 숫자 증감이 아니라 Provider의 방향·Route sequence metadata로 확인한 predecessor/successor다.
+- after 옵션이 꺼져 있으면 ARRIVED 뒤 모든 추적을 끝낸다. 켜져 있으면 Alarm은 그대로 비활성화하고 ARRIVED 차량만 다음 Stop 도달·통과까지 짧게 추적해 after Notification을 한 번 보낸다.
+- 한 Observation transition에서는 가장 의미 있는 Event 하나만 알린다. 직접 ARRIVED를 관찰하지 못한 채 Target 이전에서 이후로 점프하면 여러 알림 대신 PASSED를 선택한다. 이미 ARRIVED를 알린 차량의 follow-up 진행은 PASSED가 아니라 ONE_STOP_AFTER 후보로 처리한다.
+- Provider data가 stale하거나 방향·차량 연속성·필수 identifier가 불명확하거나 신호가 충돌하면 `UNKNOWN`으로 두고 ARRIVED/PASSED Notification을 만들지 않는다. 외부 Provider 요청 실패도 거짓 Transit Event를 만들지 않는다.
+
+세부 Observation, Event 및 lifecycle 계약은 `adr/ADR-007-bus-alarm-transit-observation-and-event-semantics.md`를 따른다.
 
 ## 4. 인증
 
@@ -149,9 +168,6 @@ Application API는 JWT Access Token 기반으로 인증하며, Access Token 기�
 운영 구현 전에 다음을 조사하거나 결정해야 한다.
 
 - Transit metadata persistence와 MyBatis가 실제로 필요한가?
-- 각 제공자의 데이터 모델에서 정확히 무엇을 “도착” 또는 “통과”로 볼 것인가?
 - 어떤 폴링 주기가 허용되며 유용한가?
 - 어떤 요청 제한이 적용되는가?
-- 알림은 한 번 울린 뒤 자동으로 비활성화할 것인가, 반복 동작을 지원할 것인가?
-- 어떤 소셜 로그인 제공자를 먼저 지원할 것인가?
 - FCM은 Android와 iOS 요구사항 모두에 충분한가?

@@ -172,7 +172,44 @@ Transit API 조회 실패, Notification 발송 결과, Alarm trigger는 Alarm의
 
 `transitType`은 `BUS`, `SUBWAY`를 표현하는 Enum으로 관리하며, Database에는 문자열로 저장한다.
 
-Transit provider와 실제 식별자 체계가 확정되기 전에는 route, stop, line, station, direction 같은 Transit-specific 속성을 Alarm에 추가하지 않는다.
+V1 Bus Alarm의 Transit Target 계약은 아래에서 정의하지만 실제 Entity와 Database Schema는 TASK-401에서 결정한다.
+
+## Bus Alarm Transit Target Contract
+
+사용자는 Bus Route와 Target Stop을 직접 선택한다. First Stop은 선택 가능한 일반 Target occurrence의 하나이며 모든 Alarm의 고정 Target이 아니다.
+
+개념적 최소 계약:
+
+```text
+external identity
+    provider
+    externalRouteId
+    externalStopId
+
+operational snapshot
+    targetStopOrder
+    targetStopLatitude (optional)
+    targetStopLongitude (optional)
+    providerRequestContext (provider별 optional; TAGO cityCode 포함)
+
+display snapshot
+    routeNumber
+    stopName
+
+notification options
+    notifyOneStopBefore
+    notifyOneStopAfter
+```
+
+`(provider, externalRouteId)`와 `(provider, externalStopId)`는 ADR-006에서 정한 opaque external reference다. Vehicle identifier는 Alarm Target에 포함하지 않는다.
+
+`targetStopOrder`는 선택한 Route traversal에서 target occurrence를 연결하고 이전/다음 Stop을 판단하기 위한 필수 operational metadata다. Stop identity가 아니며 Provider metadata 변경 뒤 stale할 수 있다. 순환·재방문 Route에서 같은 Stop ID가 여러 번 등장하면 order와 진행 문맥으로 사용자가 선택한 occurrence를 구분해야 한다.
+
+Target Stop 좌표는 Provider가 metadata로 제공할 때 저장 후보가 되는 optional operational snapshot이며, 특히 경기 first-stop에서 Stop ID·order와 함께 GPS 근접 근거를 평가하는 데 사용한다. 정확한 저장 여부와 GPS distance threshold는 TASK-401/509에서 결정한다.
+
+`routeNumber`와 `stopName`은 검색·표시 및 Notification 위치 안내를 위한 snapshot이지 identity가 아니다. TAGO `cityCode`는 API request를 재현하기 위한 필수 provider request context이지 identity가 아니다. 서울에는 가짜 `cityCode`를 채우지 않는다. `providerRequestContext`는 임의 속성을 쌓는 범용 JSON bag을 뜻하지 않으며 TASK-401/402에서 현재 Provider에 필요한 최소 typed 구조로 구체화한다.
+
+두 Notification option은 독립적인 선택값이다. Route metadata가 확인한 traversal에서 predecessor가 없으면 `notifyOneStopBefore=true`, successor가 없으면 `notifyOneStopAfter=true`인 Alarm 생성 요청은 유효하지 않다. 이 검증은 Client에만 의존하지 않고 Backend 계약에서도 수행할 수 있어야 한다. 구체적인 request field와 HTTP error는 TASK-402에서 결정한다.
 
 ## Persistence
 
@@ -201,7 +238,7 @@ Alarm은 생성, 수정, 삭제와 상태 관리를 위해 JPA Repository 기반
 
     provider 결과에 따른 식별자
 
-구체적인 identifier 이름, provider namespace 필요 여부, 방향·정류장 순서 등 V1 Transit Target에 필요한 값은 Phase 3 Transit Foundation에서 실제 응답을 확인한 뒤 결정한다.
+Route identity는 `(provider, externalRouteId)`다. `routeNumber`는 display/search metadata이고, Route Stop 목록의 순서는 하나의 traversal 안에서 predecessor/successor 및 진행 방향을 해석하는 operational metadata다.
 
 ## Relationship
 
@@ -237,7 +274,7 @@ BusRoute는 Transit 관련 조회 Model로 사용한다. Provider API가 검색�
 
     provider 결과에 따른 식별자
 
-구체적인 identifier 이름과 노선 연결 정보는 Phase 3 Transit Foundation의 실제 Provider 조사 뒤 결정한다.
+Stop identity는 `(provider, externalStopId)`다. Route 안의 Stop order, name, 좌표는 operational/display metadata이며 identity가 아니다.
 
 ## Relationship
 
@@ -261,67 +298,168 @@ BusStop은 Transit 관련 조회 Model로 사용한다. Provider API가 Route별
 
 ------------------------------------------------------------------------
 
-# TransitEvent
+# TransitObservation
 
 ## Purpose
 
-외부 Transit API에서 가져온 현재 교통 상태를 표현한다.
+Provider raw response를 StopBell이 해석한 한 차량의 현재 관측 사실이다. Database Entity나 Notification Event가 아니며, Provider DTO와 Alarm Evaluation 사이의 provider-neutral 계약이다.
 
-Database Entity라기보다 Domain 개념이다.
+## Conceptual Contract
 
-예:
+```text
+source and correlation
+    provider
+    externalRouteId
+    vehicleTrackingId
 
-    143번 버스
+current route progress
+    currentStopExternalId (optional)
+    currentStopOrder (optional)
+    currentStopName (optional, metadata로 보강 가능)
+    directionContext (optional)
+    sectionContext (optional)
 
-    서울역 정류장
+position and time
+    latitude (optional)
+    longitude (optional)
+    observedAt
+    providerDataTime (optional)
 
-    도착 예정
+direct arrival evidence
+    ARRIVED | MOVING | UNAVAILABLE
+```
 
-    30초 후
+`provider`와 `externalRouteId`는 요청 Route 문맥을 보존한다. `vehicleTrackingId`는 한 monitoring run에서 Observation을 연결하기 위한 transient reference이며 Alarm identity가 아니다. 경기 TAGO는 `vehicleno`, 서울은 `vehId`를 primary tracking reference로 사용한다. 서울 `plainNo`는 보조 확인·표시값일 수 있지만 `vehId` 누락 또는 변경을 자동으로 같은 차량이라고 단정하는 대체 identity가 아니다.
 
-## Main Attributes
+정상적인 trackable Observation의 필수 envelope는 `provider`, `externalRouteId`, `vehicleTrackingId`, `observedAt`, `arrivalEvidence`다. `arrivalEvidence`는 direct flag가 없을 때도 거짓 `MOVING` 대신 `UNAVAILABLE`을 명시한다. 필수 envelope를 만들 수 없는 raw item은 다른 차량과 연결하지 않고 Provider 정상 응답 안의 mapping ambiguity로 보존해 Evaluation을 UNKNOWN으로 만든다.
 
-    Phase 3에서 결정한 Transit Target 식별자
+현재 Stop ID/order가 Provider 응답에서 없으면 억지로 채우지 않는다. `currentStopName`은 PASSED 위치 안내를 위해 Route metadata로 보강할 수 있다. GPS도 optional이며 사용자에게 raw 숫자를 기본 표시하지 않고 Stop name 또는 “최근 확인된 위치” 표현을 보조하는 내부 근거로 사용한다.
 
-    Provider가 제공하는 vehicle, arrival, 위치, 갱신 정보 중 평가에 필요한 관측값
+`observedAt`은 StopBell이 응답을 받은 시각이고 항상 존재한다. `providerDataTime`은 Provider가 제공한 원본 data 시각이며 optional이다. 둘을 구분해야 반복·stale data를 판단할 수 있다. Provider가 data 시각을 주지 않으면 현재 수신 시각만으로 upstream freshness가 보장된다고 가정하지 않는다.
 
-## Reason
+`directionContext`와 `sectionContext`는 Provider가 제공할 때 같은 Route traversal에서 Stop order를 비교할 수 있는지 판단하는 operational evidence다. Provider raw field 이름을 Domain contract로 노출하지 않고, 없는 방향·회차 정보를 추측하지 않는다. Stop order가 역행하거나 순환·회차·분기로 traversal이 모호하면 위치 관계는 `UNKNOWN`이다.
 
-Alarm과 외부 API 데이터를 분리하기 위해 사용한다.
+현재 Observation에 `previousStopId`/`previousStopOrder`를 중복 저장하지 않는다. Evaluation은 같은 Alarm·Route·Vehicle tracking cycle의 이전 `TransitObservation`과 현재 값을 비교한다.
+
+## Provider Mapping
+
+| 공통 의미 | 경기 TAGO | 서울 버스위치 |
+| --- | --- | --- |
+| Provider / Route | `TAGO` + 요청 `routeId` | `SEOUL_BUS` + 요청 `busRouteId` 또는 응답 `routeId` |
+| Vehicle tracking | `vehicleno` | `vehId`; `plainNo`는 보조값 |
+| Current Stop | `nodeId`, `nodeOrd` | `stId`, `stOrd`; `sectOrd`/`sectionId`는 section context |
+| GPS | `gpslati`, `gpslong` | WGS84 `tmY`/`tmX` 또는 operation별 WGS84 좌표 |
+| Provider data time | 제공되지 않으면 없음 | `dataTm` |
+| Direct arrival evidence | `UNAVAILABLE` | `stopFlag=1 → ARRIVED`, `stopFlag=0 → MOVING`, 누락/해석 불가 → `UNAVAILABLE` |
+
+TAGO Arrival의 `arrprevstationcnt`와 `arrtime`은 Route/Stop 수준의 auxiliary evidence다. Vehicle identifier가 없으므로 특정 Location 차량의 direct arrival evidence로 채우지 않는다. `MOVING`은 “직접 도착 상태가 아님”이라는 뜻이며 target을 이미 통과했다는 뜻이 아니다. `UNAVAILABLE`은 `false`가 아니며 direct flag가 없거나 사용할 수 없음을 뜻한다.
+
+# Transit Evaluation 및 TransitEvent
+
+## Position Relation
+
+Observation에서 Target과의 위치 관계를 먼저 구분한다.
+
+```text
+BEFORE_TARGET
+AT_TARGET
+AFTER_TARGET
+UNKNOWN
+```
+
+`APPROACHING`은 `BEFORE_TARGET`을 사용자에게 설명하는 표현으로 사용할 수 있지만, V1의 별도 Event가 아니다. 위치 관계는 같은 방향·Route traversal에서 Stop ID/order, GPS, section context와 시간 연속성이 서로 일관될 때만 확정한다.
+
+## Event Candidate
+
+위치 관계와 이전 tracking state 및 Alarm option을 조합해 다음 Event 후보 하나 또는 없음을 만든다.
+
+```text
+ONE_STOP_BEFORE
+ARRIVED
+PASSED
+ONE_STOP_AFTER
+```
+
+`UNKNOWN`은 Event가 아니라 평가 불가 결과다. `TransitEvent`는 위 Event 후보와 Alarm/Vehicle/tracking cycle 문맥 및 Notification에 필요한 최신 위치 근거를 묶는 Domain 개념으로 사용한다. 실제 Java type과 field는 TASK-504에서 결정한다.
+
+## Event Rules
+
+### ARRIVED
+
+같은 Route의 같은 차량이 Target Stop에 도착했다는 충분하고 일관된 근거가 있을 때 발생한다. 서울의 target Stop ID/order와 direct `ARRIVED` evidence는 강한 근거다. 경기처럼 direct flag가 없으면 target `nodeId`/`nodeOrd`, target GPS 근접, fresh observation, 같은 차량의 시간에 따른 진행처럼 서로 일관된 신호를 조합할 수 있다. 완벽한 direct flag만 기다리지는 않지만 GPS threshold 같은 숫자는 TASK-509와 추가 실측에서 정한다.
+
+Alarm 활성화 순간 이미 Target에 있는 차량도 같은 충분성 기준을 만족하면 즉시 ARRIVED다. ARRIVED Notification 뒤 Alarm은 성공 처리되어 비활성화된다.
+
+### PASSED
+
+Alarm 활성화 뒤 Target 이전부터 같은 tracking cycle에서 관찰한 차량이, ARRIVED를 직접 관찰하지 못한 채 Target 이후로 진행했다는 충분한 근거가 있을 때 발생한다. 단순히 `currentStopOrder > targetStopOrder` 하나만으로 판정하지 않고, 같은 Vehicle·Route traversal, 이전 BEFORE_TARGET, fresh하고 단조로운 진행, Stop/section/GPS 신호의 일관성을 요구한다.
+
+PASSED Notification은 가능한 경우 다음 최신 위치 근거를 갖는다.
+
+```text
+currentStopExternalId
+currentStopName
+currentStopOrder
+latitude / longitude
+stopsPastTarget (optional derived value)
+observedAt / providerDataTime
+```
+
+사용자에게는 raw GPS보다 Stop name과 “최근 확인된 위치” 의미를 우선한다. `stopsPastTarget`은 같은 Route traversal의 sequence가 비교 가능한 경우에만 제공한다.
+
+PASSED는 해당 Vehicle tracking을 끝내지만 Alarm을 성공 처리하지 않는다. Alarm은 ACTIVE로 유지하고 다음 차량을 계속 감시한다.
+
+### ONE_STOP_BEFORE
+
+before 옵션이 켜져 있고 같은 차량이 선택한 Route traversal에서 Target의 직전 Stop에 도달했을 때 한 번 발생한다. 직전 Stop은 단순 `targetStopOrder - 1`이 아니라 metadata가 확인한 predecessor다. Target이 첫 Stop이면 옵션 자체가 유효하지 않다.
+
+### ONE_STOP_AFTER
+
+after 옵션이 켜진 Alarm에서 ARRIVED Notification을 이미 발생시킨 동일 차량이 같은 Route traversal의 successor Stop에 도달했거나, polling jump로 successor 이상 진행했다는 충분한 근거가 있을 때 한 번 발생한다. Target이 마지막 Stop이면 옵션 자체가 유효하지 않다. 이 Event는 ARRIVED 뒤 follow-up 전용이며 PASSED로 재분류하지 않는다.
+
+## Event Precedence
+
+한 Observation transition에서 Notification 후보는 하나만 선택한다.
+
+```text
+일반 tracking: ARRIVED > PASSED > ONE_STOP_BEFORE > 없음
+ARRIVED follow-up: ONE_STOP_AFTER > 없음
+```
+
+`previous < target`, `current > target`이고 ARRIVED를 직접 관찰하지 못했다면 PASSED를 선택하며 before/arrival/after를 함께 만들지 않는다. 현재 Observation이 target 도착을 충분히 직접 보여 주면 ARRIVED가 우선한다. 이미 ARRIVED를 보낸 차량이 target 다음 Stop을 건너뛰어 더 진행했다면 ONE_STOP_AFTER를 한 번 만들 수 있다.
+
+## UNKNOWN
+
+다음 조건에서는 Event를 억지로 만들지 않고 다음 Observation을 기다린다.
+
+- Vehicle tracking reference 변경·누락 또는 차량 일시 소실
+- Stop order 역행, 방향·회차·순환·분기 문맥 불명
+- stale Provider data 또는 서로 충돌하는 Stop/GPS/arrival evidence
+- 평가에 필요한 Route/Stop reference 누락
+- 정상 응답이지만 현재 차량 진행을 확정할 근거 부족
+
+Timeout, HTTP error, Provider error는 정상 응답 안의 ambiguity와 구분되는 Provider failure다. 실패 자체는 `TransitObservation`이 아니지만 Alarm Evaluation에는 Event 없는 UNKNOWN으로 전달되어 Alarm 상태를 손상하지 않는다.
+
+## Tracking Lifecycle
+
+Alarm 활성화 시 현재 Route 차량을 baseline으로 관찰한다.
+
+```text
+Target 이전 → tracking 후보
+Target 위치 → 충분한 근거가 있으면 즉시 ARRIVED
+Target 이후 → baseline existing vehicle로 무시
+UNKNOWN → Notification 없이 다음 Observation 대기
+```
+
+새 차량이 이후 나타나 Target 이전에서 관찰되면 새 tracking 후보가 될 수 있다. PASSED 뒤 해당 차량 cycle은 종료하고 같은 Event를 다시 만들지 않는다. 같은 tracking reference가 순환해 다시 Target 이전에 나타나는 경우에는 차량 소실·새 운행 시작 등 새 cycle 근거가 있어야 하며 단순 order 역행만으로 재사용하지 않는다.
+
+ARRIVED 뒤 after 옵션이 꺼져 있으면 Alarm 비활성화와 함께 모든 차량 tracking을 끝낸다. 옵션이 켜져 있으면 Alarm은 비활성화하고 다른 차량 tracking을 끝내며, 성공 차량만 ONE_STOP_AFTER까지 short follow-up 한다. follow-up tracking은 Alarm `active`와 다른 runtime 의미다. 별도 persisted state 필요성과 timeout은 TASK-401/509에서 결정한다.
+
+동일 Alarm + 동일 Vehicle + 동일 Event Type은 같은 tracking cycle에서 한 번만 의미가 있다. 구체적인 persistence와 concurrency 기반 duplicate prevention은 TASK-708의 범위다.
 
 ## Persistence
 
-    구현 방식은 Provider 조사 결과에 따라 결정
-
-TransitEvent는 외부 Transit 데이터를 조회하고 정규화하는 Query Model로 사용한다. Provider 응답의 의미와 필요한 관측값이 확인된 뒤 영속화·조회 방식과 MyBatis 필요성을 결정한다.
-
-Bad:
-
-    Alarm
-
-     ↓
-
-    Bus API 호출
-
-     ↓
-
-    판단
-
-Good:
-
-    Transit API
-
-     ↓
-
-    TransitEvent
-
-     ↓
-
-    Alarm Evaluation
-
-     ↓
-
-    Notification
+`TransitObservation`, `TransitEvent`와 Vehicle tracking state의 실제 영속 여부는 아직 결정하지 않는다. Schema, Java DTO/record, scheduler, GPS/freshness 수치와 평가 구현은 후속 Task 범위다.
 
 ------------------------------------------------------------------------
 
@@ -392,31 +530,14 @@ NotificationHistory는 알림 발송 기록의 저장과 상태 관리를 위해
 
           |
 
-    TransitEvent
+    TransitObservation
 
           |
 
     Alarm Evaluation
 
+          |
+
+    TransitEvent candidate
+
 ------------------------------------------------------------------------
-
-## Alarm Trigger Rule
-
-예:
-
-    arrivalTime <= 0
-
-    또는
-
-    도착 예정 1분 전
-
-정확한 기준은 Transit API 확인 후 결정한다.
-
-## TransitEvent Persistence
-
-아직 결정하지 않는다.
-
-가능한 방향:
-
--   실시간 데이터이므로 저장하지 않음
--   추후 분석 기능을 위해 저장

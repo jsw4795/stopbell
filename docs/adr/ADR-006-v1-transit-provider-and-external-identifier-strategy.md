@@ -77,6 +77,10 @@ External Route/Stop identity는 각각 `(provider, externalRouteId)` 및 `(provi
 
 서울특별시 노선정보조회 서비스는 현재 공공데이터포털에서 자동승인으로 활용신청 가능하며, `busRouteId` 기반 Route별 Stop 목록에 순번·정류소 ID·명칭·WGS84 좌표를 계약한다. `busRouteId`는 Bus Location 요청 identifier와 같다. 현재 local key에는 이 metadata 서비스의 권한이 없어 Stop ID live row 대조는 하지 못했지만, 이는 source 부재가 아니라 service enrollment 문제다.
 
+## 후속 확인
+
+TASK-305 시작 시 활성화된 서울 노선정보조회 서비스를 live preflight했다. `routeNo=7016` 검색 결과의 `busRouteId=100100447`로 Stop 106건을 조회했고, 동일 Route의 realtime 차량 표본에서 metadata `station=113000022`/`seq=3`과 Bus Location `stId=113000022`/`stOrd=3`이 일치했다. 따라서 TASK-304에서 공식 contract로 채택한 서울 metadata ↔ realtime identifier 연결을 실제 row에서도 확인했다. 이 확인은 Provider ID의 장기 불변성을 새로 보장하지 않는다.
+
 ## 결과
 
 - 후속 Transit 구현은 두 Provider의 역할을 명시적으로 routing하며, 하나의 전국 Provider 또는 fallback orchestration을 가정하지 않는다.
@@ -90,7 +94,7 @@ External Route/Stop identity는 각각 `(provider, externalRouteId)` 및 `(provi
 다음 중 하나 이상이 확인되면 이 결정을 재검토한다.
 
 - 서울 노선정보조회 서비스가 자동승인 또는 필요한 identifier contract를 더 이상 제공하지 않음
-- service enrollment 뒤 `station`과 Bus Location `stId`의 연결이 공식 contract와 다르게 확인됨
+- 후속 실측에서 `station`과 Bus Location `stId`의 연결이 반복적으로 성립하지 않음
 - V1 지원 지역이 늘어 TAGO의 cityCode/request context만으로 Provider routing이 불명확해짐
 - Provider ID 변경·재사용으로 stale target이 실제 제품 문제를 일으킴
 - 호출 제한 또는 data quality가 선택된 Provider 역할을 충족하지 못함

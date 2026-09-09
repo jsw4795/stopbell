@@ -458,9 +458,47 @@ Provider ID는 현재 Provider API를 연결하는 external reference이지, 장
 
 - 경기 TAGO Arrival에는 vehicle identifier가 없고 first Stop Arrival에서 Location의 같은 Route가 누락된 표본이 있다. Arrival은 보조 정보다.
 - 경기와 서울의 first-stop 감지 평가는 모두 B — 조건부 감지 가능이다. 이는 Provider·identifier 결정이지 최종 Alarm Rule이 아니다.
-- 서울 노선정보조회 서비스는 공식 contract와 자동승인 조건을 확인했지만, 현 local key의 서비스 권한 부재로 `station`/`stId`의 live row 대조는 아직 없다.
+- TASK-304 결정 시점에는 서울 노선정보조회 서비스의 `station`/`stId` live row 대조가 없었다. 이 항목은 아래 TASK-305 preflight에서 확인됐다.
 - Provider identifier의 장기 변경 정책은 확인되지 않았다.
 
-### TASK-305 Handoff
+## TASK-305 서울 Metadata Preflight 및 Contract Decision
 
-TASK-305는 이 Provider 역할과 opaque external reference를 입력으로 사용한다. 이 Task가 아직 결정할 항목은 Alarm Transit Target의 record/DB 구조, observation DTO, 도착·통과·first-stop rule, GPS threshold, polling interval, duplicate-event state, scheduler grouping이다.
+### 서울 Metadata Live Preflight
+
+2026-09-09 KST에 활용신청 완료 뒤 같은 local Service Key를 process 안에서만 사용해 최소 live preflight를 수행했다. Key 원문과 전체 요청 URL은 출력·저장·문서화하지 않았다.
+
+| 확인 흐름 | 결과 |
+| --- | --- |
+| `routeNo=7016` → Route 검색 | HTTP 200 / 정상 응답, `busRouteId=100100447` 연결 |
+| `busRouteId` → Stop 목록 | HTTP 200 / 정상 응답, 106개 Route Stop 반환 |
+| metadata `station` ↔ realtime `stId` | 동일 Route 운행 차량 표본에서 `station=113000022`, `stId=113000022` 일치 |
+| metadata `seq` ↔ realtime `stOrd` | 위 표본에서 `seq=3`, `stOrd=3` 일치 |
+
+Stop 이름은 `DMC첨단산업센터`였다. 이 한 Route/Stop row-level 표본으로 서울 metadata identifier와 realtime Location identifier가 실제로 연결됨을 확인했다. 이는 Provider identifier의 장기 불변성이나 모든 노선 coverage를 보장하지 않으며 TASK-304의 namespace·opaque String 전략을 변경하지 않는다.
+
+### Provider-neutral Observation Decision
+
+- TAGO `routeId`/`vehicleno`/`nodeId`/`nodeOrd`/GPS와 서울 `busRouteId`/`vehId`/`stId`/`stOrd`/section/GPS/data time을 Provider-neutral `TransitObservation`으로 변환한다.
+- 서울 `stopFlag=1`은 direct `ARRIVED`, `stopFlag=0`은 `MOVING`, 누락·해석 불가는 `UNAVAILABLE` evidence다.
+- 경기 Location에는 direct arrival flag가 없으므로 `UNAVAILABLE`로 보존한다. 차량 ID가 없는 Arrival의 `arrprevstationcnt`/`arrtime`은 auxiliary이며 특정 차량의 direct evidence로 변환하지 않는다.
+- 이전 위치는 현재 Observation의 duplicate field로 만들지 않고 같은 tracking cycle의 이전 Observation과 비교한다.
+- stale, direction/turn ambiguity, identifier 누락·변경, order 역행 또는 충돌하는 evidence는 Event 없는 `UNKNOWN`이다. Provider request failure와 정상 응답 ambiguity는 원인을 구분한다.
+
+### Alarm Target 및 Event Decision
+
+- Alarm Target external identity는 `(provider, externalRouteId, externalStopId)`이고, `targetStopOrder`, optional Stop GPS, display snapshot, Provider request context와 두 notification option을 구분한다.
+- ARRIVED만 Alarm 성공 Event이며 Notification 뒤 비활성화한다. PASSED는 target 이전부터 추적한 차량의 충분한 통과 근거가 있을 때 해당 차량만 종료하고 Alarm은 ACTIVE로 유지한다.
+- 활성화 시 target 이후 차량은 baseline으로 무시하고, target 차량은 충분한 근거가 있으면 즉시 ARRIVED다.
+- ONE_STOP_BEFORE/AFTER는 metadata traversal의 predecessor/successor를 사용한다. first/last Stop에서는 각각 해당 option을 허용하지 않는다.
+- after option은 Alarm 비활성화 뒤 성공 차량만 short follow-up하며, successor 이상 진행을 확인하면 ONE_STOP_AFTER를 한 번 발생시키고 종료한다.
+- 한 transition에서는 `ARRIVED > PASSED > ONE_STOP_BEFORE` 중 하나만 선택한다. ARRIVED follow-up에서는 ONE_STOP_AFTER만 평가한다.
+
+계약의 상세 의미와 Trade-off는 `adr/ADR-007-bus-alarm-transit-observation-and-event-semantics.md`, Domain 계약은 `domain-model.md`를 따른다. GPS threshold, freshness 수치, polling interval, tracking persistence, DB Schema, Java DTO와 Scheduler는 TASK-305에서 결정하지 않았다.
+
+### Subsequent Task Handoff
+
+- TASK-401: Alarm Target의 최소 Schema와 short follow-up runtime state 영속 필요성 결정
+- TASK-402: Alarm request/response field naming, first/last validation과 HTTP error 구체화
+- TASK-504: Provider raw DTO를 `TransitObservation`으로 mapping하고 provider-neutral `TransitEvent` 표현 정의; Event 판정은 TASK-509에 유지
+- TASK-509: evidence 조합, GPS/freshness 기준, baseline, transition precedence와 tracking cycle 구현
+- TASK-510: active Alarm monitoring과 inactive Alarm의 성공 차량 follow-up scheduling 분리
