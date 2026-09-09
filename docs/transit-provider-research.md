@@ -486,7 +486,7 @@ Stop 이름은 `DMC첨단산업센터`였다. 이 한 Route/Stop row-level 표�
 
 ### Alarm Target 및 Event Decision
 
-- Alarm Target external identity는 `(provider, externalRouteId, externalStopId)`이고, `targetStopOrder`, optional Stop GPS, display snapshot, Provider request context와 두 notification option을 구분한다.
+- Route external identity는 `(provider, externalRouteId)`, Stop external identity는 `(provider, externalStopId)`다. Alarm Target은 Route traversal 안의 특정 Stop occurrence이며 Route/Stop reference, `targetStopOrder`와 필요한 traversal/direction context로 구분한다. optional Stop GPS, display snapshot, Provider request context와 두 notification option은 각 역할에 맞게 분리한다.
 - ARRIVED만 Alarm 성공 Event이며 Notification 뒤 비활성화한다. PASSED는 target 이전부터 추적한 차량의 충분한 통과 근거가 있을 때 해당 차량만 종료하고 Alarm은 ACTIVE로 유지한다.
 - 활성화 시 target 이후 차량은 baseline으로 무시하고, target 차량은 충분한 근거가 있으면 즉시 ARRIVED다.
 - ONE_STOP_BEFORE/AFTER는 metadata traversal의 predecessor/successor를 사용한다. first/last Stop에서는 각각 해당 option을 허용하지 않는다.

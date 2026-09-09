@@ -86,15 +86,23 @@ V1은 Provider raw response를 `TransitObservation`이라는 한 차량의 provi
 
 Observation-derived 위치 관계와 사용자 Event를 분리한다. 위치 관계는 `BEFORE_TARGET`, `AT_TARGET`, `AFTER_TARGET`, `UNKNOWN`이고, 알림 후보 Event는 `ONE_STOP_BEFORE`, `ARRIVED`, `PASSED`, `ONE_STOP_AFTER` 또는 없음이다. `UNKNOWN`은 알림 Event가 아니라 판단 불가 결과다. `APPROACHING`은 `BEFORE_TARGET`의 표시용 해석일 수 있지만 별도 V1 Event로 두지 않는다.
 
-Bus Alarm Target의 external identity는 `(provider, externalRouteId, externalStopId)`다. `targetStopOrder`는 선택한 Route traversal 안의 target occurrence를 평가하기 위한 필수 operational snapshot이지 Stop identity가 아니다. `routeNumber`와 `stopName`은 display snapshot이고, target Stop 좌표는 Provider가 제공할 때 판단을 보조하는 operational snapshot이다. TAGO `cityCode` 같은 Provider request context는 호출 재현에 필요한 조건부 metadata다. `notifyOneStopBefore`와 `notifyOneStopAfter`는 서로 독립적인 선택 옵션이다.
+Route external identity는 `(provider, externalRouteId)`, Stop external identity는 `(provider, externalStopId)`다. Bus Alarm이 가리키는 Target은 Stop identity 자체가 아니라 선택한 Route traversal 안의 특정 Stop occurrence다. 이 occurrence는 Route/Stop reference와 `targetStopOrder`, 그리고 모호성을 해소하는 데 필요한 traversal·direction context로 평가한다. `targetStopOrder`는 occurrence를 구분하는 필수 operational snapshot이지 Stop identity가 아니다. 같은 Route가 같은 Stop을 재방문할 수 있으므로 `(provider, externalRouteId, externalStopId)`만으로 Target occurrence의 uniqueness가 보장된다고 가정하거나 이 조합만을 근거로 Unique Constraint를 만들지 않는다.
+
+`routeNumber`와 `stopName`은 display snapshot이고, target Stop 좌표는 Provider가 제공할 때 판단을 보조하는 operational snapshot이다. TAGO `cityCode` 같은 Provider request context는 호출 재현에 필요한 조건부 metadata다. `notifyOneStopBefore`와 `notifyOneStopAfter`는 서로 독립적인 선택 옵션이다.
 
 Route metadata traversal에서 predecessor가 없으면 before 옵션, successor가 없으면 after 옵션을 생성 시 거부할 수 있어야 한다. predecessor/successor는 단순 `order ± 1`이 아니라 같은 방향·Route traversal의 인접 Stop으로 해석한다. 구체적인 HTTP 오류와 DB 구조는 후속 Task에서 정한다.
+
+before 옵션이 켜진 Alarm을 활성화하는 순간 차량이 Target occurrence의 predecessor에 있다고 충분히 판단되면 즉시 `ONE_STOP_BEFORE` 후보를 만들 수 있다. 이 차량은 baseline이라는 이유로 알림에서 제외하지 않으며, Event를 한 번 소비한 뒤에도 Alarm을 ACTIVE로 유지하고 같은 차량을 ARRIVED까지 계속 추적한다.
 
 `ARRIVED`는 같은 Route/차량이 target에 도착했다는 충분하고 일관된 근거가 있을 때 발생한다. 활성화 순간 이미 target에 있는 차량도 같은 기준을 만족하면 즉시 ARRIVED다. ARRIVED Notification 뒤 Alarm은 성공 처리되어 비활성화되고, after 옵션이 꺼져 있으면 모든 tracking을 종료한다.
 
 `PASSED`는 Alarm 활성화 뒤 target 이전부터 같은 tracking cycle에서 관찰한 차량이, 직접 ARRIVED를 관찰하지 못한 채 target 이후로 진행했다는 충분한 근거가 있을 때 발생한다. 방향·sequence가 비교 가능하고 data가 fresh하며 신호가 일관되어야 한다. PASSED는 해당 차량 tracking만 끝내고 Alarm은 ACTIVE로 유지해 다음 차량을 감시한다. 활성화 당시 이미 target 이후인 차량은 baseline existing vehicle로 무시하며 PASSED를 만들지 않는다.
 
+PASSED 위치의 optional `stopsPastTarget`은 raw Stop order의 숫자 차이가 아니다. 같은 Route traversal에서 Target occurrence부터 현재 확인된 Stop occurrence까지 metadata sequence로 확인한 successor edge 수다. 두 occurrence와 그 사이 traversal을 확정할 수 있을 때만 계산하며, 불확실하면 값을 제공하지 않는다. `stopsPastTarget`이 없어도 PASSED와 최근 확인 위치 Notification은 발생할 수 있다.
+
 after 옵션이 켜진 ARRIVED에서는 Alarm을 비활성화하고 다른 차량 tracking을 끝낸 뒤 ARRIVED 차량만 short follow-up 한다. 같은 방향·Route traversal의 다음 Stop에 도달하거나 polling jump로 그 Stop 이상 진행했다는 충분한 근거가 있으면 `ONE_STOP_AFTER`를 한 번 발생시키고 follow-up을 끝낸다. 이 진행을 PASSED로 다시 분류하지 않는다. follow-up state의 영속화 필요성과 만료 정책은 TASK-401/509에서 판단한다.
+
+short follow-up이 남아 있는 동일 Alarm을 사용자가 다시 활성화하면 이전 activation cycle의 follow-up을 취소하고 새 baseline과 새 monitoring cycle을 시작한다. 새 activation이 이전 cycle을 supersede하므로 old ONE_STOP_AFTER와 새 cycle Event를 동시에 유지하지 않는다. Alarm 삭제는 active monitoring뿐 아니라 그 Alarm에 연결된 short follow-up도 함께 종료한다. 구체적인 runtime/persistence 방식은 TASK-401/509/510에서 결정한다.
 
 한 Observation transition은 사용자에게 가장 의미 있는 Event 하나만 선택한다. 일반 tracking에서는 직접 관찰한 ARRIVED, target을 건너뛴 PASSED, ONE_STOP_BEFORE 순으로 우선한다. ARRIVED 후 follow-up에서는 ONE_STOP_AFTER만 평가한다. 동일 Alarm·Vehicle·Event Type은 같은 tracking cycle에서 한 번만 의미가 있다.
 
@@ -108,11 +116,11 @@ ARRIVED만 Alarm 성공으로 두면 정상 성공 lifecycle이 단순해지고,
 
 ## 결과
 
-- TASK-401은 이 Target 계약을 표현할 최소 Domain/Schema와 follow-up runtime state의 영속 필요성을 결정한다.
-- TASK-402는 생성·조회 계약, before/after validation과 오류 응답을 구체화한다.
+- TASK-401은 Target occurrence를 표현할 최소 Domain/Schema와 follow-up runtime state의 영속 필요성을 결정한다. Route/Stop reference만으로 occurrence uniqueness를 가정하지 않는다.
+- TASK-402는 생성·조회·활성화·삭제 계약, before/after validation과 오류 응답을 구체화한다.
 - TASK-504는 Provider raw DTO를 `TransitObservation`으로 변환하고 `TransitEvent`의 provider-neutral 표현을 정의한다. Event 판정 자체는 Provider mapper가 아니라 TASK-509 Evaluation이 담당한다.
-- TASK-509는 evidence 조합, transition precedence, baseline, tracking cycle과 UNKNOWN 규칙을 구현하고 GPS threshold·freshness 기준을 실측으로 정한다.
-- TASK-510은 Alarm active lifecycle과 short follow-up lifecycle을 구분해 scheduling한다.
+- TASK-509는 evidence 조합, transition precedence, activation 시 predecessor, `stopsPastTarget`, tracking cycle과 UNKNOWN 규칙을 구현하고 GPS threshold·freshness 기준을 실측으로 정한다.
+- TASK-510은 Alarm active lifecycle과 short follow-up lifecycle을 구분하고 재활성화·삭제의 취소 의미를 반영해 scheduling한다.
 - Provider identifier는 ADR-006의 namespace·opaque String 정책을 그대로 따른다.
 - 실제 Entity, Migration, DTO, polling interval, GPS threshold, persistence와 중복 방지 저장소는 이 ADR에서 결정하지 않는다.
 

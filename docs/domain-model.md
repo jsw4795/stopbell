@@ -181,13 +181,15 @@ V1 Bus Alarm의 Transit Target 계약은 아래에서 정의하지만 실제 Ent
 개념적 최소 계약:
 
 ```text
-external identity
+external references
     provider
     externalRouteId
     externalStopId
 
-operational snapshot
+target occurrence operational snapshot
     targetStopOrder
+    traversalContext (ambiguity 해소에 필요한 경우)
+    directionContext (ambiguity 해소에 필요한 경우)
     targetStopLatitude (optional)
     targetStopLongitude (optional)
     providerRequestContext (provider별 optional; TAGO cityCode 포함)
@@ -201,9 +203,11 @@ notification options
     notifyOneStopAfter
 ```
 
-`(provider, externalRouteId)`와 `(provider, externalStopId)`는 ADR-006에서 정한 opaque external reference다. Vehicle identifier는 Alarm Target에 포함하지 않는다.
+Route external identity는 `(provider, externalRouteId)`, Stop external identity는 `(provider, externalStopId)`이며 둘 다 ADR-006에서 정한 opaque external reference다. Vehicle identifier는 Alarm Target에 포함하지 않는다.
 
-`targetStopOrder`는 선택한 Route traversal에서 target occurrence를 연결하고 이전/다음 Stop을 판단하기 위한 필수 operational metadata다. Stop identity가 아니며 Provider metadata 변경 뒤 stale할 수 있다. 순환·재방문 Route에서 같은 Stop ID가 여러 번 등장하면 order와 진행 문맥으로 사용자가 선택한 occurrence를 구분해야 한다.
+사용자가 선택하는 Alarm Target은 Stop identity 자체가 아니라 Route traversal 안의 특정 Stop occurrence다. Route/Stop reference에 `targetStopOrder`와 필요한 traversal/direction context를 함께 사용해 그 occurrence를 평가한다. 같은 Route의 sequence에 같은 Stop ID가 여러 번 나타날 수 있으므로 `(provider, externalRouteId, externalStopId)`만으로 Target occurrence의 uniqueness가 보장되지 않는다. TASK-401은 이 세 값만을 근거로 `UNIQUE(provider, externalRouteId, externalStopId)` 같은 제약을 만들지 않고 실제 Schema와 불변 조건을 별도로 결정한다.
+
+`targetStopOrder`는 선택한 Route traversal에서 target occurrence를 연결하고 이전/다음 Stop을 판단하기 위한 필수 operational metadata다. Stop identity가 아니며 Provider metadata 변경 뒤 stale할 수 있다. 순환·재방문·분기·회차로 같은 Stop ID가 여러 번 등장하면 order와 필요한 traversal/direction context로 사용자가 선택한 occurrence를 구분해야 한다.
 
 Target Stop 좌표는 Provider가 metadata로 제공할 때 저장 후보가 되는 optional operational snapshot이며, 특히 경기 first-stop에서 Stop ID·order와 함께 GPS 근접 근거를 평가하는 데 사용한다. 정확한 저장 여부와 GPS distance threshold는 TASK-401/509에서 결정한다.
 
@@ -405,13 +409,15 @@ stopsPastTarget (optional derived value)
 observedAt / providerDataTime
 ```
 
-사용자에게는 raw GPS보다 Stop name과 “최근 확인된 위치” 의미를 우선한다. `stopsPastTarget`은 같은 Route traversal의 sequence가 비교 가능한 경우에만 제공한다.
+사용자에게는 raw GPS보다 Stop name과 “최근 확인된 위치” 의미를 우선한다. `stopsPastTarget`은 같은 Route traversal에서 Target occurrence부터 현재 확인된 Stop occurrence까지 metadata sequence로 센 successor edge 수다. raw `currentStopOrder - targetStopOrder`가 아니며 Stop order가 연속 정수라고 가정하지 않는다. 동일 Route/traversal/direction, 양쪽 occurrence와 그 사이 sequence를 모두 확인할 수 있을 때만 계산하고, 불확실하면 unavailable로 둔다. 이 값이 없어도 PASSED Notification은 발생할 수 있다.
 
 PASSED는 해당 Vehicle tracking을 끝내지만 Alarm을 성공 처리하지 않는다. Alarm은 ACTIVE로 유지하고 다음 차량을 계속 감시한다.
 
 ### ONE_STOP_BEFORE
 
 before 옵션이 켜져 있고 같은 차량이 선택한 Route traversal에서 Target의 직전 Stop에 도달했을 때 한 번 발생한다. 직전 Stop은 단순 `targetStopOrder - 1`이 아니라 metadata가 확인한 predecessor다. Target이 첫 Stop이면 옵션 자체가 유효하지 않다.
+
+Alarm 활성화 순간 baseline 차량이 이미 predecessor에 있다고 충분히 판단되면 즉시 ONE_STOP_BEFORE 후보가 된다. baseline이라는 이유로 무시하지 않는다. Event를 보낸 뒤 Alarm은 ACTIVE이고 같은 차량 tracking은 계속되며, 이후 ARRIVED가 발생하면 정상 성공 lifecycle로 전환한다.
 
 ### ONE_STOP_AFTER
 
@@ -446,6 +452,7 @@ Alarm 활성화 시 현재 Route 차량을 baseline으로 관찰한다.
 
 ```text
 Target 이전 → tracking 후보
+정확히 predecessor + before option ON → tracking 후보 + 즉시 ONE_STOP_BEFORE 후보
 Target 위치 → 충분한 근거가 있으면 즉시 ARRIVED
 Target 이후 → baseline existing vehicle로 무시
 UNKNOWN → Notification 없이 다음 Observation 대기
@@ -454,6 +461,8 @@ UNKNOWN → Notification 없이 다음 Observation 대기
 새 차량이 이후 나타나 Target 이전에서 관찰되면 새 tracking 후보가 될 수 있다. PASSED 뒤 해당 차량 cycle은 종료하고 같은 Event를 다시 만들지 않는다. 같은 tracking reference가 순환해 다시 Target 이전에 나타나는 경우에는 차량 소실·새 운행 시작 등 새 cycle 근거가 있어야 하며 단순 order 역행만으로 재사용하지 않는다.
 
 ARRIVED 뒤 after 옵션이 꺼져 있으면 Alarm 비활성화와 함께 모든 차량 tracking을 끝낸다. 옵션이 켜져 있으면 Alarm은 비활성화하고 다른 차량 tracking을 끝내며, 성공 차량만 ONE_STOP_AFTER까지 short follow-up 한다. follow-up tracking은 Alarm `active`와 다른 runtime 의미다. 별도 persisted state 필요성과 timeout은 TASK-401/509에서 결정한다.
+
+short follow-up이 진행 중인 동일 Alarm을 사용자가 다시 활성화하면 이전 activation cycle의 follow-up을 취소하고 새 baseline으로 새 monitoring cycle을 시작한다. Alarm 삭제 시에는 active monitoring과 해당 Alarm의 short follow-up을 모두 종료한다. 취소 상태의 runtime/persistence 표현은 TASK-401/509/510에서 결정한다.
 
 동일 Alarm + 동일 Vehicle + 동일 Event Type은 같은 tracking cycle에서 한 번만 의미가 있다. 구체적인 persistence와 concurrency 기반 duplicate prevention은 TASK-708의 범위다.
 

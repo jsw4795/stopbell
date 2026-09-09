@@ -114,6 +114,8 @@ updated_at
 
 사용자가 설정한 Alarm의 현재 공통 정보를 저장한다. Phase 3에서 Bus Alarm Transit Target의 개념 계약은 확정됐지만 실제 column, 관계, Embeddable/Entity 구조와 follow-up tracking persistence는 TASK-401에서 결정하고 Migration으로 반영한다.
 
+Route external identity `(provider, externalRouteId)`와 Stop external identity `(provider, externalStopId)`는 Alarm Target occurrence 자체의 unique key가 아니다. 같은 Route traversal에서 같은 Stop ID를 재방문할 수 있으므로 `UNIQUE(provider, externalRouteId, externalStopId)`를 근거 없이 추가하지 않는다. TASK-401은 `targetStopOrder`와 필요한 traversal/direction context, 재활성화·삭제 시 short follow-up 취소 lifecycle을 함께 검토한 뒤 실제 제약과 persistence를 결정한다.
+
 후보 필드:
 
 ```text

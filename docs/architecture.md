@@ -203,9 +203,11 @@ Notification 전송 결정 또는 UNKNOWN 대기
 
 ### Alarm과 Vehicle Tracking lifecycle
 
-Alarm 활성화 시 현재 Route 차량을 baseline으로 분류한다. Target 이전 차량은 추적 후보이고, Target 차량은 충분한 근거가 있으면 즉시 ARRIVED이며, 이미 Target 이후인 차량은 기존 passed vehicle로 무시한다.
+Alarm 활성화 시 현재 Route 차량을 baseline으로 분류한다. Target 이전 차량은 추적 후보이고, before 옵션이 켜진 상태에서 정확히 predecessor인 차량은 즉시 ONE_STOP_BEFORE 후보가 된다. Target 차량은 충분한 근거가 있으면 즉시 ARRIVED이며, 이미 Target 이후인 차량은 기존 passed vehicle로 무시한다.
 
 PASSED는 해당 Vehicle tracking만 종료하고 Alarm은 ACTIVE로 유지한다. ARRIVED는 Alarm 성공 Event이며 Notification 뒤 Alarm을 비활성화하고 다른 Vehicle tracking을 종료한다. after 옵션이 켜진 경우에도 Alarm은 비활성화하되, ARRIVED를 발생시킨 동일 차량만 다음 Stop 도달·통과까지 short follow-up 한다. 따라서 Alarm의 `active`와 follow-up tracking state는 같은 의미가 아니며, 별도 persisted state가 필요한지는 TASK-401/509에서 결정한다.
+
+short follow-up 중 같은 Alarm의 새 activation은 이전 cycle을 supersede한다. 기존 follow-up을 취소하고 새 baseline과 monitoring cycle을 시작한다. Alarm 삭제는 active monitoring과 연결된 short follow-up을 모두 종료한다. 이 lifecycle의 runtime/persistence 구조는 TASK-401/509/510에서 결정하며 Architecture에서 미리 고정하지 않는다.
 
 동일 Alarm·Vehicle·Event Type은 같은 tracking cycle에서 한 번만 의미가 있다. 저장소와 동시성 기반 중복 방지는 TASK-708에서 결정한다.
 

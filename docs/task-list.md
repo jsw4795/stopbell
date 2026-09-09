@@ -132,7 +132,7 @@ TASK-301은 서울특별시와 경기도를 V1 초기 지원 범위로 정하고
 
 TASK-303은 Production Transit Client를 구현하는 Task가 아니다. 실제 Provider 응답에서 route identifier, stop identifier, direction, stop sequence, vehicle identifier, arrival information, vehicle location, provider namespace와 검색 가능 여부를 확인한다. 필요한 값은 조사 결과를 보고 판단하며, TASK-304와 TASK-305 전에는 `routeId + stopId` 또는 다른 식별자 구조를 확정하지 않는다.
 
-TASK-305는 Provider raw DTO와 provider-neutral `TransitObservation`을 분리하고, Alarm Transit Target의 identity/metadata/options, ARRIVED·PASSED·UNKNOWN, before/after Event, baseline 및 Vehicle tracking lifecycle을 계약으로 확정했다. 실제 Schema/DTO/Evaluation/Scheduler는 각각 TASK-401/402/504/509/510에서 구현한다.
+TASK-305는 Provider raw DTO와 provider-neutral `TransitObservation`을 분리하고, Alarm Transit Target의 external reference/occurrence metadata/options, ARRIVED·PASSED·UNKNOWN, before/after Event, baseline 및 Vehicle tracking lifecycle을 계약으로 확정했다. 실제 Schema/DTO/Evaluation/Scheduler는 각각 TASK-401/402/504/509/510에서 구현한다.
 
 ------------------------------------------------------------------------
 
@@ -153,7 +153,7 @@ Phase 3에서 확정된 Transit provider 및 identifier 전략을 기준으로 �
 - [ ] TASK-409 API validation 및 Error response 처리
 - [ ] TASK-410 Alarm API Test 작성
 
-TASK-401은 현재 Alarm의 공통 정보에 Phase 3에서 실제로 필요하다고 확인된 Transit Target 정보만 추가한다. Schema 변경이 필요하면 Flyway Migration도 이 Task에 포함한다. 미래 확장만을 이유로 Transit-specific 필드나 provider abstraction을 추가하지 않는다.
+TASK-401은 현재 Alarm의 공통 정보에 Phase 3에서 실제로 필요하다고 확인된 Transit Target 정보만 추가한다. Schema 변경이 필요하면 Flyway Migration도 이 Task에 포함한다. Route/Stop external reference만으로 Target occurrence uniqueness를 가정하지 않고 동일 Stop 재방문을 구분하는 operational context를 검토하며, 재활성화·삭제 시 short follow-up을 취소하는 lifecycle의 persistence 필요성도 함께 판단한다. 미래 확장만을 이유로 Transit-specific 필드나 provider abstraction을 추가하지 않는다.
 
 모든 Alarm API는 Phase 2 Authentication의 인증된 StopBell User를 기준으로 소유권을 처리한다. Client Request Body 또는 Query Parameter의 `userId`를 받지 않으며, 생성·조회·수정·삭제 모두 해당 User 소유 Alarm만 처리한다.
 

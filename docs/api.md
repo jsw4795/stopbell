@@ -60,7 +60,7 @@ POST /api/v1/alarms
 Content-Type: application/json
 ```
 
-Alarm 생성 Request의 구체적인 JSON은 TASK-402에서 확정한다. 의미상 Provider namespace 안의 Route/Target Stop external reference, target Stop order snapshot, 표시 metadata, 필요한 Provider request context와 서로 독립적인 before/after option을 표현해야 한다. first Stop의 before option 및 last Stop의 after option은 Backend에서도 invalid request로 처리할 수 있어야 하지만 구체적인 field naming과 HTTP error는 아직 확정하지 않는다. 미래 확장을 이유로 필드를 추가하지 않는다.
+Alarm 생성 Request의 구체적인 JSON은 TASK-402에서 확정한다. 의미상 Provider namespace 안의 Route/Stop external reference와 target Stop order 및 필요한 traversal/direction context를 통해 사용자가 선택한 Target occurrence를 표현하고, 표시 metadata, 필요한 Provider request context와 서로 독립적인 before/after option을 포함해야 한다. first Stop의 before option 및 last Stop의 after option은 Backend에서도 invalid request로 처리할 수 있어야 하지만 구체적인 field naming과 HTTP error는 아직 확정하지 않는다. 미래 확장을 이유로 필드를 추가하지 않는다.
 
 ### 알림 목록 조회
 
@@ -84,6 +84,8 @@ POST /api/v1/alarms/{alarmId}/activate
 
 구현 전에는 다른 REST 형태도 검토할 수 있다.
 
+활성화 시 진행 중인 이전 ARRIVED short follow-up이 있으면 이를 취소하고 새 baseline과 monitoring cycle을 시작한다. before 옵션이 켜져 있고 baseline 차량이 Target predecessor에 있으면 즉시 ONE_STOP_BEFORE 후보가 될 수 있다. 구체적인 response와 동시성 처리는 TASK-402 및 후속 구현 Task에서 결정한다.
+
 ### 알림 비활성화
 
 ```http
@@ -95,6 +97,8 @@ POST /api/v1/alarms/{alarmId}/deactivate
 ```http
 DELETE /api/v1/alarms/{alarmId}
 ```
+
+Alarm 삭제는 active monitoring뿐 아니라 해당 Alarm에 연결된 진행 중 short follow-up도 종료해야 한다. 구체적인 persistence 및 scheduler coordination은 후속 Task에서 결정한다.
 
 ### 기기 등록
 

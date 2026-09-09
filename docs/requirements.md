@@ -35,6 +35,7 @@ StopBell은 사용자가 교통 정보를 반복해서 확인해야 하는 필�
 - Provider namespace 안의 버스 노선 식별자
 - 같은 Provider namespace 안의 목표 정류장 식별자
 - 선택한 Route traversal에서 목표 정류장의 진행 순서
+- 순환·재방문·분기·회차의 occurrence 모호성을 해소하는 데 필요한 traversal/direction context
 - 알림 상태
 - 서로 독립적인 한 정거장 전 / 한 정거장 후 추가 알림 옵션
 
@@ -84,13 +85,15 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 - 사용자는 Bus Route와 자신에게 필요한 Target Stop을 직접 선택한다. First Stop은 `targetStopOrder`가 해당 Route traversal의 첫 순서인 일반 Target 사례이며 hard-coded target이 아니다.
 - 추적 차량이 Target Stop에 도착했다고 충분히 판단되면 `ARRIVED` Notification을 보내고 Alarm을 성공 처리해 자동 비활성화한다.
 - Alarm 활성화 순간 이미 Target Stop에 있는 차량도 충분한 도착 근거가 있으면 즉시 `ARRIVED`로 처리한다.
+- before 옵션이 켜진 Alarm 활성화 순간 차량이 이미 Target predecessor에 있다고 충분히 판단되면 즉시 `ONE_STOP_BEFORE` Notification을 보낸다. Alarm은 ACTIVE이고 같은 차량을 ARRIVED까지 계속 추적한다.
 - 활성화 당시 이미 Target을 지난 차량은 baseline existing vehicle로 보고 PASSED 알림을 만들지 않는다.
-- 활성화 뒤 Target 이전부터 추적한 동일 차량이 직접 도착 관측 없이 Target을 건너뛰었다는 충분한 진행 근거가 있으면 `PASSED` Notification을 보낸다. 가능한 경우 정류장명 등 최근 확인된 위치와 Target에서 지난 정거장 수를 함께 안내한다.
+- 활성화 뒤 Target 이전부터 추적한 동일 차량이 직접 도착 관측 없이 Target을 건너뛰었다는 충분한 진행 근거가 있으면 `PASSED` Notification을 보낸다. 가능한 경우 정류장명 등 최근 확인된 위치와 Target에서 지난 정거장 수를 함께 안내한다. 지난 정거장 수는 raw Stop order 차가 아니라 확인된 동일 Route traversal의 successor edge 수이며, 계산할 수 없으면 생략한다.
 - `PASSED`는 Alarm 성공 또는 종료가 아니다. 해당 차량 추적만 끝내고 Alarm은 ACTIVE로 유지해 다음 차량을 계속 감시한다.
 - 사용자는 `notifyOneStopBefore`와 `notifyOneStopAfter` 의미의 추가 알림을 서로 독립적으로 선택할 수 있다. 구체적인 API field naming은 TASK-402에서 확정한다.
 - Target이 Route traversal의 첫 Stop이면 before 옵션을, 마지막 Stop이면 after 옵션을 사용할 수 없다. Client UX와 별개로 Backend 생성 계약도 이를 검증할 수 있어야 한다.
 - before/after의 인접 Stop은 단순 숫자 증감이 아니라 Provider의 방향·Route sequence metadata로 확인한 predecessor/successor다.
 - after 옵션이 꺼져 있으면 ARRIVED 뒤 모든 추적을 끝낸다. 켜져 있으면 Alarm은 그대로 비활성화하고 ARRIVED 차량만 다음 Stop 도달·통과까지 짧게 추적해 after Notification을 한 번 보낸다.
+- ARRIVED short follow-up 중 동일 Alarm을 다시 활성화하면 이전 follow-up을 취소하고 새 baseline과 monitoring cycle을 시작한다. Alarm을 삭제하면 active monitoring과 연결된 short follow-up을 모두 종료한다.
 - 한 Observation transition에서는 가장 의미 있는 Event 하나만 알린다. 직접 ARRIVED를 관찰하지 못한 채 Target 이전에서 이후로 점프하면 여러 알림 대신 PASSED를 선택한다. 이미 ARRIVED를 알린 차량의 follow-up 진행은 PASSED가 아니라 ONE_STOP_AFTER 후보로 처리한다.
 - Provider data가 stale하거나 방향·차량 연속성·필수 identifier가 불명확하거나 신호가 충돌하면 `UNKNOWN`으로 두고 ARRIVED/PASSED Notification을 만들지 않는다. 외부 Provider 요청 실패도 거짓 Transit Event를 만들지 않는다.
 
