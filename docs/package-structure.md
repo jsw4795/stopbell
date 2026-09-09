@@ -130,7 +130,7 @@ Alarm Evaluation은 scheduler에 묻지 않는다. Transit 관측값을 받아 A
 - `dto`: provider 응답 및 내부 Transit DTO
 - `domain`: `TransitEvent` 등 Transit 관련 Domain Model
 
-동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 복잡한 Transit 검색은 MyBatis를 사용한다.
+동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 복잡한 Transit 검색은 SQL 제어가 실제로 필요한 경우 MyBatis를 사용한다. Provider API가 검색과 Route별 Stop 조회를 제공하면 이를 우선 사용하며, metadata persistence나 grouping query가 필요한지는 Transit Foundation 조사 뒤 결정한다.
 
 선택할 Transit provider, grouping key, Transit metadata의 영속화 여부는 Undecided이다.
 
@@ -170,7 +170,7 @@ transit/mapper/AlarmGroupQueryMapper
 transit/mapper/StatisticsQueryMapper
 ```
 
-MyBatis는 Transit 관련 Query, Complex Query, Statistics Query, 성능 최적화가 필요한 조회에 사용한다. Mapper 이름과 SQL file 위치는 구현 시 Spring/MyBatis 설정에 맞추되, Domain 경계를 넘는 범용 Mapper를 만들지 않는다.
+MyBatis는 Transit 관련 Query, Complex Query, Statistics Query, 성능 최적화가 필요한 조회에서 SQL 제어의 실제 필요가 확인되면 사용한다. Mapper 이름과 SQL file 위치는 구현 시 Spring/MyBatis 설정에 맞추되, Domain 경계를 넘는 범용 Mapper를 만들지 않는다.
 
 ## DTO Location
 

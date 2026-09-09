@@ -51,34 +51,27 @@ GET /api/v1/bus-routes?query={query}
 GET /api/v1/bus-routes/{routeId}/stops
 ```
 
+정확한 route identifier 의미와 request/response DTO는 Transit Foundation의 실제 Provider 조사 뒤 결정한다.
+
 ### 알림 생성
 
 ```http
-POST /api/v1/alerts
+POST /api/v1/alarms
 Content-Type: application/json
 ```
 
-후보 본문:
-
-```json
-{
-  "routeId": "provider-route-id",
-  "stopId": "provider-stop-id"
-}
-```
-
-언젠가 유용할 수 있다는 이유만으로 필드를 추가하지 않는다.
+Alarm 생성 Request는 Transit Foundation에서 실제 Provider와 identifier 전략을 결정한 뒤 TASK-402에서 확정한다. V1 요구사항의 Bus Route 식별과 Target Stop 식별은 유지하지만, Provider 조사 전에는 이를 `routeId`와 `stopId` 또는 다른 JSON 구조로 확정하지 않는다. 미래 확장을 이유로 필드를 추가하지 않는다.
 
 ### 알림 목록 조회
 
 ```http
-GET /api/v1/alerts
+GET /api/v1/alarms
 ```
 
 ### 알림 조회
 
 ```http
-GET /api/v1/alerts/{alertId}
+GET /api/v1/alarms/{alarmId}
 ```
 
 ### 알림 활성화
@@ -86,7 +79,7 @@ GET /api/v1/alerts/{alertId}
 후보:
 
 ```http
-POST /api/v1/alerts/{alertId}/activate
+POST /api/v1/alarms/{alarmId}/activate
 ```
 
 구현 전에는 다른 REST 형태도 검토할 수 있다.
@@ -94,13 +87,13 @@ POST /api/v1/alerts/{alertId}/activate
 ### 알림 비활성화
 
 ```http
-POST /api/v1/alerts/{alertId}/deactivate
+POST /api/v1/alarms/{alarmId}/deactivate
 ```
 
 ### 알림 삭제
 
 ```http
-DELETE /api/v1/alerts/{alertId}
+DELETE /api/v1/alarms/{alarmId}
 ```
 
 ### 기기 등록
@@ -130,8 +123,8 @@ POST /api/v1/devices
 
 ```json
 {
-  "code": "ALERT_NOT_FOUND",
-  "message": "Alert was not found."
+  "code": "ALARM_NOT_FOUND",
+  "message": "Alarm was not found."
 }
 ```
 

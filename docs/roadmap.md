@@ -24,7 +24,7 @@ Alarm 기능보다 먼저 Google Social Login과 StopBell 자체 Token 기반 �
 - [x] Spring Security 기반 인증된 User 식별
 - [ ] 인증된 User 기준 Alarm 소유권 처리
 
-Flutter Google Login, Secure Storage 기반 로그인 상태 유지, Token 갱신 및 Logout 연동은 Backend Alarm과 Transit Integration 이후 Flutter Client 단계에서 진행한다.
+Transit API 조사와 실제 응답 관찰은 Transit Foundation에서 먼저 수행한다. 이후 V1 구현은 Alarm Backend, Transit Integration, Flutter Client, Notification 순으로 진행한다. Flutter Google Login, Secure Storage 기반 로그인 상태 유지, Token 갱신 및 Logout 연동은 이 흐름에서 Flutter Client 단계에 포함한다.
 
 ## Phase 1 — 버스 알림 MVP
 

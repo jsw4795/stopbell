@@ -41,7 +41,7 @@ Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{
 
 JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `notification_history`는 Repository 기반으로 관리한다.
 
-MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에 사용한다. 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회와 Transit 상태 조회가 대상 예시이다.
+MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에 사용할 수 있다. Provider API가 Route 검색과 Route별 Stop 조회를 제공하고 Local DB 저장의 명확한 이유가 없으면 Transit 검색을 위해 MyBatis를 도입하지 않는다. Static metadata 저장, 검색 성능, rate limit 절감, grouping query 등 실제 필요가 확인되면 적용을 결정한다.
 
 JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡한 조회를 위해 Domain Entity의 상태 관리 책임을 MyBatis로 옮기지 않는다.
 

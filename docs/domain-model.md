@@ -195,13 +195,13 @@ Alarm은 생성, 수정, 삭제와 상태 관리를 위해 JPA Repository 기반
 
 ## Main Attributes
 
-    id
-
     routeNumber
 
     region
 
-    providerId
+    provider 결과에 따른 식별자
+
+구체적인 identifier 이름, provider namespace 필요 여부, 방향·정류장 순서 등 V1 Transit Target에 필요한 값은 Phase 3 Transit Foundation에서 실제 응답을 확인한 뒤 결정한다.
 
 ## Relationship
 
@@ -209,9 +209,9 @@ Alarm은 생성, 수정, 삭제와 상태 관리를 위해 JPA Repository 기반
 
 ## Persistence
 
-    MyBatis
+    Provider 조사 결과에 따라 결정
 
-BusRoute는 Transit 관련 조회 Model로 사용하며, 복잡한 검색과 외부 Transit 데이터 처리가 필요한 Query는 MyBatis로 처리한다.
+BusRoute는 Transit 관련 조회 Model로 사용한다. Provider API가 검색을 제공하면 이를 그대로 사용할 수 있으며, Static metadata 저장이나 검색 성능처럼 SQL 조회가 필요한 근거가 확인되면 MyBatis 사용을 검토한다.
 
 ------------------------------------------------------------------------
 
@@ -229,15 +229,15 @@ BusRoute는 Transit 관련 조회 Model로 사용하며, 복잡한 검색과 외
 
 ## Main Attributes
 
-    id
-
     name
 
     latitude
 
     longitude
 
-    providerId
+    provider 결과에 따른 식별자
+
+구체적인 identifier 이름과 노선 연결 정보는 Phase 3 Transit Foundation의 실제 Provider 조사 뒤 결정한다.
 
 ## Relationship
 
@@ -255,9 +255,9 @@ BusRoute는 Transit 관련 조회 Model로 사용하며, 복잡한 검색과 외
 
 ## Persistence
 
-    MyBatis
+    Provider 조사 결과에 따라 결정
 
-BusStop은 Transit 관련 조회 Model로 사용하며, Bus Route와의 관계를 포함한 Query는 MyBatis로 처리한다.
+BusStop은 Transit 관련 조회 Model로 사용한다. Provider API가 Route별 Stop 조회를 제공하면 이를 사용할 수 있으며, Local metadata 또는 SQL 조회가 필요한 근거가 확인되면 MyBatis 사용을 검토한다.
 
 ------------------------------------------------------------------------
 
@@ -281,15 +281,9 @@ Database Entity라기보다 Domain 개념이다.
 
 ## Main Attributes
 
-    routeId
+    Phase 3에서 결정한 Transit Target 식별자
 
-    stopId
-
-    arrivalTime
-
-    vehicleId
-
-    updatedAt
+    Provider가 제공하는 vehicle, arrival, 위치, 갱신 정보 중 평가에 필요한 관측값
 
 ## Reason
 
@@ -297,9 +291,9 @@ Alarm과 외부 API 데이터를 분리하기 위해 사용한다.
 
 ## Persistence
 
-    MyBatis
+    구현 방식은 Provider 조사 결과에 따라 결정
 
-TransitEvent는 외부 Transit 데이터를 조회하고 정규화하는 Query Model로 사용한다. 영속화 여부와 관계없이 Transit 상태 조회는 MyBatis로 처리한다.
+TransitEvent는 외부 Transit 데이터를 조회하고 정규화하는 Query Model로 사용한다. Provider 응답의 의미와 필요한 관측값이 확인된 뒤 영속화·조회 방식과 MyBatis 필요성을 결정한다.
 
 Bad:
 

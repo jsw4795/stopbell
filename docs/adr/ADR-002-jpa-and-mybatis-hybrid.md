@@ -51,18 +51,18 @@ JPA와 MyBatis를 함께 사용한다.
 
 JPA는 `User`, `Alarm`, `NotificationHistory`처럼 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 Repository 기반으로 사용한다.
 
-MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에서 사용한다.
+MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에서 사용할 수 있다. Provider API가 검색과 Route별 Stop 조회를 제공하고 Local DB 저장의 명확한 이유가 없으면 Transit 검색에 MyBatis를 강제하지 않는다.
 
 ## Rationale
 
 각 기술의 장점을 활용하고, Domain 로직과 복잡한 Query 처리를 분리하기 위함이다.
 
-JPA는 Domain Entity의 생성, 변경, 상태 전이를 간결하게 관리하게 한다. MyBatis는 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 통계 데이터 조회처럼 SQL 제어가 중요한 Query를 명확하게 작성하고 최적화할 수 있게 한다.
+JPA는 Domain Entity의 생성, 변경, 상태 전이를 간결하게 관리하게 한다. MyBatis는 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 통계 데이터 조회처럼 SQL 제어가 실제로 중요한 Query를 명확하게 작성하고 최적화할 수 있게 한다.
 
 ## Consequences
 
 - 단순한 Domain CRUD는 JPA Repository로 구현한다.
-- 복잡한 조회와 Transit 관련 Query는 MyBatis Mapper로 구현한다.
+- 복잡한 조회와 Transit 관련 Query는 SQL 제어의 실제 필요가 확인되면 MyBatis Mapper로 구현한다.
 - JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다.
 - 단순 CRUD에 MyBatis를 사용하거나, 복잡한 Query를 위해 JPA Query를 과도하게 복잡하게 만들지 않는다.
 

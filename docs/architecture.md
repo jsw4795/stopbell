@@ -78,7 +78,7 @@ Spring Boot
 
 JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `RefreshToken`, `Alarm`, `NotificationHistory`는 Repository 기반으로 관리한다.
 
-MyBatis는 복잡한 Query, 집계, 외부 Transit 데이터 처리 등 SQL 제어가 중요한 영역에서 사용한다. 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 통계 데이터 조회가 대상 예시이다.
+MyBatis는 복잡한 Query, 집계, 외부 Transit 데이터 처리 등 SQL 제어가 중요한 영역에서 사용할 수 있다. Transit Provider가 검색과 Route별 Stop 조회를 제공하면 이를 우선 사용하며, Local metadata, grouping query, 성능 최적화 등 SQL 제어가 필요한 근거가 확인된 경우에만 MyBatis를 적용한다. 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 통계 데이터 조회는 그 대상 예시이다.
 
 ## 5. Authentication Architecture
 

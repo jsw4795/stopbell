@@ -101,7 +101,7 @@ Database
 ### MyBatis / SQL
 
 - SQL은 읽기 쉽고 명시적이어야 한다.
-- Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에는 MyBatis를 사용한다.
+- Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에서 SQL 제어의 실제 필요가 확인되면 MyBatis를 사용한다. Provider API가 검색과 Route별 Stop 조회를 제공하고 Local DB 저장의 명확한 이유가 없으면 Transit 검색에 MyBatis를 강제하지 않는다.
 - N+1 쿼리 패턴을 피한다.
 - 의도가 명확하지 않은 복잡한 쿼리는 설명한다.
 - SQL 동작은 테스트할 수 있어야 한다.
