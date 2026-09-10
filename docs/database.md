@@ -131,7 +131,7 @@ INDEX(status)
 
 `status=FOLLOW_UP`이면 follow-up runtime 세 값이 모두 존재하고 `expires_at > started_at`이어야 한다. 다른 상태이면 세 값은 모두 `NULL`이어야 한다. 이 조합은 `ck_alarms_lifecycle` CHECK로 강제한다. `follow_up_vehicle_tracking_id`는 Target identity가 아니라 ARRIVED 차량의 관측을 재시작 뒤 연결하기 위한 short-lived correlation 값이다. `status` index는 TASK-510에서 FOLLOW_UP 복구 대상과 ACTIVE monitoring 대상을 조회할 수 있게 한다.
 
-V6 Migration은 nullable `status`를 먼저 추가하고 기존 `active=true`를 `ACTIVE`, `false`를 `INACTIVE`로 backfill한 뒤 `NOT NULL`을 적용하고 `active`를 제거한다. 기존 BUS Alarm row에는 가짜 Target을 생성하지 않으므로 Target 없는 legacy row도 Migration을 통과한다.
+V6 Migration은 nullable `status`를 먼저 추가하고 기존 `active=true`를 `ACTIVE`, `false`를 `INACTIVE`로 backfill한 뒤 `NOT NULL`을 적용하고 `active`를 제거한다. 기존 BUS Alarm row에는 가짜 Target을 생성하지 않으므로 Target 없는 legacy row도 Migration을 통과한다. V7 Migration은 BusAlarmTarget의 nullable column CHECK를 MySQL의 `UNKNOWN` 통과 특성에 맞게 보완하며 기존 Schema나 row를 변경하지 않는다.
 
 Transit API 조회 실패, Notification 발송 결과, ARRIVED/PASSED Event는 Alarm status로 저장하지 않는다. ACTIVE 중 차량별 tracking 및 Event consumption field도 이 table에 추가하지 않으며 TASK-509/708에서 별도 책임을 결정한다.
 
@@ -160,9 +160,9 @@ successor_stop_order INT NULL
 
 `provider`는 `TAGO`, `SEOUL_BUS` 문자열이다. TAGO에는 non-null `city_code`가 필요하고 서울에는 `NULL`이어야 하며 CHECK로 강제한다. 범용 JSON provider context는 저장하지 않는다. external ID와 vehicle tracking ID는 opaque String의 향후 여유를 위해 `VARCHAR(255)`, 표시용 노선번호는 `VARCHAR(100)`, 정류소명은 `VARCHAR(255)`, cityCode는 `VARCHAR(50)`을 사용한다.
 
-Target GPS는 provider precision을 손실 없이 다루고 부동소수 오차를 피하기 위해 Java `BigDecimal`, MySQL `DECIMAL(10,7)`을 사용한다. 두 좌표는 함께 존재하거나 함께 `NULL`이어야 하고 유효 범위를 CHECK로 제한한다.
+Target GPS는 provider precision을 손실 없이 다루고 부동소수 오차를 피하기 위해 Java `BigDecimal`, MySQL `DECIMAL(10,7)`을 사용한다. 두 좌표는 함께 존재하거나 함께 `NULL`이어야 하고 유효 범위를 CHECK로 제한한다. CHECK는 두 값이 모두 `NULL`이거나, 두 값이 모두 non-null이고 각각 유효 범위에 있는 경우만 허용하도록 명시한다.
 
-before 옵션이 켜지면 predecessor external Stop ID/order, after 옵션이 켜지면 successor external Stop ID/order가 반드시 존재하도록 CHECK를 둔다. 옵션이 꺼지면 대응 snapshot은 `NULL`이다. 인접 Stop의 display name과 GPS는 realtime occurrence 판정이나 현재 Notification 계약에 필요하지 않아 저장하지 않는다. predecessor/successor는 metadata traversal에서 확인한 occurrence snapshot이며 단순 `target_stop_order ± 1`을 가정하지 않는다.
+before 옵션이 켜지면 predecessor external Stop ID/order, after 옵션이 켜지면 successor external Stop ID/order가 모두 non-null이고 order가 양수여야 하도록 CHECK를 둔다. 옵션이 꺼지면 대응 snapshot은 `NULL`이다. 인접 Stop의 display name과 GPS는 realtime occurrence 판정이나 현재 Notification 계약에 필요하지 않아 저장하지 않는다. predecessor/successor는 metadata traversal에서 확인한 occurrence snapshot이며 단순 `target_stop_order ± 1`을 가정하지 않는다.
 
 Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, external_stop_id)`다. Target은 Route traversal 안의 occurrence이므로 `target_stop_order`를 별도로 저장한다. `(provider, external_route_id, external_stop_id)` Unique Constraint는 두지 않으며 이 세 값만으로 같은 Stop 재방문 occurrence를 합치지 않는다.
 

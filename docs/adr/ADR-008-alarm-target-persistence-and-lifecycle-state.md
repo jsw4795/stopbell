@@ -116,7 +116,7 @@ Provider namespace는 ADR-006의 `TAGO`, `SEOUL_BUS`를 `TransitProvider` Enum�
 
 before/after 옵션은 기본 OFF다. 생성 API에서 predecessor snapshot의 존재가 before ON, successor snapshot의 존재가 after ON을 의미하게 해 option과 인접 occurrence를 함께 받는다. 저장하는 인접 snapshot은 realtime 차량이 해당 occurrence에 도달했는지 판단하는 데 필요한 external Stop ID와 실제 traversal Stop order다. 인접 Stop name은 Target name으로 현재 Notification 표시 요구를 충족하고, 인접 GPS는 현재 Evaluation 필수 evidence가 아니므로 저장하지 않는다. 자동 metadata reconciliation은 V1에서 구현하지 않는다.
 
-V6 Migration은 새 nullable status를 추가하고 기존 `active=true`를 ACTIVE, `false`를 INACTIVE로 backfill한 뒤 NOT NULL을 적용하고 active column을 제거한다. 기존 row는 FOLLOW_UP일 수 없고 BusAlarmTarget 가짜 row를 만들지 않는다.
+V6 Migration은 새 nullable status를 추가하고 기존 `active=true`를 ACTIVE, `false`를 INACTIVE로 backfill한 뒤 NOT NULL을 적용하고 active column을 제거한다. 기존 row는 FOLLOW_UP일 수 없고 BusAlarmTarget 가짜 row를 만들지 않는다. V7 Migration은 nullable BusAlarmTarget column을 비교하는 CHECK가 `UNKNOWN`으로 통과하지 않도록 해당 CHECK를 재생성한다.
 
 ## 근거
 
