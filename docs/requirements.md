@@ -92,7 +92,7 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 - 사용자는 `notifyOneStopBefore`와 `notifyOneStopAfter` 의미의 추가 알림을 서로 독립적으로 선택할 수 있다. 구체적인 API field naming은 TASK-402에서 확정한다.
 - Target이 Route traversal의 첫 Stop이면 before 옵션을, 마지막 Stop이면 after 옵션을 사용할 수 없다. Client UX와 별개로 Backend 생성 계약도 이를 검증할 수 있어야 한다.
 - before/after의 인접 Stop은 단순 숫자 증감이 아니라 Provider의 방향·Route sequence metadata로 확인한 predecessor/successor다.
-- after 옵션이 꺼져 있으면 ARRIVED 뒤 모든 추적을 끝낸다. 켜져 있으면 Alarm은 그대로 비활성화하고 ARRIVED 차량만 다음 Stop 도달·통과까지 짧게 추적해 after Notification을 한 번 보낸다.
+- after 옵션이 꺼져 있으면 ARRIVED 뒤 Alarm을 `INACTIVE`로 전환하고 모든 추적을 끝낸다. 켜져 있으면 일반 monitoring을 끝내고 Alarm을 `FOLLOW_UP`으로 전환하여 ARRIVED 차량만 다음 Stop 도달·통과까지 짧게 추적한 뒤 after Notification을 한 번 보내고 `INACTIVE`로 전환한다. `FOLLOW_UP`은 ONE_STOP_AFTER 전용 lifecycle 상태이며 ARRIVED 자체는 Event다.
 - ARRIVED short follow-up 중 동일 Alarm을 다시 활성화하면 이전 follow-up을 취소하고 새 baseline과 monitoring cycle을 시작한다. Alarm을 삭제하면 active monitoring과 연결된 short follow-up을 모두 종료한다.
 - 한 Observation transition에서는 가장 의미 있는 Event 하나만 알린다. 직접 ARRIVED를 관찰하지 못한 채 Target 이전에서 이후로 점프하면 여러 알림 대신 PASSED를 선택한다. 이미 ARRIVED를 알린 차량의 follow-up 진행은 PASSED가 아니라 ONE_STOP_AFTER 후보로 처리한다.
 - Provider data가 stale하거나 방향·차량 연속성·필수 identifier가 불명확하거나 신호가 충돌하면 `UNKNOWN`으로 두고 ARRIVED/PASSED Notification을 만들지 않는다. 외부 Provider 요청 실패도 거짓 Transit Event를 만들지 않는다.

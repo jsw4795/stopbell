@@ -39,7 +39,7 @@ Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{
 
 ## 5. Persistence Strategy
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `notification_history`는 Repository 기반으로 관리한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `notification_history`는 Repository 기반으로 관리한다. `BusAlarmTarget`은 Alarm aggregate를 통해 persist/remove한다.
 
 MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에 사용할 수 있다. Provider API가 Route 검색과 Route별 Stop 조회를 제공하고 Local DB 저장의 명확한 이유가 없으면 Transit 검색을 위해 MyBatis를 도입하지 않는다. Static metadata 저장, 검색 성능, rate limit 절감, grouping query 등 실제 필요가 확인되면 적용을 결정한다.
 
@@ -47,7 +47,7 @@ JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡�
 
 ## 6. 핵심 테이블
 
-`users`, `refresh_tokens`, `alarms`, `notification_history`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 Push 연동이 확정될 때 별도 Migration으로 추가한다.
+`users`, `refresh_tokens`, `alarms`, `bus_alarm_targets`, `notification_history`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 Push 연동이 확정될 때 별도 Migration으로 추가한다.
 
 ### users
 
@@ -112,35 +112,59 @@ updated_at
 
 ### alarms
 
-사용자가 설정한 Alarm의 현재 공통 정보를 저장한다. Phase 3에서 Bus Alarm Transit Target의 개념 계약은 확정됐지만 실제 column, 관계, Embeddable/Entity 구조와 follow-up tracking persistence는 TASK-401에서 결정하고 Migration으로 반영한다.
+사용자가 설정한 Alarm의 공통 정보와 lifecycle을 저장한다. `transit_type`은 `BUS`, `SUBWAY`, `status`는 `INACTIVE`, `ACTIVE`, `FOLLOW_UP` 문자열로 저장한다. 새 Alarm의 기본 상태는 `INACTIVE`다. ARRIVED는 상태가 아닌 Event이고, FOLLOW_UP은 ARRIVED 뒤 ONE_STOP_AFTER만 처리하는 짧은 lifecycle 상태다.
 
-Route external identity `(provider, externalRouteId)`와 Stop external identity `(provider, externalStopId)`는 Alarm Target occurrence 자체의 unique key가 아니다. 같은 Route traversal에서 같은 Stop ID를 재방문할 수 있으므로 `UNIQUE(provider, externalRouteId, externalStopId)`를 근거 없이 추가하지 않는다. TASK-401은 `targetStopOrder`와 필요한 traversal/direction context, 재활성화·삭제 시 short follow-up 취소 lifecycle을 함께 검토한 뒤 실제 제약과 persistence를 결정한다.
-
-후보 필드:
-
-```text
-id
-user_id
-transit_type
-active
-created_at
-updated_at
-```
-
-`transit_type`은 `BUS`, `SUBWAY` 문자열로 저장한다. `active`는 Alarm이 현재 감시 대상인지 여부만 표현하며, 새 Alarm의 기본값은 `false`이다.
-
-Transit API 조회 실패, Notification 발송 결과, Alarm trigger는 Alarm의 상태로 저장하지 않는다. 이력과 결과는 필요 시 `notification_history` 또는 별도 logging으로 분리한다.
-
-현재 확정 Schema:
+현재 Schema:
 
 ```text
 id BIGINT AUTO_INCREMENT PRIMARY KEY
 user_id BIGINT NOT NULL REFERENCES users(id)
 transit_type VARCHAR(20) NOT NULL
-active BOOLEAN NOT NULL
+status VARCHAR(20) NOT NULL
+follow_up_vehicle_tracking_id VARCHAR(255) NULL
+follow_up_started_at DATETIME(6) NULL
+follow_up_expires_at DATETIME(6) NULL
 created_at DATETIME(6) NOT NULL
 updated_at DATETIME(6) NOT NULL
+INDEX(status)
 ```
+
+`status=FOLLOW_UP`이면 follow-up runtime 세 값이 모두 존재하고 `expires_at > started_at`이어야 한다. 다른 상태이면 세 값은 모두 `NULL`이어야 한다. 이 조합은 `ck_alarms_lifecycle` CHECK로 강제한다. `follow_up_vehicle_tracking_id`는 Target identity가 아니라 ARRIVED 차량의 관측을 재시작 뒤 연결하기 위한 short-lived correlation 값이다. `status` index는 TASK-510에서 FOLLOW_UP 복구 대상과 ACTIVE monitoring 대상을 조회할 수 있게 한다.
+
+V6 Migration은 nullable `status`를 먼저 추가하고 기존 `active=true`를 `ACTIVE`, `false`를 `INACTIVE`로 backfill한 뒤 `NOT NULL`을 적용하고 `active`를 제거한다. 기존 BUS Alarm row에는 가짜 Target을 생성하지 않으므로 Target 없는 legacy row도 Migration을 통과한다.
+
+Transit API 조회 실패, Notification 발송 결과, ARRIVED/PASSED Event는 Alarm status로 저장하지 않는다. ACTIVE 중 차량별 tracking 및 Event consumption field도 이 table에 추가하지 않으며 TASK-509/708에서 별도 책임을 결정한다.
+
+### bus_alarm_targets
+
+Bus-specific 장기 Alarm 설정을 공통 `alarms`의 nullable column으로 펼치지 않고 공유 PK Entity/table로 저장한다. 한 Alarm은 최대 하나의 BusAlarmTarget을 가지며 `alarm_id`는 PK이자 `alarms.id` FK다. FK는 `ON DELETE CASCADE`이므로 Alarm 삭제 시 orphan Target이 남지 않는다.
+
+```text
+alarm_id BIGINT PRIMARY KEY REFERENCES alarms(id) ON DELETE CASCADE
+provider VARCHAR(20) NOT NULL
+external_route_id VARCHAR(255) NOT NULL
+external_stop_id VARCHAR(255) NOT NULL
+target_stop_order INT NOT NULL
+route_number VARCHAR(100) NOT NULL
+stop_name VARCHAR(255) NOT NULL
+target_stop_latitude DECIMAL(10,7) NULL
+target_stop_longitude DECIMAL(10,7) NULL
+city_code VARCHAR(50) NULL
+notify_one_stop_before BOOLEAN NOT NULL DEFAULT FALSE
+predecessor_external_stop_id VARCHAR(255) NULL
+predecessor_stop_order INT NULL
+notify_one_stop_after BOOLEAN NOT NULL DEFAULT FALSE
+successor_external_stop_id VARCHAR(255) NULL
+successor_stop_order INT NULL
+```
+
+`provider`는 `TAGO`, `SEOUL_BUS` 문자열이다. TAGO에는 non-null `city_code`가 필요하고 서울에는 `NULL`이어야 하며 CHECK로 강제한다. 범용 JSON provider context는 저장하지 않는다. external ID와 vehicle tracking ID는 opaque String의 향후 여유를 위해 `VARCHAR(255)`, 표시용 노선번호는 `VARCHAR(100)`, 정류소명은 `VARCHAR(255)`, cityCode는 `VARCHAR(50)`을 사용한다.
+
+Target GPS는 provider precision을 손실 없이 다루고 부동소수 오차를 피하기 위해 Java `BigDecimal`, MySQL `DECIMAL(10,7)`을 사용한다. 두 좌표는 함께 존재하거나 함께 `NULL`이어야 하고 유효 범위를 CHECK로 제한한다.
+
+before 옵션이 켜지면 predecessor external Stop ID/order, after 옵션이 켜지면 successor external Stop ID/order가 반드시 존재하도록 CHECK를 둔다. 옵션이 꺼지면 대응 snapshot은 `NULL`이다. 인접 Stop의 display name과 GPS는 realtime occurrence 판정이나 현재 Notification 계약에 필요하지 않아 저장하지 않는다. predecessor/successor는 metadata traversal에서 확인한 occurrence snapshot이며 단순 `target_stop_order ± 1`을 가정하지 않는다.
+
+Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, external_stop_id)`다. Target은 Route traversal 안의 occurrence이므로 `target_stop_order`를 별도로 저장한다. `(provider, external_route_id, external_stop_id)` Unique Constraint는 두지 않으며 이 세 값만으로 같은 Stop 재방문 occurrence를 합치지 않는다.
 
 ### notification_history
 

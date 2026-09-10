@@ -115,10 +115,10 @@ Alarm 설정, 상태 전이, 활성화/비활성화 책임을 둔다.
 - `controller`: Alarm 생성, 조회, 활성화, 비활성화, 삭제 API
 - `service`: Alarm lifecycle과 Alarm Domain 규칙
 - `repository`: Alarm Entity의 JPA Repository
-- `entity`: Alarm JPA Entity
+- `entity`: `Alarm`, `BusAlarmTarget`, lifecycle/provider snapshot 관련 JPA Domain type
 - `dto`: Alarm API request/response DTO
 
-Alarm Evaluation은 scheduler에 묻지 않는다. provider-neutral `TransitObservation`과 Alarm Transit Target을 받아 위치 관계 및 `TransitEvent` 후보를 판단하는 Domain/비즈니스 로직은 `alarm`의 책임으로 둔다.
+Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기 설정은 같은 aggregate의 공유 PK `BusAlarmTarget` Entity로 분리한다. `AdjacentStopSnapshot`은 Target 생성 시 option과 필요한 predecessor/successor occurrence를 함께 표현한다. Alarm Evaluation은 scheduler에 묻지 않는다. provider-neutral `TransitObservation`과 Alarm Transit Target을 받아 위치 관계 및 `TransitEvent` 후보를 판단하는 Domain/비즈니스 로직은 `alarm`의 책임으로 둔다.
 
 ### transit
 
@@ -134,7 +134,7 @@ Alarm Evaluation은 scheduler에 묻지 않는다. provider-neutral `TransitObse
 
 V1 Provider는 경기 TAGO와 서울특별시 노선정보조회/버스위치정보조회 서비스로 결정됐다. 구현 시 provider별 client와 response DTO를 `transit` 경계 안에서 역할에 맞게 분리할 수 있지만, generic multi-provider framework나 동적 registry를 만들지 않는다. grouping key와 Transit metadata의 영속화 여부는 Undecided이다.
 
-Provider별 raw DTO를 Alarm Evaluation에 직접 전달하지 않는다. `transit`이 raw field를 `TransitObservation`의 공통 의미로 변환하고, Provider failure는 정상 Observation과 구분한다. 차량별 tracking lifecycle과 Alarm active 전이는 `alarm`이 소유하며 scheduler는 이를 실행만 한다.
+Provider별 raw DTO를 Alarm Evaluation에 직접 전달하지 않는다. `transit`이 raw field를 `TransitObservation`의 공통 의미로 변환하고, Provider failure는 정상 Observation과 구분한다. `transit.domain.TransitProvider`는 `TAGO`, `SEOUL_BUS` namespace의 안정적인 공통 type이다. 차량별 tracking lifecycle과 Alarm lifecycle 전이는 `alarm`이 소유하며 scheduler는 이를 실행만 한다.
 
 ### notification
 
@@ -160,7 +160,7 @@ alarm/repository/AlarmRepository
 notification/repository/NotificationHistoryRepository
 ```
 
-JPA는 `User`, `Alarm`, `NotificationHistory`의 단순 CRUD와 Entity 상태 관리에 사용한다.
+JPA는 `User`, `Alarm`, `BusAlarmTarget`, `NotificationHistory`의 단순 CRUD와 Entity 상태 관리에 사용한다. `BusAlarmTarget`은 별도 Repository로 독립 관리하지 않고 Alarm aggregate의 cascade lifecycle을 따른다.
 
 ### MyBatis Mapper
 

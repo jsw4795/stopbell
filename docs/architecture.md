@@ -66,6 +66,7 @@ Spring Boot
 │   ├── User
 │   ├── RefreshToken
 │   ├── Alarm
+│   ├── BusAlarmTarget
 │   └── NotificationHistory
 │
 └── MyBatis
@@ -76,7 +77,7 @@ Spring Boot
       MySQL
 ```
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `RefreshToken`, `Alarm`, `NotificationHistory`는 Repository 기반으로 관리한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `RefreshToken`, `Alarm`, `BusAlarmTarget`, `NotificationHistory`는 Repository 기반으로 관리한다. Bus-specific Target은 공통 Alarm table의 nullable column으로 펼치지 않고 Alarm과 공유 PK를 갖는 별도 Entity/table로 관리하며 Alarm aggregate의 persist/remove lifecycle을 따른다.
 
 MyBatis는 복잡한 Query, 집계, 외부 Transit 데이터 처리 등 SQL 제어가 중요한 영역에서 사용할 수 있다. Transit Provider가 검색과 Route별 Stop 조회를 제공하면 이를 우선 사용하며, Local metadata, grouping query, 성능 최적화 등 SQL 제어가 필요한 근거가 확인된 경우에만 MyBatis를 적용한다. 동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 통계 데이터 조회는 그 대상 예시이다.
 
@@ -205,9 +206,9 @@ Notification 전송 결정 또는 UNKNOWN 대기
 
 Alarm 활성화 시 현재 Route 차량을 baseline으로 분류한다. Target 이전 차량은 추적 후보이고, before 옵션이 켜진 상태에서 정확히 predecessor인 차량은 즉시 ONE_STOP_BEFORE 후보가 된다. Target 차량은 충분한 근거가 있으면 즉시 ARRIVED이며, 이미 Target 이후인 차량은 기존 passed vehicle로 무시한다.
 
-PASSED는 해당 Vehicle tracking만 종료하고 Alarm은 ACTIVE로 유지한다. ARRIVED는 Alarm 성공 Event이며 Notification 뒤 Alarm을 비활성화하고 다른 Vehicle tracking을 종료한다. after 옵션이 켜진 경우에도 Alarm은 비활성화하되, ARRIVED를 발생시킨 동일 차량만 다음 Stop 도달·통과까지 short follow-up 한다. 따라서 Alarm의 `active`와 follow-up tracking state는 같은 의미가 아니며, 별도 persisted state가 필요한지는 TASK-401/509에서 결정한다.
+PASSED는 해당 Vehicle tracking만 종료하고 Alarm은 ACTIVE로 유지한다. ARRIVED는 Alarm 성공 Event이며 after 옵션이 꺼져 있으면 Alarm을 INACTIVE로 전환하고 다른 Vehicle tracking을 종료한다. after 옵션이 켜져 있으면 Alarm을 ONE_STOP_AFTER 전용 FOLLOW_UP으로 전환하고 ARRIVED를 발생시킨 동일 차량만 다음 Stop 도달·통과까지 추적한다. FOLLOW_UP의 차량 tracking ID와 시작·만료 시각은 Alarm에 영속하여 재시작 뒤 복구할 수 있게 한다.
 
-short follow-up 중 같은 Alarm의 새 activation은 이전 cycle을 supersede한다. 기존 follow-up을 취소하고 새 baseline과 monitoring cycle을 시작한다. Alarm 삭제는 active monitoring과 연결된 short follow-up을 모두 종료한다. 이 lifecycle의 runtime/persistence 구조는 TASK-401/509/510에서 결정하며 Architecture에서 미리 고정하지 않는다.
+FOLLOW_UP 중 같은 Alarm의 새 activation은 이전 cycle을 supersede한다. 기존 follow-up runtime을 지우고 ACTIVE 상태의 새 baseline과 monitoring cycle을 시작한다. 비활성화·follow-up 완료도 runtime을 지우며 Alarm 삭제는 runtime과 BusAlarmTarget을 함께 제거한다. ACTIVE 중 차량별 observation/event 상태는 Alarm lifecycle과 분리해 TASK-509/708에서 결정한다.
 
 동일 Alarm·Vehicle·Event Type은 같은 tracking cycle에서 한 번만 의미가 있다. 저장소와 동시성 기반 중복 방지는 TASK-708에서 결정한다.
 

@@ -3,27 +3,32 @@ package com.stopbell.user.entity;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.sql.Connection;
-import java.sql.SQLException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.HexFormat;
 import javax.sql.DataSource;
 
 import com.stopbell.alarm.entity.Alarm;
+import com.stopbell.alarm.entity.AdjacentStopSnapshot;
+import com.stopbell.alarm.entity.AlarmStatus;
+import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
 import com.stopbell.notification.entity.NotificationHistory;
 import com.stopbell.notification.entity.NotificationStatus;
 import com.stopbell.notification.repository.NotificationHistoryRepository;
-import com.stopbell.user.repository.RefreshTokenRepository;
-import com.stopbell.user.repository.UserRepository;
+import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.dto.TokenResponse;
 import com.stopbell.user.auth.service.JwtTokenService;
 import com.stopbell.user.auth.service.LoginService;
+import com.stopbell.user.repository.RefreshTokenRepository;
+import com.stopbell.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,6 +37,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
@@ -94,7 +100,7 @@ class RepositoryIntegrationTest {
                 String.class
         );
 
-        assertThat(versions).contains("1", "2", "3", "4", "5");
+        assertThat(versions).contains("1", "2", "3", "4", "5", "6");
     }
 
     @Test
@@ -224,7 +230,7 @@ class RepositoryIntegrationTest {
 
         assertThat(foundAlarm.getUser().getId()).isEqualTo(user.getId());
         assertThat(foundAlarm.getTransitType()).isEqualTo(TransitType.SUBWAY);
-        assertThat(foundAlarm.isActive()).isFalse();
+        assertThat(foundAlarm.getStatus()).isEqualTo(AlarmStatus.INACTIVE);
         assertThat(foundAlarm.getCreatedAt()).isNotNull();
         assertThat(foundAlarm.getUpdatedAt()).isNotNull();
     }
@@ -278,7 +284,7 @@ class RepositoryIntegrationTest {
 
         Alarm updatedAlarm = alarmRepository.findById(savedAlarm.getId()).orElseThrow();
 
-        assertThat(updatedAlarm.isActive()).isTrue();
+        assertThat(updatedAlarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
         assertThat(updatedAlarm.getUpdatedAt()).isAfter(previousUpdatedAt);
     }
 
@@ -299,13 +305,186 @@ class RepositoryIntegrationTest {
 
         Alarm reloadedAlarm = alarmRepository.findById(alarm.getId()).orElseThrow();
 
-        assertThat(reloadedAlarm.isActive()).isTrue();
+        assertThat(reloadedAlarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
         assertThat(reloadedAlarm.getUpdatedAt()).isEqualTo(originalUpdatedAt);
+    }
+
+    @Test
+    @DisplayName("Bus Alarm Target의 식별자와 metadata snapshot 및 옵션을 저장하고 조회할 수 있다")
+    void save_bus_alarm_target_snapshots() {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-bus-target-user"));
+        BusAlarmTarget target = new BusAlarmTarget(
+                TransitProvider.TAGO,
+                "route-external-123",
+                "stop-external-456",
+                12,
+                "7007-1",
+                "판교역",
+                new BigDecimal("37.3947000"),
+                new BigDecimal("127.1112000"),
+                "31020",
+                new AdjacentStopSnapshot("predecessor-stop", 10),
+                new AdjacentStopSnapshot("successor-stop", 15)
+        );
+        Alarm savedAlarm = alarmRepository.saveAndFlush(new Alarm(user, target));
+        entityManager.clear();
+
+        Alarm foundAlarm = alarmRepository.findById(savedAlarm.getId()).orElseThrow();
+        BusAlarmTarget foundTarget = foundAlarm.getBusAlarmTarget();
+
+        assertThat(foundAlarm.getTransitType()).isEqualTo(TransitType.BUS);
+        assertThat(foundAlarm.getStatus()).isEqualTo(AlarmStatus.INACTIVE);
+        assertThat(foundTarget.getAlarmId()).isEqualTo(foundAlarm.getId());
+        assertThat(foundTarget.getProvider()).isEqualTo(TransitProvider.TAGO);
+        assertThat(foundTarget.getExternalRouteId()).isEqualTo("route-external-123");
+        assertThat(foundTarget.getExternalStopId()).isEqualTo("stop-external-456");
+        assertThat(foundTarget.getTargetStopOrder()).isEqualTo(12);
+        assertThat(foundTarget.getRouteNumber()).isEqualTo("7007-1");
+        assertThat(foundTarget.getStopName()).isEqualTo("판교역");
+        assertThat(foundTarget.getTargetStopLatitude()).isEqualByComparingTo("37.3947000");
+        assertThat(foundTarget.getTargetStopLongitude()).isEqualByComparingTo("127.1112000");
+        assertThat(foundTarget.getCityCode()).isEqualTo("31020");
+        assertThat(foundTarget.isNotifyOneStopBefore()).isTrue();
+        assertThat(foundTarget.getPredecessorExternalStopId()).isEqualTo("predecessor-stop");
+        assertThat(foundTarget.getPredecessorStopOrder()).isEqualTo(10);
+        assertThat(foundTarget.isNotifyOneStopAfter()).isTrue();
+        assertThat(foundTarget.getSuccessorExternalStopId()).isEqualTo("successor-stop");
+        assertThat(foundTarget.getSuccessorStopOrder()).isEqualTo(15);
+    }
+
+    @Test
+    @DisplayName("GPS와 인접 정류장 옵션이 없는 Bus Alarm Target도 저장할 수 있다")
+    void save_bus_alarm_target_without_optional_snapshots() {
+        Alarm savedAlarm = saveAlarm();
+        entityManager.clear();
+
+        BusAlarmTarget foundTarget = alarmRepository.findById(savedAlarm.getId()).orElseThrow().getBusAlarmTarget();
+
+        assertThat(foundTarget.getTargetStopLatitude()).isNull();
+        assertThat(foundTarget.getTargetStopLongitude()).isNull();
+        assertThat(foundTarget.getCityCode()).isNull();
+        assertThat(foundTarget.isNotifyOneStopBefore()).isFalse();
+        assertThat(foundTarget.getPredecessorExternalStopId()).isNull();
+        assertThat(foundTarget.getPredecessorStopOrder()).isNull();
+        assertThat(foundTarget.isNotifyOneStopAfter()).isFalse();
+        assertThat(foundTarget.getSuccessorExternalStopId()).isNull();
+        assertThat(foundTarget.getSuccessorStopOrder()).isNull();
+    }
+
+    @Test
+    @DisplayName("같은 Route와 Stop ID의 서로 다른 Target occurrence를 저장할 수 있다")
+    void save_revisited_stop_occurrences() {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-revisited-stop-user"));
+        Alarm firstOccurrence = alarmRepository.saveAndFlush(new Alarm(user, createSeoulTarget(10)));
+        Alarm secondOccurrence = alarmRepository.saveAndFlush(new Alarm(user, createSeoulTarget(30)));
+
+        assertThat(firstOccurrence.getId()).isNotEqualTo(secondOccurrence.getId());
+        assertThat(firstOccurrence.getBusAlarmTarget().getExternalRouteId())
+                .isEqualTo(secondOccurrence.getBusAlarmTarget().getExternalRouteId());
+        assertThat(firstOccurrence.getBusAlarmTarget().getExternalStopId())
+                .isEqualTo(secondOccurrence.getBusAlarmTarget().getExternalStopId());
+        assertThat(firstOccurrence.getBusAlarmTarget().getTargetStopOrder()).isEqualTo(10);
+        assertThat(secondOccurrence.getBusAlarmTarget().getTargetStopOrder()).isEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("FOLLOW_UP 상태와 차량 추적 문맥은 문자열 상태와 timestamp로 저장된다")
+    void save_follow_up_runtime() {
+        User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-follow-up-user"));
+        Alarm alarm = new Alarm(user, new BusAlarmTarget(
+                TransitProvider.SEOUL_BUS,
+                "route-1",
+                "stop-1",
+                12,
+                "143",
+                "서울역",
+                null,
+                null,
+                null,
+                null,
+                new AdjacentStopSnapshot("successor-stop", 13)
+        ));
+        LocalDateTime startedAt = LocalDateTime.of(2026, 9, 10, 12, 0);
+        alarm.activate();
+        alarm.startFollowUp("vehicle-123", startedAt, startedAt.plusMinutes(10));
+        Alarm savedAlarm = alarmRepository.saveAndFlush(alarm);
+        entityManager.clear();
+
+        Alarm foundAlarm = alarmRepository.findById(savedAlarm.getId()).orElseThrow();
+        String rawStatus = jdbcTemplate.queryForObject(
+                "select status from alarms where id = ?",
+                String.class,
+                savedAlarm.getId()
+        );
+
+        assertThat(foundAlarm.getStatus()).isEqualTo(AlarmStatus.FOLLOW_UP);
+        assertThat(foundAlarm.getFollowUpVehicleTrackingId()).isEqualTo("vehicle-123");
+        assertThat(foundAlarm.getFollowUpStartedAt()).isEqualTo(startedAt);
+        assertThat(foundAlarm.getFollowUpExpiresAt()).isEqualTo(startedAt.plusMinutes(10));
+        assertThat(rawStatus).isEqualTo("FOLLOW_UP");
+    }
+
+    @Test
+    @DisplayName("Alarm을 삭제하면 공유 PK로 연결된 Bus Alarm Target도 삭제된다")
+    void delete_alarm_removes_bus_alarm_target() {
+        Alarm alarm = saveAlarm();
+        Long alarmId = alarm.getId();
+
+        alarmRepository.delete(alarm);
+        alarmRepository.flush();
+        entityManager.clear();
+
+        Integer targetCount = jdbcTemplate.queryForObject(
+                "select count(*) from bus_alarm_targets where alarm_id = ?",
+                Integer.class,
+                alarmId
+        );
+        assertThat(targetCount).isZero();
+    }
+
+    @Test
+    @DisplayName("FOLLOW_UP 상태는 완전한 runtime field 없이 데이터베이스에 저장할 수 없다")
+    void save_follow_up_without_runtime_fails_by_check_constraint() {
+        Alarm alarm = saveAlarm();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "update alarms set status = 'FOLLOW_UP' where id = ?",
+                alarm.getId()
+        )).isInstanceOf(UncategorizedSQLException.class)
+                .hasMessageContaining("ck_alarms_lifecycle");
+    }
+
+    @Test
+    @DisplayName("한 정거장 후 옵션은 successor snapshot 없이 데이터베이스에 저장할 수 없다")
+    void save_after_option_without_successor_fails_by_check_constraint() {
+        Alarm alarm = saveAlarm();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "update bus_alarm_targets set notify_one_stop_after = true where alarm_id = ?",
+                alarm.getId()
+        )).isInstanceOf(UncategorizedSQLException.class)
+                .hasMessageContaining("ck_bus_alarm_targets_successor");
     }
 
     private Alarm saveAlarm() {
         User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-notification-user"));
-        return alarmRepository.saveAndFlush(new Alarm(user, TransitType.BUS));
+        return alarmRepository.saveAndFlush(new Alarm(user, createSeoulTarget(1)));
+    }
+
+    private BusAlarmTarget createSeoulTarget(int targetStopOrder) {
+        return new BusAlarmTarget(
+                TransitProvider.SEOUL_BUS,
+                "route-1",
+                "stop-1",
+                targetStopOrder,
+                "143",
+                "서울역",
+                null,
+                null,
+                null,
+                null,
+                null
+        );
     }
 
     private String sha256(String value) throws Exception {

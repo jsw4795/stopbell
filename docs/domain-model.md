@@ -148,7 +148,9 @@ RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refr
 ## Responsibilities
 
 -   Alarm 공통 정보 관리
--   활성 상태 관리
+-   Alarm lifecycle 상태 관리
+-   ARRIVED 뒤 ONE_STOP_AFTER 전용 follow-up runtime 관리
+-   Bus Alarm Target aggregate lifecycle 관리
 
 ## Main Attributes
 
@@ -158,27 +160,45 @@ RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refr
 
     transitType
 
-    active
+    status
+
+    followUpVehicleTrackingId (FOLLOW_UP only)
+
+    followUpStartedAt (FOLLOW_UP only)
+
+    followUpExpiresAt (FOLLOW_UP only)
 
     createdAt
 
     updatedAt
 
-## Active Status
+## Alarm Lifecycle
 
-`active`는 Alarm이 현재 감시 대상인지만 표현한다. 새 Alarm은 비활성 상태(`false`)로 생성한다.
+`status`는 `INACTIVE`, `ACTIVE`, `FOLLOW_UP` 값을 갖는 `AlarmStatus` Enum이며 문자열로 영속화한다. 새 Alarm의 기본 상태는 `INACTIVE`다.
+
+- `INACTIVE`: 일반 monitoring과 ARRIVED 후 follow-up이 모두 없음
+- `ACTIVE`: 다음 차량의 Target 도착을 일반 monitoring 중임
+- `FOLLOW_UP`: ARRIVED가 이미 성공했고 다른 차량 monitoring은 종료됐으며, `notifyOneStopAfter` 때문에 ARRIVED 차량의 successor 진행만 추적 중임
+
+`ARRIVED`, `PASSED`, `ONE_STOP_BEFORE`, `ONE_STOP_AFTER`는 lifecycle 상태가 아니라 Event다. 특히 `ONE_STOP_BEFORE`와 `PASSED` 뒤에는 `ACTIVE`를 유지하고, `ARRIVED` 뒤 after 옵션이 꺼져 있으면 `INACTIVE`, 켜져 있으면 `FOLLOW_UP`으로 전환한다.
+
+`activate()`는 `INACTIVE` 또는 `FOLLOW_UP`을 `ACTIVE`로 전환한다. FOLLOW_UP에서 호출되면 이전 follow-up runtime을 지워 old follow-up을 취소하고 새 monitoring cycle을 시작한다. 이미 ACTIVE이면 상태를 유지한다. `deactivate()`는 ACTIVE/FOLLOW_UP을 `INACTIVE`로 전환하고 follow-up runtime을 지운다.
+
+`startFollowUp(vehicleTrackingId, startedAt, expiresAt)`은 ACTIVE이며 `notifyOneStopAfter`가 설정된 Bus Alarm에서만 FOLLOW_UP을 시작한다. 만료시간 숫자는 이 Domain이 정하지 않고 호출자가 명시적으로 전달한다. `completeFollowUp()`은 FOLLOW_UP을 INACTIVE로 전환하고 runtime을 지운다.
+
+FOLLOW_UP이면 non-blank `followUpVehicleTrackingId`, `followUpStartedAt`, `followUpExpiresAt`이 모두 존재하고 expiry가 start보다 뒤여야 한다. FOLLOW_UP이 아니면 세 runtime field는 모두 비어 있어야 한다. after 옵션과 runtime의 교차-table 불변 조건은 Domain이, runtime field의 완전성과 status 조합은 Domain과 Database CHECK가 함께 강제한다.
 
 Transit API 조회 실패, Notification 발송 결과, Alarm trigger는 Alarm의 상태가 아니다. 이 정보는 필요 시 `NotificationHistory`, Application Log 또는 별도 이력으로 분리한다.
 
 `transitType`은 `BUS`, `SUBWAY`를 표현하는 Enum으로 관리하며, Database에는 문자열로 저장한다.
 
-V1 Bus Alarm의 Transit Target 계약은 아래에서 정의하지만 실제 Entity와 Database Schema는 TASK-401에서 결정한다.
+Bus Alarm의 장기 설정은 `Alarm`의 lifecycle runtime과 섞지 않고 공유 PK `BusAlarmTarget` Entity로 분리한다. Alarm이 aggregate lifecycle을 소유하며 persist/remove를 cascade한다. 기존 Target 없는 legacy Alarm row는 가짜 Target 없이 계속 load하고 비활성화할 수 있지만, 새 BUS Alarm 생성과 target 없는 legacy Alarm의 재활성화는 허용하지 않는다.
 
 ## Bus Alarm Transit Target Contract
 
 사용자는 Bus Route와 Target Stop을 직접 선택한다. First Stop은 선택 가능한 일반 Target occurrence의 하나이며 모든 Alarm의 고정 Target이 아니다.
 
-개념적 최소 계약:
+영속 계약:
 
 ```text
 external references
@@ -188,11 +208,9 @@ external references
 
 target occurrence operational snapshot
     targetStopOrder
-    traversalContext (ambiguity 해소에 필요한 경우)
-    directionContext (ambiguity 해소에 필요한 경우)
     targetStopLatitude (optional)
     targetStopLongitude (optional)
-    providerRequestContext (provider별 optional; TAGO cityCode 포함)
+    cityCode (TAGO only)
 
 display snapshot
     routeNumber
@@ -200,20 +218,22 @@ display snapshot
 
 notification options
     notifyOneStopBefore
+    predecessorExternalStopId / predecessorStopOrder (option ON only)
     notifyOneStopAfter
+    successorExternalStopId / successorStopOrder (option ON only)
 ```
 
 Route external identity는 `(provider, externalRouteId)`, Stop external identity는 `(provider, externalStopId)`이며 둘 다 ADR-006에서 정한 opaque external reference다. Vehicle identifier는 Alarm Target에 포함하지 않는다.
 
-사용자가 선택하는 Alarm Target은 Stop identity 자체가 아니라 Route traversal 안의 특정 Stop occurrence다. Route/Stop reference에 `targetStopOrder`와 필요한 traversal/direction context를 함께 사용해 그 occurrence를 평가한다. 같은 Route의 sequence에 같은 Stop ID가 여러 번 나타날 수 있으므로 `(provider, externalRouteId, externalStopId)`만으로 Target occurrence의 uniqueness가 보장되지 않는다. TASK-401은 이 세 값만을 근거로 `UNIQUE(provider, externalRouteId, externalStopId)` 같은 제약을 만들지 않고 실제 Schema와 불변 조건을 별도로 결정한다.
+사용자가 선택하는 Alarm Target은 Stop identity 자체가 아니라 Route traversal 안의 특정 Stop occurrence다. Route/Stop reference와 `targetStopOrder`로 선택 당시 occurrence를 보존한다. 현재 Provider 계약에서 별도 direction/traversal 값을 안전하게 영속할 구체적 field가 확인되지 않아 추측성 column은 추가하지 않았다. 같은 Route의 sequence에 같은 Stop ID가 여러 번 나타날 수 있으므로 `(provider, externalRouteId, externalStopId)`만으로 Target occurrence의 uniqueness가 보장되지 않으며 이 조합의 Unique Constraint를 두지 않는다.
 
 `targetStopOrder`는 선택한 Route traversal에서 target occurrence를 연결하고 이전/다음 Stop을 판단하기 위한 필수 operational metadata다. Stop identity가 아니며 Provider metadata 변경 뒤 stale할 수 있다. 순환·재방문·분기·회차로 같은 Stop ID가 여러 번 등장하면 order와 필요한 traversal/direction context로 사용자가 선택한 occurrence를 구분해야 한다.
 
-Target Stop 좌표는 Provider가 metadata로 제공할 때 저장 후보가 되는 optional operational snapshot이며, 특히 경기 first-stop에서 Stop ID·order와 함께 GPS 근접 근거를 평가하는 데 사용한다. 정확한 저장 여부와 GPS distance threshold는 TASK-401/509에서 결정한다.
+Target Stop 좌표는 Provider가 metadata로 제공할 때 `BigDecimal`/`DECIMAL(10,7)`로 함께 저장하는 optional operational snapshot이며, 특히 경기 first-stop에서 Stop ID·order와 함께 GPS 근접 근거를 평가하는 데 사용한다. GPS distance threshold는 TASK-509에서 결정한다.
 
-`routeNumber`와 `stopName`은 검색·표시 및 Notification 위치 안내를 위한 snapshot이지 identity가 아니다. TAGO `cityCode`는 API request를 재현하기 위한 필수 provider request context이지 identity가 아니다. 서울에는 가짜 `cityCode`를 채우지 않는다. `providerRequestContext`는 임의 속성을 쌓는 범용 JSON bag을 뜻하지 않으며 TASK-401/402에서 현재 Provider에 필요한 최소 typed 구조로 구체화한다.
+`routeNumber`와 `stopName`은 검색·표시 및 Notification 위치 안내를 위한 snapshot이지 identity가 아니다. TAGO `cityCode`는 API request를 재현하기 위한 필수 typed context column이지 identity가 아니다. TAGO Target에는 non-blank cityCode가 필요하고 서울 Target에는 가짜 cityCode를 저장하지 않는다. 범용 JSON/Map provider context는 사용하지 않는다.
 
-두 Notification option은 독립적인 선택값이다. Route metadata가 확인한 traversal에서 predecessor가 없으면 `notifyOneStopBefore=true`, successor가 없으면 `notifyOneStopAfter=true`인 Alarm 생성 요청은 유효하지 않다. 이 검증은 Client에만 의존하지 않고 Backend 계약에서도 수행할 수 있어야 한다. 구체적인 request field와 HTTP error는 TASK-402에서 결정한다.
+두 Notification option은 독립적인 선택값이며 기본값은 모두 OFF다. Domain 생성 API에서는 predecessor snapshot 존재가 before ON, successor snapshot 존재가 after ON을 의미하게 해 option만 켜지고 필요한 occurrence가 없는 조합을 만들지 않는다. 인접 snapshot은 realtime Observation을 metadata 재조회 없이 일치시키는 데 필요한 external Stop ID와 실제 traversal Stop order만 저장한다. 표시에는 Target `stopName`이면 충분하고 인접 GPS는 현재 평가 계약의 필수 근거가 아니므로 인접 Stop name/GPS는 저장하지 않는다. 구체적인 request field와 HTTP error는 TASK-402에서 결정한다.
 
 ## Persistence
 
@@ -460,9 +480,9 @@ UNKNOWN → Notification 없이 다음 Observation 대기
 
 새 차량이 이후 나타나 Target 이전에서 관찰되면 새 tracking 후보가 될 수 있다. PASSED 뒤 해당 차량 cycle은 종료하고 같은 Event를 다시 만들지 않는다. 같은 tracking reference가 순환해 다시 Target 이전에 나타나는 경우에는 차량 소실·새 운행 시작 등 새 cycle 근거가 있어야 하며 단순 order 역행만으로 재사용하지 않는다.
 
-ARRIVED 뒤 after 옵션이 꺼져 있으면 Alarm 비활성화와 함께 모든 차량 tracking을 끝낸다. 옵션이 켜져 있으면 Alarm은 비활성화하고 다른 차량 tracking을 끝내며, 성공 차량만 ONE_STOP_AFTER까지 short follow-up 한다. follow-up tracking은 Alarm `active`와 다른 runtime 의미다. 별도 persisted state 필요성과 timeout은 TASK-401/509에서 결정한다.
+ARRIVED 뒤 after 옵션이 꺼져 있으면 Alarm을 INACTIVE로 전환하고 모든 차량 tracking을 끝낸다. 옵션이 켜져 있으면 Alarm을 FOLLOW_UP으로 전환하고 다른 차량 tracking을 끝내며, 성공 차량만 ONE_STOP_AFTER까지 short follow-up 한다. FOLLOW_UP runtime은 Alarm에 영속되어 재시작 뒤 복구할 수 있고 timeout 숫자는 TASK-509/510에서 결정한다.
 
-short follow-up이 진행 중인 동일 Alarm을 사용자가 다시 활성화하면 이전 activation cycle의 follow-up을 취소하고 새 baseline으로 새 monitoring cycle을 시작한다. Alarm 삭제 시에는 active monitoring과 해당 Alarm의 short follow-up을 모두 종료한다. 취소 상태의 runtime/persistence 표현은 TASK-401/509/510에서 결정한다.
+FOLLOW_UP 상태의 동일 Alarm을 사용자가 다시 활성화하면 이전 activation cycle의 follow-up runtime을 지우고 새 baseline으로 새 monitoring cycle을 시작한다. 비활성화와 follow-up 완료도 runtime을 지운다. Alarm 삭제 시에는 Alarm column인 runtime과 공유 PK BusAlarmTarget이 함께 삭제된다.
 
 동일 Alarm + 동일 Vehicle + 동일 Event Type은 같은 tracking cycle에서 한 번만 의미가 있다. 구체적인 persistence와 concurrency 기반 duplicate prevention은 TASK-708의 범위다.
 

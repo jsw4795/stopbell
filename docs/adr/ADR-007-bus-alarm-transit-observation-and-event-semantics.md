@@ -100,9 +100,9 @@ before 옵션이 켜진 Alarm을 활성화하는 순간 차량이 Target occurre
 
 PASSED 위치의 optional `stopsPastTarget`은 raw Stop order의 숫자 차이가 아니다. 같은 Route traversal에서 Target occurrence부터 현재 확인된 Stop occurrence까지 metadata sequence로 확인한 successor edge 수다. 두 occurrence와 그 사이 traversal을 확정할 수 있을 때만 계산하며, 불확실하면 값을 제공하지 않는다. `stopsPastTarget`이 없어도 PASSED와 최근 확인 위치 Notification은 발생할 수 있다.
 
-after 옵션이 켜진 ARRIVED에서는 Alarm을 비활성화하고 다른 차량 tracking을 끝낸 뒤 ARRIVED 차량만 short follow-up 한다. 같은 방향·Route traversal의 다음 Stop에 도달하거나 polling jump로 그 Stop 이상 진행했다는 충분한 근거가 있으면 `ONE_STOP_AFTER`를 한 번 발생시키고 follow-up을 끝낸다. 이 진행을 PASSED로 다시 분류하지 않는다. follow-up state의 영속화 필요성과 만료 정책은 TASK-401/509에서 판단한다.
+after 옵션이 켜진 ARRIVED에서는 일반 monitoring과 다른 차량 tracking을 끝낸 뒤 ARRIVED 차량만 short follow-up 한다. 같은 방향·Route traversal의 다음 Stop에 도달하거나 polling jump로 그 Stop 이상 진행했다는 충분한 근거가 있으면 `ONE_STOP_AFTER`를 한 번 발생시키고 follow-up을 끝낸다. 이 진행을 PASSED로 다시 분류하지 않는다. TASK-401은 이를 `FOLLOW_UP` lifecycle과 차량 ID·시작·만료 시각으로 영속하기로 결정했으며 상세 persistence 근거는 ADR-008을 따른다. 실제 만료시간 숫자는 TASK-509/510에서 결정한다.
 
-short follow-up이 남아 있는 동일 Alarm을 사용자가 다시 활성화하면 이전 activation cycle의 follow-up을 취소하고 새 baseline과 새 monitoring cycle을 시작한다. 새 activation이 이전 cycle을 supersede하므로 old ONE_STOP_AFTER와 새 cycle Event를 동시에 유지하지 않는다. Alarm 삭제는 active monitoring뿐 아니라 그 Alarm에 연결된 short follow-up도 함께 종료한다. 구체적인 runtime/persistence 방식은 TASK-401/509/510에서 결정한다.
+short follow-up이 남아 있는 동일 Alarm을 사용자가 다시 활성화하면 이전 activation cycle의 follow-up을 취소하고 새 baseline과 새 monitoring cycle을 시작한다. 새 activation이 이전 cycle을 supersede하므로 old ONE_STOP_AFTER와 새 cycle Event를 동시에 유지하지 않는다. Alarm 삭제는 active monitoring뿐 아니라 그 Alarm에 연결된 short follow-up도 함께 종료한다. TASK-401은 재활성화·비활성화·완료 시 persisted runtime을 지우는 Domain operation을 제공하며 scheduler coordination은 TASK-510에서 구현한다.
 
 한 Observation transition은 사용자에게 가장 의미 있는 Event 하나만 선택한다. 일반 tracking에서는 직접 관찰한 ARRIVED, target을 건너뛴 PASSED, ONE_STOP_BEFORE 순으로 우선한다. ARRIVED 후 follow-up에서는 ONE_STOP_AFTER만 평가한다. 동일 Alarm·Vehicle·Event Type은 같은 tracking cycle에서 한 번만 의미가 있다.
 
@@ -116,7 +116,7 @@ ARRIVED만 Alarm 성공으로 두면 정상 성공 lifecycle이 단순해지고,
 
 ## 결과
 
-- TASK-401은 Target occurrence를 표현할 최소 Domain/Schema와 follow-up runtime state의 영속 필요성을 결정한다. Route/Stop reference만으로 occurrence uniqueness를 가정하지 않는다.
+- TASK-401은 Target occurrence를 표현할 최소 Domain/Schema와 follow-up runtime state를 구현했다. Route/Stop reference만으로 occurrence uniqueness를 가정하지 않으며 세부 결정은 ADR-008을 따른다.
 - TASK-402는 생성·조회·활성화·삭제 계약, before/after validation과 오류 응답을 구체화한다.
 - TASK-504는 Provider raw DTO를 `TransitObservation`으로 변환하고 `TransitEvent`의 provider-neutral 표현을 정의한다. Event 판정 자체는 Provider mapper가 아니라 TASK-509 Evaluation이 담당한다.
 - TASK-509는 evidence 조합, transition precedence, activation 시 predecessor, `stopsPastTarget`, tracking cycle과 UNKNOWN 규칙을 구현하고 GPS threshold·freshness 기준을 실측으로 정한다.

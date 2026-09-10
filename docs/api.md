@@ -84,7 +84,7 @@ POST /api/v1/alarms/{alarmId}/activate
 
 구현 전에는 다른 REST 형태도 검토할 수 있다.
 
-활성화 시 진행 중인 이전 ARRIVED short follow-up이 있으면 이를 취소하고 새 baseline과 monitoring cycle을 시작한다. before 옵션이 켜져 있고 baseline 차량이 Target predecessor에 있으면 즉시 ONE_STOP_BEFORE 후보가 될 수 있다. 구체적인 response와 동시성 처리는 TASK-402 및 후속 구현 Task에서 결정한다.
+활성화 시 `FOLLOW_UP`인 Alarm은 persisted follow-up runtime을 지워 이전 ARRIVED short follow-up을 취소하고 `ACTIVE`의 새 baseline과 monitoring cycle을 시작한다. before 옵션이 켜져 있고 baseline 차량이 Target predecessor에 있으면 즉시 ONE_STOP_BEFORE 후보가 될 수 있다. 구체적인 response와 동시성 처리는 TASK-402 및 후속 구현 Task에서 결정한다.
 
 ### 알림 비활성화
 
@@ -98,7 +98,7 @@ POST /api/v1/alarms/{alarmId}/deactivate
 DELETE /api/v1/alarms/{alarmId}
 ```
 
-Alarm 삭제는 active monitoring뿐 아니라 해당 Alarm에 연결된 진행 중 short follow-up도 종료해야 한다. 구체적인 persistence 및 scheduler coordination은 후속 Task에서 결정한다.
+Alarm 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime과 공유 PK BusAlarmTarget도 함께 제거한다. 구체적인 scheduler coordination은 후속 Task에서 결정한다.
 
 ### 기기 등록
 

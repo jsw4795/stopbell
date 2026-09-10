@@ -87,7 +87,7 @@ TASK-305 시작 시 활성화된 서울 노선정보조회 서비스를 live pre
 - Provider raw DTO는 Transit 경계 안에서 변환하고 StopBell Domain/API에 그대로 노출하지 않는다.
 - external ID는 String으로 보존하며 parsing·numeric arithmetic·prefix 의존을 하지 않는다.
 - 노선 개편·정류소 변경 뒤 Provider ID가 계속 불변한다는 보장은 없으므로 stale target 대응은 향후 실제 필요가 확인될 때 결정한다.
-- Alarm Target Schema, observation DTO, 도착/통과/first-stop rule, polling·grouping·duplicate state는 이 ADR이 결정하지 않으며 TASK-305로 남긴다.
+- Alarm Target Schema와 lifecycle persistence는 TASK-401 및 ADR-008에서 결정했다. Observation DTO, polling·grouping·duplicate state는 후속 Task 범위다.
 
 ## 재검토 시점
 
