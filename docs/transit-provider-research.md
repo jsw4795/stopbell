@@ -502,3 +502,60 @@ Stop 이름은 `DMC첨단산업센터`였다. 이 한 Route/Stop row-level 표�
 - TASK-504: Provider raw DTO를 `TransitObservation`으로 mapping하고 provider-neutral `TransitEvent` 표현 정의; Event 판정은 TASK-509에 유지
 - TASK-509: evidence 조합, GPS/freshness 기준, baseline, transition precedence와 tracking cycle 구현
 - TASK-510: active Alarm monitoring과 inactive Alarm의 성공 차량 follow-up scheduling 분리
+
+## Transit Static Metadata Source 호환성 PoC
+
+### 목적과 실행 범위
+
+2026-09-13 KST에 Alarm API 설계 전에 국토교통부 [버스노선별 경유정류장](https://www.data.go.kr/data/15142031/openapi.do) 전국 metadata가 기존 V1 realtime Provider의 Route/Stop identifier와 직접 호환되는지 확인했다. Production code, DB Schema, importer, Scheduler, Alarm API와 Task 체크 상태는 변경하지 않았다.
+
+Repository root의 local-only `.env`에 있던 `TAGO_SERVICE_KEY`는 process environment에서만 사용했다. Key 원문, expanded request URL, `.env` 내용은 출력하거나 문서화하지 않았다.
+
+### 국토교통부 전국 metadata API 현재 계약
+
+- 현재 endpoint는 `https://apis.data.go.kr/1613000/BusRoutespecificStopInformation/getBusRoutespecificStopInformation`이며, JSON/XML 목록 API다.
+- `opr_ymd`, `ctpv_cd`, `sgg_cd`, `pageNo`, `numOfRows`, `dataType`은 요청에 필요하고, `rte_id`는 route ID filter로 선택 가능하다. `rte_no` 검색 parameter는 계약에 없다.
+- 응답은 `rte_id`, `rte_no`, `rte_nm`, `sttn_seq`, `sttn_id`, `sttn_nm` 및 행정구역 field를 제공한다. 한 페이지의 `numOfRows` 최대값은 1,000이고, 공식 guide는 30 TPS를 표시한다.
+- 현재 포털 표기는 무료, 이용허락범위 제한 없음, 개발/운영 자동승인, 개발계정 신청 가능 트래픽 1,000이다. 포털 수정일은 2026-04-21이지만, guide와 포털에는 데이터 갱신 주기가 명시되지 않았다.
+- 제공 형식은 API(JSON/XML)이며, 포털에는 활용가이드 PDF 외에 전체/지역 CSV 또는 다른 static data download가 없다. 따라서 권한을 얻더라도 full sync는 대상 `ctpv_cd`/`sgg_cd`별 조회와 pagination으로 구성해야 한다.
+
+### 전국 metadata live 검증 결과
+
+현재 날짜와 서울/경기 요청 조건으로 실제 호출을 시도했지만 두 경우 모두 HTTP 403과 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`를 받았다. 이는 endpoint 또는 parameter 오류가 아니라 해당 dataset에 대한 현재 key의 등록/권한 부족 응답이다. 새 key 발급이나 활용신청은 수행하지 않았다.
+
+| 대상 | 기존 Provider PoC 값 | 전국 metadata row 확인 | 판정 |
+| --- | --- | --- | --- |
+| 서울 7016 | Route `100100447`, target Stop `113000022`, order `3`, `DMC첨단산업센터` | API 권한 부족으로 서울 row를 받지 못함 | `UNRESOLVED` |
+| 경기 7000 | Route `GGB200000112`, target Stop `GGB228001174`, order `1`, `사색의광장` | API 권한 부족으로 경기 row를 받지 못함 | `UNRESOLVED` |
+
+따라서 `GGB` prefix 유무, 동일 노선번호나 이름만으로 namespace 관계를 판단하지 않았다. 두 Route의 추가 occurrence도 전국 source와 대조하지 못했다.
+
+### 서울 T Data CSV fallback 실측
+
+서울 [T Data 노선마스터](https://t-data.seoul.go.kr/dataprovide/trafficdataviewfile.do?data_id=33), [정류장마스터](https://t-data.seoul.go.kr/dataprovide/trafficdataviewfile.do?data_id=35), [노선-정류장마스터](https://t-data.seoul.go.kr/dataprovide/trafficdataviewfile.do?data_id=34)는 모두 현재 CSV download를 제공한다. 노선-정류장 및 정류장 CSV를 실제로 내려받아 7016을 대조했다. 세 파일의 포털 갱신 주기는 분기별 1회이며, 이용 조건은 저작자 표시(BY)로 변경 및 2차 저작물 작성을 허용한다고 표기한다.
+
+`TBIS_MS_노선_노드`에는 Route `100100447`의 occurrence가 106개 있었다. `TBIS_MS_정류장`과 join한 앞쪽 occurrence는 다음과 같다.
+
+| stopOrder | stopId | stopName |
+| ---: | --- | --- |
+| 1 | `111000907` | 은평공영차고지 |
+| 2 | `111000225` | 덕은교.은평차고지앞 |
+| 3 | `113000022` | DMC첨단산업센터 |
+| 4 | `113000181` | 월드컵파크7단지 |
+| 5 | `113000020` | 서부면허시험장 |
+| 6 | `113000026` | 월드컵파크3단지정문 |
+
+기존 서울 metadata/realtime PoC의 target occurrence와 T Data CSV는 Route ID, Stop ID, order, Stop name이 모두 동일하므로 **서울 T Data fallback의 target occurrence 판정은 `EXACT_MATCH`**다. 추가 occurrence는 T Data 안에서 sequence와 ID를 확인했지만, 이번 PoC에서 historic realtime row를 추가로 확보하지 못했으므로 additional occurrence별 realtime 대조까지 완료한 것은 아니다. 이 결과는 `SEOUL_BUS` namespace 안의 ID 보존을 보여 주며, 장기 불변성이나 모든 서울 Route의 realtime 연결을 보장하지 않는다.
+
+### 경기 GBIS fallback 확인
+
+경기버스정보의 [경유정류소 목록조회 공식 안내](https://www.gbis.go.kr/gbis2014/publicService.action?cmd=mBusRouteStation)는 `routeId` 요청에 대해 `stationId`, `stationName`, `stationSeq`를 제공한다고 명시한다. 요청 endpoint는 `https://apis.data.go.kr/6410000/busrouteservice/v2/getBusRouteStationListv2`이며, 응답은 JSON/XML을 지원한다.
+
+같은 local key로 Route 7000 및 Route `GGB200000112`의 current response를 요청했으나 역시 HTTP 403과 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`였다. 공식 문서의 GBIS numeric example과 TAGO `GGB...` identifier 사이에 stable transform rule 또는 mapping field를 확인하지 못했으므로, **경기 GBIS fallback의 TAGO realtime ID 호환성은 `UNRESOLVED`**다. prefix를 제거하는 mapping, GBIS raw ID를 TAGO ID로 저장하는 방식은 이 결과만으로 제안하지 않는다.
+
+### 이번 PoC가 주는 의미
+
+- 전국 metadata는 현재 권한으로 서울·경기 모두 row-level identifier 호환성을 검증하지 못했으므로 단일 static metadata source 후보로 채택하거나 기존 V1 provider routing을 변경할 근거가 없다.
+- 서울 T Data CSV는 7016 target의 `SEOUL_BUS` identifier를 그대로 보존하는 실제 fallback이며, 사용자가 선호한 "metadata sync/import → StopBell DB → 사용자 요청은 DB" 구조의 입력 source가 될 수 있다.
+- 경기 GBIS/TAGO static sync는 Route/Stop ID namespace 연결을 live response와 공식 mapping 근거로 먼저 확인해야 한다. 그 전에는 TAGO Route → Stop metadata를 독립적으로 sync하는 방식이 기존 TAGO realtime reference와 가장 직접적으로 연결된다.
+- metadata persistence의 Schema, import batch, schedule, provider routing 또는 Task 순서는 이번 PoC에서 결정하지 않는다. 그 판단은 현재 계획의 TASK-507에서 다룬다.
