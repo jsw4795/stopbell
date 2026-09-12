@@ -559,3 +559,67 @@ Repository root의 local-only `.env`에 있던 `TAGO_SERVICE_KEY`는 process env
 - 서울 T Data CSV는 7016 target의 `SEOUL_BUS` identifier를 그대로 보존하는 실제 fallback이며, 사용자가 선호한 "metadata sync/import → StopBell DB → 사용자 요청은 DB" 구조의 입력 source가 될 수 있다.
 - 경기 GBIS/TAGO static sync는 Route/Stop ID namespace 연결을 live response와 공식 mapping 근거로 먼저 확인해야 한다. 그 전에는 TAGO Route → Stop metadata를 독립적으로 sync하는 방식이 기존 TAGO realtime reference와 가장 직접적으로 연결된다.
 - metadata persistence의 Schema, import batch, schedule, provider routing 또는 Task 순서는 이번 PoC에서 결정하지 않는다. 그 판단은 현재 계획의 TASK-507에서 다룬다.
+
+## 경기 TAGO Static Metadata Full Sync PoC
+
+### 목적과 실행 범위
+
+2026-09-13 KST에 경기도 버스 metadata를 TAGO 기반으로 전체 또는 주기 동기화할 수 있는지 확인했다. 이 PoC는 Production metadata Entity/Schema/importer/Scheduler/Alarm API를 구현하지 않고, 기존 `TAGO` external Route/Stop ID 및 TASK-401 occurrence 계약을 변경하지 않는다. Repository root의 local-only `.env`에 있던 `TAGO_SERVICE_KEY`는 process environment에서만 사용했고, 원문·expanded request URL·`.env` 내용은 출력하거나 기록하지 않았다.
+
+### 경기도 Route 목록 확보
+
+공식 TAGO [버스노선정보](https://www.data.go.kr/data/15098529/openapi.do)의 `getCtyCodeList`는 경기도를 하나의 code로 주지 않고 31개 시·군 cityCode로 반환했다. 이 cityCode를 `getRouteNoList`의 필수 `cityCode`에 넣고, `routeNo` 없이 `pageNo=1`, `numOfRows=1000`으로 호출하면 해당 시·군의 전체 Route 목록을 얻었다. 별도의 경기도 전체 Route 목록 endpoint는 확인하지 못했다.
+
+- 31개 cityCode Route 조회는 모두 `resultCode=00`이었다.
+- 각 cityCode의 `totalCount`와 실제 반환 item 수가 일치했다. 최소는 과천시(`31110`) 4건, 최대는 광주시(`31250`) 227건이었다.
+- 전체 2,155 Route row의 `routeid`는 모두 고유했다. 따라서 이번 데이터 기준 경기도 전체 Route 목록은 **31개 cityCode별 1 page, 2,155개 unique Route**로 수집 가능하다.
+- Route list item에는 cityCode가 없으므로, sync 결과는 API를 재현하기 위한 request context인 cityCode를 Route와 함께 보존해야 한다. cityCode는 Route identity가 아니다.
+- `numOfRows=1000` 요청은 실제로 성공했지만, 공식 명세에서 그보다 큰 maximum row 수는 별도로 확인하지 못했다. 이번 경기도 Route 목록에는 1,000 초과 page가 없었다.
+
+### Route → Stop occurrence 실측
+
+`getRouteAcctoThrghSttnList(cityCode, routeId)`는 Route별 전체 Stop occurrence를 반환했다. 실제 Stop item의 field는 `routeid`, `nodeid`, `nodenm`, `nodeord`, `gpslati`, `gpslong`이며 일부 Route에는 `nodeno`도 있었다. Stop 목록에는 direction, turn point 또는 metadata version field가 없었다.
+
+| Route | cityCode / type | Stop 수 | first / middle / last occurrence 확인 |
+| --- | --- | ---: | --- |
+| `GGB200000112` (7000) | `31010` / 직행좌석버스 | 79 | order 1 / 40 / 79 |
+| `GGB200000006` (300) | `31010` / 일반버스 | 163 | order 1 / 82 / 163 |
+| `GGB218000155` (M7119) | `31100` / 광역급행버스 | 42 | order 1 / 22 / 42 |
+| `GGB219000026` (9700) | `31250` / 직행좌석버스 | 81 | order 1 / 41 / 81 |
+
+네 표본은 모두 order가 `1..N`으로 연속했고 동일 Stop ID의 Route 내 재등장은 없었다. 그러나 이는 순환/회차 Route 전체에 대한 보장이 아니며, Route/Stop reference만으로 occurrence uniqueness를 가정하지 않는다. 실제 API가 `routeId + nodeId + nodeOrd`를 제공하므로 기존 계약대로 target occurrence는 Route reference, Stop reference, Stop order와 필요한 traversal context로 표현할 수 있다.
+
+### 7000 identifier 대조
+
+현재 TAGO metadata 응답에서 Route 7000은 `routeid=GGB200000112`, `routeno=7000`, `routetp=직행좌석버스`였다. 첫 occurrence는 `nodeid=GGB228001174`, `nodeord=1`, `nodenm=사색의광장`, GPS 37.2402833 / 127.0824였다. 기존 realtime PoC 값과 Route ID, Stop ID, order, name이 문자열까지 모두 같으므로 **`EXACT_MATCH`**다.
+
+이 Route는 order 1과 order 79에서 모두 `사색의광장`이라는 display name을 갖지만 Stop ID는 서로 다르다. display name이 occurrence identity가 아님을 보여 주는 표본이다.
+
+기존 realtime PoC에서 Route 300은 metadata `GGB200000006`의 Stop/Location `nodeId` 및 `nodeOrd` 연결을 이미 확인했다. 이번 current metadata도 같은 Route ID와 163개 Stop occurrence를 반환했다. M7119와 9700은 서로 다른 cityCode와 Route type에서 `GGB...` Route/Stop ID, sequence, GPS가 같은 TAGO metadata contract로 반환됨을 확인했다. 호출 시각에는 세 Route의 Location API가 모두 정상(`resultCode=00`)이면서 운행 차량 0건이어서 추가 Route별 current static ↔ realtime row 대조는 `UNRESOLVED`다.
+
+### Full sync 규모와 호출량
+
+실제 경기도 Route 목록 2,155건을 기준으로, Route list는 cityCode별 31회, Route → Stop은 Route별 최소 2,155회다. Stop page가 모두 한 번에 끝난다면 한 full sync의 최소 호출량은 **2,186회**다. 이번 네 표본은 모두 1,000 rows 이하여서 한 page였지만, 전체 구현은 Stop response의 `totalCount`를 보고 pagination을 계속해야 하며 추가 page 수는 이 PoC에서 `UNRESOLVED`다.
+
+네 표본의 평균 Stop 수는 91.25개이므로, 전체 Stop occurrence 규모는 표본 기반 **약 197,000개**로 추정된다. 이는 전체 2,155 Route를 모두 조회해 합산한 값이 아니므로 sizing 추정치일 뿐이다.
+
+공식 포털은 개발계정 신청 가능 트래픽을 일 10,000, 세부 기능 maximum을 30 TPS로 표시한다. 2,186회는 10,000의 약 22%이며 30 TPS만 놓고 보면 이론상 약 73초다. 다만 10,000의 API Service별/Service Key 공유 적용 단위와 실제 throttling은 확정되지 않았으므로, retry/backoff와 호출 분산을 전제로 해야 한다. Route metadata 공식 guide의 갱신주기 표기는 일 1회다.
+
+### Metadata 변경 감지와 전략 비교
+
+`getRouteInfoIem`의 Route 7000 current response에는 route ID/number/type, 기·종점과 배차 field만 있고 version, updatedAt, last-modified 또는 기준일 field는 없었다. Route → Stop 응답에도 같은 변경 감지 field를 확인하지 못했다. TAGO metadata의 row-level 변경 감지 token은 **`UNRESOLVED`**다.
+
+| 전략 | 장점 | 단점 | 이번 PoC 판단 |
+| --- | --- | --- | --- |
+| Full Sync | Route/Stop 조회와 Alarm 생성이 외부 API에 의존하지 않음; 현재 규모가 quota 안에 있음 | 최소 2,186회, version 부재로 snapshot diff가 필요 | **추천**. 일 1회 이하의 throttled sync와 snapshot diff 후보 |
+| Lazy Metadata Cache | 초기 호출량이 작고 미사용 Route를 수집하지 않음 | Route 검색/선택 단계가 Provider 가용성에 의존; cache miss 정책과 stale 상태가 추가됨 | V1의 DB 중심 사용자 흐름에는 차선책 |
+
+이번 실측만으로 production replace/upsert/diff policy, retry 횟수, transaction 경계나 Scheduler를 결정하지 않는다. version이 없으므로 미래 sync Task에서는 새 snapshot의 Route/occurrence를 비교해 변경을 감지할 수 있는지 별도로 설계해야 한다.
+
+### Architecture에 주는 의미
+
+이번 PoC의 추천은 **서울 T Data CSV full import + 경기 TAGO throttled full sync**다. 경기 TAGO metadata가 기존 realtime `GGB...` namespace와 Route 7000에서 `EXACT_MATCH`이고, full sync 최소 호출량이 현재 개발 quota보다 작기 때문이다.
+
+metadata persistence가 생기면 Flutter Route/Stop 조회 결과의 internal `RouteStopOccurrence` reference를 opaque `targetStopOccurrenceId`로 Alarm Create Request에 사용하는 것은 가능하다. 다만 Alarm에는 provider/Route/Stop external reference, target order, display/GPS/cityCode snapshot을 계속 보존해야 하며 internal ID 하나만 영구 target identity로 대체하지 않는다. 현재 API contract는 external reference와 order를 의미상 요구하므로, request를 internal ID 전용으로 바꾸는 것은 TASK-402의 명시적 설계 결정이 필요하다.
+
+`targetStopOccurrenceId` 기반 API를 실제로 제공하려면 metadata persistence와 selection validation이 먼저 있어야 한다. 따라서 TASK-402의 field naming 자체는 계속 진행할 수 있지만, 그 형태를 채택한다면 TASK-403보다 먼저 TASK-507의 metadata persistence 결정/구현을 앞당길지 개발자 확인이 필요하다. 이 PoC는 task-list 순서와 Architecture/Domain/API 문서를 변경하지 않는다.
