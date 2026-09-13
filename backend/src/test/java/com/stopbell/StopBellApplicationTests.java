@@ -13,6 +13,9 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.stopbell.user.repository.UserRepository;
 import com.stopbell.user.repository.RefreshTokenRepository;
+import com.stopbell.transit.repository.BusRouteRepository;
+import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
+import com.stopbell.transit.repository.BusStopRepository;
 
 import static org.mockito.Mockito.mock;
 
@@ -56,6 +59,21 @@ class StopBellApplicationTests {
         @Bean
         RefreshTokenRepository refreshTokenRepository() {
             return mock(RefreshTokenRepository.class);
+        }
+
+        @Bean
+        BusRouteRepository busRouteRepository() {
+            return mock(BusRouteRepository.class);
+        }
+
+        @Bean
+        BusStopRepository busStopRepository() {
+            return mock(BusStopRepository.class);
+        }
+
+        @Bean
+        BusRouteStopOccurrenceRepository busRouteStopOccurrenceRepository() {
+            return mock(BusRouteStopOccurrenceRepository.class);
         }
     }
 }

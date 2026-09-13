@@ -170,7 +170,7 @@ Application API는 JWT Access Token 기반으로 인증하며, Access Token 기�
 
 운영 구현 전에 다음을 조사하거나 결정해야 한다.
 
-- Transit metadata persistence와 MyBatis가 실제로 필요한가?
+- Transit metadata persistence는 서울 T Data CSV full import와 경기 TAGO throttled full sync를 위해 필요하며 JPA diff sync로 구현한다. Route/Stop 검색·Alarm grouping의 MyBatis 필요성은 실제 SQL 제어 요구가 확인될 때 결정한다.
 - 어떤 폴링 주기가 허용되며 유용한가?
 - 어떤 요청 제한이 적용되는가?
 - FCM은 Android와 iOS 요구사항 모두에 충분한가?

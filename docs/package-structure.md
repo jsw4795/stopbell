@@ -54,6 +54,8 @@ backend/
     │
     ├── transit/
     │   ├── client/
+    │   ├── entity/
+    │   ├── repository/
     │   ├── service/
     │   ├── mapper/
     │   ├── dto/
@@ -125,14 +127,16 @@ Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기
 외부 Transit provider 통신, provider별 응답 정규화, Transit Query 책임을 둔다.
 
 - `client`: 외부 Transit API client
-- `service`: Transit 데이터 조회와 정규화
+- `service`: Transit 데이터 조회·정규화와 source-neutral metadata reconciliation
+- `entity`: `BusRoute`, `BusStop`, `BusRouteStopOccurrence` JPA Entity
+- `repository`: Transit metadata JPA Repository
 - `mapper`: MyBatis Mapper 및 SQL
 - `dto`: provider 응답 및 내부 Transit DTO
 - `domain`: `TransitObservation`, `TransitEvent` 등 Transit 관련 Domain Model
 
-동일한 Bus Route / Bus Stop을 감시하는 Alarm 그룹 조회, Transit 상태 조회, 복잡한 Transit 검색은 SQL 제어가 실제로 필요한 경우 MyBatis를 사용한다. Provider API가 검색과 Route별 Stop 조회를 제공하면 이를 우선 사용하며, metadata persistence나 grouping query가 필요한지는 Transit Foundation 조사 뒤 결정한다.
+Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync의 normalized route snapshot을 JPA로 reconciliation한다. 동일 Route/Stop identity의 metadata는 UPDATE하고, 의미가 바뀐 occurrence는 삭제 후 새 row로 생성한다. Route/Stop 검색, Alarm grouping, Transit 상태 조회, 복잡한 검색은 SQL 제어가 실제로 필요한 경우 MyBatis를 사용한다.
 
-V1 Provider는 경기 TAGO와 서울특별시 노선정보조회/버스위치정보조회 서비스로 결정됐다. 구현 시 provider별 client와 response DTO를 `transit` 경계 안에서 역할에 맞게 분리할 수 있지만, generic multi-provider framework나 동적 registry를 만들지 않는다. grouping key와 Transit metadata의 영속화 여부는 Undecided이다.
+V1 Provider는 경기 TAGO와 서울특별시 노선정보조회/버스위치정보조회 서비스로 결정됐다. static metadata source는 서울 T Data CSV와 경기 TAGO sync를 사용한다. 구현 시 provider별 client와 response DTO를 `transit` 경계 안에서 역할에 맞게 분리할 수 있지만, generic multi-provider framework나 동적 registry를 만들지 않는다. grouping key는 아직 결정하지 않는다.
 
 Provider별 raw DTO를 Alarm Evaluation에 직접 전달하지 않는다. `transit`이 raw field를 `TransitObservation`의 공통 의미로 변환하고, Provider failure는 정상 Observation과 구분한다. `transit.domain.TransitProvider`는 `TAGO`, `SEOUL_BUS` namespace의 안정적인 공통 type이다. 차량별 tracking lifecycle과 Alarm lifecycle 전이는 `alarm`이 소유하며 scheduler는 이를 실행만 한다.
 
@@ -158,9 +162,12 @@ JPA Repository는 Entity를 소유한 Domain 안에 둔다.
 user/repository/UserRepository
 alarm/repository/AlarmRepository
 notification/repository/NotificationHistoryRepository
+transit/repository/BusRouteRepository
+transit/repository/BusStopRepository
+transit/repository/BusRouteStopOccurrenceRepository
 ```
 
-JPA는 `User`, `Alarm`, `BusAlarmTarget`, `NotificationHistory`의 단순 CRUD와 Entity 상태 관리에 사용한다. `BusAlarmTarget`은 별도 Repository로 독립 관리하지 않고 Alarm aggregate의 cascade lifecycle을 따른다.
+JPA는 `User`, `Alarm`, `BusAlarmTarget`, `NotificationHistory`, Bus metadata의 단순 CRUD와 Entity 상태 관리에 사용한다. `BusAlarmTarget`은 별도 Repository로 독립 관리하지 않고 Alarm aggregate의 cascade lifecycle을 따른다.
 
 ### MyBatis Mapper
 

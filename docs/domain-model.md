@@ -20,12 +20,7 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
      └── RefreshToken
 
 
-    Transit API
-
-     |
-     ├── BusRoute
-     |
-     └── BusStop
+    BusRoute ──< BusRouteStopOccurrence >── BusStop
 
 ------------------------------------------------------------------------
 
@@ -256,23 +251,23 @@ Alarm은 생성, 수정, 삭제와 상태 관리를 위해 JPA Repository 기반
 
 ## Main Attributes
 
+    id
+    provider
+    externalRouteId
     routeNumber
+    cityCode (TAGO only)
 
-    region
-
-    provider 결과에 따른 식별자
-
-Route identity는 `(provider, externalRouteId)`다. `routeNumber`는 display/search metadata이고, Route Stop 목록의 순서는 하나의 traversal 안에서 predecessor/successor 및 진행 방향을 해석하는 operational metadata다.
+Route identity는 `(provider, externalRouteId)`다. `id`는 StopBell 내부 PK이고, `routeNumber`는 display metadata다. `cityCode`는 TAGO metadata/realtime request를 재현하는 typed context이며 identity가 아니다. TAGO에는 non-blank cityCode가 필요하고 SEOUL_BUS에는 `null`이어야 한다.
 
 ## Relationship
 
-    BusRoute 1 : N BusStop
+    BusRoute 1 : N BusRouteStopOccurrence
 
 ## Persistence
 
-    Provider 조사 결과에 따라 결정
+    JPA
 
-BusRoute는 Transit 관련 조회 Model로 사용한다. Provider API가 검색을 제공하면 이를 그대로 사용할 수 있으며, Static metadata 저장이나 검색 성능처럼 SQL 조회가 필요한 근거가 확인되면 MyBatis 사용을 검토한다.
+서울 T Data CSV full import와 경기 TAGO throttled full sync가 제공하는 current metadata를 JPA Repository로 저장한다. 같은 external identity의 routeNumber/cityCode가 변경되면 row를 UPDATE해 `id`를 유지한다.
 
 ------------------------------------------------------------------------
 
@@ -290,35 +285,47 @@ BusRoute는 Transit 관련 조회 Model로 사용한다. Provider API가 검색�
 
 ## Main Attributes
 
-    name
-
+    id
+    provider
+    externalStopId
+    stopName
     latitude
-
     longitude
-
-    provider 결과에 따른 식별자
 
 Stop identity는 `(provider, externalStopId)`다. Route 안의 Stop order, name, 좌표는 operational/display metadata이며 identity가 아니다.
 
 ## Relationship
 
-실제로 하나의 정류장은 여러 노선에 포함될 수 있다.
-
-따라서 Database에서는 중간 테이블이 필요할 가능성이 있다.
-
-예:
-
-    bus_routes
-
-    bus_stops
-
-    route_stops
+한 Stop은 여러 Route occurrence에 포함될 수 있다. 좌표는 둘 다 null이거나 둘 다 존재하며 latitude `-90~90`, longitude `-180~180` 범위를 만족한다.
 
 ## Persistence
 
-    Provider 조사 결과에 따라 결정
+    JPA
 
-BusStop은 Transit 관련 조회 Model로 사용한다. Provider API가 Route별 Stop 조회를 제공하면 이를 사용할 수 있으며, Local metadata 또는 SQL 조회가 필요한 근거가 확인되면 MyBatis 사용을 검토한다.
+같은 external identity의 stopName/GPS가 변경되면 row를 UPDATE해 `id`를 유지한다.
+
+------------------------------------------------------------------------
+
+# BusRouteStopOccurrence
+
+## Purpose
+
+특정 Route traversal에서 Stop이 몇 번째로 나타나는지 표현하는 current metadata다. 같은 Route가 같은 Stop을 재방문할 수 있으므로 Stop identity와 occurrence를 분리한다.
+
+## Main Attributes
+
+    id
+    route
+    stop
+    stopOrder
+
+`route`와 `stop`은 같은 provider여야 하고 `stopOrder`는 양수다. Route 안에서 `(route, stopOrder)`는 유일하지만 `(route, stop)`은 유일하지 않다.
+
+## Persistence
+
+    JPA
+
+Route snapshot reconciliation은 `(route, stop, stopOrder)`가 완전히 같은 occurrence만 같은 내부 ID를 유지한다. Stop 또는 order가 바뀌면 기존 occurrence를 삭제하고 새 row를 생성해 의미가 바뀐 occurrence ID를 재사용하지 않는다.
 
 ------------------------------------------------------------------------
 

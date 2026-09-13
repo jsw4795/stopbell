@@ -39,15 +39,15 @@ Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{
 
 ## 5. Persistence Strategy
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `notification_history`는 Repository 기반으로 관리한다. `BusAlarmTarget`은 Alarm aggregate를 통해 persist/remove한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`는 Repository 기반으로 관리한다. `BusAlarmTarget`은 Alarm aggregate를 통해 persist/remove한다. Bus metadata는 source-neutral route snapshot을 한 Route 단위로 reconciliation한다.
 
-MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에 사용할 수 있다. Provider API가 Route 검색과 Route별 Stop 조회를 제공하고 Local DB 저장의 명확한 이유가 없으면 Transit 검색을 위해 MyBatis를 도입하지 않는다. Static metadata 저장, 검색 성능, rate limit 절감, grouping query 등 실제 필요가 확인되면 적용을 결정한다.
+MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에 사용할 수 있다. 이번 metadata CRUD와 reconciliation은 JPA Entity 상태 관리가 중심이므로 MyBatis를 사용하지 않는다. Route/Stop 검색, Alarm grouping, 대량 조회 성능에서 실제 SQL 제어 필요성이 확인되면 적용을 결정한다.
 
 JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡한 조회를 위해 Domain Entity의 상태 관리 책임을 MyBatis로 옮기지 않는다.
 
 ## 6. 핵심 테이블
 
-`users`, `refresh_tokens`, `alarms`, `bus_alarm_targets`, `notification_history`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 Push 연동이 확정될 때 별도 Migration으로 추가한다.
+`users`, `refresh_tokens`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 Push 연동이 확정될 때 별도 Migration으로 추가한다.
 
 ### users
 
@@ -184,19 +184,43 @@ created_at DATETIME(6) NOT NULL
 
 FCM message ID, device token, provider 응답, retry count, 전송 단계별 timestamp는 실제 Notification 전송 흐름이 확정될 때 필요성을 검토한다. NotificationHistory 저장 시점, retry 및 duplicate prevention 전략도 현재 결정하지 않는다.
 
+### bus_routes, bus_stops, bus_route_stop_occurrences
+
+서울/경기 Bus static metadata의 현재 상태를 저장한다. `BusAlarmTarget`은 이 테이블을 FK로 참조하지 않고 Alarm 생성 당시 필요한 값을 snapshot으로 복사한다. 따라서 metadata sync가 기존 Alarm target을 변경하지 않는다.
+
+```text
+bus_routes
+id BIGINT AUTO_INCREMENT PRIMARY KEY
+provider VARCHAR(20) NOT NULL
+external_route_id VARCHAR(255) NOT NULL
+route_number VARCHAR(100) NOT NULL
+city_code VARCHAR(50) NULL
+UNIQUE(provider, external_route_id)
+
+bus_stops
+id BIGINT AUTO_INCREMENT PRIMARY KEY
+provider VARCHAR(20) NOT NULL
+external_stop_id VARCHAR(255) NOT NULL
+stop_name VARCHAR(255) NOT NULL
+latitude DECIMAL(10,7) NULL
+longitude DECIMAL(10,7) NULL
+UNIQUE(provider, external_stop_id)
+
+bus_route_stop_occurrences
+id BIGINT AUTO_INCREMENT PRIMARY KEY
+route_id BIGINT NOT NULL REFERENCES bus_routes(id) ON DELETE CASCADE
+stop_id BIGINT NOT NULL REFERENCES bus_stops(id)
+stop_order INT NOT NULL
+UNIQUE(route_id, stop_order)
+```
+
+Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, external_stop_id)`다. TAGO Route에는 non-blank `city_code`가 필요하고 SEOUL_BUS Route에는 `NULL`이어야 한다. Stop GPS는 함께 `NULL`이거나 함께 존재해야 하며 latitude `-90~90`, longitude `-180~180`만 허용한다. occurrence의 `stop_order`는 양수여야 한다. 같은 Route가 같은 Stop을 재방문할 수 있으므로 `(route_id, stop_id)` Unique Constraint는 두지 않는다.
+
+Route snapshot sync는 동일 Route/Stop identity의 display·operational metadata를 UPDATE해 내부 ID를 유지한다. occurrence는 `(route, stop, stopOrder)`가 완전히 같을 때만 내부 ID를 유지하며 Stop 또는 order가 바뀌면 기존 row를 삭제하고 새 row를 만든다. Route snapshot에서 사라진 occurrence는 제거한다. Provider 전체 source fetch가 성공한 경우에만 source에 없는 Route를 제거하고, 모든 occurrence에서 참조되지 않는 같은 provider Stop만 orphan cleanup한다. source fetch 실패 시 provider-level 삭제를 실행하지 않는다.
+
 ## 7. 외부 교통 데이터
 
-`bus_routes`, `bus_stops` 마스터 테이블을 자동으로 만들지 않는다.
-
-먼저 다음을 확인한다.
-
-- 제공자 API 지연 시간
-- 요청 제한
-- 식별자의 안정성
-- 검색 기능
-- 로컬 캐시가 UX 또는 API 사용량을 실질적으로 개선하는지 여부
-
-교통 메타데이터를 영속화한다면 이유를 문서화하고 갱신/무효화 규칙을 정의한다.
+서울은 T Data CSV full import, 경기는 TAGO throttled full sync를 source로 사용한다. static metadata를 DB에 보관하면 사용자 Route/Stop 조회와 Alarm 생성이 외부 metadata 호출·rate limit에 매번 의존하지 않고, identifier와 traversal 정보를 현재 metadata로 관리할 수 있다. 실제 source downloader/parser, production client, scheduler는 별도 Transit Task에서 구현한다.
 
 ## 8. 인덱싱
 

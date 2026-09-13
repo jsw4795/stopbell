@@ -12,6 +12,9 @@ import java.util.Base64;
 import com.stopbell.user.auth.service.JwtTokenService;
 import com.stopbell.user.repository.UserRepository;
 import com.stopbell.user.repository.RefreshTokenRepository;
+import com.stopbell.transit.repository.BusRouteRepository;
+import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
+import com.stopbell.transit.repository.BusStopRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -148,6 +151,21 @@ class SecurityConfigurationIntegrationTest {
         @Bean
         RefreshTokenRepository refreshTokenRepository() {
             return mock(RefreshTokenRepository.class);
+        }
+
+        @Bean
+        BusRouteRepository busRouteRepository() {
+            return mock(BusRouteRepository.class);
+        }
+
+        @Bean
+        BusStopRepository busStopRepository() {
+            return mock(BusStopRepository.class);
+        }
+
+        @Bean
+        BusRouteStopOccurrenceRepository busRouteStopOccurrenceRepository() {
+            return mock(BusRouteStopOccurrenceRepository.class);
         }
     }
 

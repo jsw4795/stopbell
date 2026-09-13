@@ -155,6 +155,8 @@ Phase 3에서 확정된 Transit provider 및 identifier 전략을 기준으로 �
 
 TASK-401은 Alarm lifecycle을 `INACTIVE`/`ACTIVE`/`FOLLOW_UP` 상태로 전환하고 ARRIVED 후 ONE_STOP_AFTER 전용 runtime을 영속했다. BUS 전용 장기 설정은 공유 PK `BusAlarmTarget`으로 분리하고 Route/Stop identity, target occurrence order, display/GPS/cityCode 및 필요한 인접 occurrence snapshot을 V6 Migration과 JPA Domain에 반영했다. Route/Stop external reference만으로 uniqueness를 강제하지 않으며 ACTIVE 중 차량별 tracking과 API/Evaluation/Scheduler는 후속 Task에 남겼다.
 
+TASK-507은 client 최소 입력과 metadata DB lookup 기반 Alarm Create를 설계하기 위해 TASK-402/403보다 먼저 완료했다. Bus static metadata는 current `BusRoute`/`BusStop`/`BusRouteStopOccurrence`로 관리하고 Alarm 생성 시에는 기존 `BusAlarmTarget` snapshot으로 복사한다. TASK-402/403은 아직 API field나 internal occurrence ID의 public 노출 여부를 확정하지 않는다.
+
 모든 Alarm API는 Phase 2 Authentication의 인증된 StopBell User를 기준으로 소유권을 처리한다. Client Request Body 또는 Query Parameter의 `userId`를 받지 않으며, 생성·조회·수정·삭제 모두 해당 User 소유 Alarm만 처리한다.
 
 ------------------------------------------------------------------------
@@ -171,14 +173,14 @@ Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 A
 - [ ] TASK-504 StopBell Transit DTO 및 `TransitEvent` 변환 구현
 - [ ] TASK-505 Bus Route 검색 구현
 - [ ] TASK-506 Bus Stop 조회 구현
-- [ ] TASK-507 Transit metadata persistence / MyBatis 필요성 결정 및 필요 시 구현
+- [x] TASK-507 Transit metadata persistence / MyBatis 필요성 결정 및 구현
 - [ ] TASK-508 Alarm grouping 조회 전략 결정 및 구현
 - [ ] TASK-509 Alarm Evaluation Logic 구현
 - [ ] TASK-510 Scheduler 실행 모델 결정 및 구현
 - [ ] TASK-511 Transit API failure를 `UNKNOWN` 상태로 처리
 - [ ] TASK-512 Transit Integration Test 작성
 
-Provider API가 Route 검색과 Route별 Stop 조회를 제공하고 Local DB 저장의 명확한 이유가 없다면 Transit 검색을 위해 MyBatis를 도입하지 않는다. Static metadata 저장, 검색 성능, rate limit 절감, grouping query 등 실제 필요가 확인되면 TASK-507 또는 TASK-508에서 적절한 persistence 및 query 방식을 결정한다. JPA/MyBatis 사용 자체를 포트폴리오 목적으로 강제하지 않는다.
+TASK-507은 서울 T Data CSV full import와 경기 TAGO throttled full sync를 위한 local metadata persistence 필요성을 확인해 `BusRoute`/`BusStop`/`BusRouteStopOccurrence` Schema, JPA Repository, source-neutral route diff sync를 구현했다. 같은 Route/Stop identity의 metadata는 내부 ID를 유지하며, 의미가 바뀐 occurrence는 새 ID를 받는다. Provider 전체 fetch 성공 시에만 없는 Route와 orphan Stop을 cleanup한다. metadata CRUD/reconciliation은 JPA로 충분하므로 MyBatis를 도입하지 않았고, Route/Stop 검색·Alarm grouping·대량 조회 성능에서 실제 SQL 제어 필요성이 확인될 때 재검토한다.
 
 ------------------------------------------------------------------------
 
