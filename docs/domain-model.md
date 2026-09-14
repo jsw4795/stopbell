@@ -228,7 +228,7 @@ Target Stop 좌표는 Provider가 metadata로 제공할 때 `BigDecimal`/`DECIMA
 
 `routeNumber`와 `stopName`은 검색·표시 및 Notification 위치 안내를 위한 snapshot이지 identity가 아니다. TAGO `cityCode`는 API request를 재현하기 위한 필수 typed context column이지 identity가 아니다. TAGO Target에는 non-blank cityCode가 필요하고 서울 Target에는 가짜 cityCode를 저장하지 않는다. 범용 JSON/Map provider context는 사용하지 않는다.
 
-두 Notification option은 독립적인 선택값이며 기본값은 모두 OFF다. Domain 생성 API에서는 predecessor snapshot 존재가 before ON, successor snapshot 존재가 after ON을 의미하게 해 option만 켜지고 필요한 occurrence가 없는 조합을 만들지 않는다. 인접 snapshot은 realtime Observation을 metadata 재조회 없이 일치시키는 데 필요한 external Stop ID와 실제 traversal Stop order만 저장한다. 표시에는 Target `stopName`이면 충분하고 인접 GPS는 현재 평가 계약의 필수 근거가 아니므로 인접 Stop name/GPS는 저장하지 않는다. 구체적인 request field와 HTTP error는 TASK-402에서 결정한다.
+두 Notification option은 독립적인 선택값이며 기본값은 모두 OFF다. Alarm 생성 API는 Client가 Provider metadata를 전달하지 않고 선택한 `BusRouteStopOccurrence.id`를 `targetStopOccurrenceId`로 전달한다. Backend는 current metadata에서 target과 predecessor/successor occurrence를 조회해 option을 검증하고 필요한 snapshot을 생성한다. predecessor snapshot 존재가 before ON, successor snapshot 존재가 after ON을 의미하게 해 option만 켜지고 필요한 occurrence가 없는 조합을 만들지 않는다. 인접 snapshot은 realtime Observation을 metadata 재조회 없이 일치시키는 데 필요한 external Stop ID와 실제 traversal Stop order만 저장한다. 표시에는 Target `stopName`이면 충분하고 인접 GPS는 현재 평가 계약의 필수 근거가 아니므로 인접 Stop name/GPS는 저장하지 않는다. HTTP error 처리 구현은 TASK-409에서 담당한다.
 
 ## Persistence
 

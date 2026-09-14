@@ -82,14 +82,14 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 
 ### V1 Bus Alarm 실행 규칙
 
-- 사용자는 Bus Route와 자신에게 필요한 Target Stop을 직접 선택한다. First Stop은 `targetStopOrder`가 해당 Route traversal의 첫 순서인 일반 Target 사례이며 hard-coded target이 아니다.
+- 사용자는 Bus Route와 자신에게 필요한 Target Stop occurrence를 직접 선택한다. First Stop은 Route traversal의 첫 occurrence인 일반 Target 사례이며 hard-coded target이 아니다.
 - 추적 차량이 Target Stop에 도착했다고 충분히 판단되면 `ARRIVED` Notification을 보내고 Alarm을 성공 처리해 자동 비활성화한다.
 - Alarm 활성화 순간 이미 Target Stop에 있는 차량도 충분한 도착 근거가 있으면 즉시 `ARRIVED`로 처리한다.
 - before 옵션이 켜진 Alarm 활성화 순간 차량이 이미 Target predecessor에 있다고 충분히 판단되면 즉시 `ONE_STOP_BEFORE` Notification을 보낸다. Alarm은 ACTIVE이고 같은 차량을 ARRIVED까지 계속 추적한다.
 - 활성화 당시 이미 Target을 지난 차량은 baseline existing vehicle로 보고 PASSED 알림을 만들지 않는다.
 - 활성화 뒤 Target 이전부터 추적한 동일 차량이 직접 도착 관측 없이 Target을 건너뛰었다는 충분한 진행 근거가 있으면 `PASSED` Notification을 보낸다. 가능한 경우 정류장명 등 최근 확인된 위치와 Target에서 지난 정거장 수를 함께 안내한다. 지난 정거장 수는 raw Stop order 차가 아니라 확인된 동일 Route traversal의 successor edge 수이며, 계산할 수 없으면 생략한다.
 - `PASSED`는 Alarm 성공 또는 종료가 아니다. 해당 차량 추적만 끝내고 Alarm은 ACTIVE로 유지해 다음 차량을 계속 감시한다.
-- 사용자는 `notifyOneStopBefore`와 `notifyOneStopAfter` 의미의 추가 알림을 서로 독립적으로 선택할 수 있다. 구체적인 API field naming은 TASK-402에서 확정한다.
+- 사용자는 `notifyOneStopBefore`와 `notifyOneStopAfter` 추가 알림 옵션을 서로 독립적으로 선택할 수 있다.
 - Target이 Route traversal의 첫 Stop이면 before 옵션을, 마지막 Stop이면 after 옵션을 사용할 수 없다. Client UX와 별개로 Backend 생성 계약도 이를 검증할 수 있어야 한다.
 - before/after의 인접 Stop은 단순 숫자 증감이 아니라 Provider의 방향·Route sequence metadata로 확인한 predecessor/successor다.
 - after 옵션이 꺼져 있으면 ARRIVED 뒤 Alarm을 `INACTIVE`로 전환하고 모든 추적을 끝낸다. 켜져 있으면 일반 monitoring을 끝내고 Alarm을 `FOLLOW_UP`으로 전환하여 ARRIVED 차량만 다음 Stop 도달·통과까지 짧게 추적한 뒤 after Notification을 한 번 보내고 `INACTIVE`로 전환한다. `FOLLOW_UP`은 ONE_STOP_AFTER 전용 lifecycle 상태이며 ARRIVED 자체는 Event다.

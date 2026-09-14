@@ -35,7 +35,7 @@ Spring Boot Actuator가 제공하는 공식 Application health endpoint이며, �
 
 별도의 `GET /api/v1/health` Application API는 제공하지 않는다.
 
-## 4. 후보 Application API
+## 4. Application API
 
 ### 버스 노선 검색
 
@@ -43,7 +43,7 @@ Spring Boot Actuator가 제공하는 공식 Application health endpoint이며, �
 GET /api/v1/bus-routes?query={query}
 ```
 
-응답 형태는 아직 확정되지 않았다.
+응답 형태는 Transit API 구현 Task에서 확정한다.
 
 ### 버스 노선의 정류장 조회
 
@@ -51,7 +51,21 @@ GET /api/v1/bus-routes?query={query}
 GET /api/v1/bus-routes/{routeId}/stops
 ```
 
-Route identifier는 Provider namespace 안의 opaque external reference다. 이를 path/query/response에 표현하는 정확한 형태는 Transit API 구현 Task에서 결정한다.
+Route identifier의 구체적인 표현은 Transit API 구현 Task에서 결정한다. Alarm 생성에 사용하는 Stop selection response는 최소 다음 형태다.
+
+```json
+{
+  "id": 12345,
+  "name": "사색의광장",
+  "order": 1,
+  "canNotifyOneStopBefore": false,
+  "canNotifyOneStopAfter": true
+}
+```
+
+`id`는 current metadata의 `BusRouteStopOccurrence.id`이며 Alarm 생성 Request의 `targetStopOccurrenceId`와 같은 selection reference다. `name`과 `order`는 Stop 선택 UI용 metadata다. `canNotifyOneStopBefore`와 `canNotifyOneStopAfter`는 현재 Route traversal에서 실제 predecessor/successor occurrence 존재 여부를 나타내며, `order`의 산술 증감으로 계산하지 않는다.
+
+Stop selection response에는 `provider`, `externalRouteId`, `externalStopId`, `cityCode`, GPS를 노출하지 않는다. 이 값들은 Provider 또는 Backend metadata implementation detail이며, GPS는 현재 Flutter 기능에 필요하지 않다.
 
 ### 알림 생성
 
@@ -60,12 +74,58 @@ POST /api/v1/alarms
 Content-Type: application/json
 ```
 
-Alarm 생성 Request의 구체적인 JSON은 TASK-402에서 확정한다. 의미상 Provider namespace 안의 Route/Stop external reference와 target Stop order 및 필요한 traversal/direction context를 통해 사용자가 선택한 Target occurrence를 표현하고, 표시 metadata, 필요한 Provider request context와 서로 독립적인 before/after option을 포함해야 한다. first Stop의 before option 및 last Stop의 after option은 Backend에서도 invalid request로 처리할 수 있어야 하지만 구체적인 field naming과 HTTP error는 아직 확정하지 않는다. 미래 확장을 이유로 필드를 추가하지 않는다.
+Alarm 생성은 인증된 User의 Alarm만 생성하며 Request body에 `userId` 또는 Provider metadata를 받지 않는다.
+
+Request body:
+
+```json
+{
+  "targetStopOccurrenceId": 12345,
+  "notifyOneStopBefore": true,
+  "notifyOneStopAfter": false
+}
+```
+
+`targetStopOccurrenceId`는 Route Stop 조회 응답의 `id`인 `BusRouteStopOccurrence.id`이며 필수다. Backend는 해당 current metadata occurrence와 Route/Stop metadata를 조회해 `BusAlarmTarget` snapshot을 생성한다. Client는 `provider`, `externalRouteId`, `externalStopId`, `targetStopOrder`, `routeNumber`, `stopName`, target GPS, `cityCode`, predecessor/successor external ID 또는 order를 직접 전달하지 않는다.
+
+새 Alarm의 초기 `status`는 `INACTIVE`다. 생성 뒤 사용자가 활성화 endpoint를 호출하면 `ACTIVE`가 된다.
+
+성공 응답은 `201 Created`와 다음 Alarm response다.
+
+```json
+{
+  "id": 15,
+  "transitType": "BUS",
+  "status": "INACTIVE",
+  "routeNumber": "7000",
+  "stopName": "사색의광장",
+  "notifyOneStopBefore": true,
+  "notifyOneStopAfter": false
+}
+```
+
+`targetStopOccurrenceId`가 존재하지 않으면 `404 Not Found`다. 첫 occurrence에 `notifyOneStopBefore: true` 또는 마지막 occurrence에 `notifyOneStopAfter: true`를 요청하면 `400 Bad Request`다. Backend는 해당 option을 `false`로 변경해 생성하지 않는다. first/last 판정은 `stopOrder`가 1 또는 최대값인지가 아니라 predecessor/successor occurrence의 실제 존재 여부를 사용한다.
 
 ### 알림 목록 조회
 
 ```http
 GET /api/v1/alarms
+```
+
+현재 인증된 User가 소유한 Alarm 목록을 단순 JSON array로 반환한다. 성공은 `200 OK`이며 V1에는 pagination wrapper와 정렬 정책을 추가하지 않는다.
+
+```json
+[
+  {
+    "id": 15,
+    "transitType": "BUS",
+    "status": "ACTIVE",
+    "routeNumber": "7000",
+    "stopName": "사색의광장",
+    "notifyOneStopBefore": false,
+    "notifyOneStopAfter": true
+  }
+]
 ```
 
 ### 알림 조회
@@ -74,17 +134,15 @@ GET /api/v1/alarms
 GET /api/v1/alarms/{alarmId}
 ```
 
-### 알림 활성화
+현재 인증된 User가 소유한 Alarm을 Alarm response로 반환한다. 성공은 `200 OK`다. Alarm이 없거나 현재 User의 소유가 아니면 모두 `404 Not Found`로 처리한다.
 
-후보:
+### 알림 활성화
 
 ```http
 POST /api/v1/alarms/{alarmId}/activate
 ```
 
-구현 전에는 다른 REST 형태도 검토할 수 있다.
-
-활성화 시 `FOLLOW_UP`인 Alarm은 persisted follow-up runtime을 지워 이전 ARRIVED short follow-up을 취소하고 `ACTIVE`의 새 baseline과 monitoring cycle을 시작한다. before 옵션이 켜져 있고 baseline 차량이 Target predecessor에 있으면 즉시 ONE_STOP_BEFORE 후보가 될 수 있다. 구체적인 response와 동시성 처리는 TASK-402 및 후속 구현 Task에서 결정한다.
+현재 인증된 User가 소유한 Alarm을 활성화하고 변경된 Alarm response를 반환한다. 성공은 `200 OK`이며 status는 `ACTIVE`다. `FOLLOW_UP` Alarm 활성화는 persisted follow-up runtime을 지워 이전 ARRIVED short follow-up을 취소하고 새 monitoring cycle을 시작한다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다.
 
 ### 알림 비활성화
 
@@ -92,13 +150,35 @@ POST /api/v1/alarms/{alarmId}/activate
 POST /api/v1/alarms/{alarmId}/deactivate
 ```
 
+현재 인증된 User가 소유한 Alarm을 비활성화하고 변경된 Alarm response를 반환한다. 성공은 `200 OK`이며 status는 `INACTIVE`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다.
+
 ### 알림 삭제
 
 ```http
 DELETE /api/v1/alarms/{alarmId}
 ```
 
-Alarm 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime과 공유 PK BusAlarmTarget도 함께 제거한다. 구체적인 scheduler coordination은 후속 Task에서 결정한다.
+현재 인증된 User가 소유한 Alarm을 삭제한다. 성공은 response body 없는 `204 No Content`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다. 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime과 공유 PK BusAlarmTarget도 함께 제거한다. 구체적인 scheduler coordination은 후속 Task에서 결정한다.
+
+### Alarm response
+
+Alarm 생성, 목록, 상세, 활성화, 비활성화 response는 다음 필드를 사용한다.
+
+```json
+{
+  "id": 15,
+  "transitType": "BUS",
+  "status": "FOLLOW_UP",
+  "routeNumber": "7000",
+  "stopName": "사색의광장",
+  "notifyOneStopBefore": true,
+  "notifyOneStopAfter": false
+}
+```
+
+`transitType`은 현재 Domain enum의 `BUS`, `SUBWAY`를, `status`는 `INACTIVE`, `ACTIVE`, `FOLLOW_UP`를 사용한다. V1 Alarm response에는 Subway 전용 field를 미리 추가하지 않는다.
+
+Alarm response에는 `provider`, `externalRouteId`, `externalStopId`, `targetStopOrder`, target GPS, `cityCode`, predecessor/successor external ID 또는 order, `followUpVehicleTrackingId`, `followUpStartedAt`, `followUpExpiresAt`을 포함하지 않는다. 이 값들은 Backend의 provider metadata, target snapshot, evaluation 또는 follow-up runtime implementation detail이다.
 
 ### 기기 등록
 
@@ -123,7 +203,7 @@ POST /api/v1/devices
 
 ## 5. 오류 형식
 
-후보 형식:
+오류 response는 다음 구조를 사용한다.
 
 ```json
 {
@@ -132,7 +212,7 @@ POST /api/v1/devices
 }
 ```
 
-관측성이 필요해질 때 선택적으로 trace/request ID를 추가할 수 있다.
+관측성이 필요해질 때 선택적으로 trace/request ID를 추가할 수 있다. Alarm API의 구체적인 validation, error code, exception handling 구현은 TASK-409에서 담당한다. 이 계약에서 `404 Not Found`는 target occurrence가 존재하지 않거나, Alarm이 존재하지 않거나 현재 User가 소유하지 않음을 의미한다. `400 Bad Request`는 predecessor/successor occurrence 없이 before/after option을 요청한 경우를 포함한 유효하지 않은 Alarm 생성 요청을 의미한다.
 
 ## 6. 인증
 
