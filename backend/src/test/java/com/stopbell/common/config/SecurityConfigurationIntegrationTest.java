@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.Base64;
 
 import com.stopbell.user.auth.service.JwtTokenService;
+import com.stopbell.alarm.repository.AlarmRepository;
 import com.stopbell.user.repository.UserRepository;
 import com.stopbell.user.repository.RefreshTokenRepository;
 import com.stopbell.transit.repository.BusRouteRepository;
@@ -146,6 +147,11 @@ class SecurityConfigurationIntegrationTest {
         @Bean
         UserRepository userRepository() {
             return mock(UserRepository.class);
+        }
+
+        @Bean
+        AlarmRepository alarmRepository() {
+            return mock(AlarmRepository.class);
         }
 
         @Bean

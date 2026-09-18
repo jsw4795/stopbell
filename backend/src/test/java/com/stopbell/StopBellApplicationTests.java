@@ -13,6 +13,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.stopbell.user.repository.UserRepository;
 import com.stopbell.user.repository.RefreshTokenRepository;
+import com.stopbell.alarm.repository.AlarmRepository;
 import com.stopbell.transit.repository.BusRouteRepository;
 import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
 import com.stopbell.transit.repository.BusStopRepository;
@@ -54,6 +55,11 @@ class StopBellApplicationTests {
         @Bean
         UserRepository userRepository() {
             return mock(UserRepository.class);
+        }
+
+        @Bean
+        AlarmRepository alarmRepository() {
+            return mock(AlarmRepository.class);
         }
 
         @Bean

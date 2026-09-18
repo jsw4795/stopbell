@@ -54,7 +54,10 @@ public class JwtTokenService {
     }
 
     public Long extractUserId(String accessToken) {
-        Jwt jwt = jwtDecoder.decode(accessToken);
+        return extractUserId(jwtDecoder.decode(accessToken));
+    }
+
+    public Long extractUserId(Jwt jwt) {
         String subject = jwt.getSubject();
 
         if (subject == null || !subject.matches("[1-9]\\d*")) {
