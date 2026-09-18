@@ -8,6 +8,7 @@ import com.stopbell.alarm.dto.CreateAlarmRequest;
 import com.stopbell.alarm.entity.AdjacentStopSnapshot;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.BusAlarmTarget;
+import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
@@ -88,6 +89,24 @@ public class AlarmService {
                 successor
         );
         Alarm alarm = alarmRepository.save(new Alarm(user, busTarget));
+        return toResponse(alarm);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AlarmResponse> findAll(Long userId) {
+        return alarmRepository.findAllByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(AlarmService::toResponse)
+                .toList();
+    }
+
+    private static AlarmResponse toResponse(Alarm alarm) {
+        BusAlarmTarget busTarget = alarm.getBusAlarmTarget();
+        if (alarm.getTransitType() == TransitType.BUS && busTarget == null) {
+            throw new IllegalStateException("Bus alarm requires a BusAlarmTarget");
+        }
+        if (alarm.getTransitType() != TransitType.BUS) {
+            throw new IllegalStateException("Unsupported alarm transit type: " + alarm.getTransitType());
+        }
         return new AlarmResponse(
                 alarm.getId(),
                 alarm.getTransitType(),

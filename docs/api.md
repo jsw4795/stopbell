@@ -112,7 +112,7 @@ Request body:
 GET /api/v1/alarms
 ```
 
-현재 인증된 User가 소유한 Alarm 목록을 단순 JSON array로 반환한다. 성공은 `200 OK`이며 V1에는 pagination wrapper와 정렬 정책을 추가하지 않는다.
+현재 인증된 User가 소유한 Alarm 목록을 `createdAt DESC`(최근 생성순)로 정렬해 단순 JSON array로 반환한다. `INACTIVE`, `ACTIVE`, `FOLLOW_UP` 상태를 모두 포함하며, Alarm이 없으면 빈 array를 반환한다. 성공은 `200 OK`이고 V1에는 pagination을 사용하지 않는다. `createdAt`은 정렬에만 사용하며 response에는 포함하지 않는다.
 
 ```json
 [

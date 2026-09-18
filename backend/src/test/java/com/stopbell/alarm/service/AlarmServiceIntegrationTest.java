@@ -2,11 +2,14 @@ package com.stopbell.alarm.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import com.stopbell.alarm.dto.AlarmResponse;
@@ -28,6 +31,9 @@ import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -79,6 +85,9 @@ class AlarmServiceIntegrationTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private EntityManagerFactory entityManagerFactory;
 
     @Test
     @DisplayName("실제 traversal 인접 occurrence와 current metadata를 Bus Alarm snapshot으로 저장한다")
@@ -210,6 +219,87 @@ class AlarmServiceIntegrationTest {
 
         Alarm alarm = alarmRepository.findAll().getFirst();
         assertThat(alarm.getUser().getId()).isEqualTo(user.getId());
+    }
+
+    @Test
+    @DisplayName("인증된 User의 모든 상태 Alarm만 최근 생성순으로 반환한다")
+    void authenticated_get_lists_owned_alarms_newest_first() throws Exception {
+        User owner = user();
+        User other = user();
+        RouteFixture route = route();
+        Long oldestId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), true, false)).id();
+        Long middleId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
+        Long newestId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, true)).id();
+        alarmService.create(other.getId(), new CreateAlarmRequest(route.middleId(), false, false));
+
+        alarmRepository.findById(middleId).orElseThrow().activate();
+        alarmRepository.findById(newestId).orElseThrow().activate();
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        alarmRepository.findById(newestId).orElseThrow()
+                .startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        entityManager.flush();
+        setCreatedAt(oldestId, LocalDateTime.of(2025, 1, 1, 0, 0));
+        setCreatedAt(middleId, LocalDateTime.of(2025, 1, 2, 0, 0));
+        setCreatedAt(newestId, LocalDateTime.of(2025, 1, 3, 0, 0));
+        entityManager.clear();
+
+        mockMvc.perform(get("/api/v1/alarms")
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[0].id").value(newestId))
+                .andExpect(jsonPath("$[0].transitType").value("BUS"))
+                .andExpect(jsonPath("$[0].status").value("FOLLOW_UP"))
+                .andExpect(jsonPath("$[0].routeNumber").value("7000"))
+                .andExpect(jsonPath("$[0].stopName").value("Stop B"))
+                .andExpect(jsonPath("$[0].notifyOneStopBefore").value(false))
+                .andExpect(jsonPath("$[0].notifyOneStopAfter").value(true))
+                .andExpect(jsonPath("$[0].createdAt").doesNotExist())
+                .andExpect(jsonPath("$[1].id").value(middleId))
+                .andExpect(jsonPath("$[1].status").value("ACTIVE"))
+                .andExpect(jsonPath("$[2].id").value(oldestId))
+                .andExpect(jsonPath("$[2].status").value("INACTIVE"));
+    }
+
+    @Test
+    @DisplayName("Alarm이 없는 User의 목록은 200과 빈 배열을 반환한다")
+    void authenticated_get_returns_empty_array() throws Exception {
+        User owner = user();
+
+        mockMvc.perform(get("/api/v1/alarms")
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("Alarm 목록과 모든 BusAlarmTarget을 한 쿼리로 조회한다")
+    void find_all_fetches_bus_targets_in_one_query() {
+        User owner = user();
+        RouteFixture route = route();
+        for (int index = 0; index < 3; index++) {
+            alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false));
+        }
+        entityManager.flush();
+        entityManager.clear();
+
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        boolean originallyEnabled = statistics.isStatisticsEnabled();
+        statistics.setStatisticsEnabled(true);
+        try {
+            statistics.clear();
+            assertThat(alarmService.findAll(owner.getId())).hasSize(3);
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
+        } finally {
+            statistics.setStatisticsEnabled(originallyEnabled);
+        }
+    }
+
+    private void setCreatedAt(Long alarmId, LocalDateTime createdAt) {
+        entityManager.createNativeQuery("UPDATE alarms SET created_at = :createdAt WHERE id = :id")
+                .setParameter("createdAt", createdAt)
+                .setParameter("id", alarmId)
+                .executeUpdate();
     }
 
     private User user() {
