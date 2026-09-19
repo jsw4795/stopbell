@@ -438,6 +438,144 @@ class AlarmServiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("인증된 User는 ACTIVE Alarm을 비활성화하고 AlarmResponse를 받는다")
+    void authenticated_post_deactivates_active_alarm() throws Exception {
+        User owner = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), true, true)).id();
+        alarmRepository.findById(alarmId).orElseThrow().activate();
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(post("/api/v1/alarms/{alarmId}/deactivate", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(alarmId))
+                .andExpect(jsonPath("$.transitType").value("BUS"))
+                .andExpect(jsonPath("$.status").value("INACTIVE"))
+                .andExpect(jsonPath("$.routeNumber").value("7000"))
+                .andExpect(jsonPath("$.stopName").value("Stop B"))
+                .andExpect(jsonPath("$.notifyOneStopBefore").value(true))
+                .andExpect(jsonPath("$.notifyOneStopAfter").value(true));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(alarmRepository.findById(alarmId).orElseThrow().getStatus()).isEqualTo(AlarmStatus.INACTIVE);
+    }
+
+    @Test
+    @DisplayName("이미 INACTIVE인 Alarm을 다시 비활성화해도 설정을 유지하고 성공한다")
+    void authenticated_post_keeps_inactive_alarm_inactive() throws Exception {
+        User owner = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), true, false)).id();
+
+        mockMvc.perform(post("/api/v1/alarms/{alarmId}/deactivate", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INACTIVE"))
+                .andExpect(jsonPath("$.notifyOneStopBefore").value(true))
+                .andExpect(jsonPath("$.notifyOneStopAfter").value(false));
+        entityManager.flush();
+        entityManager.clear();
+
+        Alarm persistedAlarm = alarmRepository.findById(alarmId).orElseThrow();
+        assertThat(persistedAlarm.getStatus()).isEqualTo(AlarmStatus.INACTIVE);
+        assertThat(persistedAlarm.getBusAlarmTarget().isNotifyOneStopBefore()).isTrue();
+        assertThat(persistedAlarm.getBusAlarmTarget().isNotifyOneStopAfter()).isFalse();
+    }
+
+    @Test
+    @DisplayName("FOLLOW_UP Alarm을 비활성화하면 runtime을 지우고 비활성 상태로 저장한다")
+    void authenticated_post_deactivates_follow_up_alarm_and_clears_runtime() throws Exception {
+        User owner = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, true)).id();
+        Alarm alarm = alarmRepository.findById(alarmId).orElseThrow();
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        alarm.activate();
+        alarm.startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        entityManager.flush();
+        entityManager.clear();
+
+        Alarm followUpAlarm = alarmRepository.findById(alarmId).orElseThrow();
+        assertThat(followUpAlarm.getStatus()).isEqualTo(AlarmStatus.FOLLOW_UP);
+        assertThat(followUpAlarm.getFollowUpVehicleTrackingId()).isNotNull();
+        assertThat(followUpAlarm.getFollowUpStartedAt()).isNotNull();
+        assertThat(followUpAlarm.getFollowUpExpiresAt()).isNotNull();
+
+        mockMvc.perform(post("/api/v1/alarms/{alarmId}/deactivate", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("INACTIVE"));
+        entityManager.flush();
+        entityManager.clear();
+
+        Alarm persistedAlarm = alarmRepository.findById(alarmId).orElseThrow();
+        assertThat(persistedAlarm.getStatus()).isEqualTo(AlarmStatus.INACTIVE);
+        assertThat(persistedAlarm.getFollowUpVehicleTrackingId()).isNull();
+        assertThat(persistedAlarm.getFollowUpStartedAt()).isNull();
+        assertThat(persistedAlarm.getFollowUpExpiresAt()).isNull();
+    }
+
+    @Test
+    @DisplayName("다른 User의 ACTIVE Alarm 비활성화 요청은 404이며 상태를 변경하지 않는다")
+    void authenticated_post_deactivate_returns_not_found_for_other_users_active_alarm() throws Exception {
+        User owner = user();
+        User other = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
+        alarmRepository.findById(alarmId).orElseThrow().activate();
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(post("/api/v1/alarms/{alarmId}/deactivate", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(other.getId())))
+                .andExpect(status().isNotFound());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(alarmRepository.findById(alarmId).orElseThrow().getStatus()).isEqualTo(AlarmStatus.ACTIVE);
+    }
+
+    @Test
+    @DisplayName("다른 User의 FOLLOW_UP Alarm 비활성화 요청은 404이며 runtime을 유지한다")
+    void authenticated_post_deactivate_returns_not_found_for_other_users_follow_up_alarm() throws Exception {
+        User owner = user();
+        User other = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, true)).id();
+        Alarm alarm = alarmRepository.findById(alarmId).orElseThrow();
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        alarm.activate();
+        alarm.startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(post("/api/v1/alarms/{alarmId}/deactivate", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(other.getId())))
+                .andExpect(status().isNotFound());
+        entityManager.flush();
+        entityManager.clear();
+
+        Alarm persistedAlarm = alarmRepository.findById(alarmId).orElseThrow();
+        assertThat(persistedAlarm.getStatus()).isEqualTo(AlarmStatus.FOLLOW_UP);
+        assertThat(persistedAlarm.getFollowUpVehicleTrackingId()).isEqualTo("vehicle-1");
+        assertThat(persistedAlarm.getFollowUpStartedAt()).isEqualTo(startedAt);
+        assertThat(persistedAlarm.getFollowUpExpiresAt()).isEqualTo(startedAt.plus(10, ChronoUnit.MINUTES));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 Alarm 비활성화 요청은 404를 반환한다")
+    void authenticated_post_deactivate_returns_not_found_for_missing_alarm() throws Exception {
+        User owner = user();
+
+        mockMvc.perform(post("/api/v1/alarms/{alarmId}/deactivate", Long.MAX_VALUE)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("인증된 User는 Alarm과 종속 데이터를 삭제하고 transit metadata는 보존한다")
     void authenticated_delete_removes_owned_alarm_and_dependent_data() throws Exception {
         User owner = user();

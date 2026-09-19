@@ -49,6 +49,11 @@ public class AlarmController {
         return alarmService.activate(jwtTokenService.extractUserId(jwt), alarmId);
     }
 
+    @PostMapping("/api/v1/alarms/{alarmId}/deactivate")
+    public AlarmResponse deactivate(@AuthenticationPrincipal Jwt jwt, @PathVariable Long alarmId) {
+        return alarmService.deactivate(jwtTokenService.extractUserId(jwt), alarmId);
+    }
+
     @DeleteMapping("/api/v1/alarms/{alarmId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@AuthenticationPrincipal Jwt jwt, @PathVariable Long alarmId) {
