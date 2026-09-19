@@ -243,6 +243,13 @@ Alarm 조건 충족 시 실제 기기에 중복 없이 Push notification을 전�
 - [ ] TASK-809 CI build/test 구성
 - [ ] TASK-810 실제 환경에서 notification delay 측정
 - [ ] TASK-811 server restart 안전성 검증
+- [ ] TASK-812 Analytics Event 및 장기 통계 데이터 보존 전략 결정 및 최소 구현
+
+TASK-812에서는 운영 Domain 데이터 lifecycle과 독립적으로 장기 보존할 통계·분석 데이터를 결정하고, 필요한 최소 구현을 수행한다. Alarm 삭제 시 `BusAlarmTarget`, `NotificationHistory` 같은 종속 운영 데이터는 함께 삭제할 수 있지만, 서비스 사용 패턴과 품질 분석에 필요한 데이터는 Alarm 삭제 여부와 독립적으로 보존할 수 있어야 한다. 장기 보존 데이터는 별도의 Analytics/Event Logging 책임으로 분리하며, `NotificationHistory`의 Alarm lifecycle 종속 정책과 충돌하지 않는다.
+
+후보 Event는 `ALARM_CREATED`, `ALARM_ACTIVATED`, `ALARM_DEACTIVATED`, `ALARM_DELETED`, `NOTIFICATION_SUCCESS`, `NOTIFICATION_FAILURE` 등이지만, 실제 V1 기능이 대부분 완성된 뒤 필요한 통계, Event 범위, 익명화·최소화 수준, 보존 기간, 원본 Event와 집계 데이터의 보존 범위를 결정한다. 이 시점에는 추측성 Analytics Schema를 미리 확정하지 않으며, 외부 Provider 사용자 식별자, Refresh Token, Push Token, 정확한 개인 식별 정보 등 장기 통계에 불필요한 데이터는 복제하지 않는 것을 기본 원칙으로 한다.
+
+TASK-805의 구조화된 Logging은 장애 추적, 서버 동작 관찰, request/error 운영 분석을 위한 것으로 로그 보존 정책에 따라 삭제될 수 있다. TASK-812의 Analytics/Event는 장기 통계, 서비스 사용 패턴, 기능 사용률, Notification 성공·실패 분석을 위한 별도 책임이며, 운영 Domain 데이터 삭제와 독립적인 보존을 검토한다.
 
 Future Consideration:
 
