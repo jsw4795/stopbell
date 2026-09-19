@@ -106,6 +106,13 @@ public class AlarmService {
         return toResponse(alarm);
     }
 
+    @Transactional
+    public void delete(Long userId, Long alarmId) {
+        Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alarm not found"));
+        alarmRepository.delete(alarm);
+    }
+
     private static AlarmResponse toResponse(Alarm alarm) {
         BusAlarmTarget busTarget = alarm.getBusAlarmTarget();
         if (alarm.getTransitType() == TransitType.BUS && busTarget == null) {

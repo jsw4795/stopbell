@@ -2,8 +2,10 @@ package com.stopbell.alarm.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -19,6 +21,9 @@ import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
+import com.stopbell.notification.entity.NotificationHistory;
+import com.stopbell.notification.entity.NotificationStatus;
+import com.stopbell.notification.repository.NotificationHistoryRepository;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
@@ -64,6 +69,9 @@ class AlarmServiceIntegrationTest {
 
     @Autowired
     private AlarmRepository alarmRepository;
+
+    @Autowired
+    private NotificationHistoryRepository notificationHistoryRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -318,6 +326,117 @@ class AlarmServiceIntegrationTest {
         mockMvc.perform(get("/api/v1/alarms/{alarmId}", Long.MAX_VALUE)
                         .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("인증된 User는 Alarm과 종속 데이터를 삭제하고 transit metadata는 보존한다")
+    void authenticated_delete_removes_owned_alarm_and_dependent_data() throws Exception {
+        User owner = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
+        notificationHistoryRepository.saveAndFlush(new NotificationHistory(
+                alarmRepository.findById(alarmId).orElseThrow(), NotificationStatus.SUCCESS, null
+        ));
+        notificationHistoryRepository.saveAndFlush(new NotificationHistory(
+                alarmRepository.findById(alarmId).orElseThrow(), NotificationStatus.FAILURE, "provider error"
+        ));
+        long routeCount = routeRepository.count();
+        long stopCount = stopRepository.count();
+        long occurrenceCount = occurrenceRepository.count();
+        entityManager.clear();
+
+        mockMvc.perform(delete("/api/v1/alarms/{alarmId}", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(alarmRepository.existsById(alarmId)).isFalse();
+        assertThat(entityManager.find(BusAlarmTarget.class, alarmId)).isNull();
+        assertThat(notificationHistoryRepository.count()).isZero();
+        assertThat(routeRepository.count()).isEqualTo(routeCount);
+        assertThat(stopRepository.count()).isEqualTo(stopCount);
+        assertThat(occurrenceRepository.count()).isEqualTo(occurrenceCount);
+
+        mockMvc.perform(get("/api/v1/alarms/{alarmId}", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("다른 User의 Alarm 삭제 요청은 404이며 종속 데이터를 유지한다")
+    void authenticated_delete_rejects_other_users_alarm() throws Exception {
+        User owner = user();
+        User other = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
+        Long historyId = notificationHistoryRepository.saveAndFlush(new NotificationHistory(
+                alarmRepository.findById(alarmId).orElseThrow(), NotificationStatus.SUCCESS, null
+        )).getId();
+
+        mockMvc.perform(delete("/api/v1/alarms/{alarmId}", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(other.getId())))
+                .andExpect(status().isNotFound());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(alarmRepository.existsById(alarmId)).isTrue();
+        assertThat(entityManager.find(BusAlarmTarget.class, alarmId)).isNotNull();
+        assertThat(notificationHistoryRepository.existsById(historyId)).isTrue();
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 Alarm 삭제 요청은 404를 반환한다")
+    void authenticated_delete_returns_not_found_for_missing_alarm() throws Exception {
+        User owner = user();
+
+        mockMvc.perform(delete("/api/v1/alarms/{alarmId}", Long.MAX_VALUE)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("ACTIVE Alarm은 상태 전이 없이 삭제할 수 있다")
+    void authenticated_delete_removes_active_alarm() throws Exception {
+        User owner = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
+        alarmRepository.findById(alarmId).orElseThrow().activate();
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(delete("/api/v1/alarms/{alarmId}", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isNoContent());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(alarmRepository.existsById(alarmId)).isFalse();
+        assertThat(entityManager.find(BusAlarmTarget.class, alarmId)).isNull();
+    }
+
+    @Test
+    @DisplayName("FOLLOW_UP Alarm은 상태 전이 없이 삭제할 수 있다")
+    void authenticated_delete_removes_follow_up_alarm() throws Exception {
+        User owner = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, true)).id();
+        Alarm alarm = alarmRepository.findById(alarmId).orElseThrow();
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        alarm.activate();
+        alarm.startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(delete("/api/v1/alarms/{alarmId}", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isNoContent());
+        entityManager.flush();
+        entityManager.clear();
+
+        assertThat(alarmRepository.existsById(alarmId)).isFalse();
+        assertThat(entityManager.find(BusAlarmTarget.class, alarmId)).isNull();
     }
 
     @Test

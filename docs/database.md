@@ -174,13 +174,13 @@ Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, 
 
 ```text
 id BIGINT AUTO_INCREMENT PRIMARY KEY
-alarm_id BIGINT NOT NULL REFERENCES alarms(id)
+alarm_id BIGINT NOT NULL REFERENCES alarms(id) ON DELETE CASCADE
 status VARCHAR(20) NOT NULL
 failure_reason VARCHAR(255) NULL
 created_at DATETIME(6) NOT NULL
 ```
 
-`status`는 `SUCCESS`, `FAILURE` 문자열만 저장한다. `failure_reason`은 실패 시 간단한 원인을 기록할 수 있고 `null`을 허용한다. `created_at`은 생성 후 변경하지 않으며 `updated_at`은 추가하지 않는다.
+`status`는 `SUCCESS`, `FAILURE` 문자열만 저장한다. `failure_reason`은 실패 시 간단한 원인을 기록할 수 있고 `null`을 허용한다. `created_at`은 생성 후 변경하지 않으며 `updated_at`은 추가하지 않는다. NotificationHistory는 현재 Alarm lifecycle에 종속되므로 Alarm hard delete 시 함께 삭제된다. 장기 통계 보존은 TASK-812의 독립 Analytics/Event 책임에서 다룬다.
 
 FCM message ID, device token, provider 응답, retry count, 전송 단계별 timestamp는 실제 Notification 전송 흐름이 확정될 때 필요성을 검토한다. NotificationHistory 저장 시점, retry 및 duplicate prevention 전략도 현재 결정하지 않는다.
 

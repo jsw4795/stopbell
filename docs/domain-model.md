@@ -535,7 +535,7 @@ FOLLOW_UP 상태의 동일 Alarm을 사용자가 다시 활성화하면 이전 a
 
     Alarm 1 : N NotificationHistory
 
-NotificationHistory가 `Alarm`을 참조하는 단방향 관계를 사용한다. Alarm Entity에는 NotificationHistory collection을 추가하지 않는다.
+NotificationHistory가 `Alarm`을 참조하는 단방향 관계를 사용한다. Alarm Entity에는 NotificationHistory collection을 추가하지 않는다. NotificationHistory는 현재 Alarm lifecycle에 종속되어 Alarm hard delete 시 함께 삭제된다.
 
 ## Persistence
 

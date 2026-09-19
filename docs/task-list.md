@@ -147,7 +147,7 @@ Phase 3에서 확정된 Transit provider 및 identifier 전략을 기준으로 �
 - [x] TASK-403 Alarm 생성 API 구현
 - [x] TASK-404 Alarm 목록 조회 API 구현
 - [x] TASK-405 Alarm 상세 조회 API 구현
-- [ ] TASK-406 Alarm 삭제 API 구현
+- [x] TASK-406 Alarm 삭제 API 구현
 - [ ] TASK-407 Alarm 활성화 API 구현
 - [ ] TASK-408 Alarm 비활성화 API 구현
 - [ ] TASK-409 API validation 및 Error response 처리

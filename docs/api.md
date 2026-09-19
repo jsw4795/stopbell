@@ -158,7 +158,7 @@ POST /api/v1/alarms/{alarmId}/deactivate
 DELETE /api/v1/alarms/{alarmId}
 ```
 
-현재 인증된 User가 소유한 Alarm을 삭제한다. 성공은 response body 없는 `204 No Content`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다. 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime과 공유 PK BusAlarmTarget도 함께 제거한다. 구체적인 scheduler coordination은 후속 Task에서 결정한다.
+현재 인증된 User가 소유한 Alarm을 삭제한다. 성공은 response body 없는 `204 No Content`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다. 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime, 공유 PK BusAlarmTarget 및 종속 NotificationHistory를 함께 제거한다. 구체적인 scheduler coordination은 후속 Task에서 결정한다.
 
 ### Alarm response
 
