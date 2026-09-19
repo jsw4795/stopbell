@@ -86,7 +86,7 @@ Request body:
 }
 ```
 
-`targetStopOccurrenceId`는 Route Stop 조회 응답의 `id`인 `BusRouteStopOccurrence.id`이며 필수다. Backend는 해당 current metadata occurrence와 Route/Stop metadata를 조회해 `BusAlarmTarget` snapshot을 생성한다. Client는 `provider`, `externalRouteId`, `externalStopId`, `targetStopOrder`, `routeNumber`, `stopName`, target GPS, `cityCode`, predecessor/successor external ID 또는 order를 직접 전달하지 않는다.
+`targetStopOccurrenceId`는 Route Stop 조회 응답의 `id`인 `BusRouteStopOccurrence.id`이며 필수인 양의 정수다. `notifyOneStopBefore`와 `notifyOneStopAfter`는 생략할 수 있고, 생략하면 각각 `false`다. Backend는 해당 current metadata occurrence와 Route/Stop metadata를 조회해 `BusAlarmTarget` snapshot을 생성한다. Client는 `provider`, `externalRouteId`, `externalStopId`, `targetStopOrder`, `routeNumber`, `stopName`, target GPS, `cityCode`, predecessor/successor external ID 또는 order를 직접 전달하지 않는다.
 
 새 Alarm의 초기 `status`는 `INACTIVE`다. 생성 뒤 사용자가 활성화 endpoint를 호출하면 `ACTIVE`가 된다.
 
@@ -212,7 +212,18 @@ POST /api/v1/devices
 }
 ```
 
-관측성이 필요해질 때 선택적으로 trace/request ID를 추가할 수 있다. Alarm API의 구체적인 validation, error code, exception handling 구현은 TASK-409에서 담당한다. 이 계약에서 `404 Not Found`는 target occurrence가 존재하지 않거나, Alarm이 존재하지 않거나 현재 User가 소유하지 않음을 의미한다. `400 Bad Request`는 predecessor/successor occurrence 없이 before/after option을 요청한 경우를 포함한 유효하지 않은 Alarm 생성 요청을 의미한다.
+V1 Error Response는 `code`, `message` 두 필드만 사용한다. `timestamp`, `path`, `status`, trace/request ID, field error 또는 stack trace는 포함하지 않는다.
+
+Alarm API의 error code와 HTTP status는 다음과 같다.
+
+| Code | HTTP status | 의미 |
+| --- | --- | --- |
+| `ALARM_NOT_FOUND` | `404 Not Found` | Alarm이 없거나 현재 User 소유가 아님 |
+| `TARGET_STOP_OCCURRENCE_NOT_FOUND` | `404 Not Found` | Alarm 생성 대상 occurrence가 현재 metadata에 없음 |
+| `INVALID_ALARM_REQUEST` | `400 Bad Request` | predecessor/successor 없이 before/after option을 요청하는 등 Alarm Domain 규칙 위반 |
+| `INVALID_REQUEST` | `400 Bad Request` | 필수 ID 누락, 0 이하 ID, body 누락 또는 읽을 수 없는 JSON 등 기본 요청 형식 오류 |
+
+`ALARM_NOT_FOUND`의 message는 `Alarm was not found.`이며, `TARGET_STOP_OCCURRENCE_NOT_FOUND`의 message는 `Target stop occurrence was not found.`이다. `INVALID_ALARM_REQUEST`는 `Target stop has no predecessor stop.` 또는 `Target stop has no successor stop.`처럼 구체적 사유를 message로 전달한다. `INVALID_REQUEST`의 message는 `Request is invalid.`이다.
 
 ## 6. 인증
 

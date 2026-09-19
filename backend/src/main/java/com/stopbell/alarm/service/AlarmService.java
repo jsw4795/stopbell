@@ -10,6 +10,8 @@ import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
+import com.stopbell.common.error.ApiException;
+import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
 import com.stopbell.transit.entity.BusStop;
@@ -42,13 +44,13 @@ public class AlarmService {
     public AlarmResponse create(Long userId, CreateAlarmRequest request) {
         if (request == null || request.targetStopOccurrenceId() == null
                 || request.targetStopOccurrenceId() <= 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Target stop occurrence ID is required");
+            throw new ApiException(ErrorCode.INVALID_REQUEST);
         }
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
         BusRouteStopOccurrence targetOccurrence = occurrenceRepository.findById(request.targetStopOccurrenceId())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Target stop occurrence not found"));
+                .orElseThrow(() -> new ApiException(ErrorCode.TARGET_STOP_OCCURRENCE_NOT_FOUND));
 
         BusRoute route = targetOccurrence.getRoute();
         List<BusRouteStopOccurrence> traversal = occurrenceRepository.findAllByRouteOrderByStopOrderAsc(route);
@@ -60,14 +62,14 @@ public class AlarmService {
             }
         }
         if (targetIndex < 0) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Target stop occurrence not found");
+            throw new ApiException(ErrorCode.TARGET_STOP_OCCURRENCE_NOT_FOUND);
         }
 
         if (request.notifyOneStopBefore() && targetIndex == 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Target has no predecessor stop");
+            throw new ApiException(ErrorCode.INVALID_ALARM_REQUEST, "Target stop has no predecessor stop.");
         }
         if (request.notifyOneStopAfter() && targetIndex == traversal.size() - 1) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Target has no successor stop");
+            throw new ApiException(ErrorCode.INVALID_ALARM_REQUEST, "Target stop has no successor stop.");
         }
 
         AdjacentStopSnapshot predecessor = request.notifyOneStopBefore()
@@ -102,14 +104,14 @@ public class AlarmService {
     @Transactional(readOnly = true)
     public AlarmResponse findById(Long userId, Long alarmId) {
         Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alarm not found"));
+                .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         return toResponse(alarm);
     }
 
     @Transactional
     public AlarmResponse activate(Long userId, Long alarmId) {
         Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alarm not found"));
+                .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         alarm.activate();
         return toResponse(alarm);
     }
@@ -117,7 +119,7 @@ public class AlarmService {
     @Transactional
     public AlarmResponse deactivate(Long userId, Long alarmId) {
         Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alarm not found"));
+                .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         alarm.deactivate();
         return toResponse(alarm);
     }
@@ -125,7 +127,7 @@ public class AlarmService {
     @Transactional
     public void delete(Long userId, Long alarmId) {
         Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alarm not found"));
+                .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         alarmRepository.delete(alarm);
     }
 

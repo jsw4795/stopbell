@@ -150,7 +150,7 @@ Phase 3에서 확정된 Transit provider 및 identifier 전략을 기준으로 �
 - [x] TASK-406 Alarm 삭제 API 구현
 - [x] TASK-407 Alarm 활성화 API 구현
 - [x] TASK-408 Alarm 비활성화 API 구현
-- [ ] TASK-409 API validation 및 Error response 처리
+- [x] TASK-409 API validation 및 Error response 처리
 - [ ] TASK-410 Alarm API Test 작성
 
 TASK-401은 Alarm lifecycle을 `INACTIVE`/`ACTIVE`/`FOLLOW_UP` 상태로 전환하고 ARRIVED 후 ONE_STOP_AFTER 전용 runtime을 영속했다. BUS 전용 장기 설정은 공유 PK `BusAlarmTarget`으로 분리하고 Route/Stop identity, target occurrence order, display/GPS/cityCode 및 필요한 인접 occurrence snapshot을 V6 Migration과 JPA Domain에 반영했다. Route/Stop external reference만으로 uniqueness를 강제하지 않으며 ACTIVE 중 차량별 tracking과 API/Evaluation/Scheduler는 후속 Task에 남겼다.

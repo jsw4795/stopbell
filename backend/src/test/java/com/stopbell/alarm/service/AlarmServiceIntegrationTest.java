@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.UUID;
 
 import com.stopbell.alarm.dto.AlarmResponse;
@@ -21,6 +22,8 @@ import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
+import com.stopbell.common.error.ApiException;
+import com.stopbell.common.error.ErrorCode;
 import com.stopbell.notification.entity.NotificationHistory;
 import com.stopbell.notification.entity.NotificationStatus;
 import com.stopbell.notification.repository.NotificationHistoryRepository;
@@ -45,6 +48,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
@@ -160,8 +164,8 @@ class AlarmServiceIntegrationTest {
         long alarmCount = alarmRepository.count();
 
         assertThatThrownBy(() -> alarmService.create(user.getId(), new CreateAlarmRequest(route.firstId(), true, false)))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("400 BAD_REQUEST");
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_ALARM_REQUEST));
         assertThat(alarmRepository.count()).isEqualTo(alarmCount);
     }
 
@@ -173,8 +177,8 @@ class AlarmServiceIntegrationTest {
         long alarmCount = alarmRepository.count();
 
         assertThatThrownBy(() -> alarmService.create(user.getId(), new CreateAlarmRequest(route.lastId(), false, true)))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("400 BAD_REQUEST");
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_ALARM_REQUEST));
         assertThat(alarmRepository.count()).isEqualTo(alarmCount);
     }
 
@@ -185,11 +189,11 @@ class AlarmServiceIntegrationTest {
         long alarmCount = alarmRepository.count();
 
         assertThatThrownBy(() -> alarmService.create(user.getId(), new CreateAlarmRequest(Long.MAX_VALUE, false, false)))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("404 NOT_FOUND");
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.TARGET_STOP_OCCURRENCE_NOT_FOUND));
         assertThatThrownBy(() -> alarmService.create(user.getId(), new CreateAlarmRequest(null, false, false)))
-                .isInstanceOf(ResponseStatusException.class)
-                .hasMessageContaining("400 BAD_REQUEST");
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
         assertThat(alarmRepository.count()).isEqualTo(alarmCount);
     }
 
@@ -227,6 +231,139 @@ class AlarmServiceIntegrationTest {
 
         Alarm alarm = alarmRepository.findAll().getFirst();
         assertThat(alarm.getUser().getId()).isEqualTo(user.getId());
+    }
+
+    @Test
+    @DisplayName("Alarm 생성 요청의 target occurrence ID 검증 오류는 INVALID_REQUEST를 반환한다")
+    void reject_invalid_target_stop_occurrence_id() throws Exception {
+        User user = user();
+
+        for (String requestBody : List.of(
+                "{\"targetStopOccurrenceId\":null}",
+                "{\"targetStopOccurrenceId\":0}",
+                "{\"targetStopOccurrenceId\":-1}"
+        )) {
+            mockMvc.perform(post("/api/v1/alarms")
+                            .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(user.getId()))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                    .andExpect(jsonPath("$.message").value("Request is invalid."));
+        }
+    }
+
+    @Test
+    @DisplayName("선택 option 없이 Alarm을 생성하면 두 option은 false가 된다")
+    void create_alarm_with_id_only() throws Exception {
+        User user = user();
+        RouteFixture route = route();
+
+        mockMvc.perform(post("/api/v1/alarms")
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(user.getId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetStopOccurrenceId\":" + route.middleId() + "}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.notifyOneStopBefore").value(false))
+                .andExpect(jsonPath("$.notifyOneStopAfter").value(false));
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 target occurrence는 구조화된 404 오류를 반환한다")
+    void return_target_stop_occurrence_not_found() throws Exception {
+        User user = user();
+
+        mockMvc.perform(post("/api/v1/alarms")
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(user.getId()))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetStopOccurrenceId\":999999999}"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("TARGET_STOP_OCCURRENCE_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("Target stop occurrence was not found."));
+    }
+
+    @Test
+    @DisplayName("인접 occurrence가 없는 option 요청은 구조화된 400 오류를 반환한다")
+    void reject_boundary_alarm_request() throws Exception {
+        User user = user();
+        RouteFixture route = route();
+        String authorization = "Bearer " + jwtTokenService.createAccessToken(user.getId());
+
+        mockMvc.perform(post("/api/v1/alarms")
+                        .header("Authorization", authorization)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetStopOccurrenceId\":" + route.firstId()
+                                + ",\"notifyOneStopBefore\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ALARM_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Target stop has no predecessor stop."));
+
+        mockMvc.perform(post("/api/v1/alarms")
+                        .header("Authorization", authorization)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetStopOccurrenceId\":" + route.lastId()
+                                + ",\"notifyOneStopAfter\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_ALARM_REQUEST"))
+                .andExpect(jsonPath("$.message").value("Target stop has no successor stop."));
+    }
+
+    @Test
+    @DisplayName("읽을 수 없는 Alarm 생성 요청은 INVALID_REQUEST를 반환한다")
+    void reject_missing_or_malformed_request_body() throws Exception {
+        User user = user();
+        String authorization = "Bearer " + jwtTokenService.createAccessToken(user.getId());
+
+        for (String requestBody : List.of("", "{\"targetStopOccurrenceId\":")) {
+            mockMvc.perform(post("/api/v1/alarms")
+                            .header("Authorization", authorization)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(requestBody))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                    .andExpect(jsonPath("$.message").value("Request is invalid."));
+        }
+    }
+
+    @Test
+    @DisplayName("Alarm 소유권 조회 실패는 모든 변경 API에서 ALARM_NOT_FOUND를 반환한다")
+    void return_alarm_not_found_for_missing_or_other_user_alarm() throws Exception {
+        User owner = user();
+        User other = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
+        String authorization = "Bearer " + jwtTokenService.createAccessToken(other.getId());
+
+        mockMvc.perform(get("/api/v1/alarms/{alarmId}", alarmId)
+                        .header("Authorization", authorization))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("ALARM_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("Alarm was not found."));
+
+        mockMvc.perform(post("/api/v1/alarms/{alarmId}/activate", Long.MAX_VALUE)
+                        .header("Authorization", authorization))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("ALARM_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("Alarm was not found."));
+
+        mockMvc.perform(post("/api/v1/alarms/{alarmId}/deactivate", Long.MAX_VALUE)
+                        .header("Authorization", authorization))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("ALARM_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("Alarm was not found."));
+
+        mockMvc.perform(delete("/api/v1/alarms/{alarmId}", Long.MAX_VALUE)
+                        .header("Authorization", authorization))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.code").value("ALARM_NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("Alarm was not found."));
     }
 
     @Test

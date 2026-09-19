@@ -6,6 +6,7 @@ import com.stopbell.alarm.dto.AlarmResponse;
 import com.stopbell.alarm.dto.CreateAlarmRequest;
 import com.stopbell.alarm.service.AlarmService;
 import com.stopbell.user.auth.service.JwtTokenService;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -30,7 +31,7 @@ public class AlarmController {
 
     @PostMapping("/api/v1/alarms")
     @ResponseStatus(HttpStatus.CREATED)
-    public AlarmResponse create(@AuthenticationPrincipal Jwt jwt, @RequestBody CreateAlarmRequest request) {
+    public AlarmResponse create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateAlarmRequest request) {
         return alarmService.create(jwtTokenService.extractUserId(jwt), request);
     }
 
