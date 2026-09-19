@@ -107,6 +107,14 @@ public class AlarmService {
     }
 
     @Transactional
+    public AlarmResponse activate(Long userId, Long alarmId) {
+        Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alarm not found"));
+        alarm.activate();
+        return toResponse(alarm);
+    }
+
+    @Transactional
     public void delete(Long userId, Long alarmId) {
         Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Alarm not found"));
