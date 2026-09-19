@@ -273,6 +273,54 @@ class AlarmServiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("인증된 User는 소유한 Alarm 상세와 현재 상태를 AlarmResponse로 조회한다")
+    void authenticated_get_returns_owned_alarm_detail() throws Exception {
+        User owner = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, true)).id();
+        Alarm alarm = alarmRepository.findById(alarmId).orElseThrow();
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        alarm.activate();
+        alarm.startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        entityManager.flush();
+        entityManager.clear();
+
+        mockMvc.perform(get("/api/v1/alarms/{alarmId}", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(alarmId))
+                .andExpect(jsonPath("$.transitType").value("BUS"))
+                .andExpect(jsonPath("$.status").value("FOLLOW_UP"))
+                .andExpect(jsonPath("$.routeNumber").value("7000"))
+                .andExpect(jsonPath("$.stopName").value("Stop B"))
+                .andExpect(jsonPath("$.notifyOneStopBefore").value(false))
+                .andExpect(jsonPath("$.notifyOneStopAfter").value(true));
+    }
+
+    @Test
+    @DisplayName("다른 User가 소유한 Alarm 상세 조회는 404를 반환한다")
+    void authenticated_get_returns_not_found_for_other_users_alarm() throws Exception {
+        User owner = user();
+        User other = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
+
+        mockMvc.perform(get("/api/v1/alarms/{alarmId}", alarmId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(other.getId())))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 Alarm 상세 조회는 404를 반환한다")
+    void authenticated_get_returns_not_found_for_missing_alarm() throws Exception {
+        User owner = user();
+
+        mockMvc.perform(get("/api/v1/alarms/{alarmId}", Long.MAX_VALUE)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("Alarm 목록과 모든 BusAlarmTarget을 한 쿼리로 조회한다")
     void find_all_fetches_bus_targets_in_one_query() {
         User owner = user();
@@ -289,6 +337,29 @@ class AlarmServiceIntegrationTest {
         try {
             statistics.clear();
             assertThat(alarmService.findAll(owner.getId())).hasSize(3);
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
+        } finally {
+            statistics.setStatisticsEnabled(originallyEnabled);
+        }
+    }
+
+    @Test
+    @DisplayName("Alarm 상세와 BusAlarmTarget을 한 쿼리로 조회한다")
+    void find_by_id_fetches_bus_target_in_one_query() {
+        User owner = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
+        entityManager.flush();
+        entityManager.clear();
+
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        boolean originallyEnabled = statistics.isStatisticsEnabled();
+        statistics.setStatisticsEnabled(true);
+        try {
+            statistics.clear();
+            assertThat(alarmService.findById(owner.getId(), alarmId)).isEqualTo(new AlarmResponse(
+                    alarmId, TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", false, false
+            ));
             assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
         } finally {
             statistics.setStatisticsEnabled(originallyEnabled);
