@@ -568,7 +568,7 @@ alarmId
 
 이 identity에는 DB Unique Constraint 또는 동등한 atomic uniqueness가 필요하다. `alarmId + eventType`만으로 dedup하지 않는다. 정확한 Schema/constraint 이름은 TASK-707/708에서 결정한다.
 
-Current Alarm lifecycle/activation generation 검증, lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성은 같은 Database transaction에서 수행한다. eligible Device가 0개면 Event와 Delivery 0개를 commit하고 no-recipient operational log/metric으로 관찰한다. Commit 뒤 worker는 이미 생성된 pending Delivery를 전달하며 recipient를 새로 결정하지 않는다. FCM network I/O는 이 transaction 안에서 실행하지 않는다.
+Current Alarm lifecycle/activation generation 검증, lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성은 같은 Database transaction에서 수행한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient operational log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. Commit 뒤 worker는 이미 생성된 pending Delivery를 전달하며 recipient를 새로 결정하지 않는다. FCM network I/O는 이 transaction 안에서 실행하지 않는다.
 
 ------------------------------------------------------------------------
 
