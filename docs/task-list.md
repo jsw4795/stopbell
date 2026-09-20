@@ -174,13 +174,41 @@ Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 A
 - [ ] TASK-505 Bus Route 검색 구현
 - [ ] TASK-506 Bus Stop 조회 구현
 - [x] TASK-507 Transit metadata persistence / MyBatis 필요성 결정 및 구현
+- [ ] TASK-513 Transit metadata source adapter / bootstrap 구현
 - [ ] TASK-508 Alarm grouping 조회 전략 결정 및 구현
 - [ ] TASK-509 Alarm Evaluation Logic 구현
 - [ ] TASK-510 Scheduler 실행 모델 결정 및 구현
 - [ ] TASK-511 Transit API failure를 `UNKNOWN` 상태로 처리
 - [ ] TASK-512 Transit Integration Test 작성
 
-TASK-507은 서울 T Data CSV full import와 경기 TAGO throttled full sync를 위한 local metadata persistence 필요성을 확인해 `BusRoute`/`BusStop`/`BusRouteStopOccurrence` Schema, JPA Repository, source-neutral route diff sync를 구현했다. 같은 Route/Stop identity의 metadata는 내부 ID를 유지하며, 의미가 바뀐 occurrence는 새 ID를 받는다. Provider 전체 fetch 성공 시에만 없는 Route와 orphan Stop을 cleanup한다. metadata CRUD/reconciliation은 JPA로 충분하므로 MyBatis를 도입하지 않았고, Route/Stop 검색·Alarm grouping·대량 조회 성능에서 실제 SQL 제어 필요성이 확인될 때 재검토한다.
+Phase 5의 dependency는 다음과 같다. TASK-513 때문에 TASK-503을 선행 차단하지 않으며 기존 Task 번호와 완료 이력도 유지한다.
+
+```text
+Realtime:                  TASK-501 → TASK-502 → TASK-503 → TASK-504
+Metadata / User selection: TASK-507 → TASK-513 → TASK-505 → TASK-506
+                                        두 branch 준비 후
+                         TASK-508 → TASK-509 → TASK-510 → TASK-511 → TASK-512
+```
+
+TASK-503은 `TransitProviderClient<R, C>` contract를 유지해 실제 Provider 호출을 구현한다. timeout/network, HTTP non-success, Provider logical error, decode/protocol error를 정상 empty와 구분 가능한 failure로 전달하며, failure를 빈 차량 목록으로 바꾸지 않는다. 서울은 Route 전체 조회로 roster/coarse 상태를 확인한 뒤 필요 차량만 `getBusPosByVehIdItem` 등 vehicle detail operation으로 조회한다. Route 전체 item의 `sectOrd`/`sectionId`/`nextStId`에서 target Stop occurrence를 추론하지 않으며, detail 대상 선택 규칙은 TASK-508~510에서 결정한다.
+
+TASK-504는 request Route context, raw Provider response, StopBell successful response receive time을 provider-neutral `TransitObservation`으로 변환하고 필요하면 `TransitEvent`의 표현을 정의한다. `observedAt`은 polling 시작 시각이 아니라 successful response를 받은 직후의 시각이며 같은 response의 차량은 같은 receive-time context를 공유한다. TAGO와 서울 Route realtime item에 externalRouteId가 없을 수 있으므로 request context를 mapper까지 전달한다. ONE_STOP_BEFORE, ARRIVED, PASSED, ONE_STOP_AFTER 판정, baseline, tracking lifecycle, GPS/freshness/missing grace는 TASK-509 책임이다.
+
+TASK-507은 서울 T Data CSV full import와 경기 TAGO throttled full sync를 위한 local metadata persistence 필요성을 확인해 `BusRoute`/`BusStop`/`BusRouteStopOccurrence` Schema, JPA Repository, source-neutral route diff sync를 구현했다. 같은 Route/Stop identity의 metadata는 내부 ID를 유지하며, 의미가 바뀐 occurrence는 새 ID를 받는다. complete provider snapshot 성공 시에만 없는 Route와 orphan Stop을 cleanup하는 reconciliation 방향을 구현했다. metadata CRUD/reconciliation은 JPA로 충분하므로 MyBatis를 도입하지 않았고, Route/Stop 검색·Alarm grouping·대량 조회 성능에서 실제 SQL 제어 필요성이 확인될 때 재검토한다.
+
+TASK-513은 source에서 metadata를 가져와 TASK-507 reconciliation에 적용하는 production ingestion 책임이다. 서울에서는 노선마스터·정류장마스터·노선-정류장마스터 T Data CSV를 parsing·validation하여 normalized `BusRouteMetadataSnapshot`으로 만들고, 경기에서는 TAGO city별 Route와 Route Stop을 pagination 완료까지 수집해 normalized snapshot으로 만든다. 실제 CSV header, encoding, GPS column은 fixture 또는 source 파일을 확인한 구현 시점에 확정한다. TAGO metadata full sync는 realtime vehicle polling과 별도 책임이다.
+
+TASK-513의 최초 bootstrap 기본 방향은 Backend startup이 아닌 명시적 one-shot metadata import/sync 실행이다. 자동 refresh 주기는 이번 Task에서 결정하지 않는다. partial source fetch, parser failure, pagination incomplete, required source missing, provider request 일부 실패 중 하나라도 있으면 complete provider snapshot이 아니므로 provider 전체 cleanup을 실행하지 않는다. empty `List`만으로 complete snapshot을 자동 판정하지 않는다. 구체 Java type 또는 Schema는 강제하지 않는다.
+
+TASK-513 ingestion은 단일 Backend 환경에서 동일 Provider full sync single-flight를 보장하고, current Route reconciliation의 Stop lazy-loading N+1 여부를 확인·개선한다. Provider 전체를 하나의 장시간 DB transaction으로 묶지 않으며 Route 단위 transaction과 successful complete snapshot 뒤 cleanup 방향을 유지한다. Redis, distributed lock, queue는 V1에 도입하지 않는다.
+
+TASK-508은 기본 polling key를 TAGO의 `(provider, externalRouteId, cityCode)`, 서울의 `(provider, externalRouteId)`로 grouping한다. `cityCode`는 Route identity가 아니라 TAGO request 재현 문맥이지만 동일 request 공유에는 필요하다. 같은 Route를 쓰는 여러 사용자·target Stop·ACTIVE Alarm·FOLLOW_UP Alarm은 가능한 한 한 Route polling response를 공유하며 Alarm별 Provider 호출은 만들지 않는다. 현재 JPA + Java grouping으로 충분하며 MyBatis는 도입하지 않는다.
+
+TASK-509은 ACTIVE Alarm의 필요한 vehicle tracking을 V1에서 memory 기반으로 관리할 수 있다. Backend restart 뒤에는 이전 memory tracking과 새 cycle을 연결하지 않고 안전한 recovery baseline을 만들며, restart 전 Observation과 연결해 PASSED를 추론하거나 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 일부 Event 누락보다 false-positive 방지를 우선하며, 모든 raw Provider observation 저장이나 event sourcing은 도입하지 않는다. FOLLOW_UP은 영속된 `status`, `vehicleTrackingId`, `startedAt`, `expiresAt`을 실제 scheduler가 재사용해 유효한 동일 vehicle tracking을 재개해야 한다. restart continuity 충족 여부는 TASK-811에서 검증하고 필요하면 최소 persistence를 재검토한다.
+
+TASK-510은 단일 Spring instance 기준으로 polling cycle overlap을 막는 synchronous/fixed-delay 모델을 우선한다. Provider HTTP I/O 중 DB transaction/row lock을 장시간 유지하지 않고, Alarm을 읽은 뒤 deactivate/delete/reactivate될 수 있음을 고려해 stale polling 결과가 최신 lifecycle을 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation race를 안전하게 처리한다. JPA `@Version`, conditional update/CAS, lifecycle generation token 중 무엇을 쓸지는 구현 전에 비교하며 지금 확정하지 않는다.
+
+TASK-511은 TASK-503 Provider failure를 Transit/Alarm orchestration에서 Event 없는 UNKNOWN으로 처리한다. failure 때문에 Alarm lifecycle을 진행하거나 기존 vehicle tracking state를 즉시 삭제하거나 synthetic PASSED/ARRIVED를 만들지 않는다. retry/backoff 정책과 Resilience4j/circuit breaker 도입 여부는 TASK-510/511 구현 시 결정한다.
 
 ------------------------------------------------------------------------
 

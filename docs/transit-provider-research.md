@@ -622,4 +622,8 @@ Repository root의 local-only `.env`에 있던 `TAGO_SERVICE_KEY`는 process env
 
 metadata persistence가 생기면 Flutter Route/Stop 조회 결과의 internal `RouteStopOccurrence` reference를 opaque `targetStopOccurrenceId`로 Alarm Create Request에 사용하는 것은 가능하다. 다만 Alarm에는 provider/Route/Stop external reference, target order, display/GPS/cityCode snapshot을 계속 보존해야 하며 internal ID 하나만 영구 target identity로 대체하지 않는다. 현재 API contract는 external reference와 order를 의미상 요구하므로, request를 internal ID 전용으로 바꾸는 것은 TASK-402의 명시적 설계 결정이 필요하다.
 
-`targetStopOccurrenceId` 기반 API를 실제로 제공하려면 metadata persistence와 selection validation이 먼저 있어야 한다. 따라서 TASK-402의 field naming 자체는 계속 진행할 수 있지만, 그 형태를 채택한다면 TASK-403보다 먼저 TASK-507의 metadata persistence 결정/구현을 앞당길지 개발자 확인이 필요하다. 이 PoC는 task-list 순서와 Architecture/Domain/API 문서를 변경하지 않는다.
+`targetStopOccurrenceId` 기반 API를 실제로 제공하려면 metadata persistence와 selection validation이 먼저 있어야 한다. 따라서 TASK-402의 field naming 자체는 계속 진행할 수 있지만, 그 형태를 채택한다면 TASK-403보다 먼저 TASK-507의 metadata persistence 결정/구현을 앞당길지 개발자 확인이 필요하다. 이 PoC는 당시 task-list 순서와 Architecture/Domain/API 문서를 변경하지 않았다.
+
+## 후속 결정 상태
+
+이 문서는 조사 및 PoC 기록으로서 위의 당시 관찰과 미확정 항목을 보존한다. 이후 ADR-009는 이 PoC를 근거로 서울 static metadata를 T Data CSV full import, 경기 static metadata를 TAGO throttled full sync로 채택했고, `SEOUL_BUS` namespace와 서울 버스위치정보조회 realtime 역할을 유지했다. TASK-507은 metadata persistence/reconciliation을 구현했으며, source adapter와 명시적 one-shot bootstrap은 TASK-513의 후속 구현 책임이다. 이 후속 결정은 과거의 노선정보조회 서비스 preflight 또는 source 접근 실패 기록을 삭제하거나 재해석하지 않는다.

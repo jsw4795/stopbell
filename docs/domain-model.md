@@ -183,7 +183,7 @@ RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refr
 
 FOLLOW_UP이면 non-blank `followUpVehicleTrackingId`, `followUpStartedAt`, `followUpExpiresAt`이 모두 존재하고 expiry가 start보다 뒤여야 한다. FOLLOW_UP이 아니면 세 runtime field는 모두 비어 있어야 한다. after 옵션과 runtime의 교차-table 불변 조건은 Domain이, runtime field의 완전성과 status 조합은 Domain과 Database CHECK가 함께 강제한다.
 
-Transit API 조회 실패, Notification 발송 결과, Alarm trigger는 Alarm의 상태가 아니다. 이 정보는 필요 시 `NotificationHistory`, Application Log 또는 별도 이력으로 분리한다.
+Transit API 조회 실패, Notification 발송 결과, Alarm trigger는 Alarm의 상태가 아니다. 이 정보는 필요 시 `NotificationHistory`, Application Log 또는 별도 이력으로 분리한다. ACTIVE의 차량별 tracking state는 V1에서 memory 기반일 수 있으므로 Backend restart 뒤에는 이전 state와 새 Observation을 연결하지 않고 안전한 baseline부터 시작한다. 이는 restart 직후 false PASSED 또는 ONE_STOP_BEFORE 재발행을 피하기 위한 방향이다. 반면 FOLLOW_UP runtime은 이 Entity에 영속된 값으로 유효 기간 안에 재개한다.
 
 `transitType`은 `BUS`, `SUBWAY`를 표현하는 Enum으로 관리하며, Database에는 문자열로 저장한다.
 
@@ -267,7 +267,7 @@ Route identity는 `(provider, externalRouteId)`다. `id`는 StopBell 내부 PK�
 
     JPA
 
-서울 T Data CSV full import와 경기 TAGO throttled full sync가 제공하는 current metadata를 JPA Repository로 저장한다. 같은 external identity의 routeNumber/cityCode가 변경되면 row를 UPDATE해 `id`를 유지한다.
+서울 T Data CSV full import와 경기 TAGO throttled full sync가 제공하는 current metadata를 JPA Repository로 저장한다. 같은 external identity의 routeNumber/cityCode가 변경되면 row를 UPDATE해 `id`를 유지한다. Source adapter는 complete provider snapshot을 검증한 경우에만 provider-level absence cleanup을 허용하며, partial fetch, parser failure, pagination 미완료, required source 누락 또는 일부 provider request failure는 deletion 근거가 아니다. empty collection만으로 complete snapshot을 뜻하지 않는다.
 
 ------------------------------------------------------------------------
 
@@ -366,7 +366,7 @@ direct arrival evidence
 
 현재 Stop ID/order가 Provider 응답에서 없으면 억지로 채우지 않는다. `currentStopName`은 PASSED 위치 안내를 위해 Route metadata로 보강할 수 있다. GPS도 optional이며 사용자에게 raw 숫자를 기본 표시하지 않고 Stop name 또는 “최근 확인된 위치” 표현을 보조하는 내부 근거로 사용한다.
 
-`observedAt`은 StopBell이 응답을 받은 시각이고 항상 존재한다. `providerDataTime`은 Provider가 제공한 원본 data 시각이며 optional이다. 둘을 구분해야 반복·stale data를 판단할 수 있다. Provider가 data 시각을 주지 않으면 현재 수신 시각만으로 upstream freshness가 보장된다고 가정하지 않는다.
+`observedAt`은 StopBell이 성공한 Provider response를 받은 직후의 시각이고 항상 존재한다. polling 시작 시각이 아니며, 같은 response에서 mapping한 차량은 같은 receive-time context를 공유한다. `providerDataTime`은 Provider가 제공한 원본 data 시각이며 optional이다. 둘을 구분해야 반복·stale data를 판단할 수 있다. Provider가 data 시각을 주지 않으면 현재 수신 시각만으로 upstream freshness가 보장된다고 가정하지 않는다.
 
 `directionContext`와 `sectionContext`는 Provider가 제공할 때 같은 Route traversal에서 Stop order를 비교할 수 있는지 판단하는 operational evidence다. Provider raw field 이름을 Domain contract로 노출하지 않고, 없는 방향·회차 정보를 추측하지 않는다. Stop order가 역행하거나 순환·회차·분기로 traversal이 모호하면 위치 관계는 `UNKNOWN`이다.
 
@@ -378,10 +378,12 @@ direct arrival evidence
 | --- | --- | --- |
 | Provider / Route | `TAGO` + 요청 `routeId` | `SEOUL_BUS` + 요청 `busRouteId` 또는 응답 `routeId` |
 | Vehicle tracking | `vehicleno` | `vehId`; `plainNo`는 보조값 |
-| Current Stop | `nodeId`, `nodeOrd` | `stId`, `stOrd`; `sectOrd`/`sectionId`는 section context |
+| Current Stop | `nodeId`, `nodeOrd` | vehicle detail의 `stId`, `stOrd`; Route roster의 `sectOrd`/`sectionId`는 coarse section context |
 | GPS | `gpslati`, `gpslong` | WGS84 `tmY`/`tmX` 또는 operation별 WGS84 좌표 |
 | Provider data time | 제공되지 않으면 없음 | `dataTm` |
 | Direct arrival evidence | `UNAVAILABLE` | `stopFlag=1 → ARRIVED`, `stopFlag=0 → MOVING`, 누락/해석 불가 → `UNAVAILABLE` |
+
+서울 Route 전체 조회는 차량 roster와 coarse 상태를 확인하는 용도이며 `sectOrd`, `sectionId`, `nextStId`만으로 target Stop occurrence를 확정하지 않는다. 필요한 서울 차량의 정확한 Stop observation은 vehicle detail의 `stId`/`stOrd`/`stopFlag`에서 만든다. 어떤 차량을 detail 조회할지는 Client가 아니라 polling/orchestration이 결정하며, `sectOrd == stOrd` 같은 관계를 만들지 않는다. TASK-503은 timeout/network, HTTP non-success, Provider logical error, decode/protocol error를 정상 empty와 구분해 전달하고, TASK-504는 정상 raw response만 이 Domain 계약으로 mapping한다.
 
 TAGO Arrival의 `arrprevstationcnt`와 `arrtime`은 Route/Stop 수준의 auxiliary evidence다. Vehicle identifier가 없으므로 특정 Location 차량의 direct arrival evidence로 채우지 않는다. `MOVING`은 “직접 도착 상태가 아님”이라는 뜻이며 target을 이미 통과했다는 뜻이 아니다. `UNAVAILABLE`은 `false`가 아니며 direct flag가 없거나 사용할 수 없음을 뜻한다.
 

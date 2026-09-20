@@ -144,15 +144,19 @@ common
 
 외부 교통 데이터 제공자와의 통신을 담당하고, 필요할 때 제공자별 데이터를 정규화한다.
 
-V1은 하나의 전국 Provider를 강제하지 않는다. 경기는 TAGO가 Route metadata, Stop metadata, realtime Location, Arrival 보조 정보를 맡고, 서울은 서울특별시 노선정보조회 서비스가 Route/Stop metadata를, 서울특별시 버스위치정보조회 서비스가 realtime Location을 맡는다. 두 Provider의 raw external ID는 provider namespace와 opaque String으로 처리하고, Route number·Stop name·Stop order를 identity로 사용하지 않는다. Provider client/DTO를 구현할 때 이 역할 구분을 따르되 범용 plugin 또는 dynamic provider registry를 만들지 않는다.
+V1은 하나의 전국 Provider를 강제하지 않는다. 경기는 TAGO가 Route metadata, Stop metadata, realtime Location, Arrival 보조 정보를 맡는다. 서울 static Route/Stop metadata는 서울 T Data CSV full import를 사용하고, realtime Location은 서울특별시 버스위치정보조회 서비스를 사용한다. 두 지역의 raw external ID는 `TAGO`, `SEOUL_BUS` provider namespace 안의 opaque String으로 처리하고, Route number·Stop name·Stop order를 identity로 사용하지 않는다. Provider client/DTO를 구현할 때 이 역할 구분을 따르되 범용 plugin 또는 dynamic provider registry를 만들지 않는다. 서울 노선정보조회 서비스가 metadata source였던 ADR-006의 초기 결정은 ADR-009에서 T Data CSV로 대체됐다.
 
-realtime Vehicle Location 조회는 `TransitProviderClient<R, C>` contract로 구분한다. Client는 자신이 담당하는 `TransitProvider`를 제공하고 `VehicleLocationRequest<C>`의 opaque `externalRouteId`와 provider별 typed context를 받아 raw response `R`을 반환한다. TAGO context의 `cityCode`는 API request 재현용이며 identity가 아니고, 서울 context에는 TAGO 값을 넣지 않는다. Provider raw DTO는 TASK-502, 실제 Client 호출 구현은 TASK-503, raw DTO의 `TransitObservation` 변환은 TASK-504에서 각각 맡는다.
+realtime Vehicle Location 조회는 `TransitProviderClient<R, C>` contract로 구분한다. Client는 자신이 담당하는 `TransitProvider`를 제공하고 `VehicleLocationRequest<C>`의 opaque `externalRouteId`와 provider별 typed context를 받아 raw response `R`을 반환한다. TAGO context의 `cityCode`는 API request 재현용이며 identity가 아니고, 서울 context에는 TAGO 값을 넣지 않는다. 서울은 Route 전체 조회로 차량 roster와 coarse 상태를 확인한 뒤, polling/orchestration이 필요하다고 고른 차량만 vehicle detail 조회로 `stId`/`stOrd`/`stopFlag`를 확인하는 2단계 방향을 사용한다. Route 전체 응답의 `sectOrd`, `sectionId`, `nextStId`만으로 target Stop occurrence를 판정하거나 다른 operation field와 동치 관계를 만들지 않는다. 상세 조회 대상 선택은 Client나 Flutter가 아니라 후속 polling/orchestration 책임이다. Provider raw DTO는 TASK-502, 실제 Client 호출 구현과 failure 분류는 TASK-503, raw DTO의 `TransitObservation` 변환은 TASK-504에서 각각 맡는다.
 
-Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync에서 받아 StopBell DB의 현재 상태로 보관한다. 사용자 Route/Stop 조회와 Alarm 생성은 DB metadata를 사용하고, Alarm 생성 시 필요한 값은 `BusAlarmTarget` snapshot으로 복사한다. Alarm target은 metadata Entity를 FK로 장기 참조하지 않으므로 subsequent sync가 기존 Alarm을 변경하지 않는다. 실제 source adapter와 Scheduler는 별도 Task에서 구현한다.
+Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync에서 받아 StopBell DB의 현재 상태로 보관한다. 사용자 Route/Stop 조회와 Alarm 생성은 DB metadata를 사용하고, Alarm 생성 시 필요한 값은 `BusAlarmTarget` snapshot으로 복사한다. Alarm target은 metadata Entity를 FK로 장기 참조하지 않으므로 subsequent sync가 기존 Alarm을 변경하지 않는다.
+
+TASK-513의 source adapter는 서울의 노선마스터·정류장마스터·노선-정류장마스터 CSV와 경기의 TAGO city별 Route·Route Stop pagination을 검증해 normalized metadata snapshot으로 만든 뒤 기존 reconciliation service에 전달한다. 실제 CSV header, encoding, GPS column은 fixture 또는 source 파일을 확인한 구현 시점에 확정한다. source 일부 fetch 실패, parser failure, pagination 미완료, required source 누락은 complete provider snapshot이 아니므로 absence/deletion으로 해석하지 않으며 provider-level cleanup을 실행하지 않는다. 단순 empty list도 complete snapshot으로 자동 간주하지 않는다.
+
+최초 metadata bootstrap은 일반 Backend startup에 강제로 연결하지 않는 명시적 one-shot import/sync 실행을 기본으로 한다. 자동 refresh 주기는 이번 결정에 포함하지 않는다. 단일 Backend에서는 같은 Provider full sync의 동시 실행을 막고, Provider 전체를 하나의 장시간 DB transaction으로 묶지 않는다. 기존 Route 단위 transaction과 complete snapshot 성공 뒤 cleanup을 유지하며, ingestion 구현 시 Route reconciliation의 Stop lazy-loading N+1 여부를 확인·개선한다. Redis, distributed lock, queue는 V1 범위가 아니다.
 
 선택된 Provider와 identifier 정책의 근거·제약은 `adr/ADR-006-v1-transit-provider-and-external-identifier-strategy.md`를 따른다.
 
-Provider mapper는 raw response를 한 차량의 관측 사실인 `TransitObservation`으로 변환한다. 공통 의미에는 Provider/Route reference, transient vehicle tracking reference, 현재 Stop/진행 순서, 선택적인 위치·시간·방향/구간 문맥, 그리고 `ARRIVED`/`MOVING`/`UNAVAILABLE`로 구분한 직접 도착 근거가 포함된다. Provider에 없는 값을 가짜 값으로 채우지 않는다.
+Provider mapper는 request Route context, raw Provider response, StopBell이 성공 응답을 받은 직후의 시각을 한 차량의 관측 사실인 `TransitObservation`으로 변환한다. TAGO와 서울 Route realtime item에 externalRouteId가 없을 수 있으므로 request context는 mapper까지 전달한다. 같은 응답의 차량은 같은 receive-time context를 공유하며, `observedAt`은 polling 시작 시각이 아니다. 공통 의미에는 Provider/Route reference, transient vehicle tracking reference, 현재 Stop/진행 순서, 선택적인 위치·시간·방향/구간 문맥, 그리고 `ARRIVED`/`MOVING`/`UNAVAILABLE`로 구분한 직접 도착 근거가 포함된다. Provider에 없는 값을 가짜 값으로 채우지 않는다. HTTP/network timeout, HTTP non-success, Provider logical error, decode/protocol error는 정상 empty와 구분하는 Provider failure이며 빈 차량 목록으로 변환하지 않는다.
 
 ### notification
 
@@ -174,16 +178,9 @@ Provider mapper는 raw response를 한 차량의 관측 사실인 `TransitObserv
 
 여러 알림이 같은 교통 조회에 의존한다면, 요청은 궁극적으로 중복 제거하거나 그룹화해야 한다.
 
-정확한 그룹화 키는 선택한 교통 API에 따라 달라지며 **아직 결정되지 않았다**.
+V1의 기본 Provider polling key는 TAGO의 `(provider, externalRouteId, cityCode)`와 서울의 `(provider, externalRouteId)`다. `cityCode`는 Route identity가 아니라 TAGO request context이지만 동일 polling request 재현에는 필요하다. 같은 Route를 사용하는 여러 사용자·target Stop·ACTIVE Alarm·FOLLOW_UP Alarm은 가능한 한 하나의 Route polling response를 공유한다. Alarm별 Provider 호출이나 MyBatis 도입은 기본 구조로 삼지 않는다.
 
-가능한 그룹화 예시:
-
-- 노선 + 정류장
-- 정류장만
-- 노선 + 방향
-- 제공자별 차량/노선 식별자
-
-외부 API의 의미를 이해하기 전에는 하나를 선택하지 않는다.
+TASK-510 Scheduler는 단일 Spring instance에서 polling cycle overlap을 막는 단순 synchronous/fixed-delay 방식을 우선한다. Provider HTTP I/O 동안 DB transaction 또는 row lock을 오래 유지하지 않으며, polling 뒤 lifecycle이 바뀐 Alarm을 stale 결과가 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation의 race를 안전하게 다뤄야 한다. 구체적인 conditional update, CAS, lifecycle generation token 또는 JPA `@Version` 선택은 구현 전에 비교하며 지금 확정하지 않는다.
 
 ## 8. 알림 평가
 
@@ -203,7 +200,7 @@ Event 후보: ONE_STOP_BEFORE / ARRIVED / PASSED / ONE_STOP_AFTER / 없음
 Notification 전송 결정 또는 UNKNOWN 대기
 ```
 
-`UNKNOWN`은 Notification Event가 아니라 판단 불가 결과다. 정상 응답 안의 애매한 관측과 timeout·HTTP/provider error 같은 Provider failure는 원인이 다르지만 둘 다 거짓 ARRIVED/PASSED Event를 만들지 않는다.
+`UNKNOWN`은 Notification Event가 아니라 판단 불가 결과다. 정상 응답 안의 애매한 관측과 TASK-503에서 구분한 Provider failure는 원인이 다르지만 둘 다 거짓 ARRIVED/PASSED Event를 만들지 않는다. TASK-511은 Provider failure를 Event 없는 UNKNOWN으로 처리하며 Alarm lifecycle을 진행하거나 기존 vehicle tracking state를 즉시 삭제하거나 synthetic PASSED/ARRIVED를 만들지 않는다. retry/backoff와 circuit breaker 도입 여부는 TASK-510/511 구현에서 결정한다.
 
 일반 tracking의 Event precedence는 target에서 도착을 충분히 관찰한 `ARRIVED`, target 이전에서 이후로 건너뛴 `PASSED`, `ONE_STOP_BEFORE` 순이다. ARRIVED 후 동일 차량 follow-up에서는 `ONE_STOP_AFTER`만 평가하며 PASSED로 재분류하지 않는다. Stop order는 같은 방향·Route traversal 문맥에서 비교할 수 있을 때만 사용한다.
 
@@ -213,7 +210,7 @@ Alarm 활성화 시 현재 Route 차량을 baseline으로 분류한다. Target �
 
 PASSED는 해당 Vehicle tracking만 종료하고 Alarm은 ACTIVE로 유지한다. ARRIVED는 Alarm 성공 Event이며 after 옵션이 꺼져 있으면 Alarm을 INACTIVE로 전환하고 다른 Vehicle tracking을 종료한다. after 옵션이 켜져 있으면 Alarm을 ONE_STOP_AFTER 전용 FOLLOW_UP으로 전환하고 ARRIVED를 발생시킨 동일 차량만 다음 Stop 도달·통과까지 추적한다. FOLLOW_UP의 차량 tracking ID와 시작·만료 시각은 Alarm에 영속하여 재시작 뒤 복구할 수 있게 한다.
 
-FOLLOW_UP 중 같은 Alarm의 새 activation은 이전 cycle을 supersede한다. 기존 follow-up runtime을 지우고 ACTIVE 상태의 새 baseline과 monitoring cycle을 시작한다. 비활성화·follow-up 완료도 runtime을 지우며 Alarm 삭제는 runtime과 BusAlarmTarget을 함께 제거한다. ACTIVE 중 차량별 observation/event 상태는 Alarm lifecycle과 분리해 TASK-509/708에서 결정한다.
+FOLLOW_UP 중 같은 Alarm의 새 activation은 이전 cycle을 supersede한다. 기존 follow-up runtime을 지우고 ACTIVE 상태의 새 baseline과 monitoring cycle을 시작한다. 비활성화·follow-up 완료도 runtime을 지우며 Alarm 삭제는 runtime과 BusAlarmTarget을 함께 제거한다. FOLLOW_UP runtime은 서버 restart 뒤에도 저장된 vehicle tracking ID와 유효 기간으로 재사용한다. 반면 ACTIVE의 차량별 observation/event state는 V1에서 memory 기반일 수 있다. restart 뒤에는 이전 memory tracking을 새 cycle과 연결하지 않고 안전한 recovery baseline을 만들며, restart 전 observation으로 PASSED를 추론하거나 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 일부 Event 누락보다 false-positive 방지를 우선하고 모든 raw Provider observation 저장이나 event sourcing은 도입하지 않으며, restart continuity 충족 여부는 TASK-811에서 검증한다.
 
 동일 Alarm·Vehicle·Event Type은 같은 tracking cycle에서 한 번만 의미가 있다. 저장소와 동시성 기반 중복 방지는 TASK-708에서 결정한다.
 

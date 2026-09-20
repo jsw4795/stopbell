@@ -120,7 +120,7 @@ Alarm 설정, 상태 전이, 활성화/비활성화 책임을 둔다.
 - `entity`: `Alarm`, `BusAlarmTarget`, lifecycle/provider snapshot 관련 JPA Domain type
 - `dto`: Alarm API request/response DTO
 
-Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기 설정은 같은 aggregate의 공유 PK `BusAlarmTarget` Entity로 분리한다. `AdjacentStopSnapshot`은 Target 생성 시 option과 필요한 predecessor/successor occurrence를 함께 표현한다. Alarm Evaluation은 scheduler에 묻지 않는다. provider-neutral `TransitObservation`과 Alarm Transit Target을 받아 위치 관계 및 `TransitEvent` 후보를 판단하는 Domain/비즈니스 로직은 `alarm`의 책임으로 둔다.
+Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기 설정은 같은 aggregate의 공유 PK `BusAlarmTarget` Entity로 분리한다. `AdjacentStopSnapshot`은 Target 생성 시 option과 필요한 predecessor/successor occurrence를 함께 표현한다. Alarm Evaluation은 scheduler에 묻지 않는다. provider-neutral `TransitObservation`과 Alarm Transit Target을 받아 위치 관계 및 `TransitEvent` 후보를 판단하는 Domain/비즈니스 로직은 `alarm`의 책임으로 둔다. Scheduler/orchestration은 같은 Route polling response를 여러 Alarm에 공유하고, Provider failure를 Event 없는 UNKNOWN으로 전달하며, lifecycle 변경과 stale polling 결과의 race를 조정한다.
 
 ### transit
 
@@ -134,11 +134,11 @@ Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기
 - `dto`: provider 응답 및 내부 Transit DTO
 - `domain`: `TransitObservation`, `TransitEvent` 등 Transit 관련 Domain Model
 
-Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync의 normalized route snapshot을 JPA로 reconciliation한다. 동일 Route/Stop identity의 metadata는 UPDATE하고, 의미가 바뀐 occurrence는 삭제 후 새 row로 생성한다. Route/Stop 검색, Alarm grouping, Transit 상태 조회, 복잡한 검색은 SQL 제어가 실제로 필요한 경우 MyBatis를 사용한다.
+Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync의 normalized route snapshot을 JPA로 reconciliation한다. TASK-513 source adapter는 서울 노선마스터·정류장마스터·노선-정류장마스터 CSV와 경기 TAGO city별 Route/Route Stop pagination을 읽어 validation 뒤 snapshot을 만든다. source 일부 실패·불완전 pagination·parser failure·필수 source 누락은 provider-level cleanup을 허용하지 않으며 empty collection만으로 complete snapshot을 뜻하지 않는다. 동일 Route/Stop identity의 metadata는 UPDATE하고, 의미가 바뀐 occurrence는 삭제 후 새 row로 생성한다. Route/Stop 검색, Alarm grouping, Transit 상태 조회, 복잡한 검색은 SQL 제어가 실제로 필요한 경우 MyBatis를 사용한다.
 
-V1 Provider는 경기 TAGO와 서울특별시 노선정보조회/버스위치정보조회 서비스로 결정됐다. static metadata source는 서울 T Data CSV와 경기 TAGO sync를 사용한다. 구현 시 provider별 client와 response DTO를 `transit` 경계 안에서 역할에 맞게 분리할 수 있지만, generic multi-provider framework나 동적 registry를 만들지 않는다. grouping key는 아직 결정하지 않는다.
+V1 Provider namespace는 `TAGO`, `SEOUL_BUS`다. static metadata source는 서울 T Data CSV와 경기 TAGO sync이며, 서울 realtime은 Route 전체 roster/coarse 조회 뒤 필요 차량의 vehicle detail을 조회하는 2단계 방향을 사용한다. 구현 시 provider별 client와 response DTO를 `transit` 경계 안에서 역할에 맞게 분리할 수 있지만, generic multi-provider framework나 동적 registry를 만들지 않는다. 기본 polling key는 TAGO의 `(provider, externalRouteId, cityCode)`, 서울의 `(provider, externalRouteId)`다.
 
-Provider별 raw DTO를 Alarm Evaluation에 직접 전달하지 않는다. `transit`이 raw field를 `TransitObservation`의 공통 의미로 변환하고, Provider failure는 정상 Observation과 구분한다. `transit.domain.TransitProvider`는 `TAGO`, `SEOUL_BUS` namespace의 안정적인 공통 type이다. 차량별 tracking lifecycle과 Alarm lifecycle 전이는 `alarm`이 소유하며 scheduler는 이를 실행만 한다.
+Provider별 raw DTO를 Alarm Evaluation에 직접 전달하지 않는다. `transit`은 request context와 successful response receive time을 raw field와 함께 `TransitObservation`의 공통 의미로 변환하고, Provider failure는 정상 empty 및 정상 Observation과 구분한다. `transit.domain.TransitProvider`는 `TAGO`, `SEOUL_BUS` namespace의 안정적인 공통 type이다. 차량별 tracking lifecycle과 Alarm lifecycle 전이는 `alarm`이 소유하며 scheduler는 이를 실행만 한다. metadata full sync의 single-flight, Route 단위 transaction, Stop lazy-loading N+1 확인은 ingestion 구현 책임이며 Redis, distributed lock, queue는 V1에 추가하지 않는다.
 
 ### notification
 

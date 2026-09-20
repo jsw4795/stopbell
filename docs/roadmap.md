@@ -42,7 +42,7 @@ TASK-305 Transit 관측 모델 및 Alarm Transit Target 계약 결정
 
 Transit Foundation Phase 3의 TASK-301~305는 모두 완료됐다.
 
-TASK-304는 경기 TAGO를 Route/Stop metadata·realtime Location·Arrival 보조 Provider로, 서울특별시 노선정보조회 서비스를 Route/Stop metadata source로, 서울특별시 버스위치정보조회 서비스를 realtime Location Provider로 결정했다. Provider external identifier는 provider namespace 안의 opaque String으로 처리한다. TASK-305는 provider-neutral Observation, Alarm Transit Target, ARRIVED·PASSED·UNKNOWN과 before/after 및 Vehicle tracking lifecycle 계약을 확정했다. TASK-401은 BusAlarmTarget snapshot Schema와 INACTIVE/ACTIVE/FOLLOW_UP lifecycle 및 재시작 가능한 after follow-up runtime을 구현했다. API, mapping, Evaluation, Scheduler는 Phase 4~5의 후속 Task에서 구현한다.
+TASK-304는 경기 TAGO를 Route/Stop metadata·realtime Location·Arrival 보조 Provider로, 서울특별시 버스위치정보조회 서비스를 realtime Location Provider로 결정했다. 서울 static Route/Stop metadata source의 초기 노선정보조회 서비스 결정은 PoC와 ADR-009에서 서울 T Data CSV full import로 대체됐다. Provider external identifier는 `TAGO`, `SEOUL_BUS` namespace 안의 opaque String으로 처리한다. TASK-305는 provider-neutral Observation, Alarm Transit Target, ARRIVED·PASSED·UNKNOWN과 before/after 및 Vehicle tracking lifecycle 계약을 확정했다. TASK-401은 BusAlarmTarget snapshot Schema와 INACTIVE/ACTIVE/FOLLOW_UP lifecycle 및 재시작 가능한 after follow-up runtime을 구현했다. API, mapping, Evaluation, Scheduler는 Phase 4~5의 후속 Task에서 구현한다.
 
 ## Phase 1 — 버스 알림 MVP
 
@@ -94,6 +94,21 @@ TASK-304는 경기 TAGO를 Route/Stop metadata·realtime Location·Arrival 보�
 - [ ] 상태 확인 추가
 - [ ] CI 빌드/테스트 추가
 - [ ] 수동 배포를 이해한 뒤에만 CD 추가
+
+## Phase 5 — Transit Integration 의존성
+
+Phase 5는 realtime branch와 metadata/user selection branch를 독립적으로 진행한 뒤 통합한다. TASK-513은 metadata source adapter와 bootstrap 책임이며, 기존 완료 TASK-507을 미완료로 되돌리거나 realtime branch를 선행 차단하지 않는다.
+
+```text
+Realtime
+TASK-501 → TASK-502 → TASK-503 → TASK-504
+
+Metadata / User selection
+TASK-507 → TASK-513 → TASK-505 → TASK-506
+
+두 branch 준비 후
+TASK-508 → TASK-509 → TASK-510 → TASK-511 → TASK-512
+```
 
 ## Phase 2 — 지하철 기상 알림
 
