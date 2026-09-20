@@ -234,6 +234,13 @@ class AlarmServiceIntegrationTest {
     }
 
     @Test
+    @DisplayName("Access Token 없이 Alarm API 목록을 조회하면 401을 반환한다")
+    void reject_unauthenticated_alarm_api_request() throws Exception {
+        mockMvc.perform(get("/api/v1/alarms"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("Alarm 생성 요청의 target occurrence ID 검증 오류는 INVALID_REQUEST를 반환한다")
     void reject_invalid_target_stop_occurrence_id() throws Exception {
         User user = user();
