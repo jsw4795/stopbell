@@ -125,6 +125,13 @@ Database
 - API 시크릿을 로그에 남기지 않는다.
 - 제공자 지연/실패를 디버깅할 충분한 메타데이터를 보존한다.
 
+### 운영 관측성과 시간
+
+- structured log에는 필요한 correlation과 outcome/elapsed time만 기록하고, 모든 identifier를 모든 log에 넣지 않는다.
+- Access/Refresh Token, Google ID Token, Firebase credential, 원문 push targeting identifier·installationId, API key가 포함된 URL/query, 필요 이상의 GPS, raw Provider response 전체를 기록하지 않는다.
+- metric label에는 `alarmId`, `deviceId`, `routeId`, `trackingCycleId`, `installationId`처럼 high-cardinality identifier를 사용하지 않는다.
+- persisted operational time은 UTC 의미를 유지하고, Provider local time은 timezone을 명시적으로 해석한다. business time 계산은 test 가능한 `Clock` 또는 동등한 source를 우선한다.
+
 ### Authentication
 
 - Application API는 Spring Security가 검증한 인증된 StopBell User를 기준으로 처리하며, Controller에서 JWT를 직접 parsing하거나 Client 제공 `userId`를 신뢰하지 않는다.
@@ -138,6 +145,7 @@ Database
 - 스케줄러 코드는 작업을 조율하고 모든 비즈니스 로직을 담지 않는다.
 - 중복 부작용을 낼 수 있는 실행이 겹치지 않게 한다.
 - 폴링 주기는 제공자 제한과 실제 제품 요구를 반영해야 한다.
+- graceful shutdown 때는 새 cycle을 시작하지 않고 진행 중 transaction을 정상 commit/rollback하며, pending delivery와 stale worker claim은 restart 뒤 복구할 수 있어야 한다.
 
 ## 4. Flutter 가이드라인
 

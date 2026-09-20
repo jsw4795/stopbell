@@ -277,30 +277,75 @@ FCM targeting identifier와 Device field/column 길이는 TASK-701/702, activati
 
 목표:
 
-사용자에게 실패를 일으킬 수 있는 동작을 검증하고, 운영에 필요한 최소 품질을 갖춘다.
+Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경 조건에서 검증하고, V1 운영에 필요한 최소 품질을 갖춘다. Phase 8은 activation generation, stale scheduler result 보호, Alarm Evaluation/tracking의 중복 억제, lifecycle concurrency, NotificationEvent atomic uniqueness, lifecycle과 logical NotificationEvent의 atomic commit, durable pending dispatch recovery, Device별 delivery uniqueness, failure/retry state를 처음 구현하는 단계가 아니다.
 
 - [ ] TASK-801 Alarm Evaluation Test 보강
 - [ ] TASK-802 Duplicate Prevention Test 보강
-- [ ] TASK-803 외부 provider response mapping Test 보강
-- [ ] TASK-804 API validation/error handling Test 보강
-- [ ] TASK-805 구조화된 Logging 추가
+- [ ] TASK-803 외부 provider response mapping Test 보강: 실제 관찰 response를 민감 정보를 제거한 golden fixture로 만들고 synthetic edge fixture를 함께 사용한다. fixture에는 provider, operation, 관찰 시점 또는 provenance를 남기되 credential은 제거한다. 실제 Provider 호출이나 scheduled live canary는 일반 PR CI 또는 V1 필수 infrastructure로 두지 않는다.
+- [ ] TASK-804 API validation/error handling Test 보강: 오류 body shape를 안정적으로 통일하되 모든 오류 의미를 합치지 않는다. 최소 `INVALID_REQUEST`, `UNAUTHENTICATED`, resource-specific `NOT_FOUND`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명시적 concurrency/stale conflict, `METADATA_UNAVAILABLE`, `INTERNAL_SERVER_ERROR`를 검증하며 예상치 못한 Exception을 400으로 바꾸지 않는다.
+- [ ] TASK-805 구조화된 Logging, 최소 Operational Metrics 및 Alerting contract 추가
 - [ ] TASK-806 Secret 관리 검토
-- [ ] TASK-807 Health check 검증
-- [ ] TASK-808 Dockerize Backend
+- [ ] TASK-807 Health / Readiness 계약 검증
+- [ ] TASK-808 재현 가능한 Backend runtime image 구성
 - [ ] TASK-809 CI build/test 구성
-- [ ] TASK-810 실제 환경에서 notification delay 측정
-- [ ] TASK-811 server restart 안전성 검증
-- [ ] TASK-812 Analytics Event 및 장기 통계 데이터 보존 전략 결정 및 최소 구현
+- [ ] TASK-810 실제 iPhone 환경에서 notification latency 측정
+- [ ] TASK-811 restart / graceful shutdown / recovery 안전성 검증
+- [ ] TASK-812 Analytics / 장기 통계 필요성 결정 및 필요한 경우에만 최소 구현
+- [ ] TASK-813 Production deployment / migration / backup & recovery readiness
+- [ ] TASK-814 Production UTC time contract 및 timestamp consistency
+- [ ] TASK-815 iOS public App Store release readiness
 
-TASK-812에서는 운영 Domain 데이터 lifecycle과 독립적으로 장기 보존할 통계·분석 데이터를 결정하고, 필요한 최소 구현을 수행한다. Phase 7의 NotificationEvent/NotificationDelivery는 correctness와 delivery operation을 위한 데이터이며 장기 Analytics를 겸하지 않는다. 서비스 사용 패턴과 품질 분석에 필요한 데이터는 Alarm 삭제 여부와 독립적으로 보존할 수 있어야 한다.
+TASK-805는 structured log, 최소 operational metric, alerting contract를 함께 다룬다. metric은 Provider request outcome/latency, Observation staleness/UNKNOWN reason, ACTIVE/FOLLOW_UP Alarm 수, scheduler cycle duration·last completion·overlap, Notification pending 수와 oldest pending delivery age, delivery accepted/failure/retry/expired, metadata 마지막 complete sync 성공 age를 후보로 한다. `alarmId`, `deviceId`, `routeId`, `trackingCycleId`, `installationId`는 metric label에 넣지 않는다. Actuator/Micrometer 수준을 기본으로 하고 자체 Prometheus/Grafana stack을 V1 요구로 만들지 않으며 export와 alert destination은 deployment platform에서 정한다. log는 문맥에 필요한 correlation(`requestId`, `operationId`, provider, schedulerCycleId, alarmId, activation generation, trackingCycleId, notificationEventId, deliveryId, elapsedMs, outcome)만 기록한다. Access/Refresh Token, Google ID Token, Firebase credential, 원문 push targeting identifier·installationId, API key가 든 URL/query, 필요 이상의 GPS, raw Provider response 전체는 로그에 남기지 않는다.
 
-후보 Event는 `ALARM_CREATED`, `ALARM_ACTIVATED`, `ALARM_DEACTIVATED`, `ALARM_DELETED`, `NOTIFICATION_SUCCESS`, `NOTIFICATION_FAILURE` 등이지만, 실제 V1 기능이 대부분 완성된 뒤 필요한 통계, Event 범위, 익명화·최소화 수준, 보존 기간, 원본 Event와 집계 데이터의 보존 범위를 결정한다. 이 시점에는 추측성 Analytics Schema를 미리 확정하지 않으며, 외부 Provider 사용자 식별자, Refresh Token, Push targeting identifier, 정확한 개인 식별 정보 등 장기 통계에 불필요한 데이터는 복제하지 않는 것을 기본 원칙으로 한다.
+TASK-807은 liveness(JVM/process 생존), readiness(DB 연결, Flyway 적용 완료, 필요한 component 초기화, scheduler/outbox worker 실행 가능), business/dependency health(Provider 최근 실패, scheduler last completion, outbox backlog, metadata 마지막 sync age)를 구분한다. TAGO/서울/FCM의 일시적 원격 장애만으로 Backend readiness를 DOWN으로 만들지 않으며, 상세 dependency 정보는 public health response에 과도하게 노출하지 않는다. fresh DB 최초 배포에서는 필요한 metadata bootstrap이 끝나기 전 public Route/Alarm 생성 traffic을 받지 않는 절차가 필요하지만, 정상 운영 중 metadata가 일시적으로 오래됐다는 이유만으로 기존 Alarm monitoring을 unready로 만들지 않는다.
 
-TASK-802/810/811은 Phase 7의 logical DB uniqueness, stale activation 보호, durable pending recovery, multi-device fan-out, invalid registration conditional cleanup, bounded retry와 실제 iOS 검증을 미루는 근거가 아니다. Phase 8은 더 넓은 race/restart/load/latency/operations 검증을 보강한다.
+TASK-808은 production topology 전체가 아니라 Java 21 기반의 재현 가능한 Backend runtime image를 만든다. Gradle Wrapper build 또는 CI-built bootJar, non-root 실행, SIGTERM 전달, UTC runtime timezone, stdout/stderr logging, runtime environment/secret injection, Firebase credential read-only mount 또는 platform identity, health/readiness integration과 graceful shutdown budget을 검토한다. image size 최적화는 correctness보다 우선하지 않고 development `docker-compose.yml`을 production topology로 자동 채택하지 않는다.
 
-TASK-805의 구조화된 Logging은 장애 추적, 서버 동작 관찰, request/error 운영 분석을 위한 것으로 로그 보존 정책에 따라 삭제될 수 있다. TASK-812의 Analytics/Event는 장기 통계, 서비스 사용 패턴, 기능 사용률, Notification provider acceptance·failure 분석을 위한 별도 책임이며, 운영 Domain 데이터 삭제와 독립적인 보존을 검토한다.
+TASK-809의 최소 CI는 지금부터 시작할 수 있다. Backend는 Java 21, Gradle Wrapper, build/test, Testcontainers/MySQL/Flyway 검증을, Flutter는 고정 Flutter version, `flutter analyze`, test가 생긴 뒤 `flutter test`를 포함한다. Phase 5~7 구현이 추가될 때 해당 correctness test를 계속 포함한다. 실제 TAGO/서울 Provider 호출, production Firebase credential, 실제 FCM 전송, signed iOS archive는 일반 PR CI에 넣지 않는다. TASK-808 완료 뒤 Docker image build/smoke를 추가할 수 있으며 GitHub Actions는 후보이나 workflow 세부는 이 Task에서 확정한다.
+
+TASK-810은 `pollStartedAt`, provider data time(제공되는 경우), `observedAt`, `eventDetectedAt`, `notificationEventCreatedAt`, `deliveryAttemptAt`, `providerAcceptedAt`으로 Provider freshness/request, evaluation, outbox queue, FCM request, Backend observable end-to-end latency를 분리해 측정한다. Provider가 실제 버스 Event 시각을 주지 않으면 물리 Event부터 Backend까지 지연은 알 수 없고, FCM accepted도 iPhone 표시 시각이 아니다. foreground/background/terminated별 실제 Device 반복 측정으로 체감 지연을 보완한다.
+
+TASK-811은 ACTIVE tracking, ONE_STOP_BEFORE 뒤, target 통과 직전, FOLLOW_UP, lifecycle과 NotificationEvent commit 직후, pending delivery 전, FCM accepted와 DB result update 사이, retry wait, metadata sync 경계에서 restart를 검증한다. ACTIVE tracking의 memory loss는 허용하고 safe rebaseline을 사용하며 restart 전후 Observation을 연결해 PASSED를 추론하지 않는다. FOLLOW_UP은 persisted runtime으로, NotificationEvent는 durable outbox로 복구한다. ambiguous FCM acceptance에는 duplicate 가능성을 인정한다. SIGTERM/deployment 때 새 polling·dispatch cycle을 시작하지 않고 진행 중 transaction은 commit/rollback하며 Provider/FCM timeout은 shutdown budget보다 짧게 제한한다. pending delivery는 restart 뒤 복구하고 incomplete metadata sync는 provider cleanup 근거가 될 수 없다. worker claim을 쓰면 stale claim을 회수할 lease/claimedAt 또는 동등한 contract를 둔다. 이 검증에서 실제 품질 문제가 입증되기 전에는 ACTIVE tracking persistence나 event sourcing을 추가하지 않는다.
+
+TASK-812는 debugging을 위한 structured log, notification quality를 위한 operational metrics/NotificationDelivery, product usage를 위한 analytics, 장기 business metric을 구분한다. 실제 제품 질문과 보존 근거가 있을 때만 Analytics를 최소 구현하며 별도 persistence가 필요 없다는 결론도 정상 완료다. Phase 7의 NotificationEvent/NotificationDelivery는 correctness와 delivery operation 데이터이며 장기 Analytics Source of Truth가 아니다. TASK-812는 public V1 release blocker가 아니다.
+
+TASK-813은 단일 persistent Backend runtime, durable MySQL, HTTPS/domain 또는 동등한 secure public endpoint, runtime secret injection, restart policy, deployment smoke, rollback procedure, DB backup/restore, Flyway migration policy를 준비한다. 특정 vendor/product는 정하지 않는다. 첫 production 적용 뒤에는 적용된 Flyway migration file을 수정하지 않고 새 migration을 추가한다. single-instance V1은 application startup migration을 유지할 수 있으나, 배포 전 migration 영향과 backup/restore point를 확인하고 migration 실패 instance는 ready가 되어서는 안 된다. DB를 임의 downgrade하지 않으며 application rollback은 새 Schema와의 compatibility를 확인한 경우만 한다. 공개 사용자 데이터를 받기 전 자동 DB backup 또는 platform snapshot, 가능하면 PITR, deploy 전 restore point, 실제 restore drill 최소 1회를 검증한다. Alarm/User/BusAlarmTarget은 복구 중요도가 높고 Transit metadata는 source에서 재생성할 수 있으며 pending notification은 freshness policy를 고려한다. 오래된 backup 복원 뒤 RefreshToken session revoke/re-login 정책은 이 Task에서 결정한다.
+
+TASK-814는 persisted operational time을 UTC 의미로 통일한다. `createdAt`/`updatedAt`, RefreshToken expiry, FOLLOW_UP start/expiry, Provider data time normalization, scheduler time, Notification retry/expiry, latency instrumentation 및 Analytics event time(도입 시)이 대상이다. business time 계산은 test 가능한 `Clock` 또는 동등한 source를 우선하며 Provider local time은 timezone을 명시적으로 해석한다. 모든 type을 `Instant`로 바꿀지 UTC `LocalDateTime`/MySQL `DATETIME` 의미를 유지할지는 implementation 시 Schema와 migration 비용을 확인해 정하되 host local timezone에 따라 persisted time 의미가 달라져서는 안 된다.
+
+TASK-815는 Phase 6의 iOS development/actual-device vertical slice를 막지 않으며 public App Store 제출 전에만 release blocker다. 제출 시점 Apple 공식 Guideline을 확인해 Google-only primary social login의 Guideline 4.8 준수, 동등한 privacy-preserving login option 필요 여부, in-app account deletion, Privacy Policy, App Store privacy disclosure/data inventory, Firebase/Google 등 third-party SDK disclosure를 검토한다. 지금 Sign in with Apple 구현을 고정하지 않으며 필요할 때 User, Alarm, Device, Refresh Session 등 사용자 연결 데이터의 삭제 범위와 법적 보존 데이터를 정한다.
+
+공개 V1 전에는 기존 Domain Task에서 User별 총/ACTIVE Alarm, User별 Device, Route search query 길이/result limit, request body size의 최소 상한을 Provider quota와 실제 규모를 기준으로 결정한다. 별도 generic rate limiter나 Redis rate limiter는 도입하지 않는다. Provider polling은 Route grouping으로 Alarm별 외부 API 증폭을 막는다.
+
+실행 dependency는 다음과 같다. TASK 번호는 변경하지 않는다.
+
+```text
+TASK-809 최소 CI는 지금부터 시작 가능
+
+Phase 5~7 correctness 구현 완료
+        ↓
+TASK-803 / 801 / 802 / 804 regression 보강
+        ↓
+TASK-814 UTC time contract
+        ↓
+TASK-806 Secret 관리
+        ↓
+TASK-805 Logging / Metrics / Alerts
+        ↓
+TASK-807 Health / Readiness
+        ↓
+TASK-808 Backend Docker image
+        ↓
+TASK-813 Production deployment / migration / backup & recovery
+        ↓
+TASK-811 Restart / graceful shutdown / recovery 검증
+        ↓
+TASK-810 실제 iPhone notification latency 측정
+```
+
+TASK-815는 public App Store 제출 전에 수행하고 TASK-812는 제품 Analytics 필요성이 확인될 때 수행한다.
 
 Future Consideration:
 
 - CD 도입은 수동 배포 흐름을 이해한 뒤 검토한다.
-- Redis, external message broker, multiple backend instance는 측정된 문제가 있을 때만 검토한다. Phase 7의 MySQL pending dispatch worker는 이미 기본 correctness 범위다.
+- Redis, external message broker, multiple backend instance, Kubernetes, Kafka, RabbitMQ, ELK cluster, self-hosted Prometheus/Grafana stack, Vault, distributed tracing platform, multi-region, read replica, CQRS, event sourcing, microservice split, blue/green deployment framework는 측정된 필요가 있을 때만 검토한다. Phase 7의 MySQL pending dispatch worker는 이미 기본 correctness 범위다.

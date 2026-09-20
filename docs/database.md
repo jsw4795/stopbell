@@ -29,13 +29,15 @@ Hibernate `ddl-auto`를 통한 자동 Schema 변경은 사용하지 않는다. E
 
 Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{description}.sql` 형식으로 둔다. Flyway는 애플리케이션과 MySQL Testcontainer 통합 테스트에서 이 Migration을 적용한다.
 
+첫 production 적용 뒤 이미 적용된 Migration file은 수정하지 않고 Schema 변경은 새 Migration으로 추가한다. single-instance V1에서는 application startup Flyway migration을 유지할 수 있으나, 배포 전 migration 영향과 backup/restore point를 확인한다. migration 실패 instance는 ready가 되어서는 안 되며 DB를 임의 downgrade하지 않는다. application rollback은 새 Schema와 old application compatibility가 검증된 경우만 허용한다.
+
 ## 4. 모델링 원칙
 
 - 명확한 관계형 제약 조건을 우선한다.
 - 데이터베이스가 안전하게 강제할 수 있는 불변 조건에는 데이터베이스 제약을 사용한다.
 - 캐시/영속화할 측정된 이유가 없다면 대량의 외부 교통 마스터 데이터를 중복 저장하지 않는다.
 - 제공자 식별자는 제공자별 네임스페이스가 없으면 전역적으로 유일하다고 가정하지 않는다.
-- 타임스탬프는 일관되게 저장한다.
+- persisted operational timestamp는 host local timezone과 무관한 UTC 의미로 일관되게 저장한다. 구체 Java type과 MySQL `DATETIME` 표현은 TASK-814에서 Schema/migration 비용을 확인해 정한다.
 
 ## 5. Persistence Strategy
 
@@ -208,7 +210,7 @@ NotificationDelivery
 
 하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition과 NotificationEvent insert를 함께 commit한다. commit 뒤 in-process worker가 pending Event를 읽어 활성 Device에 fan-out하고 FCM I/O 뒤 Delivery 결과를 갱신한다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
 
-Delivery는 accepted, invalid/unregistered target, transient failure, rate/quota failure, provider authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance state, expired notification을 구분할 수 있어야 한다. 모든 retry attempt를 append-only row로 저장할 필요는 없다. 정확한 status/type, retry count·interval·freshness TTL과 polling query/index는 TASK-707/709에서 정한다. 이 operational data와 TASK-812의 장기 Analytics는 별도 책임이다.
+Delivery는 accepted, invalid/unregistered target, transient failure, rate/quota failure, provider authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance state, expired notification을 구분할 수 있어야 한다. 모든 retry attempt를 append-only row로 저장할 필요는 없다. 정확한 status/type, retry count·interval·freshness TTL과 polling query/index는 TASK-707/709에서 정한다. 이 operational data는 Analytics와 별도 책임이며, Analytics persistence는 실제 제품 질문과 보존 근거가 있을 때만 TASK-812에서 결정한다.
 
 ### bus_routes, bus_stops, bus_route_stop_occurrences
 

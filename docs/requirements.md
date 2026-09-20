@@ -138,16 +138,20 @@ Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고
 
 Phase 7은 stale activation/lifecycle 보호, logical Notification DB uniqueness, durable pending dispatch recovery, multi-device fan-out, invalid registration의 조건부 정리, bounded retry state를 포함해야 한다. Phase 8 검증은 이 correctness를 대체하지 않는다.
 
+ACTIVE tracking은 V1에서 memory 기반 상태와 restart-safe rebaseline을 유지한다. restart 전후 Observation을 연결해 PASSED를 추론하지 않으며, TASK-811이 실제 품질 문제를 입증하기 전에는 tracking persistence나 event sourcing을 추가하지 않는다.
+
 ### NFR-002 관측성
 
-다음의 중요한 단계는 로그를 통해 추적할 수 있어야 한다.
+다음의 중요한 단계는 structured log와 최소 operational metric으로 추적할 수 있어야 한다.
 
 - 교통 API 요청/결과
 - 알림 조건 평가
 - 푸시 요청/결과
 - 관련 실패
 
-로그에 시크릿이나 민감한 토큰을 노출해서는 안 된다.
+최소 metric 후보는 Provider request outcome/latency, Observation staleness/UNKNOWN reason, ACTIVE/FOLLOW_UP Alarm 수, scheduler cycle duration·last completion·overlap, Notification pending 수와 oldest pending delivery age, delivery accepted/failure/retry/expired, metadata 마지막 complete sync 성공 age다. `alarmId`, `deviceId`, `routeId`, `trackingCycleId`, `installationId`는 metric label에 넣지 않는다. Actuator/Micrometer 수준을 기본으로 하며 export와 alert destination은 deployment platform에서 정한다.
+
+로그에 시크릿이나 민감한 토큰을 노출해서는 안 된다. Access/Refresh Token, Google ID Token, Firebase credential, 원문 push targeting identifier·installationId, Transit API key가 포함된 URL/query, 필요 이상의 정확한 GPS, raw Provider response 전체를 기록하지 않는다.
 
 ### NFR-003 외부 API 효율성
 
@@ -171,6 +175,12 @@ Phase 7은 stale activation/lifecycle 보호, logical Notification DB uniqueness
 
 알림 조건을 판단하는 비즈니스 규칙은 가능한 경우 Controller/네트워크 연결 코드와 분리해야 한다.
 
+### NFR-007 운영 준비성
+
+Backend liveness와 readiness를 구분한다. readiness는 DB 연결, Flyway migration 적용, 필요한 application component 초기화, scheduler/outbox worker 실행 가능을 확인하며 일시적인 TAGO/서울/FCM 원격 장애만으로 DOWN이 되어서는 안 된다. fresh DB 최초 배포에서는 필요한 metadata bootstrap 전 public Route/Alarm 생성 traffic을 받지 않는 절차가 필요하다.
+
+Persisted operational time은 host local timezone과 무관하게 UTC 의미로 일관되어야 한다. Provider local time은 timezone을 명시적으로 해석하며, business time 계산은 test 가능한 `Clock` 또는 동등한 source를 우선한다.
+
 ## 6. V1에서 명시적으로 제외하는 범위
 
 별도 승인이 없다면 V1에는 다음을 포함하지 않는다.
@@ -186,6 +196,8 @@ Phase 7은 stale activation/lifecycle 보호, logical Notification DB uniqueness
 - 마이크로서비스
 - 멀티 리전 배포
 - 복잡한 관리자 콘솔
+- Kubernetes, self-hosted Prometheus/Grafana stack, Vault, distributed tracing platform
+- CQRS, event sourcing, blue/green deployment framework
 
 ## 7. 미해결 질문
 
@@ -195,3 +207,4 @@ Phase 7은 stale activation/lifecycle 보호, logical Notification DB uniqueness
 - 어떤 폴링 주기가 허용되며 유용한가?
 - 어떤 요청 제한이 적용되는가?
 - TASK-701에서 실제 사용할 FlutterFire/firebase_messaging, Firebase iOS SDK, Java Firebase Admin SDK 버전의 iOS targeting identifier와 local unregister 동작은 무엇인가?
+- 공개 App Store 제출 시점 Apple Guideline 4.8의 적용 여부와 가장 단순한 login/account deletion 준수 방식은 무엇인가?

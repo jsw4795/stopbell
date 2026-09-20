@@ -154,6 +154,44 @@ TASK-711 최종 E2E/regression
 
 각 Task는 자기 correctness test를 함께 작성한다. TASK-711은 테스트를 몰아서 처음 작성하는 Task가 아니라 최종 E2E/regression 보강이다. Phase 7에서 logical DB uniqueness, stale activation 보호, durable pending recovery, multi-device fan-out, invalid registration conditional cleanup, bounded retry와 실제 iOS 상태별/tap 검증을 갖추며 Phase 8에 미루지 않는다.
 
+## Phase 8 — Quality / Operations / Production Readiness
+
+Phase 8은 Phase 5/7 correctness를 처음 구현하는 단계가 아니라, 이미 구현한 lifecycle, dedup, durable delivery correctness를 race, restart, actual-device, production-like 조건에서 검증하고 최소 운영 계약을 갖추는 단계다. ACTIVE tracking은 V1 memory 기반과 restart-safe rebaseline을 유지하며, TASK-811이 실제 품질 문제를 입증하기 전에는 persistence나 event sourcing을 추가하지 않는다.
+
+```text
+TASK-809 최소 CI는 지금부터 시작 가능
+
+Phase 5~7 correctness 구현 완료
+        ↓
+TASK-803 / 801 / 802 / 804 regression 보강
+        ↓
+TASK-814 UTC time contract
+        ↓
+TASK-806 Secret 관리
+        ↓
+TASK-805 Logging / Metrics / Alerts
+        ↓
+TASK-807 Health / Readiness
+        ↓
+TASK-808 Backend Docker image
+        ↓
+TASK-813 Production deployment / migration / backup & recovery
+        ↓
+TASK-811 Restart / graceful shutdown / recovery 검증
+        ↓
+TASK-810 실제 iPhone notification latency 측정
+```
+
+TASK-809의 초기 CI는 Java 21, Gradle Wrapper, Backend build/test와 Testcontainers/MySQL/Flyway 검증, 고정 Flutter version의 `flutter analyze`, test가 생긴 뒤 `flutter test`를 포함한다. 이후 Phase 5~7 correctness test를 계속 포함한다. 실제 Provider 호출, production Firebase credential, 실제 FCM 전송, signed iOS archive는 일반 PR CI에 넣지 않으며 TASK-808 뒤 image build/smoke를 추가할 수 있다.
+
+TASK-805는 structured logging과 최소 operational metric/alerting contract를 함께 다룬다. TASK-807은 liveness, DB/Flyway/component/worker readiness, Provider·scheduler·outbox·metadata의 business/dependency health를 구분한다. 일시적 원격 Provider/FCM 장애는 readiness를 DOWN으로 만들지 않는다.
+
+TASK-808은 production topology가 아닌 재현 가능한 Backend runtime image 책임이다. TASK-813은 single persistent Backend, durable MySQL, secure public endpoint, secret injection, restart/deployment smoke, rollback, backup/restore와 Flyway 운영 policy를 연결한다. 첫 production 적용 뒤 적용된 migration file은 수정하지 않고 새 migration을 추가하며 migration 실패 instance는 ready가 될 수 없다. V1은 Kubernetes, Kafka/RabbitMQ, Redis, self-hosted Prometheus/Grafana, Vault, distributed tracing, multi-region, read replica, CQRS, event sourcing, microservice split, blue/green framework를 기본 요구로 만들지 않는다.
+
+TASK-814는 persisted operational time을 UTC 의미로 통일하고 host timezone 의존을 제거한다. TASK-811은 memory ACTIVE tracking의 safe rebaseline, persisted FOLLOW_UP, durable outbox recovery, FCM ambiguous acceptance와 worker claim recovery를 restart/shutdown 경계에서 검증한다. TASK-810은 Provider freshness, evaluation, outbox, FCM, Backend observable latency를 분리하고 실제 iPhone foreground/background/terminated 반복 측정으로 체감 지연을 보완한다.
+
+TASK-812 Analytics는 실제 제품 질문과 보존 근거가 있을 때만 최소 구현하며 public V1 release blocker가 아니다. `NotificationEvent`/`NotificationDelivery`는 operational correctness 데이터이지 장기 Analytics Source of Truth가 아니다. TASK-815는 public App Store 제출 전에만 실행하는 release blocker이며, 제출 시점의 Apple login/account deletion/privacy disclosure 요건을 검토한다. 이는 Phase 6의 iOS actual-device vertical slice를 막지 않는다.
+
 ## Phase 2 — 지하철 기상 알림
 
 V1 버스 알림이 신뢰성 있게 동작한 뒤에만 시작한다.

@@ -64,7 +64,7 @@ Database에서는 MySQL `BIGINT AUTO_INCREMENT`를 사용한다. JPA 구현 시�
 
 ## Timestamp Policy
 
-`createdAt`, `updatedAt`은 Java에서 `LocalDateTime`, Database에서 `DATETIME(6)`으로 관리한다. 두 컬럼은 `NOT NULL`을 기본 정책으로 한다.
+현재 `createdAt`, `updatedAt`은 Java에서 `LocalDateTime`, Database에서 `DATETIME(6)`으로 관리한다. 두 컬럼은 `NOT NULL`을 기본 정책으로 한다. 이 표현의 persisted 의미는 UTC여야 하며 host local timezone에 따라 달라져서는 안 된다. TASK-814에서 현재 Schema와 migration 비용을 확인해 모든 operational time을 `Instant`로 전환할지, UTC `LocalDateTime`/`DATETIME(6)` 의미를 유지할지 결정한다.
 
 timestamp는 JPA lifecycle callback으로 관리한다. `@PrePersist`에서 `createdAt`과 `updatedAt`을 초기화하고, `@PreUpdate`에서 `updatedAt`을 갱신한다.
 

@@ -280,16 +280,19 @@ MySQL pending dispatch를 처리하는 in-process worker는 Phase 7 기본 구�
 
 ## 11. 배포 방향
 
-초기 목표:
+V1 production은 하나의 persistent Spring Boot runtime, durable MySQL, HTTPS/domain 또는 동등한 secure public endpoint, runtime secret injection, restart policy와 deployment smoke를 필요로 한다. 특정 vendor/product를 지금 정하지 않으며 development `docker-compose.yml`은 production topology가 아니다.
 
-- 컨테이너화된 Spring Boot 백엔드
-- 영속적인 MySQL 인스턴스
-- HTTPS 엔드포인트
-- 알림이 활성 상태인 동안 서버가 계속 사용 가능해야 함
+Backend image는 Java 21 runtime, Gradle Wrapper build 또는 CI-built bootJar, non-root 실행, SIGTERM 전달, UTC timezone, stdout/stderr logging, health/readiness integration과 graceful shutdown budget을 갖는 재현 가능한 runtime image를 목표로 한다. image size 최적화는 correctness보다 우선하지 않는다.
 
-정확한 제공자는 아직 정해지지 않았다.
+liveness는 JVM/process 생존을, readiness는 DB 연결, Flyway migration 적용 완료, 필요한 component 초기화, scheduler/outbox worker 실행 가능을 뜻한다. Provider/FCM의 일시적 장애는 Backend readiness를 DOWN으로 만들지 않는다. Provider 최근 실패, scheduler last completion, outbox backlog, metadata 마지막 complete sync age는 business/dependency health로 관찰하되 public response에 상세 내용을 과도하게 노출하지 않는다.
 
-초기 개발에서는 AWS 또는 더 단순한 관리형 플랫폼을 후보로 고려할 수 있다.
+최초 fresh DB deployment에서는 필요한 metadata bootstrap이 끝나기 전 public Route/Alarm 생성 traffic을 받지 않는다. 반대로 정상 운영 중 metadata stale만으로 기존 Alarm monitoring을 unready로 만들지 않는다.
+
+deployment와 SIGTERM 때는 새 polling/notification dispatch cycle을 시작하지 않고, 진행 중 DB transaction은 정상 commit 또는 rollback한다. Provider/FCM timeout은 shutdown budget보다 짧게 제한하고 pending delivery는 restart 뒤 durable outbox에서 복구한다. worker claim을 쓴다면 crash 뒤 stale claim을 회수할 lease/claimedAt 또는 동등한 contract가 필요하다. incomplete metadata sync는 provider cleanup의 근거가 아니다.
+
+첫 production 적용 뒤 Flyway migration file은 수정하지 않고 변경을 새 migration으로 추가한다. 배포 전 migration 영향과 backup/restore point를 확인하고 migration 실패 instance는 ready가 되어서는 안 된다. DB downgrade는 임의로 하지 않으며 application rollback은 새 Schema와 old application compatibility를 확인한 경우만 한다. 공개 사용자 데이터를 받기 전 자동 DB backup 또는 platform snapshot, 가능하면 PITR, deploy 전 restore point와 실제 restore drill 최소 1회를 검증한다. Alarm/User/BusAlarmTarget은 복구 중요도가 높고 Transit metadata는 source에서 재생성할 수 있으며 pending notification은 freshness policy를 고려한다.
+
+Kubernetes, multi-region, read replica, blue/green deployment framework는 V1 기본 요구가 아니다.
 
 ## 12. 아키텍처 원칙
 
