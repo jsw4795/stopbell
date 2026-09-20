@@ -16,8 +16,8 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
     User
 
      ├── Alarm
-     |
-     └── RefreshToken
+     ├── RefreshToken
+     └── Device
 
 
     BusRoute ──< BusRouteStopOccurrence >── BusStop
@@ -128,6 +128,46 @@ RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refr
 
 ------------------------------------------------------------------------
 
+# Device
+
+## Purpose
+
+StopBell이 한 User의 한 앱 installation과 현재 Push delivery reference를 구분해 관리하는 Domain이다.
+
+## Conceptual Attributes
+
+    id
+
+    user
+
+    installationId
+
+    platform
+
+    currentPushTargetId
+
+    registrationRevision
+
+    enabled
+
+    createdAt
+
+    updatedAt
+
+`installationId`는 Client가 앱 installation마다 생성하는 StopBell Device identity다. Firebase targeting identifier는 rotation/re-registration될 수 있는 현재 delivery reference이며 Device identity가 아니다. APNs device token도 StopBell Device identity로 사용하지 않는다. 실제 Firebase identifier, field 이름과 길이는 TASK-701/702에서 사용하는 SDK 버전과 동작을 확인한 뒤 확정한다.
+
+## Relationship and Lifecycle
+
+    User 1 : N Device
+
+한 User는 여러 Device를 가질 수 있다. RefreshToken Session과 Device는 직접 FK로 연결하지 않는다.
+
+동일 installation의 registration update는 monotonic revision 또는 동등한 stale-write 방지 계약을 사용한다. 더 오래된 update가 최신 push target을 덮어쓸 수 없고, 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
+
+현재 installation logout 또는 Push 해제는 해당 Device만 disable/unregister하며 Alarm lifecycle과 다른 Device를 변경하지 않는다. Auth logout request에 Device field를 추가하지 않고 별도 authenticated Device lifecycle로 처리한다. Invalid/unregistered provider 결과도 실패한 target/revision이 여전히 current registration일 때만 조건부로 disable하며 Device row를 무조건 삭제하지 않는다.
+
+------------------------------------------------------------------------
+
 # Alarm
 
 ## Purpose
@@ -157,6 +197,8 @@ RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refr
 
     status
 
+    activationGeneration
+
     followUpVehicleTrackingId (FOLLOW_UP only)
 
     followUpStartedAt (FOLLOW_UP only)
@@ -179,11 +221,13 @@ RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refr
 
 `activate()`는 `INACTIVE` 또는 `FOLLOW_UP`을 `ACTIVE`로 전환한다. FOLLOW_UP에서 호출되면 이전 follow-up runtime을 지워 old follow-up을 취소하고 새 monitoring cycle을 시작한다. 이미 ACTIVE이면 상태를 유지한다. `deactivate()`는 ACTIVE/FOLLOW_UP을 `INACTIVE`로 전환하고 follow-up runtime을 지운다.
 
+`activationGeneration`은 서로 다른 monitoring activation cycle을 구분하는 persisted semantic generation이다. 새 activation cycle이 시작될 때 증가하여 deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation의 Notification candidate를 현재 activation과 구분한다. 정확한 증가 조건, 초기값과 CAS/query 구현은 TASK-510에서 확정하며 JPA `@Version` 같은 일반 optimistic locking 검토를 대체하지 않는다.
+
 `startFollowUp(vehicleTrackingId, startedAt, expiresAt)`은 ACTIVE이며 `notifyOneStopAfter`가 설정된 Bus Alarm에서만 FOLLOW_UP을 시작한다. 만료시간 숫자는 이 Domain이 정하지 않고 호출자가 명시적으로 전달한다. `completeFollowUp()`은 FOLLOW_UP을 INACTIVE로 전환하고 runtime을 지운다.
 
 FOLLOW_UP이면 non-blank `followUpVehicleTrackingId`, `followUpStartedAt`, `followUpExpiresAt`이 모두 존재하고 expiry가 start보다 뒤여야 한다. FOLLOW_UP이 아니면 세 runtime field는 모두 비어 있어야 한다. after 옵션과 runtime의 교차-table 불변 조건은 Domain이, runtime field의 완전성과 status 조합은 Domain과 Database CHECK가 함께 강제한다.
 
-Transit API 조회 실패, Notification 발송 결과, Alarm trigger는 Alarm의 상태가 아니다. 이 정보는 필요 시 `NotificationHistory`, Application Log 또는 별도 이력으로 분리한다. ACTIVE의 차량별 tracking state는 V1에서 memory 기반일 수 있으므로 Backend restart 뒤에는 이전 state와 새 Observation을 연결하지 않고 안전한 baseline부터 시작한다. 이는 restart 직후 false PASSED 또는 ONE_STOP_BEFORE 재발행을 피하기 위한 방향이다. 반면 FOLLOW_UP runtime은 이 Entity에 영속된 값으로 유효 기간 안에 재개한다.
+Transit API 조회 실패, Notification delivery 결과, Alarm trigger는 Alarm의 상태가 아니다. Logical notification 결정은 `NotificationEvent`, Device별 전달 상태는 `NotificationDelivery`로 분리한다. ACTIVE의 차량별 tracking state는 V1에서 memory 기반일 수 있으므로 Backend restart 뒤에는 이전 state와 새 Observation을 연결하지 않고 안전한 baseline부터 시작한다. 이는 restart 직후 false PASSED 또는 ONE_STOP_BEFORE 재발행을 피하기 위한 방향이다. 반면 FOLLOW_UP runtime은 이 Entity에 영속된 값으로 유효 기간 안에 재개한다.
 
 `transitType`은 `BUS`, `SUBWAY`를 표현하는 Enum으로 관리하며, Database에는 문자열로 저장한다.
 
@@ -493,57 +537,72 @@ ARRIVED 뒤 after 옵션이 꺼져 있으면 Alarm을 INACTIVE로 전환하고 �
 
 FOLLOW_UP 상태의 동일 Alarm을 사용자가 다시 활성화하면 이전 activation cycle의 follow-up runtime을 지우고 새 baseline으로 새 monitoring cycle을 시작한다. 비활성화와 follow-up 완료도 runtime을 지운다. Alarm 삭제 시에는 Alarm column인 runtime과 공유 PK BusAlarmTarget이 함께 삭제된다.
 
-동일 Alarm + 동일 Vehicle + 동일 Event Type은 같은 tracking cycle에서 한 번만 의미가 있다. 구체적인 persistence와 concurrency 기반 duplicate prevention은 TASK-708의 범위다.
+반복 Observation 억제와 중복 Event candidate 억제는 tracking/Evaluation 책임이다. ACTIVE tracking은 V1에서 memory 기반일 수 있고 runtime마다 unique한 `trackingCycleId` 또는 동등한 cycle identity를 사용한다. TransitEvent가 Notification candidate가 되면 cycle identity를 durable `NotificationEvent`에 복사한다. 모든 raw Observation이나 ACTIVE tracking state를 영속하지 않는다.
 
 ## Persistence
 
-`TransitObservation`, `TransitEvent`와 Vehicle tracking state의 실제 영속 여부는 아직 결정하지 않는다. Schema, Java DTO/record, scheduler, GPS/freshness 수치와 평가 구현은 후속 Task 범위다.
+`TransitObservation`과 ACTIVE Vehicle tracking state 전체는 V1에서 영속하지 않을 수 있다. Durable Notification dedup에 필요한 activation generation, tracking cycle identity, event type은 TransitEvent에서 `NotificationEvent`로 전달한다. 구체 Schema, Java DTO/record, scheduler, GPS/freshness 수치와 평가 구현은 후속 Task 범위다.
 
 ------------------------------------------------------------------------
 
-# NotificationHistory
+# NotificationEvent
 
 ## Purpose
 
-알림 발송 기록.
+하나의 logical Notification 결정을 durable하게 표현하고 pending dispatch 및 dedup의 기준이 된다.
 
 ## Responsibilities
 
--   어떤 Alarm인지
--   언제 발송했는지
--   발송 결과가 무엇인지
+-   current Alarm lifecycle과 activation generation 검증 결과 보존
+-   logical Notification dedup identity 보존
+-   commit 뒤 delivery worker가 처리할 pending dispatch 근거 제공
 
-기록한다.
+## Conceptual Identity
 
-## Main Attributes
+```text
+alarmId
++ activationGeneration
++ trackingCycleId
++ eventType
+```
 
-    id
+이 identity에는 DB Unique Constraint 또는 동등한 atomic uniqueness가 필요하다. `alarmId + eventType`만으로 dedup하지 않는다. 정확한 Schema/constraint 이름은 TASK-707/708에서 결정한다.
 
-    alarm
+Alarm lifecycle transition과 NotificationEvent insert는 같은 Database transaction에서 수행한다. commit 뒤 worker가 전달하며 FCM network I/O는 이 transaction 안에서 실행하지 않는다.
 
-    status
+------------------------------------------------------------------------
 
-    failureReason
+# NotificationDelivery
 
-    createdAt
+## Purpose
 
-`status`는 `SUCCESS`, `FAILURE`만 가지는 Enum으로 표현하고 Database에는 문자열로 저장한다.
-
-`failureReason`은 실패 시 한 줄 수준의 간단한 원인을 기록할 수 있으며 `null`을 허용한다. Provider별 응답 구조나 FCM message ID는 현재 저장하지 않는다.
-
-`createdAt`은 발송 결과 History가 생성된 시각이다. History는 현재 생성 후 일반적으로 수정하지 않는 방향이므로 `updatedAt`은 두지 않는다.
+하나의 NotificationEvent를 한 Device에 전달하는 현재 operational state를 표현한다.
 
 ## Relationship
 
-    Alarm 1 : N NotificationHistory
+    NotificationEvent 1 : N NotificationDelivery
+    Device 1 : N NotificationDelivery
 
-NotificationHistory가 `Alarm`을 참조하는 단방향 관계를 사용한다. Alarm Entity에는 NotificationHistory collection을 추가하지 않는다. NotificationHistory는 현재 Alarm lifecycle에 종속되어 Alarm hard delete 시 함께 삭제된다.
+각 `NotificationEvent × Device` 조합은 Database 기준 하나다. Provider request는 bounded retry로 여러 번 발생할 수 있지만 모든 attempt를 append-only row로 영속할 필요는 없다.
 
-## Persistence
+## Delivery Result Semantics
 
-    JPA
+Provider client와 Delivery state는 최소한 다음 의미를 구분한다.
 
-NotificationHistory는 알림 발송 기록의 저장과 상태 관리를 위해 JPA Repository 기반으로 관리한다.
+```text
+accepted
+invalid/unregistered target
+transient provider failure
+rate/quota failure
+provider authentication/configuration failure
+invalid payload/permanent request failure
+timeout/unknown acceptance state
+expired notification
+```
+
+`accepted`는 Provider가 요청을 접수했다는 뜻이며 실제 사용자 표시 성공이 아니다. Timeout은 실제 접수 여부가 불명확하므로 retry가 중복 표시를 만들 수 있다. 정확한 status/type 이름, 최대 retry 횟수·간격·freshness TTL은 TASK-709에서 결정한다.
+
+기존 `NotificationHistory`는 이 logical event와 per-Device delivery 책임을 충분히 표현하지 못한다. 확장·대체·migration 방식은 TASK-707에서 결정하며 Phase 8 Analytics와 operational delivery data는 별도 책임으로 유지한다.
 
 ------------------------------------------------------------------------
 
@@ -551,9 +610,13 @@ NotificationHistory는 알림 발송 기록의 저장과 상태 관리를 위해
 
                      User
 
-                 ┌────┴────┐
+              ┌──────┼──────┐
 
-               Alarm   RefreshToken
+           Alarm  RefreshToken  Device
+
+             |                    |
+
+      NotificationEvent ──< NotificationDelivery
 
 
     Transit API

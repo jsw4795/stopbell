@@ -94,7 +94,7 @@ Database
 ### JPA
 
 - 단순한 Domain CRUD와 Entity 상태 관리는 JPA Repository를 사용한다.
-- `User`, `Alarm`, `NotificationHistory`는 JPA 기반으로 관리한다.
+- `User`, `Alarm`, Bus metadata와 Device/Notification operational persistence는 JPA 기반으로 관리한다.
 - Entity 관계와 상태 전이는 Domain 규칙에 맞게 명확히 유지한다.
 - 복잡한 조회를 위해 불필요하게 JPA Query를 복잡하게 만들지 않는다.
 
@@ -148,7 +148,7 @@ V1에서 앱은 비교적 얇은 클라이언트로 유지한다.
 - 사용자 상호작용
 - API 요청
 - 로컬 화면 상태
-- 푸시 토큰 획득/갱신
+- Push permission과 provider targeting identifier 획득/갱신
 - 푸시 알림 처리
 
 특별한 이유 없이 교통 모니터링 비즈니스 로직을 모바일 앱으로 옮기지 않는다.
@@ -278,7 +278,7 @@ ADR-002 결정 사항을 반영했다.
 fix: 알림 중복 발송 문제 수정
 
 동일한 Transit Event가 여러 번 처리되는 문제가 있어
-NotificationHistory 기반 중복 체크 로직을 추가했다.
+NotificationEvent atomic uniqueness 검증을 추가했다.
 ```
 
 #### Body 작성 원칙

@@ -39,7 +39,7 @@ Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{
 
 ## 5. Persistence Strategy
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`는 Repository 기반으로 관리한다. `BusAlarmTarget`은 Alarm aggregate를 통해 persist/remove한다. Bus metadata는 source-neutral route snapshot을 한 Route 단위로 reconciliation한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, Phase 7의 Notification event/delivery persistence, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`는 Repository 기반으로 관리한다. `BusAlarmTarget`은 Alarm aggregate를 통해 persist/remove한다. Bus metadata는 source-neutral route snapshot을 한 Route 단위로 reconciliation한다.
 
 MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에 사용할 수 있다. 이번 metadata CRUD와 reconciliation은 JPA Entity 상태 관리가 중심이므로 MyBatis를 사용하지 않는다. Route/Stop 검색, Alarm grouping, 대량 조회 성능에서 실제 SQL 제어 필요성이 확인되면 적용을 결정한다.
 
@@ -47,7 +47,7 @@ JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡�
 
 ## 6. 핵심 테이블
 
-`users`, `refresh_tokens`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 Push 연동이 확정될 때 별도 Migration으로 추가한다.
+`users`, `refresh_tokens`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 physical Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`, Alarm activation generation, `NotificationEvent`/`NotificationDelivery` physical Schema는 각각 TASK-702, TASK-510, TASK-707에서 별도 Migration으로 추가하거나 기존 Schema를 대체한다.
 
 ### users
 
@@ -91,24 +91,24 @@ UNIQUE(token_hash)
 
 ### devices
 
-모바일 설치/기기를 사용자 및 푸시 토큰에 연결한다.
+모바일 앱 installation을 User 및 현재 Push delivery reference에 연결한다.
 
-후보 필드:
+확정된 conceptual contract:
 
 ```text
-id
-user_id
-platform
-push_token
-active
-created_at
-updated_at
+Device internal PK
++ user
++ client-generated installationId
++ current Firebase push targeting identifier
++ stale registration update를 막는 monotonic revision 또는 동등한 값
++ enabled/disabled lifecycle
 ```
 
-질문:
+한 User는 여러 Device를 가질 수 있다. `installationId`는 StopBell Device identity이고 push targeting identifier는 변경 가능한 delivery reference다. APNs device token을 Device identity로 사용하지 않으며 RefreshToken과 Device를 FK로 직접 연결하지 않는다.
 
-- 한 사용자가 여러 기기를 가질 수 있는가? 아마 그렇다.
-- 푸시 토큰은 고유해야 하는가? 아마 그렇지만, 제공자의 생명주기를 검토해야 한다.
+동일 installation의 더 오래된 registration update가 최신 target을 덮어쓰지 못해야 하고 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다. Invalid/unregistered provider 결과는 실패한 target/revision이 current registration과 일치할 때만 조건부 disable한다.
+
+실제 Firebase targeting identifier, field/column 이름과 길이, uniqueness와 index는 TASK-701의 SDK 확인 뒤 TASK-702에서 정한다.
 
 ### alarms
 
@@ -134,6 +134,8 @@ INDEX(status)
 V6 Migration은 nullable `status`를 먼저 추가하고 기존 `active=true`를 `ACTIVE`, `false`를 `INACTIVE`로 backfill한 뒤 `NOT NULL`을 적용하고 `active`를 제거한다. 기존 BUS Alarm row에는 가짜 Target을 생성하지 않으므로 Target 없는 legacy row도 Migration을 통과한다. V7 Migration은 BusAlarmTarget의 nullable column CHECK를 MySQL의 `UNKNOWN` 통과 특성에 맞게 보완하며 기존 Schema나 row를 변경하지 않는다.
 
 Transit API 조회 실패, Notification 발송 결과, ARRIVED/PASSED Event는 Alarm status로 저장하지 않는다. ACTIVE 중 차량별 tracking 및 Event consumption field도 이 table에 추가하지 않으며 TASK-509/708에서 별도 책임을 결정한다.
+
+Phase 7 Notification correctness를 위해 Alarm에는 서로 다른 activation cycle을 구분하는 persisted semantic activation generation이 필요하다. 새 monitoring activation cycle마다 증가시키며 deactivate→reactivate, FOLLOW_UP 중 reactivate와 stale scheduler 결과를 구분한다. 구체 column 이름·초기값·increment 조건과 CAS/query 구현은 TASK-510에서 결정하며 현재 physical Schema 설명에는 추측성 column을 추가하지 않는다.
 
 ### bus_alarm_targets
 
@@ -166,9 +168,9 @@ before 옵션이 켜지면 predecessor external Stop ID/order, after 옵션이 �
 
 Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, external_stop_id)`다. Target은 Route traversal 안의 occurrence이므로 `target_stop_order`를 별도로 저장한다. `(provider, external_route_id, external_stop_id)` Unique Constraint는 두지 않으며 이 세 값만으로 같은 Stop 재방문 occurrence를 합치지 않는다.
 
-### notification_history
+### notification_history (초기 physical Schema)
 
-특정 Alarm에서 발생한 Notification 발송 결과를 기록한다. Alarm의 활성 상태나 Transit API 조회 실패 상태를 표현하지 않는다.
+특정 Alarm에서 발생한 Notification 발송 결과를 기록하는 현재 초기 Schema다. Alarm의 활성 상태나 Transit API 조회 실패 상태를 표현하지 않는다.
 
 현재 확정 Schema:
 
@@ -180,9 +182,33 @@ failure_reason VARCHAR(255) NULL
 created_at DATETIME(6) NOT NULL
 ```
 
-`status`는 `SUCCESS`, `FAILURE` 문자열만 저장한다. `failure_reason`은 실패 시 간단한 원인을 기록할 수 있고 `null`을 허용한다. `created_at`은 생성 후 변경하지 않으며 `updated_at`은 추가하지 않는다. NotificationHistory는 현재 Alarm lifecycle에 종속되므로 Alarm hard delete 시 함께 삭제된다. 장기 통계 보존은 TASK-812의 독립 Analytics/Event 책임에서 다룬다.
+`status`는 `SUCCESS`, `FAILURE` 문자열만 저장한다. `failure_reason`은 실패 시 간단한 원인을 기록할 수 있고 `null`을 허용한다. `created_at`은 생성 후 변경하지 않으며 `updated_at`은 추가하지 않는다. NotificationHistory는 현재 Alarm lifecycle에 종속되어 Alarm hard delete 시 함께 삭제된다.
 
-FCM message ID, device token, provider 응답, retry count, 전송 단계별 timestamp는 실제 Notification 전송 흐름이 확정될 때 필요성을 검토한다. NotificationHistory 저장 시점, retry 및 duplicate prevention 전략도 현재 결정하지 않는다.
+이 Schema는 durable logical decision, dedup identity, per-Device delivery와 retry state를 충분히 표현하지 못하므로 Phase 7 최종 모델이 아니다. 기존 table을 확장·대체·migration하는 방식은 TASK-707에서 결정하며 production legacy compatibility를 과도하게 만들지 않는다.
+
+### Phase 7 Notification persistence contract
+
+Phase 7에서는 physical table 이름과 세부 column을 확정하기 전에 다음 두 책임을 분리한다.
+
+```text
+NotificationEvent
+- durable logical notification decision
+- alarmId + activation generation + trackingCycleId + eventType identity
+- pending dispatch basis
+- 위 logical identity의 DB Unique Constraint 또는 동등한 atomic uniqueness
+
+NotificationDelivery
+- NotificationEvent × Device
+- 위 조합의 DB uniqueness
+- provider delivery/retry/expiry state
+- current/final provider result
+```
+
+`alarmId + eventType`만으로 logical dedup하지 않는다. ACTIVE tracking 전체나 raw TransitObservation은 저장하지 않아도 되며, runtime-unique tracking cycle identity를 TransitEvent 발생 시 NotificationEvent에 복사한다.
+
+하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition과 NotificationEvent insert를 함께 commit한다. commit 뒤 in-process worker가 pending Event를 읽어 활성 Device에 fan-out하고 FCM I/O 뒤 Delivery 결과를 갱신한다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
+
+Delivery는 accepted, invalid/unregistered target, transient failure, rate/quota failure, provider authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance state, expired notification을 구분할 수 있어야 한다. 모든 retry attempt를 append-only row로 저장할 필요는 없다. 정확한 status/type, retry count·interval·freshness TTL과 polling query/index는 TASK-707/709에서 정한다. 이 operational data와 TASK-812의 장기 Analytics는 별도 책임이다.
 
 ### bus_routes, bus_stops, bus_route_stop_occurrences
 
@@ -231,21 +257,13 @@ Route snapshot sync는 동일 Route/Stop identity의 display·operational metada
 - 상태별 활성 알림 조회
 - 사용자별 알림
 - 사용자별 기기
-- 푸시 토큰 고유성/조회
+- 현재 push targeting identifier 조회
+- pending NotificationEvent/Delivery worker 조회
 
 지원하는 쿼리를 특정하지 않은 추측성 인덱스는 추가하지 않는다.
 
 ## 9. 트랜잭션 고려 사항
 
-향후 핵심 트랜잭션 질문:
+동일 logical Notification의 중복은 lifecycle transaction 안의 generation 검증과 NotificationEvent atomic uniqueness로 막는다. 구체적인 conditional update/CAS 또는 row locking은 TASK-510/707/708에서 단일 Spring instance 실행 모델에 맞게 정한다.
 
-어떻게 두 개의 스케줄러 실행 또는 백엔드 인스턴스가 동일한 일회성 알림을 동시에 전송하기로 결정하는 일을 막을 것인가?
-
-가능한 방법:
-
-- 조건부 업데이트
-- 행 잠금
-- 고유 이벤트 키
-- 트랜잭션 상태 전이
-
-구체적인 선택은 스케줄러/동시성 모델을 정한 뒤 결정한다.
+MySQL은 durable pending dispatch/outbox의 Source of Truth다. Kafka, RabbitMQ, Redis queue, multi-instance distributed lock은 V1에 도입하지 않는다. Worker claim/polling 방식과 interval은 TASK-706~709에서 결정한다.

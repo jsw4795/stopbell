@@ -160,7 +160,7 @@ POST /api/v1/alarms/{alarmId}/deactivate
 DELETE /api/v1/alarms/{alarmId}
 ```
 
-현재 인증된 User가 소유한 Alarm을 삭제한다. 성공은 response body 없는 `204 No Content`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다. 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime, 공유 PK BusAlarmTarget 및 종속 NotificationHistory를 함께 제거한다. 구체적인 scheduler coordination은 후속 Task에서 결정한다.
+현재 인증된 User가 소유한 Alarm을 삭제한다. 성공은 response body 없는 `204 No Content`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다. 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime과 공유 PK BusAlarmTarget을 함께 제거한다. 현재 초기 physical model에서는 종속 NotificationHistory도 함께 제거되며, Phase 7 NotificationEvent/Delivery의 정확한 lifecycle은 TASK-707에서 결정한다. 구체적인 scheduler coordination은 후속 Task에서 결정한다.
 
 ### Alarm response
 
@@ -184,24 +184,43 @@ Alarm response에는 `provider`, `externalRouteId`, `externalStopId`, `targetSto
 
 ### 기기 등록
 
-푸시 연동을 도입할 때 필요하다.
+Phase 7에서 인증된 User의 현재 앱 installation과 Push delivery reference를 등록·갱신한다.
 
-후보:
+Endpoint 후보:
 
 ```http
 POST /api/v1/devices
 ```
 
-후보 본문:
+Conceptual request:
 
 ```json
 {
+  "installationId": "<client-generated installation identity>",
   "platform": "IOS",
-  "pushToken": "..."
+  "pushRegistrationId": "<current provider targeting identifier>",
+  "registrationRevision": 1
 }
 ```
 
-정확한 기기 생명주기 및 토큰 갱신 전략은 아직 결정되지 않았다.
+`installationId`는 StopBell이 앱 installation을 구분하는 identity이고 Firebase targeting identifier는 변경 가능한 delivery reference다. 실제 request field 이름, identifier 형식, 길이와 revision 표현은 TASK-701/702에서 확정한다. 동일 installation의 오래된 update가 최신 target을 덮어쓰지 못해야 하며 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
+
+현재 installation의 Push subscription을 disable/unregister하는 별도 authenticated Endpoint 또는 동등한 명시적 lifecycle도 TASK-702/703에서 정의한다. 이 동작은 해당 Device만 변경하며 Alarm lifecycle과 다른 Device는 변경하지 않는다. `/auth/logout` request에 Device field를 추가하지 않는다.
+
+### Push payload와 Notification tap
+
+Push payload는 navigation hint 수준의 최소 정보만 포함한다.
+
+```json
+{
+  "type": "ALARM_EVENT",
+  "alarmId": "123",
+  "eventType": "ARRIVED",
+  "notificationEventId": "456"
+}
+```
+
+`userId`, Auth Token, push registration identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체는 포함하지 않는다. Payload는 권한 근거가 아니며 Flutter는 Auth Session initialization 뒤 `alarmId` navigation entry를 사용해 Backend Alarm detail API에서 ownership과 current state를 다시 확인한다. 삭제되었거나 접근할 수 없는 Alarm은 stale notification으로 정상 처리한다. 최종 payload field/type 이름은 TASK-704/706에서 확정한다.
 
 ## 5. 오류 형식
 
@@ -313,5 +332,7 @@ Content-Type: application/json
 Access Token blacklist는 사용하지 않으므로 Logout 뒤에도 이미 발급된 Access Token은 만료 시점까지 유효할 수 있다. Backend는 Flutter Login 화면으로 redirect하지 않는다.
 
 Flutter logout은 같은 Auth Session 안에서 refresh와 직렬화하며 local 인증 상태가 late refresh/API response로 되살아나지 않게 보호한다. 이는 서버에 이미 도착한 요청을 취소하거나 기존 Access Token을 즉시 무효화한다는 계약이 아니다. `/auth/google`과 `/auth/logout`도 refresh interceptor나 자동 재시도 대상이 아니다.
+
+Phase 7 Flutter logout은 이 기존 lifecycle/hook을 사용해 현재 Device unsubscribe/disable을 시도한 뒤 Auth logout과 local session 종료를 수행한다. Device 처리는 별도 authenticated API를 사용하며 이 request body에 Device field를 추가하지 않는다. Offline logout에서는 Backend Device disable을 즉시 보장할 수 없으므로 local session 종료를 영구 차단하지 않는다. 구체 순서와 SDK local unregister 동작은 TASK-701/704에서 검증한다.
 
 Alarm을 포함한 사용자 소유 Application API는 Client Request Body 또는 Query Parameter의 `userId`를 받지 않는다. Spring Security가 검증한 Access Token의 Principal에서 StopBell User를 식별한다.

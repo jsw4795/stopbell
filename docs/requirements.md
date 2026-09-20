@@ -55,11 +55,11 @@ Alarm 상태는 `INACTIVE`, `ACTIVE`, `FOLLOW_UP`을 그대로 표시하며 bool
 
 ### FR-006 푸시 알림
 
-알림 조건이 충족되면 백엔드는 사용자가 등록한 기기로 푸시 알림을 시작한다.
+알림 조건이 충족되면 백엔드는 사용자가 등록한 활성 Device들로 푸시 알림 전달을 시작한다. 한 User는 여러 Device를 가질 수 있으며 현재 installation의 logout이나 Push 해제 때문에 다른 Device 또는 Alarm lifecycle이 변경되어서는 안 된다.
 
 ### FR-007 중복 방지
 
-동일한 알림 발생 건은 의도적으로 중복 알림을 생성하지 않아야 한다.
+동일한 logical Notification 발생 건은 Database uniqueness 기준으로 한 번만 생성되어야 한다. 각 Event와 Device 조합의 delivery record도 하나여야 하지만, retry 때문에 Provider request는 여러 번 발생할 수 있고 실제 Device 표시 exactly-once는 보장하지 않는다.
 
 ### FR-008 활성 알림 조회
 
@@ -103,6 +103,19 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 
 세부 Observation, Event 및 lifecycle 계약은 `adr/ADR-007-bus-alarm-transit-observation-and-event-semantics.md`를 따른다.
 
+### V1 Push Notification 계약
+
+- StopBell Device identity는 Client가 앱 installation마다 생성한 `installationId`를 기준으로 하며, Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference로 분리한다. APNs device token은 StopBell Device identity로 사용하지 않는다.
+- 실제 targeting identifier는 TASK-701에서 사용하는 FlutterFire/firebase_messaging, Firebase iOS SDK, Java Firebase Admin SDK 버전과 동작을 확인한 뒤 확정한다. 그전에는 `pushRegistrationId` 또는 `pushTargetId`처럼 provider-neutral한 의미로 표현한다.
+- 동일 installation의 registration update는 monotonic revision 또는 동등한 계약으로 순서 역전된 stale update가 최신 push target을 덮어쓰지 못하게 한다. 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
+- 현재 installation logout은 해당 Device의 Push subscription disable/unregister를 시도하지만 Alarm lifecycle과 다른 Device는 변경하지 않는다. Auth logout은 Refresh Session 종료 책임을 유지하며 Device lifecycle은 별도 authenticated API 또는 동등한 명시적 흐름으로 처리한다. Offline logout에서 Backend Device disable을 즉시 보장하지 않는다.
+- 첫 Alarm activation 직전에 기능 맥락을 설명한 뒤 Notification permission을 요청하는 것을 기본 방향으로 한다. Permission이 거부되어도 Alarm 생성·활성화를 Backend에서 금지하지 않으며, 현재 Device가 Push를 받을 수 없다는 안내와 Settings 진입을 제공하고 app resume에서 상태를 재동기화할 수 있어야 한다.
+- Push payload는 navigation hint에 필요한 `type`, `alarmId`, `eventType`, `notificationEventId` 수준으로 제한한다. `userId`, Auth Token, push targeting identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체를 포함하지 않는다. Tap 뒤에는 Auth Session 초기화 후 Backend Alarm detail API로 소유권과 현재 상태를 다시 확인하며, 삭제되었거나 접근할 수 없는 Alarm은 정상적인 stale-notification UX로 처리한다.
+- Alarm lifecycle transition과 durable logical `NotificationEvent` 생성은 같은 Database transaction에서 처리하고, commit 뒤 worker가 per-Device delivery를 수행한다. FCM I/O는 이 transaction 안에서 수행하지 않으며 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
+- Provider 결과는 accepted, invalid/unregistered target, transient failure, rate/quota failure, authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance, expired notification을 구분할 수 있어야 한다. Provider accepted는 실제 사용자 표시 성공을 뜻하지 않는다.
+
+세부 Device 및 전달 결정의 근거와 보류 범위는 `adr/ADR-010-notification-device-and-durable-delivery.md`를 따른다.
+
 ## 4. 인증
 
 StopBell은 자체 ID/Password 회원가입을 제공하지 않고 Social Login만 지원한다. 최초 Provider는 Google이며, 추가 Provider는 실제 필요가 확인된 후 별도 범위로 검토한다.
@@ -122,6 +135,8 @@ Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고
 ### NFR-001 신뢰성
 
 시스템은 불필요한 기능 폭보다 누락 알림과 중복 알림 방지를 우선해야 한다.
+
+Phase 7은 stale activation/lifecycle 보호, logical Notification DB uniqueness, durable pending dispatch recovery, multi-device fan-out, invalid registration의 조건부 정리, bounded retry state를 포함해야 한다. Phase 8 검증은 이 correctness를 대체하지 않는다.
 
 ### NFR-002 관측성
 
@@ -150,7 +165,7 @@ Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고
 
 - 시크릿은 Git에 커밋하지 않는다.
 - API 키는 환경/설정 메커니즘을 통해 저장한다.
-- 기기 토큰과 인증 데이터는 민감한 데이터로 취급한다.
+- push targeting identifier와 인증 데이터는 민감한 데이터로 취급하고 로그에서 redaction한다.
 
 ### NFR-006 유지보수성
 
@@ -179,4 +194,4 @@ Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고
 - Transit metadata persistence는 서울 T Data CSV full import와 경기 TAGO throttled full sync를 위해 필요하며 JPA diff sync로 구현한다. Route/Stop 검색·Alarm grouping의 MyBatis 필요성은 실제 SQL 제어 요구가 확인될 때 결정한다.
 - 어떤 폴링 주기가 허용되며 유용한가?
 - 어떤 요청 제한이 적용되는가?
-- FCM은 Android와 iOS 요구사항 모두에 충분한가?
+- TASK-701에서 실제 사용할 FlutterFire/firebase_messaging, Firebase iOS SDK, Java Firebase Admin SDK 버전의 iOS targeting identifier와 local unregister 동작은 무엇인가?

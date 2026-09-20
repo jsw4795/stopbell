@@ -142,15 +142,16 @@ Provider별 raw DTO를 Alarm Evaluation에 직접 전달하지 않는다. `trans
 
 ### notification
 
-푸시 알림 요청, 결과 처리, 알림 발송 기록 책임을 둔다.
+Device registration lifecycle, durable logical Notification, per-Device delivery, Push provider 요청과 결과 처리 책임을 둔다.
 
-- `service`: Notification 전송 결정과 결과 처리
-- `client`: FCM 등 Push provider client
-- `repository`: NotificationHistory Entity의 JPA Repository
-- `entity`: NotificationHistory JPA Entity
-- `dto`: Push 요청/응답과 Notification DTO
+- `controller`: authenticated Device registration/disable API
+- `service`: NotificationEvent 생성 orchestration, pending dispatch worker, Device fan-out과 delivery 결과 처리
+- `client`: FCM Push provider client와 명시적인 provider result/failure mapping
+- `repository`: Device, NotificationEvent, NotificationDelivery JPA Repository
+- `entity`: Device, NotificationEvent, NotificationDelivery JPA Entity
+- `dto`: Device registration, Push 요청/응답, 최소 payload와 Notification DTO
 
-Device registration API 및 Push token lifecycle은 구현 전에 별도 결정이 필요하다.
+구체 Package/Class 이름은 구현 시 필요한 책임에 맞게 정하며 generic multi-provider framework, generic retry framework, Device subtype hierarchy, 별도 Notification microservice를 만들지 않는다. 기존 `NotificationHistory`의 확장·대체 방식은 TASK-707에서 결정한다.
 
 ## Persistence Location
 
@@ -167,7 +168,9 @@ transit/repository/BusStopRepository
 transit/repository/BusRouteStopOccurrenceRepository
 ```
 
-JPA는 `User`, `Alarm`, `BusAlarmTarget`, `NotificationHistory`, Bus metadata의 단순 CRUD와 Entity 상태 관리에 사용한다. `BusAlarmTarget`은 별도 Repository로 독립 관리하지 않고 Alarm aggregate의 cascade lifecycle을 따른다.
+현재 `NotificationHistoryRepository`는 초기 Schema의 Repository다. Phase 7에서는 `Device`, `NotificationEvent`, `NotificationDelivery` Repository로 책임을 분리하되 구체 경로와 기존 Repository migration은 TASK-702/707에서 결정한다.
+
+JPA는 `User`, `Alarm`, `BusAlarmTarget`, Device/Notification persistence, Bus metadata의 단순 CRUD와 Entity 상태 관리에 사용한다. `BusAlarmTarget`은 별도 Repository로 독립 관리하지 않고 Alarm aggregate의 cascade lifecycle을 따른다.
 
 ### MyBatis Mapper
 
@@ -242,7 +245,11 @@ V1은 필요한 수준의 Auth API, Transit API, Alarm API, Auth Session 관리,
 - `auth`: Google Login, Token Pair Secure Storage, startup 상태 복구, refresh 및 logout을 포함한 Auth Session
 - `alarm`: `INACTIVE`/`ACTIVE`/`FOLLOW_UP` 상태를 보존하는 Alarm 생성·조회·활성화/비활성화 화면과 Alarm ID 기반 navigation 진입점
 - `transit`: Bus Route 검색과 Bus Stop 선택 화면. Stop response의 `canNotifyOneStopBefore`/`canNotifyOneStopAfter`로 option을 제어하며 stale occurrence 생성 `404`에서는 Stop 재선택 흐름으로 복구
-- `notification`: Phase 7에서 Push permission, Push token 처리, 알림 진입 흐름을 구현한다. Phase 6에서는 notification stub을 만들지 않는다.
+- `notification`: Phase 7에서 기능 맥락 기반 Push permission, installation identity와 registration 갱신, 현재 Device disable, 알림 진입 흐름을 구현한다. Phase 6에서는 notification stub을 만들지 않는다.
+
+Flutter logout은 Phase 6 Auth Session의 logout lifecycle/hook에서 현재 Device unsubscribe/disable을 먼저 시도하고 Auth logout과 local session 종료를 이어간다. Device 호출은 별도 authenticated API를 사용하며 `/auth/logout` request에 Device field를 추가하지 않는다. Offline logout에서는 Backend disable을 즉시 보장하지 않고, late auth response가 session을 되살리지 못하게 하는 기존 session generation 보호를 유지한다.
+
+Notification tap payload는 navigation hint일 뿐 권한 근거가 아니다. Auth Session initialization 뒤 Alarm ID navigation entry를 사용하고 Backend Alarm detail API에서 ownership/current state를 다시 확인한다. App resume에서는 permission/registration 상태를 재동기화할 수 있어야 한다.
 
 ### shared
 
@@ -257,4 +264,4 @@ V1은 필요한 수준의 Auth API, Transit API, Alarm API, Auth Session 관리,
 - Flutter state management 방식은 Undecided이다.
 - routing, dependency injection, API client library 선택은 구현 전에 필요성과 트레이드오프를 검토한다.
 - Transit monitoring 비즈니스 로직은 특별한 이유 없이 Flutter Application으로 옮기지 않는다.
-- Phase 6은 Phase 7에 안정적인 Auth Session state, 자동 refresh를 포함한 authenticated API client, logout lifecycle/hook, Alarm ID navigation 진입점, app resume 시 Auth Session 재평가 지점을 제공한다. Device/FCM/logout registration 정책은 TASK-701/702에서 결정하며 Phase 6에서 선행 구현하지 않는다.
+- Phase 6은 Phase 7에 안정적인 Auth Session state, 자동 refresh를 포함한 authenticated API client, logout lifecycle/hook, Alarm ID navigation 진입점, app resume 시 Auth Session 재평가 지점을 제공한다. Phase 7은 이 hook과 진입점을 사용하며 Device/FCM 구현은 TASK-701~704에서 맡는다.

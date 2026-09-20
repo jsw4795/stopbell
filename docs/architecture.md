@@ -68,7 +68,9 @@ Spring Boot
 │   ├── Alarm
 │   ├── BusAlarmTarget
 │   ├── BusRoute / BusStop / BusRouteStopOccurrence
-│   └── NotificationHistory
+│   ├── Device
+│   ├── NotificationEvent
+│   └── NotificationDelivery
 │
 └── MyBatis
     ├── Transit Query
@@ -78,7 +80,7 @@ Spring Boot
       MySQL
 ```
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `RefreshToken`, `Alarm`, `BusAlarmTarget`, `NotificationHistory`, Bus static metadata는 Repository 기반으로 관리한다. Bus-specific Target은 공통 Alarm table의 nullable column으로 펼치지 않고 Alarm과 공유 PK를 갖는 별도 Entity/table로 관리하며 Alarm aggregate의 persist/remove lifecycle을 따른다. Bus metadata는 source-neutral route snapshot을 한 Route씩 diff sync한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `RefreshToken`, `Alarm`, `BusAlarmTarget`, `Device`, `NotificationEvent`, `NotificationDelivery`, Bus static metadata는 Repository 기반으로 관리한다. Bus-specific Target은 공통 Alarm table의 nullable column으로 펼치지 않고 Alarm과 공유 PK를 갖는 별도 Entity/table로 관리하며 Alarm aggregate의 persist/remove lifecycle을 따른다. Bus metadata는 source-neutral route snapshot을 한 Route씩 diff sync한다.
 
 MyBatis는 복잡한 Query, 집계, 외부 Transit 데이터 처리 등 SQL 제어가 중요한 영역에서 사용할 수 있다. metadata CRUD와 diff sync는 JPA Entity 상태 관리로 충분하므로 MyBatis를 사용하지 않는다. Route/Stop 검색, Alarm grouping, 성능 최적화에서 실제 SQL 제어 필요성이 확인되면 적용한다.
 
@@ -140,7 +142,7 @@ common
 
 ### user
 
-인증이 도입되면 애플리케이션 사용자 식별과 기기 연결을 담당한다.
+애플리케이션 사용자 식별과 Authentication Session을 담당한다. RefreshToken과 Push Device는 직접 연결하지 않는다.
 
 ### alarm
 
@@ -166,7 +168,27 @@ Provider mapper는 request Route context, raw Provider response, StopBell이 성
 
 ### notification
 
-푸시 알림 요청과 알림 결과 처리를 담당한다.
+Device registration lifecycle, durable logical Notification 결정, per-Device fan-out, Push provider 요청과 결과 처리를 담당한다.
+
+StopBell Device identity는 내부 PK와 Client가 생성한 installation ID로 구성한다. Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference이며 Device identity가 아니다. 한 User는 여러 Device를 가질 수 있다. 동일 installation의 registration update는 monotonic revision 또는 동등한 stale-write 보호를 사용한다. 실제 targeting identifier와 구체 field 이름·길이는 TASK-701/702에서 SDK 동작을 확인한 뒤 정한다.
+
+Notification persistence는 다음 책임으로 분리한다.
+
+```text
+NotificationEvent
+- durable logical notification decision
+- alarmId + activation generation + trackingCycleId + eventType dedup identity
+- pending dispatch의 근거
+
+NotificationDelivery
+- NotificationEvent × Device
+- provider delivery/retry/expiry state
+- current/final provider result
+```
+
+Alarm lifecycle transition과 `NotificationEvent` insert는 current Alarm lifecycle/generation을 검증하는 하나의 MySQL transaction에서 처리한다. commit 뒤 같은 Spring Boot application의 worker가 pending Event를 조회해 활성 Device별 Delivery를 만들고 FCM I/O를 수행한 뒤 결과를 갱신한다. 외부 Kafka/RabbitMQ/Redis queue, Notification microservice, non-durable after-commit callback만으로 구성한 전달 경로는 사용하지 않는다.
+
+Push provider 결과는 accepted, invalid/unregistered target, transient failure, rate/quota failure, provider authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance, expired notification을 구분한다. Invalid/unregistered 응답은 실패한 targeting identifier와 registration revision이 해당 Device의 current registration일 때만 조건부로 disable한다. Provider acceptance는 실제 Device 표시 성공이 아니며 timeout 뒤 retry는 중복 표시 가능성이 있다.
 
 ### common
 
@@ -186,7 +208,7 @@ Provider mapper는 request Route context, raw Provider response, StopBell이 성
 
 V1의 기본 Provider polling key는 TAGO의 `(provider, externalRouteId, cityCode)`와 서울의 `(provider, externalRouteId)`다. `cityCode`는 Route identity가 아니라 TAGO request context이지만 동일 polling request 재현에는 필요하다. 같은 Route를 사용하는 여러 사용자·target Stop·ACTIVE Alarm·FOLLOW_UP Alarm은 가능한 한 하나의 Route polling response를 공유한다. Alarm별 Provider 호출이나 MyBatis 도입은 기본 구조로 삼지 않는다.
 
-TASK-510 Scheduler는 단일 Spring instance에서 polling cycle overlap을 막는 단순 synchronous/fixed-delay 방식을 우선한다. Provider HTTP I/O 동안 DB transaction 또는 row lock을 오래 유지하지 않으며, polling 뒤 lifecycle이 바뀐 Alarm을 stale 결과가 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation의 race를 안전하게 다뤄야 한다. 구체적인 conditional update, CAS, lifecycle generation token 또는 JPA `@Version` 선택은 구현 전에 비교하며 지금 확정하지 않는다.
+TASK-510 Scheduler는 단일 Spring instance에서 polling cycle overlap을 막는 단순 synchronous/fixed-delay 방식을 우선한다. Provider HTTP I/O 동안 DB transaction 또는 row lock을 오래 유지하지 않으며, polling 뒤 lifecycle이 바뀐 Alarm을 stale 결과가 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation의 race를 안전하게 다뤄야 한다. 이를 위해 서로 다른 activation cycle을 구분하는 persisted semantic activation generation을 사용하며 새 monitoring activation cycle마다 증가시킨다. 정확한 증가 조건과 conditional update/CAS, JPA `@Version`의 병행 여부는 TASK-510에서 확정한다.
 
 ## 8. 알림 평가
 
@@ -216,19 +238,28 @@ Alarm 활성화 시 현재 Route 차량을 baseline으로 분류한다. Target �
 
 PASSED는 해당 Vehicle tracking만 종료하고 Alarm은 ACTIVE로 유지한다. ARRIVED는 Alarm 성공 Event이며 after 옵션이 꺼져 있으면 Alarm을 INACTIVE로 전환하고 다른 Vehicle tracking을 종료한다. after 옵션이 켜져 있으면 Alarm을 ONE_STOP_AFTER 전용 FOLLOW_UP으로 전환하고 ARRIVED를 발생시킨 동일 차량만 다음 Stop 도달·통과까지 추적한다. FOLLOW_UP의 차량 tracking ID와 시작·만료 시각은 Alarm에 영속하여 재시작 뒤 복구할 수 있게 한다.
 
-FOLLOW_UP 중 같은 Alarm의 새 activation은 이전 cycle을 supersede한다. 기존 follow-up runtime을 지우고 ACTIVE 상태의 새 baseline과 monitoring cycle을 시작한다. 비활성화·follow-up 완료도 runtime을 지우며 Alarm 삭제는 runtime과 BusAlarmTarget을 함께 제거한다. FOLLOW_UP runtime은 서버 restart 뒤에도 저장된 vehicle tracking ID와 유효 기간으로 재사용한다. 반면 ACTIVE의 차량별 observation/event state는 V1에서 memory 기반일 수 있다. restart 뒤에는 이전 memory tracking을 새 cycle과 연결하지 않고 안전한 recovery baseline을 만들며, restart 전 observation으로 PASSED를 추론하거나 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 일부 Event 누락보다 false-positive 방지를 우선하고 모든 raw Provider observation 저장이나 event sourcing은 도입하지 않으며, restart continuity 충족 여부는 TASK-811에서 검증한다.
+FOLLOW_UP 중 같은 Alarm의 새 activation은 persisted activation generation을 증가시켜 이전 cycle을 supersede한다. 기존 follow-up runtime을 지우고 ACTIVE 상태의 새 baseline과 monitoring cycle을 시작한다. 비활성화·follow-up 완료도 runtime을 지우며 Alarm 삭제는 runtime과 BusAlarmTarget을 함께 제거한다. FOLLOW_UP runtime은 서버 restart 뒤에도 저장된 vehicle tracking ID와 유효 기간으로 재사용한다. 반면 ACTIVE의 차량별 observation/event state는 V1에서 memory 기반일 수 있다. runtime마다 unique한 `trackingCycleId` 또는 동등한 cycle identity를 사용하고, TransitEvent가 생기면 이를 durable NotificationEvent에 복사할 수 있다. restart 뒤에는 이전 memory tracking을 새 cycle과 연결하지 않고 안전한 recovery baseline을 만들며, restart 전 observation으로 PASSED를 추론하거나 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 일부 Event 누락보다 false-positive 방지를 우선하고 모든 raw Provider observation 저장이나 event sourcing은 도입하지 않으며, restart continuity 충족 여부는 TASK-811에서 검증한다.
 
-동일 Alarm·Vehicle·Event Type은 같은 tracking cycle에서 한 번만 의미가 있다. 저장소와 동시성 기반 중복 방지는 TASK-708에서 결정한다.
+반복 `TransitObservation`과 중복 `TransitEvent` candidate의 억제는 Phase 5 tracking/Evaluation 책임이다. 동일 logical Notification의 중복은 Phase 7 persistence 책임이며 기본 identity는 `(alarmId, activation generation, trackingCycleId, eventType)`이다. DB Unique Constraint 또는 동등한 atomic uniqueness의 구체 Schema는 TASK-707/708에서 결정한다.
 
 구체적인 Observation과 Event 의미는 `adr/ADR-007-bus-alarm-transit-observation-and-event-semantics.md`를 따른다.
 
 ## 9. 전달 의미론
 
-V1은 분산 푸시 전달을 완벽히 제어할 수 없다는 점을 인정하면서, 알림 발생 건당 사용자에게 보이는 알림을 실용적인 최대 한 번으로 전달하는 것을 목표로 한다.
+V1의 보장 경계는 다음과 같다.
 
-백엔드는 이미 실행된 일회성 알림에 대해 중복 푸시 요청을 의도적으로 보내지 않도록 충분한 상태를 유지해야 한다.
+```text
+logical NotificationEvent         → DB uniqueness 기준 한 번
+NotificationEvent × Device record → DB 기준 하나
+FCM request                       → bounded retry로 여러 번 가능
+실제 Device 표시                  → exactly once 보장하지 않음
+```
 
-정확한 트랜잭션 전략은 아직 결정되지 않았다.
+Provider `accepted`는 요청 접수를 뜻하며 실제 표시 성공을 뜻하지 않는다. Timeout은 Provider가 접수했는지 알 수 없는 ambiguous 결과다. Retry 최대 횟수·간격·freshness TTL과 최종 status/type 이름은 TASK-709에서 실제 smoke 결과와 함께 정한다. 모든 attempt를 append-only row로 저장하거나 generic retry framework를 도입하지 않는다.
+
+Push payload는 navigation hint에 필요한 최소 정보만 포함하고 권한 근거로 사용하지 않는다. Flutter는 Auth Session 초기화 뒤 Alarm ID navigation entry를 사용해 Backend에서 ownership/current state를 재확인한다. Permission이 없어도 다른 Device가 수신할 수 있으므로 Alarm 생성·활성화를 금지하지 않는다. 현재 installation logout은 Device unsubscribe/disable을 시도한 뒤 기존 Auth logout과 local session 종료를 수행하되, offline에서는 Backend disable을 즉시 보장하지 않는다.
+
+세부 결정은 `adr/ADR-010-notification-device-and-durable-delivery.md`를 따른다.
 
 ## 10. 확장 경로 — 필요한 경우에만
 
@@ -241,11 +272,11 @@ V1은 분산 푸시 전달을 완벽히 제어할 수 없다는 점을 인정하
 - 그룹 폴링
 - 단기 캐시
 - 공유 상태용 Redis
-- 알림 팬아웃용 큐/워커
+- 외부 message broker 기반 fan-out
 - 여러 백엔드 인스턴스
 ```
 
-Redis, Kafka, RabbitMQ, Kubernetes, 마이크로서비스는 **기본 요구사항이 아니다**.
+MySQL pending dispatch를 처리하는 in-process worker는 Phase 7 기본 구조다. Redis, Kafka, RabbitMQ, Kubernetes, 마이크로서비스와 multi-instance distributed lock은 **기본 요구사항이 아니다**.
 
 ## 11. 배포 방향
 

@@ -206,7 +206,7 @@ TASK-508은 기본 polling key를 TAGO의 `(provider, externalRouteId, cityCode)
 
 TASK-509은 ACTIVE Alarm의 필요한 vehicle tracking을 V1에서 memory 기반으로 관리할 수 있다. Backend restart 뒤에는 이전 memory tracking과 새 cycle을 연결하지 않고 안전한 recovery baseline을 만들며, restart 전 Observation과 연결해 PASSED를 추론하거나 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 일부 Event 누락보다 false-positive 방지를 우선하며, 모든 raw Provider observation 저장이나 event sourcing은 도입하지 않는다. FOLLOW_UP은 영속된 `status`, `vehicleTrackingId`, `startedAt`, `expiresAt`을 실제 scheduler가 재사용해 유효한 동일 vehicle tracking을 재개해야 한다. restart continuity 충족 여부는 TASK-811에서 검증하고 필요하면 최소 persistence를 재검토한다.
 
-TASK-510은 단일 Spring instance 기준으로 polling cycle overlap을 막는 synchronous/fixed-delay 모델을 우선한다. Provider HTTP I/O 중 DB transaction/row lock을 장시간 유지하지 않고, Alarm을 읽은 뒤 deactivate/delete/reactivate될 수 있음을 고려해 stale polling 결과가 최신 lifecycle을 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation race를 안전하게 처리한다. JPA `@Version`, conditional update/CAS, lifecycle generation token 중 무엇을 쓸지는 구현 전에 비교하며 지금 확정하지 않는다.
+TASK-510은 단일 Spring instance 기준으로 polling cycle overlap을 막는 synchronous/fixed-delay 모델을 우선한다. Provider HTTP I/O 중 DB transaction/row lock을 장시간 유지하지 않고, Alarm을 읽은 뒤 deactivate/delete/reactivate될 수 있음을 고려해 stale polling 결과가 최신 lifecycle을 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation race를 안전하게 처리한다. 서로 다른 activation cycle을 구분하는 persisted semantic activation generation은 필수이며 새 monitoring activation cycle마다 증가시킨다. 정확한 increment 조건과 conditional update/CAS/query, JPA `@Version` 병행 여부는 TASK-510에서 확정한다.
 
 TASK-511은 TASK-503 Provider failure를 Transit/Alarm orchestration에서 Event 없는 UNKNOWN으로 처리한다. failure 때문에 Alarm lifecycle을 진행하거나 기존 vehicle tracking state를 즉시 삭제하거나 synthetic PASSED/ARRIVED를 만들지 않는다. retry/backoff 정책과 Resilience4j/circuit breaker 도입 여부는 TASK-510/511 구현 시 결정한다.
 
@@ -222,7 +222,7 @@ TASK-511은 TASK-503 Provider failure를 Transit/Alarm orchestration에서 Event
 - [ ] TASK-602 Access/Refresh Token Pair Secure Storage 구현: pair 단위 저장·읽기·삭제와 손상된 저장값 처리를 구현한다. 구체 storage serialization API는 구현 시 결정한다.
 - [ ] TASK-603 인증 API Client 및 Access Token 적용 구현: Auth API와 authenticated API client의 최소 연결을 구현한다.
 - [ ] TASK-604 startup 인증 상태 복구 및 Access Token 만료/Refresh Rotation 연동: Auth Session이 current Token Pair, `initializing`/`authenticated`/`unauthenticated` 상태, refresh single-flight, Token Pair 교체와 Secure Storage 반영을 단일 책임으로 소유하게 한다. concurrent `401`은 single-flight로 처리하고 refresh 성공 뒤 원 보호 요청을 최대 한 번 재시도한다. refresh `401`은 Token Pair 제거와 unauthenticated 전환이며 network/offline/5xx는 장기 session을 즉시 삭제하지 않는다. `/auth/google`, `/auth/refresh`, `/auth/logout`는 refresh loop에 넣지 않는다.
-- [ ] TASK-605 Flutter Logout 구현: TASK-604와 같은 Auth Session coordination에서 logout과 refresh를 직렬화하고, session generation 또는 동등한 보호로 late refresh/API response가 logout 뒤 local auth state를 되살리지 않게 한다. 서버에 이미 도착한 요청 취소나 Access Token blacklist는 가정하지 않는다.
+- [ ] TASK-605 Flutter Logout 구현: TASK-604와 같은 Auth Session coordination에서 logout과 refresh를 직렬화하고, session generation 또는 동등한 보호로 late refresh/API response가 logout 뒤 local auth state를 되살리지 않게 한다. Phase 7이 현재 Device unsubscribe/disable을 연결할 logout lifecycle/hook을 제공하며 서버에 이미 도착한 요청 취소나 Access Token blacklist는 가정하지 않는다.
 - [ ] TASK-606 Flutter Bus Route 검색 연동: TASK-513 → TASK-505 완료 뒤 구현하며 loading, empty, error, retry 상태를 제공한다.
 - [ ] TASK-607 Flutter Bus Stop 조회 및 선택 구현: TASK-506 완료 뒤 구현하며 loading, empty, error, retry 상태와 `canNotifyOneStopBefore`/`canNotifyOneStopAfter` 기반 option 비활성화를 제공한다.
 - [ ] TASK-608 Flutter Alarm 생성 및 관리 화면/API 연동: TASK-607 뒤 구현하며 `INACTIVE`/`ACTIVE`/`FOLLOW_UP`을 그대로 표현한다. Alarm 목록/조회에는 loading, empty, error, retry 상태를 제공하고 mutation 진행 중 중복 입력을 막는다. stale `targetStopOccurrenceId`의 생성 `404`는 old ID 추측 매칭·자동 POST 재시도 대신 Stop 목록 재선택 흐름으로 복구하며, idempotency contract가 없는 create timeout도 자동 POST 재시도하지 않는다. 실제 ACTIVE monitoring 종단 검증은 Phase 5 monitoring 완료 후 수행한다.
@@ -230,7 +230,7 @@ TASK-511은 TASK-503 Provider failure를 Transit/Alarm orchestration에서 Event
 
 TASK-601~605 Authentication lane은 Backend Authentication이 준비되어 있으므로 Phase 5와 병행할 수 있다. TASK-606은 TASK-513 → TASK-505 뒤, TASK-607은 TASK-506 뒤, TASK-608은 TASK-607 뒤 진행한다. offline mutation queue/cache, generic `Repository`/`BaseRepository`, 모든 API별 `UseCase` class, global event bus, 복잡한 refresh queue framework, notification stub은 이번 Phase에 도입하지 않는다. state management library도 특정 제품으로 확정하지 않는다.
 
-Phase 6은 Phase 7에 안정적인 Auth Session state, 자동 refresh를 포함한 authenticated API client, logout lifecycle/hook, Alarm ID 기반 navigation 진입점, app resume 시 Auth Session 재평가 가능 지점을 제공한다. Device/FCM/logout registration 정책은 TASK-701/702에서 결정하며 Phase 6에서 미리 구현하지 않는다. Apple Login과 App Store 계정 삭제 요건은 별도 release readiness에서 재검토한다.
+Phase 6은 Phase 7에 안정적인 Auth Session state, 자동 refresh를 포함한 authenticated API client, logout lifecycle/hook, Alarm ID 기반 navigation 진입점, app resume 시 Auth Session 재평가 가능 지점을 제공한다. Device/FCM 구현은 TASK-701~704에서 맡는다. Flutter logout은 이 hook에서 현재 Device disable을 시도한 뒤 Auth logout과 local session 종료를 수행하는 방향이며 offline에서 Backend disable을 즉시 보장하지 않는다. Apple Login과 App Store 계정 삭제 요건은 별도 release readiness에서 재검토한다.
 
 ------------------------------------------------------------------------
 
@@ -240,19 +240,36 @@ Phase 6은 Phase 7에 안정적인 Auth Session state, 자동 refresh를 포함�
 
 Alarm 조건 충족 시 실제 기기에 중복 없이 Push notification을 전송한다.
 
-- [ ] TASK-701 FCM iOS 지원 적합성 및 Device / Push Token lifecycle 최종 결정
-- [ ] TASK-702 Device Domain/Schema 및 Device registration contract 정의
-- [ ] TASK-703 Device registration API 구현
-- [ ] TASK-704 Flutter Push permission, FCM Token 획득, Backend registration 및 Token 갱신 연동
-- [ ] TASK-705 Push provider client 구현
-- [ ] TASK-706 Notification Service 구현
-- [ ] TASK-707 NotificationHistory 저장 연동
-- [ ] TASK-708 Duplicate Prevention 전략 결정 및 구현
-- [ ] TASK-709 Notification failure 처리 구현
-- [ ] TASK-710 실제 기기 Push notification 검증
-- [ ] TASK-711 Notification Test 작성
+- [ ] TASK-701 FCM iOS 지원 적합성 및 targeting contract 확정: 실제 사용할 FlutterFire/firebase_messaging, Firebase iOS SDK, Java Firebase Admin SDK 버전을 확인하고 현재 지원되는 targeting identifier와 local unregister 동작을 확정한다. Firebase→실제 iPhone early smoke를 수행하며 APNs token을 StopBell Device identity로 사용하지 않는다.
+- [ ] TASK-702 Device Domain/Schema 및 registration/logout contract 정의: 내부 PK + client-generated installationId + current push targeting identifier를 분리하고 multi-device, registration rotation, monotonic revision 또는 동등한 stale-write 방지, 별도 authenticated disable/unregister lifecycle을 정의한다. RefreshToken FK와 단일 Device 제한은 두지 않는다.
+- [ ] TASK-703 Device registration/disable API 구현: stale registration update가 최신 target을 덮어쓰지 못하게 하고 같은 revision/registration 재요청을 idempotent하게 처리하는 correctness test를 함께 작성한다.
+- [ ] TASK-704 Flutter Push permission, registration 및 tap lifecycle 구현: 첫 Alarm activation 직전 맥락 기반 permission UX, denied 경고/Settings 안내, app resume 재동기화, registration 갱신, logout hook의 현재 Device disable 시도, Auth Session 초기화 뒤 Alarm ID navigation을 구현한다. Permission denied로 Alarm 생성/활성화를 금지하지 않는다.
+- [ ] TASK-705 Push provider client 구현: TASK-709의 result/failure taxonomy를 구현하고 Backend→실제 iPhone smoke를 수행한다. accepted를 실제 표시 성공으로 해석하지 않고 credential/target redaction을 검증한다.
+- [ ] TASK-706 Notification orchestration 및 durable pending dispatch worker 구현: lifecycle transaction commit 뒤 MySQL pending Event를 활성 Device에 fan-out하고 Delivery 결과를 갱신한다. FCM I/O를 Alarm transaction 안에서 수행하거나 non-durable callback만을 전달 보장으로 사용하지 않는다.
+- [ ] TASK-707 NotificationEvent / NotificationDelivery persistence 및 durable outbox 구현: 초기 NotificationHistory의 확장·대체·migration 방식을 결정하고 logical Event, Event×Device delivery, pending/retry state를 분리한다. production legacy compatibility와 append-only attempt history를 과도하게 만들지 않는다.
+- [ ] TASK-708 Duplicate Prevention 설계 및 구현: 먼저 `(alarmId, activation generation, trackingCycleId, eventType)` logical identity와 atomic DB uniqueness를 설계한 뒤 구현한다. 반복 Observation과 Event candidate 억제는 Phase 5 책임으로 유지하고 `alarmId + eventType`만으로 dedup하지 않는다.
+- [ ] TASK-709 Notification failure/retry 설계 및 구현: 먼저 accepted, invalid/unregistered, transient, rate/quota, auth/config, invalid payload/permanent, timeout/unknown acceptance, expired taxonomy를 정의한다. 이후 bounded retry/expiry와 실패 target/revision이 current registration일 때만 Device를 disable하는 조건부 cleanup을 구현하고, smoke 결과로 최대 횟수·간격·freshness TTL을 확정한다.
+- [ ] TASK-710 실제 iPhone foreground/background/terminated 수신 및 tap 검증: payload가 최소 navigation hint이고 tap 뒤 ownership/current state를 Backend에서 재검증하며 stale notification을 정상 처리하는지 확인한다.
+- [ ] TASK-711 Notification 최종 E2E/regression Test 보강: 각 선행 Task의 correctness test를 대체하지 않고 durable recovery, multi-device fan-out과 전체 Notification 흐름을 최종 검증한다.
 
-현재 Device Schema는 후보일 뿐이다. TASK-701에서 실제 FCM lifecycle을 확인한 뒤 TASK-702에서 필요한 최소 Schema를 결정하며, 추측성 field를 미리 추가하지 않는다.
+실행 dependency는 다음과 같다. TASK-708/709는 선행 설계와 후행 구현 단계를 가지며 Task 번호와 완료 상태는 변경하지 않는다.
+
+```text
+TASK-701
+  → TASK-702
+  → TASK-708 design
+  → TASK-709 design
+  → TASK-707
+  → TASK-703 / TASK-704
+  → TASK-705
+  → TASK-708 implementation
+  → TASK-706
+  → TASK-709 implementation
+  → TASK-710
+  → TASK-711
+```
+
+FCM targeting identifier와 Device field/column 길이는 TASK-701/702, activation generation increment/CAS는 TASK-510, Notification Schema/constraint 이름은 TASK-707/708, retry 수치는 TASK-709에서 확정한다. MySQL durable pending dispatch와 in-process worker를 사용하며 Kafka, RabbitMQ, Redis queue, Notification microservice, event sourcing, generic multi-provider/retry framework, Device subtype hierarchy, APNs direct client, multi-instance distributed lock은 V1에 도입하지 않는다.
 
 ------------------------------------------------------------------------
 
@@ -275,13 +292,15 @@ Alarm 조건 충족 시 실제 기기에 중복 없이 Push notification을 전�
 - [ ] TASK-811 server restart 안전성 검증
 - [ ] TASK-812 Analytics Event 및 장기 통계 데이터 보존 전략 결정 및 최소 구현
 
-TASK-812에서는 운영 Domain 데이터 lifecycle과 독립적으로 장기 보존할 통계·분석 데이터를 결정하고, 필요한 최소 구현을 수행한다. Alarm 삭제 시 `BusAlarmTarget`, `NotificationHistory` 같은 종속 운영 데이터는 함께 삭제할 수 있지만, 서비스 사용 패턴과 품질 분석에 필요한 데이터는 Alarm 삭제 여부와 독립적으로 보존할 수 있어야 한다. 장기 보존 데이터는 별도의 Analytics/Event Logging 책임으로 분리하며, `NotificationHistory`의 Alarm lifecycle 종속 정책과 충돌하지 않는다.
+TASK-812에서는 운영 Domain 데이터 lifecycle과 독립적으로 장기 보존할 통계·분석 데이터를 결정하고, 필요한 최소 구현을 수행한다. Phase 7의 NotificationEvent/NotificationDelivery는 correctness와 delivery operation을 위한 데이터이며 장기 Analytics를 겸하지 않는다. 서비스 사용 패턴과 품질 분석에 필요한 데이터는 Alarm 삭제 여부와 독립적으로 보존할 수 있어야 한다.
 
-후보 Event는 `ALARM_CREATED`, `ALARM_ACTIVATED`, `ALARM_DEACTIVATED`, `ALARM_DELETED`, `NOTIFICATION_SUCCESS`, `NOTIFICATION_FAILURE` 등이지만, 실제 V1 기능이 대부분 완성된 뒤 필요한 통계, Event 범위, 익명화·최소화 수준, 보존 기간, 원본 Event와 집계 데이터의 보존 범위를 결정한다. 이 시점에는 추측성 Analytics Schema를 미리 확정하지 않으며, 외부 Provider 사용자 식별자, Refresh Token, Push Token, 정확한 개인 식별 정보 등 장기 통계에 불필요한 데이터는 복제하지 않는 것을 기본 원칙으로 한다.
+후보 Event는 `ALARM_CREATED`, `ALARM_ACTIVATED`, `ALARM_DEACTIVATED`, `ALARM_DELETED`, `NOTIFICATION_SUCCESS`, `NOTIFICATION_FAILURE` 등이지만, 실제 V1 기능이 대부분 완성된 뒤 필요한 통계, Event 범위, 익명화·최소화 수준, 보존 기간, 원본 Event와 집계 데이터의 보존 범위를 결정한다. 이 시점에는 추측성 Analytics Schema를 미리 확정하지 않으며, 외부 Provider 사용자 식별자, Refresh Token, Push targeting identifier, 정확한 개인 식별 정보 등 장기 통계에 불필요한 데이터는 복제하지 않는 것을 기본 원칙으로 한다.
 
-TASK-805의 구조화된 Logging은 장애 추적, 서버 동작 관찰, request/error 운영 분석을 위한 것으로 로그 보존 정책에 따라 삭제될 수 있다. TASK-812의 Analytics/Event는 장기 통계, 서비스 사용 패턴, 기능 사용률, Notification 성공·실패 분석을 위한 별도 책임이며, 운영 Domain 데이터 삭제와 독립적인 보존을 검토한다.
+TASK-802/810/811은 Phase 7의 logical DB uniqueness, stale activation 보호, durable pending recovery, multi-device fan-out, invalid registration conditional cleanup, bounded retry와 실제 iOS 검증을 미루는 근거가 아니다. Phase 8은 더 넓은 race/restart/load/latency/operations 검증을 보강한다.
+
+TASK-805의 구조화된 Logging은 장애 추적, 서버 동작 관찰, request/error 운영 분석을 위한 것으로 로그 보존 정책에 따라 삭제될 수 있다. TASK-812의 Analytics/Event는 장기 통계, 서비스 사용 패턴, 기능 사용률, Notification provider acceptance·failure 분석을 위한 별도 책임이며, 운영 Domain 데이터 삭제와 독립적인 보존을 검토한다.
 
 Future Consideration:
 
 - CD 도입은 수동 배포 흐름을 이해한 뒤 검토한다.
-- Redis, queue/worker, multiple backend instance는 측정된 문제가 있을 때만 검토한다.
+- Redis, external message broker, multiple backend instance는 측정된 문제가 있을 때만 검토한다. Phase 7의 MySQL pending dispatch worker는 이미 기본 correctness 범위다.

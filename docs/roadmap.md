@@ -73,7 +73,7 @@ TASK-304는 경기 TAGO를 Route/Stop metadata·realtime Location·Arrival 보�
 - [ ] 일시적인 제공자 장애 처리
 - [ ] 서버 재시작을 안전하게 처리
 - [ ] 중복 방지 개선
-- [ ] 유용하다면 알림 이력 추가
+- [ ] Notification delivery 운영 데이터와 장기 Analytics 경계 검증
 - [ ] 알림 평가 자동화 테스트 추가
 
 ## Phase 1.2 — 사용자 경험
@@ -127,6 +127,33 @@ TASK-506 → TASK-607 → TASK-608
 
 Flutter는 미확정 Route DTO나 identity를 추측하지 않는다. TASK-606~608은 loading, empty, error, retry와 mutation 진행 중 중복 입력 방지를 포함한다. offline mutation queue/cache는 선행 구축하지 않으며, idempotency 계약이 없는 Alarm create는 timeout으로 자동 POST 재시도하지 않는다. TASK-609는 각 Task의 테스트를 모아 작성하는 항목이 아니라, 이 흐름이 준비된 뒤 Flutter Authentication/Transit/Alarm의 E2E·regression을 보강하는 최종 Task다.
 
+## Phase 7 — Notification 의존성
+
+Phase 7은 SDK와 iOS targeting 동작을 먼저 실제 Device에서 확인하고, Device identity와 registration ordering, logical Notification dedup, provider failure 의미를 설계한 뒤 persistence와 delivery를 구현한다. Alarm lifecycle transition과 durable NotificationEvent는 MySQL transaction으로 묶고 in-process worker가 commit 뒤 전달한다. 외부 message broker나 Notification microservice는 도입하지 않는다.
+
+```text
+TASK-701 FCM/iOS contract + early Firebase→device smoke
+    ↓
+TASK-702 Device identity / multi-device / logout contract
+    ↓
+TASK-708 design: activation/tracking/event dedup identity
+    ↓
+TASK-709 design: provider result/failure taxonomy
+    ↓
+TASK-707 NotificationEvent / NotificationDelivery persistence + durable outbox
+    ↓
+TASK-703 Device API ─┐
+TASK-704 Flutter lifecycle ─┴→ TASK-705 Push provider client + Backend→device smoke
+                                  ↓
+TASK-708 implementation → TASK-706 orchestration → TASK-709 implementation
+                                  ↓
+TASK-710 iPhone foreground/background/terminated/tap 검증
+                                  ↓
+TASK-711 최종 E2E/regression
+```
+
+각 Task는 자기 correctness test를 함께 작성한다. TASK-711은 테스트를 몰아서 처음 작성하는 Task가 아니라 최종 E2E/regression 보강이다. Phase 7에서 logical DB uniqueness, stale activation 보호, durable pending recovery, multi-device fan-out, invalid registration conditional cleanup, bounded retry와 실제 iOS 상태별/tap 검증을 갖추며 Phase 8에 미루지 않는다.
+
 ## Phase 2 — 지하철 기상 알림
 
 V1 버스 알림이 신뢰성 있게 동작한 뒤에만 시작한다.
@@ -148,7 +175,7 @@ V1 버스 알림이 신뢰성 있게 동작한 뒤에만 시작한다.
 - 그룹화된 교통 폴링
 - 공유 캐시
 - Redis
-- 알림 큐/워커
+- 외부 message broker 기반 알림 queue
 - 여러 백엔드 인스턴스
 - 추가 교통 지역/제공자
 - 반복 통근 프리셋
