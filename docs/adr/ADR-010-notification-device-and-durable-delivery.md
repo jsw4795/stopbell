@@ -102,19 +102,19 @@ Device internal PK
 + current Firebase push targeting identifier
 ```
 
-`installationId`는 StopBell이 한 앱 installation을 구분하는 identity다. Firebase targeting identifier는 rotation/re-registration 가능한 delivery reference이며 Device identity가 아니다. APNs device token을 StopBell Device identity로 사용하지 않는다.
+`installationId`는 StopBell이 한 앱 installation을 구분하는 identity이며 User-scoped identity가 아니다. 하나의 installation에는 동시에 current owner가 최대 한 명이어야 한다. 같은 installation에서 다른 User가 로그인하면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase targeting identifier는 rotation/re-registration 가능한 delivery reference이며 Device identity가 아니다. APNs device token을 StopBell Device identity로 사용하지 않는다.
 
-실제 targeting identifier는 TASK-701에서 사용할 FlutterFire/firebase_messaging, Firebase iOS SDK, Java Firebase Admin SDK 버전과 iOS 동작을 확인한 뒤 확정한다. 그전 문서는 `pushRegistrationId`, `pushTargetId` 같은 provider-neutral 용어를 사용한다. 구체 field 이름, column 길이와 uniqueness는 TASK-702에서 정한다.
+실제 targeting identifier는 TASK-701에서 사용할 FlutterFire/firebase_messaging, Firebase iOS SDK, Java Firebase Admin SDK 버전과 iOS 동작을 확인한 뒤 확정한다. 그전 문서는 `pushRegistrationId`, `pushTargetId` 같은 provider-neutral 용어를 사용한다. Targeting identifier 자체의 global uniqueness도 TASK-701 확인 전에는 가정하지 않으며 구체 field 이름, column 길이와 constraint는 TASK-702에서 정한다.
 
-한 User는 여러 Device를 가질 수 있다. 단일 Device 제한을 두지 않고 RefreshToken Session과 Device를 FK로 직접 연결하지 않는다. 동일 installation의 update에는 monotonic revision 또는 동등한 stale-write 보호가 필요하다. 오래된 update는 최신 target을 덮어쓸 수 없고 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
+한 User는 여러 Device를 가질 수 있다. 단일 Device 제한을 두지 않고 RefreshToken Session과 Device를 FK로 직접 연결하지 않는다. Installation ownership takeover의 구체 DB constraint와 API transaction은 TASK-702/703에서 정한다. 동일 installation의 update에는 monotonic revision 또는 동등한 stale-write 보호가 필요하다. 오래된 update는 최신 target을 덮어쓸 수 없고 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
 
 현재 installation logout은 해당 Push subscription만 disable/unregister하고 Alarm lifecycle과 다른 Device는 변경하지 않는다. `/auth/logout`은 Refresh Session 종료 책임을 유지하며 Device field를 받지 않는다. Device disable은 별도 authenticated API 또는 동등한 명시적 lifecycle로 처리한다. Flutter는 Phase 6 logout hook에서 Device disable을 시도한 뒤 Auth logout과 local session 종료를 수행하며, offline에서는 Backend disable을 즉시 보장하지 않는다.
 
 ### Alarm activation과 tracking identity
 
-Alarm은 새 monitoring activation cycle마다 증가하는 persisted semantic activation generation을 가진다. 이는 deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation Notification candidate를 현재 activation과 구분한다. 구체 이름 후보는 `activationSequence`이며 정확한 increment 조건과 CAS/query, JPA `@Version` 병행 여부는 TASK-510에서 확정한다.
+Alarm은 새 monitoring activation cycle마다 증가하는 persisted semantic activation generation을 가진다. `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. 이는 deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation Notification candidate를 현재 activation과 구분한다. 구체 이름 후보는 `activationSequence`이며 CAS/query와 JPA `@Version` 병행 여부는 TASK-510에서 확정한다.
 
-ACTIVE vehicle tracking은 기존 Phase 5 결정대로 V1에서 memory 기반일 수 있다. Runtime-unique `trackingCycleId` 또는 동등한 identity를 사용하고 TransitEvent 발생 시 durable NotificationEvent에 복사할 수 있다. Restart 뒤에는 이전 tracking을 새 cycle과 임의로 연결하지 않고 safe recovery baseline을 사용한다. Notification correctness를 이유로 raw TransitObservation 또는 ACTIVE tracking 전체를 영속하지 않는다.
+ACTIVE vehicle tracking은 기존 Phase 5 결정대로 V1에서 memory 기반일 수 있다. `trackingCycleId` 또는 동등한 값은 DB transaction ID가 아니라 logical vehicle tracking cycle identity로 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction이 deadlock/optimistic conflict로 retry되어도 identity를 다시 만들지 않으며 retry로 Notification dedup uniqueness를 우회해서는 안 된다. TransitEvent 발생 시 이 identity를 durable NotificationEvent에 복사할 수 있다. Restart 뒤에는 이전 tracking을 새 cycle과 임의로 연결하지 않고 safe recovery baseline을 사용한다. Notification correctness를 이유로 raw TransitObservation 또는 ACTIVE tracking 전체를 영속하지 않는다.
 
 ### Duplicate identity
 
@@ -138,15 +138,18 @@ Provider I/O / Evaluation
      - current Alarm lifecycle/generation 검증
      - lifecycle transition
      - durable logical NotificationEvent insert
+     - 현재 eligible Device별 NotificationDelivery(PENDING) 생성
   → commit
-  → in-process Notification delivery worker
+  → in-process worker가 기존 pending Delivery 처리
   → FCM I/O
   → NotificationDelivery result update
 ```
 
-FCM I/O를 Alarm lifecycle transaction 안에서 수행하지 않고 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다. 외부 Kafka, RabbitMQ, Redis queue와 Notification microservice는 도입하지 않는다. Worker claim 방식과 polling interval은 TASK-706~709에서 정한다.
+Recipient set은 Event 결정 transaction에서 Device identity로 확정한다. Event 뒤 등록된 Device가 과거 Event를 받지 않으며 worker는 recipient를 새로 결정하지 않는다. Eligible Device가 0개면 NotificationEvent와 Delivery 0개를 commit하고 no-recipient operational log/metric으로 관찰한다. 이를 Provider failure나 success로 해석하거나 별도 enum을 강제하지 않는다.
 
-`NotificationEvent`는 durable logical decision, dedup identity와 pending dispatch 근거를 소유한다. `NotificationDelivery`는 Event×Device, Provider delivery/retry/expiry state와 current/final result를 소유한다. 기존 `NotificationHistory` Entity/table을 확장·대체·migration하는 방식은 TASK-707에서 정하며 production legacy compatibility를 과도하게 만들지 않는다. 모든 retry attempt를 append-only row로 저장하지 않는다. Analytics는 실제 제품 질문과 보존 근거가 있을 때만 별도 책임으로 최소 구현하며, Event/Delivery를 장기 Analytics Source of Truth로 사용하지 않는다.
+Worker는 전송 직전에 recipient Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 재검증하고 실제 attempt에 사용한 target/revision을 기록한다. FCM I/O를 Alarm lifecycle transaction 안에서 수행하지 않고 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다. 외부 Kafka, RabbitMQ, Redis queue와 Notification microservice는 도입하지 않는다. Worker claim 방식과 polling interval은 TASK-706~709에서 정한다.
+
+`NotificationEvent`는 durable logical decision과 dedup identity를 소유하고 Event 시점에 생성된 recipient Delivery들의 logical source가 된다. `NotificationDelivery`는 Event×Device, Provider delivery/retry/expiry state와 current/final result를 소유한다. 기존 `NotificationHistory` Entity/table을 확장·대체·migration하는 방식은 TASK-707에서 정하며 production legacy compatibility를 과도하게 만들지 않는다. 모든 retry attempt를 append-only row로 저장하지 않는다. Analytics는 실제 제품 질문과 보존 근거가 있을 때만 별도 책임으로 최소 구현하며, Event/Delivery를 장기 Analytics Source of Truth로 사용하지 않는다.
 
 ### Delivery semantics와 failure taxonomy
 
@@ -161,7 +164,7 @@ FCM request                       → retry로 여러 번 가능
 
 Provider acceptance는 실제 사용자 표시 성공이 아니다. Provider client와 Delivery state는 accepted, invalid/unregistered target, transient failure, rate/quota failure, provider authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance state, expired notification을 구분한다.
 
-Invalid/unregistered 결과는 실패한 targeting identifier와 revision이 Device의 current registration일 때만 조건부 disable한다. Timeout은 Provider가 실제 접수했는지 알 수 없는 ambiguous 상태다. 최대 retry 횟수·간격·freshness TTL과 최종 status/type 이름은 TASK-709에서 smoke 결과와 함께 정한다. Generic retry framework는 미리 도입하지 않는다.
+Invalid/unregistered 결과는 attempt에 사용한 targeting identifier/revision이 Device의 current registration과 일치할 때만 조건부 disable한다. Old attempt 실패가 새 registration을 disable해서는 안 된다. Timeout은 Provider가 실제 접수했는지 알 수 없는 ambiguous 상태다. 최대 retry 횟수·간격·freshness TTL과 최종 status/type 이름은 TASK-709에서 smoke 결과와 함께 정한다. Generic retry framework는 미리 도입하지 않는다.
 
 ### Permission, payload와 tap
 
@@ -173,7 +176,7 @@ Payload는 `type`, `alarmId`, `eventType`, `notificationEventId` 수준의 navig
 
 Installation identity를 Provider targeting에서 분리하면 Firebase 계약 변화와 registration rotation이 StopBell Device lifecycle을 오염시키지 않는다. Activation generation과 cycle identity는 memory-based tracking을 유지하면서도 durable Notification dedup에 필요한 최소 문맥을 제공한다.
 
-MySQL outbox는 이미 사용하는 infrastructure 안에서 lifecycle commit과 logical Notification 생성을 atomic하게 만들고 process crash 뒤 복구를 가능하게 한다. Event와 Delivery 분리는 multi-device fan-out, retry와 Provider 결과를 logical Alarm Event에서 분리하면서 exactly-once라고 과장하지 않는 경계를 제공한다.
+MySQL outbox는 이미 사용하는 infrastructure 안에서 lifecycle transition, logical Notification과 Event 시점 recipient Delivery 생성을 atomic하게 만들고 process crash 뒤 복구를 가능하게 한다. Event와 Delivery 분리는 multi-device recipient, retry와 Provider 결과를 logical Alarm Event에서 분리하면서 exactly-once라고 과장하지 않는 경계를 제공한다.
 
 ## 결과
 
@@ -181,6 +184,7 @@ MySQL outbox는 이미 사용하는 infrastructure 안에서 lifecycle commit과
 - TASK-702/703은 installation identity, multi-device, stale registration ordering과 별도 disable API를 정의·구현한다.
 - TASK-510은 persisted activation generation의 정확한 증가/CAS 계약을 구현한다.
 - TASK-707/708은 NotificationEvent/Delivery persistence와 logical DB uniqueness를 구현한다.
+- TASK-707은 Alarm 삭제 시 이미 생성된 Event/Delivery를 유지·취소·cascade 삭제할지 lifecycle과 outbox recovery 의미로 결정하며 FK cascade에 우연히 맡기지 않는다.
 - TASK-705/709는 명시적인 Provider result/failure와 bounded retry를 구현한다.
 - TASK-704/710은 permission, registration, foreground/background/terminated/tap을 실제 iPhone에서 검증한다.
 - Kafka, RabbitMQ, Redis queue, event sourcing, generic multi-provider/retry framework, Device subtype hierarchy, APNs direct client, multi-instance distributed lock은 V1에서 제외한다.

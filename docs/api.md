@@ -203,7 +203,7 @@ Conceptual request:
 }
 ```
 
-`installationId`는 StopBell이 앱 installation을 구분하는 identity이고 Firebase targeting identifier는 변경 가능한 delivery reference다. 실제 request field 이름, identifier 형식, 길이와 revision 표현은 TASK-701/702에서 확정한다. 동일 installation의 오래된 update가 최신 target을 덮어쓰지 못해야 하며 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
+`installationId`는 User-scoped가 아닌 StopBell 앱 installation identity이며 하나의 installation에는 동시에 current owner가 최대 한 명이어야 한다. 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase targeting identifier는 변경 가능한 delivery reference이며 global uniqueness는 TASK-701 확인 전에는 가정하지 않는다. 실제 request field 이름, identifier 형식, 길이와 revision 표현은 TASK-701/702에서 확정한다. 동일 installation의 오래된 update가 최신 target을 덮어쓰지 못해야 하며 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
 
 현재 installation의 Push subscription을 disable/unregister하는 별도 authenticated Endpoint 또는 동등한 명시적 lifecycle도 TASK-702/703에서 정의한다. 이 동작은 해당 Device만 변경하며 Alarm lifecycle과 다른 Device는 변경하지 않는다. `/auth/logout` request에 Device field를 추가하지 않는다.
 

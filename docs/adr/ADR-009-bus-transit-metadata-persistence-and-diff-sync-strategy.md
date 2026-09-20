@@ -49,7 +49,9 @@ V1 Bus Route/Stop 선택과 Alarm 생성이 Provider metadata API를 매번 다�
 
 각 source adapter는 raw DTO 대신 normalized route snapshot을 전달하고 service가 한 Route 단위로 reconciliation한다. 같은 Route/Stop identity의 display·operational metadata는 UPDATE해 internal ID를 유지한다. occurrence는 `(route, stop, stopOrder)`가 완전히 같을 때만 ID를 유지하며 Stop 또는 order가 바뀌면 기존 row를 삭제하고 새 row를 만든다. Route snapshot에서 사라진 occurrence는 제거한다.
 
-Provider 전체 fetch가 완전히 성공한 경우에만 source에 없는 Route를 제거하며 Route FK는 occurrence cascade delete를 가진다. Stop은 여러 Route에서 공유될 수 있으므로 모든 occurrence에서 더 이상 참조되지 않는 provider Stop만 cleanup한다. fetch 실패·부분 snapshot에서는 provider-level 삭제를 실행하지 않는다. complete provider snapshot은 adapter가 required source 존재, parsing/validation 성공, pagination 완료 및 provider request 성공을 확인한 결과여야 하며, 단순 empty collection만으로 자동 판정하지 않는다.
+Provider 전체 fetch가 완전히 성공한 경우에만 source에 없는 Route를 제거하며 Route FK는 occurrence cascade delete를 가진다. Stop은 여러 Route에서 공유될 수 있으므로 모든 occurrence에서 더 이상 참조되지 않는 provider Stop만 cleanup한다. fetch 실패·부분 snapshot에서는 provider-level 삭제를 실행하지 않는다. Complete provider snapshot은 adapter가 required source 존재, parsing/validation 성공, pagination 완료 및 provider request 성공을 확인한 결과여야 하며, 검증되지 않은 empty collection은 complete가 아니다. Typed complete snapshot boundary, explicit completeness token/result, destructive method visibility 제한 또는 동등한 구조적 보호로 검증된 snapshot만 cleanup 경로에 들어가게 하고 구체 type은 TASK-513에서 정한다.
+
+Provider별 최소 persisted metadata sync state는 `provider`, `lastCompleteSyncAt` 의미를 보존한다. Fresh DB bootstrap 완료, readiness와 last successful complete sync age 판단에 사용하며 필요하면 in-progress/failure 정보를 확장할 수 있다. Sync history, checksum history, staging table, error journal은 현재 요구하지 않고 정확한 Schema/type은 TASK-513에서 정한다.
 
 `BusAlarmTarget`은 metadata Entity를 FK로 장기 참조하지 않는다. Alarm 생성 시 metadata에서 필요한 값을 읽어 Target snapshot에 복사하므로 metadata sync가 기존 Alarm target을 자동 변경하지 않는다.
 
@@ -59,7 +61,7 @@ metadata CRUD와 reconciliation은 JPA Entity 상태 관리와 단순 관계 CRU
 
 TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TASK-513은 source adapter와 production ingestion을 담당한다. 서울은 노선마스터·정류장마스터·노선-정류장마스터 T Data CSV를 parsing·validation해 normalized metadata snapshot을 만들고, 경기는 TAGO city별 Route와 Route Stop을 pagination 완료까지 수집해 snapshot을 만든다. CSV header, encoding, GPS column은 실제 fixture 또는 source 파일을 확인한 TASK-513 구현 시점에 확정한다.
 
-최초 bootstrap은 일반 Backend startup에 묶지 않는 명시적 one-shot import/sync 실행을 기본으로 한다. 자동 refresh 주기는 이 ADR이나 TASK-513 문서 범위에서 확정하지 않는다. partial source fetch, parser failure, pagination incomplete, required source missing, provider request 일부 실패는 모두 complete snapshot이 아니므로 provider 전체 cleanup을 실행하지 않는다. incomplete snapshot을 absence/deletion으로 해석하지 않는다.
+최초 bootstrap은 일반 Backend startup에 묶지 않는 명시적 one-shot import/sync 실행을 기본으로 한다. 자동 refresh 주기는 이 ADR이나 TASK-513 문서 범위에서 확정하지 않는다. partial source fetch, parser failure, pagination incomplete, required source missing, provider request 일부 실패와 검증되지 않은 empty result는 모두 complete snapshot이 아니므로 provider 전체 cleanup을 실행하지 않는다. Incomplete snapshot을 absence/deletion으로 해석하지 않는다.
 
 단일 Backend 환경에서 동일 Provider full sync는 single-flight로 실행한다. Provider 전체를 하나의 장시간 DB transaction으로 묶지 않고 기존 Route 단위 transaction과 successful complete snapshot 이후 cleanup 방향을 유지한다. ingestion 구현은 Route reconciliation의 Stop lazy-loading N+1 여부를 확인·개선한다. Redis, distributed lock, queue는 V1에 도입하지 않는다.
 
@@ -73,6 +75,7 @@ TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TAS
 - `BusRoute`와 `BusStop` metadata 변경은 내부 ID를 유지한다
 - 의미가 바뀐 occurrence는 기존 ID를 재사용하지 않는다
 - partial source failure가 Route 삭제로 오판되지 않도록 provider cleanup 호출을 검증된 complete snapshot 성공 뒤로 제한한다
+- Provider별 마지막 complete sync 성공 시각을 최소 영속 상태로 관리한다
 - MyBatis는 현재 추가하지 않으며 hybrid persistence 결정은 유지한다
 - Source downloader/parser와 one-shot bootstrap은 TASK-513, realtime production client·Scheduler와 Alarm API는 각각 후속 Task로 남는다
 

@@ -145,7 +145,7 @@ Provider별 raw DTO를 Alarm Evaluation에 직접 전달하지 않는다. `trans
 Device registration lifecycle, durable logical Notification, per-Device delivery, Push provider 요청과 결과 처리 책임을 둔다.
 
 - `controller`: authenticated Device registration/disable API
-- `service`: NotificationEvent 생성 orchestration, pending dispatch worker, Device fan-out과 delivery 결과 처리
+- `service`: NotificationEvent와 Event 시점 recipient Delivery 생성 orchestration, 기존 pending Delivery worker와 전달 결과 처리
 - `client`: FCM Push provider client와 명시적인 provider result/failure mapping
 - `repository`: Device, NotificationEvent, NotificationDelivery JPA Repository
 - `entity`: Device, NotificationEvent, NotificationDelivery JPA Entity

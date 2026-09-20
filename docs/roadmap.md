@@ -129,7 +129,7 @@ Flutter는 미확정 Route DTO나 identity를 추측하지 않는다. TASK-606~6
 
 ## Phase 7 — Notification 의존성
 
-Phase 7은 SDK와 iOS targeting 동작을 먼저 실제 Device에서 확인하고, Device identity와 registration ordering, logical Notification dedup, provider failure 의미를 설계한 뒤 persistence와 delivery를 구현한다. Alarm lifecycle transition과 durable NotificationEvent는 MySQL transaction으로 묶고 in-process worker가 commit 뒤 전달한다. 외부 message broker나 Notification microservice는 도입하지 않는다.
+Phase 7은 SDK와 iOS targeting 동작을 먼저 실제 Device에서 확인하고, Device identity와 registration ordering, logical Notification dedup, provider failure 의미를 설계한 뒤 persistence와 delivery를 구현한다. Alarm lifecycle transition, durable NotificationEvent와 Event 시점의 eligible Device별 pending Delivery는 MySQL transaction으로 묶어 recipient set을 확정하고, in-process worker는 commit 뒤 기존 pending Delivery만 전달한다. 외부 message broker나 Notification microservice는 도입하지 않는다.
 
 ```text
 TASK-701 FCM/iOS contract + early Firebase→device smoke
@@ -152,7 +152,7 @@ TASK-710 iPhone foreground/background/terminated/tap 검증
 TASK-711 최종 E2E/regression
 ```
 
-각 Task는 자기 correctness test를 함께 작성한다. TASK-711은 테스트를 몰아서 처음 작성하는 Task가 아니라 최종 E2E/regression 보강이다. Phase 7에서 logical DB uniqueness, stale activation 보호, durable pending recovery, multi-device fan-out, invalid registration conditional cleanup, bounded retry와 실제 iOS 상태별/tap 검증을 갖추며 Phase 8에 미루지 않는다.
+각 Task는 자기 correctness test를 함께 작성한다. TASK-711은 테스트를 몰아서 처음 작성하는 Task가 아니라 최종 E2E/regression 보강이다. Phase 7에서 logical DB uniqueness, stale activation 보호, Event 시점의 multi-device recipient 확정, durable pending recovery, invalid registration conditional cleanup, bounded retry와 실제 iOS 상태별/tap 검증을 갖추며 Phase 8에 미루지 않는다.
 
 ## Phase 8 — Quality / Operations / Production Readiness
 
@@ -188,7 +188,7 @@ TASK-805는 structured logging과 최소 operational metric/alerting contract를
 
 TASK-808은 production topology가 아닌 재현 가능한 Backend runtime image 책임이다. TASK-813은 single persistent Backend, durable MySQL, secure public endpoint, secret injection, restart/deployment smoke, rollback, backup/restore와 Flyway 운영 policy를 연결한다. 첫 production 적용 뒤 적용된 migration file은 수정하지 않고 새 migration을 추가하며 migration 실패 instance는 ready가 될 수 없다. V1은 Kubernetes, Kafka/RabbitMQ, Redis, self-hosted Prometheus/Grafana, Vault, distributed tracing, multi-region, read replica, CQRS, event sourcing, microservice split, blue/green framework를 기본 요구로 만들지 않는다.
 
-TASK-814는 persisted operational time을 UTC 의미로 통일하고 host timezone 의존을 제거한다. TASK-811은 memory ACTIVE tracking의 safe rebaseline, persisted FOLLOW_UP, durable outbox recovery, FCM ambiguous acceptance와 worker claim recovery를 restart/shutdown 경계에서 검증한다. TASK-810은 Provider freshness, evaluation, outbox, FCM, Backend observable latency를 분리하고 실제 iPhone foreground/background/terminated 반복 측정으로 체감 지연을 보완한다.
+TASK-814는 persisted operational time을 UTC 의미로 통일하고 host timezone 의존을 제거한다. 다만 그 전 TASK에서 새로 추가하는 timestamp도 처음부터 UTC 의미, test 가능한 Clock과 명시적 Provider timezone parsing을 적용한다. TASK-811은 memory ACTIVE tracking의 safe rebaseline, persisted FOLLOW_UP, durable outbox recovery, FCM ambiguous acceptance와 worker claim recovery를 restart/shutdown 경계에서 검증한다. TASK-810은 Provider freshness, evaluation, outbox, FCM, Backend observable latency를 분리하고 실제 iPhone foreground/background/terminated 반복 측정으로 체감 지연을 보완한다.
 
 TASK-812 Analytics는 실제 제품 질문과 보존 근거가 있을 때만 최소 구현하며 public V1 release blocker가 아니다. `NotificationEvent`/`NotificationDelivery`는 operational correctness 데이터이지 장기 Analytics Source of Truth가 아니다. TASK-815는 public App Store 제출 전에만 실행하는 release blocker이며, 제출 시점의 Apple login/account deletion/privacy disclosure 요건을 검토한다. 이는 Phase 6의 iOS actual-device vertical slice를 막지 않는다.
 
@@ -210,8 +210,7 @@ V1 버스 알림이 신뢰성 있게 동작한 뒤에만 시작한다.
 
 가능한 주제이며, 약속된 항목은 아니다.
 
-- 그룹화된 교통 폴링
-- 공유 캐시
+- cross-instance shared polling/cache
 - Redis
 - 외부 message broker 기반 알림 queue
 - 여러 백엔드 인스턴스

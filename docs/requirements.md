@@ -49,13 +49,15 @@ Alarm 상태는 `INACTIVE`, `ACTIVE`, `FOLLOW_UP`을 그대로 표시하며 bool
 
 사용자는 알림을 활성화하고 비활성화할 수 있다.
 
+새 monitoring cycle을 시작하는 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서만 activation generation을 증가시킨다. 이미 `ACTIVE`인 Alarm의 중복 활성화는 idempotent하며 generation을 증가시키거나 baseline을 초기화하지 않는다.
+
 ### FR-005 교통 모니터링
 
 백엔드는 외부 교통 데이터 소스를 사용해 활성 알림 조건이 충족되었는지 판단한다.
 
 ### FR-006 푸시 알림
 
-알림 조건이 충족되면 백엔드는 사용자가 등록한 활성 Device들로 푸시 알림 전달을 시작한다. 한 User는 여러 Device를 가질 수 있으며 현재 installation의 logout이나 Push 해제 때문에 다른 Device 또는 Alarm lifecycle이 변경되어서는 안 된다.
+알림 조건이 충족되면 백엔드는 그 logical Event 결정 시점에 eligible한 Device들을 recipient로 확정하고 푸시 알림 전달을 시작한다. 한 User는 여러 Device를 가질 수 있으며 현재 installation의 logout이나 Push 해제 때문에 다른 Device 또는 Alarm lifecycle이 변경되어서는 안 된다.
 
 ### FR-007 중복 방지
 
@@ -105,13 +107,14 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 
 ### V1 Push Notification 계약
 
-- StopBell Device identity는 Client가 앱 installation마다 생성한 `installationId`를 기준으로 하며, Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference로 분리한다. APNs device token은 StopBell Device identity로 사용하지 않는다.
+- StopBell Device identity는 Client가 앱 installation마다 생성한 `installationId`를 기준으로 하며 User-scoped identity가 아니다. 하나의 `installationId`에는 동시에 current owner가 최대 한 명이어야 하고, 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference로 분리하고 APNs device token은 StopBell Device identity로 사용하지 않는다. Firebase targeting identifier 자체의 global uniqueness는 TASK-701 확인 뒤 결정한다.
 - 실제 targeting identifier는 TASK-701에서 사용하는 FlutterFire/firebase_messaging, Firebase iOS SDK, Java Firebase Admin SDK 버전과 동작을 확인한 뒤 확정한다. 그전에는 `pushRegistrationId` 또는 `pushTargetId`처럼 provider-neutral한 의미로 표현한다.
 - 동일 installation의 registration update는 monotonic revision 또는 동등한 계약으로 순서 역전된 stale update가 최신 push target을 덮어쓰지 못하게 한다. 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
 - 현재 installation logout은 해당 Device의 Push subscription disable/unregister를 시도하지만 Alarm lifecycle과 다른 Device는 변경하지 않는다. Auth logout은 Refresh Session 종료 책임을 유지하며 Device lifecycle은 별도 authenticated API 또는 동등한 명시적 흐름으로 처리한다. Offline logout에서 Backend Device disable을 즉시 보장하지 않는다.
 - 첫 Alarm activation 직전에 기능 맥락을 설명한 뒤 Notification permission을 요청하는 것을 기본 방향으로 한다. Permission이 거부되어도 Alarm 생성·활성화를 Backend에서 금지하지 않으며, 현재 Device가 Push를 받을 수 없다는 안내와 Settings 진입을 제공하고 app resume에서 상태를 재동기화할 수 있어야 한다.
 - Push payload는 navigation hint에 필요한 `type`, `alarmId`, `eventType`, `notificationEventId` 수준으로 제한한다. `userId`, Auth Token, push targeting identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체를 포함하지 않는다. Tap 뒤에는 Auth Session 초기화 후 Backend Alarm detail API로 소유권과 현재 상태를 다시 확인하며, 삭제되었거나 접근할 수 없는 Alarm은 정상적인 stale-notification UX로 처리한다.
-- Alarm lifecycle transition과 durable logical `NotificationEvent` 생성은 같은 Database transaction에서 처리하고, commit 뒤 worker가 per-Device delivery를 수행한다. FCM I/O는 이 transaction 안에서 수행하지 않으며 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
+- Alarm lifecycle transaction은 current lifecycle/activation generation 검증, lifecycle transition, durable logical `NotificationEvent` 생성과 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성을 함께 처리한다. commit 뒤 worker는 이미 확정된 pending Delivery만 처리한다. 전송 직전 recipient Device의 current owner, enabled 상태, current push target/revision을 다시 확인하고 실제 attempt에 사용한 target/revision을 기록한다. FCM I/O는 이 transaction 안에서 수행하지 않으며 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
+- eligible Device가 0개여도 `NotificationEvent`는 생성하고 Delivery는 0개로 둔다. 이를 Provider failure나 delivery success로 해석하거나 별도 status enum을 강제하지 않고 no-recipient operational log/metric으로 관찰한다.
 - Provider 결과는 accepted, invalid/unregistered target, transient failure, rate/quota failure, authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance, expired notification을 구분할 수 있어야 한다. Provider accepted는 실제 사용자 표시 성공을 뜻하지 않는다.
 
 세부 Device 및 전달 결정의 근거와 보류 범위는 `adr/ADR-010-notification-device-and-durable-delivery.md`를 따른다.
@@ -136,7 +139,7 @@ Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고
 
 시스템은 불필요한 기능 폭보다 누락 알림과 중복 알림 방지를 우선해야 한다.
 
-Phase 7은 stale activation/lifecycle 보호, logical Notification DB uniqueness, durable pending dispatch recovery, multi-device fan-out, invalid registration의 조건부 정리, bounded retry state를 포함해야 한다. Phase 8 검증은 이 correctness를 대체하지 않는다.
+Phase 7은 stale activation/lifecycle 보호, logical Notification DB uniqueness, Event 시점의 multi-device recipient Delivery 생성, durable pending dispatch recovery, invalid registration의 조건부 정리, bounded retry state를 포함해야 한다. Phase 8 검증은 이 correctness를 대체하지 않는다.
 
 ACTIVE tracking은 V1에서 memory 기반 상태와 restart-safe rebaseline을 유지한다. restart 전후 Observation을 연결해 PASSED를 추론하지 않으며, TASK-811이 실제 품질 문제를 입증하기 전에는 tracking persistence나 event sourcing을 추가하지 않는다.
 
@@ -179,7 +182,7 @@ ACTIVE tracking은 V1에서 memory 기반 상태와 restart-safe rebaseline을 �
 
 Backend liveness와 readiness를 구분한다. readiness는 DB 연결, Flyway migration 적용, 필요한 application component 초기화, scheduler/outbox worker 실행 가능을 확인하며 일시적인 TAGO/서울/FCM 원격 장애만으로 DOWN이 되어서는 안 된다. fresh DB 최초 배포에서는 필요한 metadata bootstrap 전 public Route/Alarm 생성 traffic을 받지 않는 절차가 필요하다.
 
-Persisted operational time은 host local timezone과 무관하게 UTC 의미로 일관되어야 한다. Provider local time은 timezone을 명시적으로 해석하며, business time 계산은 test 가능한 `Clock` 또는 동등한 source를 우선한다.
+Persisted operational time은 host local timezone과 무관하게 UTC 의미로 일관되어야 한다. Provider local time은 timezone을 명시적으로 해석하며, business time 계산은 test 가능한 `Clock` 또는 동등한 source를 우선한다. 이 원칙은 TASK-814 이전에 추가되는 timestamp에도 즉시 적용하며 TASK-814는 기존 timestamp의 최종 consistency를 정리한다.
 
 ## 6. V1에서 명시적으로 제외하는 범위
 

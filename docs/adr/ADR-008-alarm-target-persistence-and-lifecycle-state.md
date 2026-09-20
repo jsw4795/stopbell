@@ -108,7 +108,7 @@ ARRIVED 뒤 after follow-up은 서버 재시작 뒤에도 같은 차량을 이�
 
 FOLLOW_UP runtime은 `alarms`의 `follow_up_vehicle_tracking_id`, `follow_up_started_at`, `follow_up_expires_at`에 저장한다. FOLLOW_UP이면 세 값과 after 옵션이 필요하고, 다른 status이면 세 값은 모두 비운다. Domain은 전체 불변 조건을 검사하고 Database CHECK는 같은 table 안의 status/runtime 완전성과 시간 순서를 강제한다. cross-table after option 조건은 Database CHECK로 복잡하게 만들지 않고 Domain에서 강제한다.
 
-BUS 전용 장기 설정은 `bus_alarm_targets` 별도 Entity/table로 분리한다. `alarm_id`는 PK이자 `alarms.id` FK이며 `@MapsId` shared-primary-key one-to-one을 사용한다. Alarm이 aggregate lifecycle을 소유해 persist/remove를 cascade하고 FK도 `ON DELETE CASCADE`를 사용한다. Target 없는 legacy Alarm은 load하고 비활성화할 수 있지만 새 BUS Alarm 생성과 재활성화에는 Target을 요구한다. generic inheritance나 polymorphic target framework는 도입하지 않는다.
+BUS 전용 장기 설정은 `bus_alarm_targets` 별도 Entity/table로 분리한다. `alarm_id`는 PK이자 `alarms.id` FK이며 `@MapsId` shared-primary-key one-to-one을 사용한다. Alarm이 aggregate lifecycle을 소유해 persist/remove를 cascade하고 FK도 `ON DELETE CASCADE`를 사용한다. 현재 V1이 지원하는 모든 BUS Alarm은 BusAlarmTarget을 반드시 가진다. V6 당시 가짜 Target을 만들지 않아 pre-production migration 과정에 targetless row가 존재할 수 있었지만 이는 public V1 지원 상태가 아니다. Production 전 개발 DB reset/cleanup 또는 migration 검증으로 해당 row가 없음을 보장하고 별도 compatibility code는 추가하지 않는다. generic inheritance나 polymorphic target framework는 도입하지 않는다.
 
 Provider namespace는 ADR-006의 `TAGO`, `SEOUL_BUS`를 `TransitProvider` Enum으로 저장한다. Route/Stop external ID는 opaque `VARCHAR(255)`이고 `target_stop_order`는 occurrence operational snapshot이다. `(provider, external_route_id, external_stop_id)` Unique Constraint는 두지 않는다.
 
@@ -126,12 +126,13 @@ V6 Migration은 새 nullable status를 추가하고 기존 `active=true`를 ACTI
 
 ## 결과
 
-- `activate()`는 INACTIVE/FOLLOW_UP을 ACTIVE로 전환하고 이전 follow-up runtime을 지운다.
+- `activate()`는 INACTIVE/FOLLOW_UP에서 새 monitoring cycle을 시작하고 이전 follow-up runtime을 지우며, 이미 ACTIVE이면 generation 증가와 baseline reset 없이 idempotent하다.
 - `deactivate()`는 ACTIVE/FOLLOW_UP을 INACTIVE로 전환하고 runtime을 지운다.
 - `startFollowUp(...)`은 ACTIVE, after option, 완전한 차량/시간 문맥을 요구한다.
 - `completeFollowUp()`은 FOLLOW_UP을 INACTIVE로 전환하고 runtime을 지운다.
 - status index로 후속 Scheduler가 ACTIVE/FOLLOW_UP Alarm을 조회할 수 있다.
 - ACTIVE 중 vehicle/event state, Observation history, dedup journal은 이번 Schema에 포함하지 않는다.
+- V6이 허용했던 targetless pre-production row는 public V1 compatibility 대상이 아니며 production 전 데이터 검증으로 제거한다.
 - API validation과 HTTP error는 TASK-402 이후, Evaluation·만료시간·복구 실행은 TASK-509/510, Event consumption persistence는 TASK-708에서 결정한다.
 
 ## 재검토 시점
@@ -142,3 +143,4 @@ V6 Migration은 새 nullable status를 추가하고 기존 `active=true`를 ACTI
 - Provider metadata 변경으로 stored snapshot의 자동 reconciliation이 실제 제품 요구가 됨
 - 인접 Stop name/GPS 없이는 Evaluation 또는 Notification 계약을 충족할 수 없음
 - 다중 Backend concurrency 때문에 current status/runtime CHECK만으로 follow-up 정합성을 유지할 수 없음
+- Production legacy data를 실제로 지원해야 하는 근거가 생겨 targetless BUS Alarm의 별도 lifecycle이 필요함

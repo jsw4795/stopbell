@@ -130,7 +130,7 @@ Database
 - structured log에는 필요한 correlation과 outcome/elapsed time만 기록하고, 모든 identifier를 모든 log에 넣지 않는다.
 - Access/Refresh Token, Google ID Token, Firebase credential, 원문 push targeting identifier·installationId, API key가 포함된 URL/query, 필요 이상의 GPS, raw Provider response 전체를 기록하지 않는다.
 - metric label에는 `alarmId`, `deviceId`, `routeId`, `trackingCycleId`, `installationId`처럼 high-cardinality identifier를 사용하지 않는다.
-- persisted operational time은 UTC 의미를 유지하고, Provider local time은 timezone을 명시적으로 해석한다. business time 계산은 test 가능한 `Clock` 또는 동등한 source를 우선한다.
+- persisted operational time은 UTC 의미를 유지하고, Provider local time은 timezone을 명시적으로 해석한다. business time 계산은 test 가능한 `Clock` 또는 동등한 source를 우선한다. TASK-814 이전 구현도 이 원칙을 즉시 적용하며 host-local `now()`를 새로 추가하지 않는다.
 
 ### Authentication
 

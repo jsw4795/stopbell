@@ -106,11 +106,11 @@ Device internal PK
 + enabled/disabled lifecycle
 ```
 
-한 User는 여러 Device를 가질 수 있다. `installationId`는 StopBell Device identity이고 push targeting identifier는 변경 가능한 delivery reference다. APNs device token을 Device identity로 사용하지 않으며 RefreshToken과 Device를 FK로 직접 연결하지 않는다.
+한 User는 여러 Device를 가질 수 있다. `installationId`는 User-scoped가 아닌 StopBell 앱 installation identity이며 하나의 installation에는 동시에 current owner가 최대 한 명이어야 한다. 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. 구체 constraint/API transaction은 TASK-702/703에서 정한다. Push targeting identifier는 변경 가능한 delivery reference다. APNs device token을 Device identity로 사용하지 않으며 RefreshToken과 Device를 FK로 직접 연결하지 않는다.
 
 동일 installation의 더 오래된 registration update가 최신 target을 덮어쓰지 못해야 하고 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다. Invalid/unregistered provider 결과는 실패한 target/revision이 current registration과 일치할 때만 조건부 disable한다.
 
-실제 Firebase targeting identifier, field/column 이름과 길이, uniqueness와 index는 TASK-701의 SDK 확인 뒤 TASK-702에서 정한다.
+실제 Firebase targeting identifier, field/column 이름과 길이, global uniqueness와 index는 TASK-701의 SDK 확인 뒤 TASK-702에서 정한다.
 
 ### alarms
 
@@ -133,11 +133,11 @@ INDEX(status)
 
 `status=FOLLOW_UP`이면 follow-up runtime 세 값이 모두 존재하고 `expires_at > started_at`이어야 한다. 다른 상태이면 세 값은 모두 `NULL`이어야 한다. 이 조합은 `ck_alarms_lifecycle` CHECK로 강제한다. `follow_up_vehicle_tracking_id`는 Target identity가 아니라 ARRIVED 차량의 관측을 재시작 뒤 연결하기 위한 short-lived correlation 값이다. `status` index는 TASK-510에서 FOLLOW_UP 복구 대상과 ACTIVE monitoring 대상을 조회할 수 있게 한다.
 
-V6 Migration은 nullable `status`를 먼저 추가하고 기존 `active=true`를 `ACTIVE`, `false`를 `INACTIVE`로 backfill한 뒤 `NOT NULL`을 적용하고 `active`를 제거한다. 기존 BUS Alarm row에는 가짜 Target을 생성하지 않으므로 Target 없는 legacy row도 Migration을 통과한다. V7 Migration은 BusAlarmTarget의 nullable column CHECK를 MySQL의 `UNKNOWN` 통과 특성에 맞게 보완하며 기존 Schema나 row를 변경하지 않는다.
+V6 Migration은 nullable `status`를 먼저 추가하고 기존 `active=true`를 `ACTIVE`, `false`를 `INACTIVE`로 backfill한 뒤 `NOT NULL`을 적용하고 `active`를 제거한다. 당시 기존 BUS Alarm row에는 가짜 Target을 생성하지 않아 targetless row가 Migration을 통과할 수 있었다. 그러나 이는 pre-production migration 상태일 뿐 public V1 지원 계약이 아니며, production 전 개발 DB reset/cleanup 또는 migration 검증으로 모든 BUS Alarm에 BusAlarmTarget이 있음을 보장한다. V7 Migration은 BusAlarmTarget의 nullable column CHECK를 MySQL의 `UNKNOWN` 통과 특성에 맞게 보완하며 기존 Schema나 row를 변경하지 않는다.
 
 Transit API 조회 실패, Notification 발송 결과, ARRIVED/PASSED Event는 Alarm status로 저장하지 않는다. ACTIVE 중 차량별 tracking 및 Event consumption field도 이 table에 추가하지 않으며 TASK-509/708에서 별도 책임을 결정한다.
 
-Phase 7 Notification correctness를 위해 Alarm에는 서로 다른 activation cycle을 구분하는 persisted semantic activation generation이 필요하다. 새 monitoring activation cycle마다 증가시키며 deactivate→reactivate, FOLLOW_UP 중 reactivate와 stale scheduler 결과를 구분한다. 구체 column 이름·초기값·increment 조건과 CAS/query 구현은 TASK-510에서 결정하며 현재 physical Schema 설명에는 추측성 column을 추가하지 않는다.
+Phase 7 Notification correctness를 위해 Alarm에는 서로 다른 activation cycle을 구분하는 persisted semantic activation generation이 필요하다. `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset 없이 idempotent하다. Deactivate 뒤 reactivate, FOLLOW_UP 중 reactivate와 stale scheduler 결과를 구분한다. 구체 column 이름·초기값과 CAS/query 구현은 TASK-510에서 결정하며 현재 physical Schema 설명에는 추측성 column을 추가하지 않는다.
 
 ### bus_alarm_targets
 
@@ -196,19 +196,20 @@ Phase 7에서는 physical table 이름과 세부 column을 확정하기 전에 �
 NotificationEvent
 - durable logical notification decision
 - alarmId + activation generation + trackingCycleId + eventType identity
-- pending dispatch basis
+- Event 시점 recipient Delivery들의 logical source
 - 위 logical identity의 DB Unique Constraint 또는 동등한 atomic uniqueness
 
 NotificationDelivery
 - NotificationEvent × Device
 - 위 조합의 DB uniqueness
+- Event 결정 시점에 확정된 recipient Device identity
 - provider delivery/retry/expiry state
 - current/final provider result
 ```
 
-`alarmId + eventType`만으로 logical dedup하지 않는다. ACTIVE tracking 전체나 raw TransitObservation은 저장하지 않아도 되며, runtime-unique tracking cycle identity를 TransitEvent 발생 시 NotificationEvent에 복사한다.
+`alarmId + eventType`만으로 logical dedup하지 않는다. ACTIVE tracking 전체나 raw TransitObservation은 저장하지 않아도 된다. Tracking cycle identity는 logical cycle 시작 시 한 번 생성하고 같은 cycle의 transaction retry에서 유지하며 TransitEvent 발생 시 NotificationEvent에 복사한다.
 
-하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition과 NotificationEvent insert를 함께 commit한다. commit 뒤 in-process worker가 pending Event를 읽어 활성 Device에 fan-out하고 FCM I/O 뒤 Delivery 결과를 갱신한다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
+하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성을 함께 commit한다. eligible Device가 0개면 Event와 Delivery 0개를 남기고 no-recipient log/metric으로 관찰한다. Commit 뒤 in-process worker는 이미 생성된 pending Delivery만 처리하고 recipient를 다시 선정하지 않는다. Worker는 전송 직전 Device owner/enabled/current target/revision을 재검증하고 실제 attempt target/revision을 기록한다. Invalid/unregistered 결과는 attempt target/revision이 current registration과 일치할 때만 disable한다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
 
 Delivery는 accepted, invalid/unregistered target, transient failure, rate/quota failure, provider authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance state, expired notification을 구분할 수 있어야 한다. 모든 retry attempt를 append-only row로 저장할 필요는 없다. 정확한 status/type, retry count·interval·freshness TTL과 polling query/index는 TASK-707/709에서 정한다. 이 operational data는 Analytics와 별도 책임이며, Analytics persistence는 실제 제품 질문과 보존 근거가 있을 때만 TASK-812에서 결정한다.
 
@@ -244,7 +245,9 @@ UNIQUE(route_id, stop_order)
 
 Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, external_stop_id)`다. TAGO Route에는 non-blank `city_code`가 필요하고 SEOUL_BUS Route에는 `NULL`이어야 한다. Stop GPS는 함께 `NULL`이거나 함께 존재해야 하며 latitude `-90~90`, longitude `-180~180`만 허용한다. occurrence의 `stop_order`는 양수여야 한다. 같은 Route가 같은 Stop을 재방문할 수 있으므로 `(route_id, stop_id)` Unique Constraint는 두지 않는다.
 
-Route snapshot sync는 동일 Route/Stop identity의 display·operational metadata를 UPDATE해 내부 ID를 유지한다. occurrence는 `(route, stop, stopOrder)`가 완전히 같을 때만 내부 ID를 유지하며 Stop 또는 order가 바뀌면 기존 row를 삭제하고 새 row를 만든다. Route snapshot에서 사라진 occurrence는 제거한다. Provider 전체 source fetch가 성공한 경우에만 source에 없는 Route를 제거하고, 모든 occurrence에서 참조되지 않는 같은 provider Stop만 orphan cleanup한다. source fetch 실패 시 provider-level 삭제를 실행하지 않는다.
+Route snapshot sync는 동일 Route/Stop identity의 display·operational metadata를 UPDATE해 내부 ID를 유지한다. occurrence는 `(route, stop, stopOrder)`가 완전히 같을 때만 내부 ID를 유지하며 Stop 또는 order가 바뀌면 기존 row를 삭제하고 새 row를 만든다. Route snapshot에서 사라진 occurrence는 제거한다. 검증된 complete provider snapshot만 typed boundary, completeness token/result, destructive method visibility 제한 또는 동등한 구조적 보호를 거쳐 provider-level cleanup에 들어간다. Partial fetch, pagination incomplete, parser failure, required source 누락, provider request 일부 실패와 검증되지 않은 empty result는 cleanup 근거가 아니다.
+
+TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `lastCompleteSyncAt` 의미를 저장해 fresh DB bootstrap 완료, readiness와 last successful complete sync age를 판단한다. 구체 table/column/type은 구현 시 정하며 sync/checksum history, staging table, error journal은 요구하지 않는다.
 
 ## 7. 외부 교통 데이터
 

@@ -132,7 +132,7 @@ RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refr
 
 ## Purpose
 
-StopBell이 한 User의 한 앱 installation과 현재 Push delivery reference를 구분해 관리하는 Domain이다.
+StopBell이 앱 installation 자체의 identity, 현재 owner와 Push delivery reference를 구분해 관리하는 Domain이다.
 
 ## Conceptual Attributes
 
@@ -154,13 +154,13 @@ StopBell이 한 User의 한 앱 installation과 현재 Push delivery reference�
 
     updatedAt
 
-`installationId`는 Client가 앱 installation마다 생성하는 StopBell Device identity다. Firebase targeting identifier는 rotation/re-registration될 수 있는 현재 delivery reference이며 Device identity가 아니다. APNs device token도 StopBell Device identity로 사용하지 않는다. 실제 Firebase identifier, field 이름과 길이는 TASK-701/702에서 사용하는 SDK 버전과 동작을 확인한 뒤 확정한다.
+`installationId`는 Client가 앱 installation마다 생성하는 StopBell Device identity이며 User-scoped identity가 아니다. Firebase targeting identifier는 rotation/re-registration될 수 있는 현재 delivery reference이며 Device identity가 아니다. APNs device token도 StopBell Device identity로 사용하지 않는다. 실제 Firebase identifier, field 이름과 길이는 TASK-701/702에서 사용하는 SDK 버전과 동작을 확인한 뒤 확정하고 targeting identifier 자체의 global uniqueness도 TASK-701 결과 전에는 가정하지 않는다.
 
 ## Relationship and Lifecycle
 
     User 1 : N Device
 
-한 User는 여러 Device를 가질 수 있다. RefreshToken Session과 Device는 직접 FK로 연결하지 않는다.
+한 User는 여러 Device를 가질 수 있지만 하나의 `installationId`에는 동시에 current owner가 최대 한 명이다. 같은 installation에서 다른 User가 로그인하면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. 구체 DB constraint와 API transaction은 TASK-702/703에서 정한다. RefreshToken Session과 Device는 직접 FK로 연결하지 않는다.
 
 동일 installation의 registration update는 monotonic revision 또는 동등한 stale-write 방지 계약을 사용한다. 더 오래된 update가 최신 push target을 덮어쓸 수 없고, 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
 
@@ -219,9 +219,9 @@ StopBell이 한 User의 한 앱 installation과 현재 Push delivery reference�
 
 `ARRIVED`, `PASSED`, `ONE_STOP_BEFORE`, `ONE_STOP_AFTER`는 lifecycle 상태가 아니라 Event다. 특히 `ONE_STOP_BEFORE`와 `PASSED` 뒤에는 `ACTIVE`를 유지하고, `ARRIVED` 뒤 after 옵션이 꺼져 있으면 `INACTIVE`, 켜져 있으면 `FOLLOW_UP`으로 전환한다.
 
-`activate()`는 `INACTIVE` 또는 `FOLLOW_UP`을 `ACTIVE`로 전환한다. FOLLOW_UP에서 호출되면 이전 follow-up runtime을 지워 old follow-up을 취소하고 새 monitoring cycle을 시작한다. 이미 ACTIVE이면 상태를 유지한다. `deactivate()`는 ACTIVE/FOLLOW_UP을 `INACTIVE`로 전환하고 follow-up runtime을 지운다.
+`activate()`는 `INACTIVE` 또는 `FOLLOW_UP`을 `ACTIVE`로 전환해 새 monitoring cycle을 시작한다. FOLLOW_UP에서 호출되면 이전 follow-up runtime을 지워 old follow-up을 취소한다. 이미 ACTIVE이면 generation 증가와 baseline reset 없이 idempotent하게 상태를 유지한다. `deactivate()`는 ACTIVE/FOLLOW_UP을 `INACTIVE`로 전환하고 follow-up runtime을 지운다.
 
-`activationGeneration`은 서로 다른 monitoring activation cycle을 구분하는 persisted semantic generation이다. 새 activation cycle이 시작될 때 증가하여 deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation의 Notification candidate를 현재 activation과 구분한다. 정확한 증가 조건, 초기값과 CAS/query 구현은 TASK-510에서 확정하며 JPA `@Version` 같은 일반 optimistic locking 검토를 대체하지 않는다.
+`activationGeneration`은 서로 다른 monitoring activation cycle을 구분하는 persisted semantic generation이다. `INACTIVE → ACTIVE`와 `FOLLOW_UP → ACTIVE`에서 증가하여 deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation의 Notification candidate를 현재 activation과 구분한다. `ACTIVE → ACTIVE`에서는 증가하지 않는다. 초기값과 CAS/query 구현은 TASK-510에서 확정하며 JPA `@Version` 같은 일반 optimistic locking 검토를 대체하지 않는다.
 
 `startFollowUp(vehicleTrackingId, startedAt, expiresAt)`은 ACTIVE이며 `notifyOneStopAfter`가 설정된 Bus Alarm에서만 FOLLOW_UP을 시작한다. 만료시간 숫자는 이 Domain이 정하지 않고 호출자가 명시적으로 전달한다. `completeFollowUp()`은 FOLLOW_UP을 INACTIVE로 전환하고 runtime을 지운다.
 
@@ -231,7 +231,7 @@ Transit API 조회 실패, Notification delivery 결과, Alarm trigger는 Alarm�
 
 `transitType`은 `BUS`, `SUBWAY`를 표현하는 Enum으로 관리하며, Database에는 문자열로 저장한다.
 
-Bus Alarm의 장기 설정은 `Alarm`의 lifecycle runtime과 섞지 않고 공유 PK `BusAlarmTarget` Entity로 분리한다. Alarm이 aggregate lifecycle을 소유하며 persist/remove를 cascade한다. 기존 Target 없는 legacy Alarm row는 가짜 Target 없이 계속 load하고 비활성화할 수 있지만, 새 BUS Alarm 생성과 target 없는 legacy Alarm의 재활성화는 허용하지 않는다.
+Bus Alarm의 장기 설정은 `Alarm`의 lifecycle runtime과 섞지 않고 공유 PK `BusAlarmTarget` Entity로 분리한다. Alarm이 aggregate lifecycle을 소유하며 persist/remove를 cascade한다. V1에서 지원하는 모든 BUS Alarm은 `BusAlarmTarget`을 반드시 가진다. Pre-production migration 과정의 targetless legacy BUS row는 public V1 지원 상태가 아니며 production 전 개발 DB reset/cleanup 또는 migration 검증으로 존재하지 않음을 보장한다. 이를 위한 compatibility code는 추가하지 않는다.
 
 ## Bus Alarm Transit Target Contract
 
@@ -311,7 +311,7 @@ Route identity는 `(provider, externalRouteId)`다. `id`는 StopBell 내부 PK�
 
     JPA
 
-서울 T Data CSV full import와 경기 TAGO throttled full sync가 제공하는 current metadata를 JPA Repository로 저장한다. 같은 external identity의 routeNumber/cityCode가 변경되면 row를 UPDATE해 `id`를 유지한다. Source adapter는 complete provider snapshot을 검증한 경우에만 provider-level absence cleanup을 허용하며, partial fetch, parser failure, pagination 미완료, required source 누락 또는 일부 provider request failure는 deletion 근거가 아니다. empty collection만으로 complete snapshot을 뜻하지 않는다.
+서울 T Data CSV full import와 경기 TAGO throttled full sync가 제공하는 current metadata를 JPA Repository로 저장한다. 같은 external identity의 routeNumber/cityCode가 변경되면 row를 UPDATE해 `id`를 유지한다. Source adapter는 complete provider snapshot을 검증한 경우에만 provider-level absence cleanup을 허용하며, partial fetch, parser failure, pagination 미완료, required source 누락, 일부 provider request failure와 검증되지 않은 empty result는 deletion 근거가 아니다. Typed complete snapshot boundary, completeness token/result, destructive method visibility 제한 또는 동등한 구조적 보호를 사용하며 구체 type은 TASK-513에서 정한다. Provider별 최소 persisted sync state는 `provider`, `lastCompleteSyncAt` 의미를 보존해 bootstrap/readiness/마지막 complete sync age 판단에 사용한다. Sync history, checksum history, staging table, error journal은 요구하지 않는다.
 
 ------------------------------------------------------------------------
 
@@ -537,7 +537,7 @@ ARRIVED 뒤 after 옵션이 꺼져 있으면 Alarm을 INACTIVE로 전환하고 �
 
 FOLLOW_UP 상태의 동일 Alarm을 사용자가 다시 활성화하면 이전 activation cycle의 follow-up runtime을 지우고 새 baseline으로 새 monitoring cycle을 시작한다. 비활성화와 follow-up 완료도 runtime을 지운다. Alarm 삭제 시에는 Alarm column인 runtime과 공유 PK BusAlarmTarget이 함께 삭제된다.
 
-반복 Observation 억제와 중복 Event candidate 억제는 tracking/Evaluation 책임이다. ACTIVE tracking은 V1에서 memory 기반일 수 있고 runtime마다 unique한 `trackingCycleId` 또는 동등한 cycle identity를 사용한다. TransitEvent가 Notification candidate가 되면 cycle identity를 durable `NotificationEvent`에 복사한다. 모든 raw Observation이나 ACTIVE tracking state를 영속하지 않는다.
+반복 Observation 억제와 중복 Event candidate 억제는 tracking/Evaluation 책임이다. ACTIVE tracking은 V1에서 memory 기반일 수 있다. `trackingCycleId` 또는 동등한 값은 transaction ID가 아니라 logical vehicle tracking cycle identity이며 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction retry에서는 identity를 유지해 Notification dedup uniqueness를 우회하지 않는다. TransitEvent가 Notification candidate가 되면 cycle identity를 durable `NotificationEvent`에 복사한다. 모든 raw Observation이나 ACTIVE tracking state를 영속하지 않는다.
 
 ## Persistence
 
@@ -549,13 +549,13 @@ FOLLOW_UP 상태의 동일 Alarm을 사용자가 다시 활성화하면 이전 a
 
 ## Purpose
 
-하나의 logical Notification 결정을 durable하게 표현하고 pending dispatch 및 dedup의 기준이 된다.
+하나의 logical Notification 결정을 durable하게 표현하고 Event 시점 recipient Delivery들의 source 및 dedup 기준이 된다.
 
 ## Responsibilities
 
 -   current Alarm lifecycle과 activation generation 검증 결과 보존
 -   logical Notification dedup identity 보존
--   commit 뒤 delivery worker가 처리할 pending dispatch 근거 제공
+-   Event 결정 시점에 확정한 recipient Device별 pending Delivery 제공
 
 ## Conceptual Identity
 
@@ -568,7 +568,7 @@ alarmId
 
 이 identity에는 DB Unique Constraint 또는 동등한 atomic uniqueness가 필요하다. `alarmId + eventType`만으로 dedup하지 않는다. 정확한 Schema/constraint 이름은 TASK-707/708에서 결정한다.
 
-Alarm lifecycle transition과 NotificationEvent insert는 같은 Database transaction에서 수행한다. commit 뒤 worker가 전달하며 FCM network I/O는 이 transaction 안에서 실행하지 않는다.
+Current Alarm lifecycle/activation generation 검증, lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성은 같은 Database transaction에서 수행한다. eligible Device가 0개면 Event와 Delivery 0개를 commit하고 no-recipient operational log/metric으로 관찰한다. Commit 뒤 worker는 이미 생성된 pending Delivery를 전달하며 recipient를 새로 결정하지 않는다. FCM network I/O는 이 transaction 안에서 실행하지 않는다.
 
 ------------------------------------------------------------------------
 
@@ -584,6 +584,8 @@ Alarm lifecycle transition과 NotificationEvent insert는 같은 Database transa
     Device 1 : N NotificationDelivery
 
 각 `NotificationEvent × Device` 조합은 Database 기준 하나다. Provider request는 bounded retry로 여러 번 발생할 수 있지만 모든 attempt를 append-only row로 영속할 필요는 없다.
+
+Delivery recipient는 Device identity다. Worker는 전송 직전에 Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 확인하고 실제 attempt에 사용한 target/revision을 기록한다. Invalid/unregistered 결과는 attempt target/revision이 Device의 current registration과 일치할 때만 현재 registration을 disable한다. 구체 column/schema 이름은 TASK-707/709에서 정한다.
 
 ## Delivery Result Semantics
 
