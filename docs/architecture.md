@@ -146,6 +146,8 @@ common
 
 V1은 하나의 전국 Provider를 강제하지 않는다. 경기는 TAGO가 Route metadata, Stop metadata, realtime Location, Arrival 보조 정보를 맡고, 서울은 서울특별시 노선정보조회 서비스가 Route/Stop metadata를, 서울특별시 버스위치정보조회 서비스가 realtime Location을 맡는다. 두 Provider의 raw external ID는 provider namespace와 opaque String으로 처리하고, Route number·Stop name·Stop order를 identity로 사용하지 않는다. Provider client/DTO를 구현할 때 이 역할 구분을 따르되 범용 plugin 또는 dynamic provider registry를 만들지 않는다.
 
+realtime Vehicle Location 조회는 `TransitProviderClient<R, C>` contract로 구분한다. Client는 자신이 담당하는 `TransitProvider`를 제공하고 `VehicleLocationRequest<C>`의 opaque `externalRouteId`와 provider별 typed context를 받아 raw response `R`을 반환한다. TAGO context의 `cityCode`는 API request 재현용이며 identity가 아니고, 서울 context에는 TAGO 값을 넣지 않는다. Provider raw DTO는 TASK-502, 실제 Client 호출 구현은 TASK-503, raw DTO의 `TransitObservation` 변환은 TASK-504에서 각각 맡는다.
+
 Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync에서 받아 StopBell DB의 현재 상태로 보관한다. 사용자 Route/Stop 조회와 Alarm 생성은 DB metadata를 사용하고, Alarm 생성 시 필요한 값은 `BusAlarmTarget` snapshot으로 복사한다. Alarm target은 metadata Entity를 FK로 장기 참조하지 않으므로 subsequent sync가 기존 Alarm을 변경하지 않는다. 실제 source adapter와 Scheduler는 별도 Task에서 구현한다.
 
 선택된 Provider와 identifier 정책의 근거·제약은 `adr/ADR-006-v1-transit-provider-and-external-identifier-strategy.md`를 따른다.
