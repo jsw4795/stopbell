@@ -22,7 +22,7 @@ Alarm 기능보다 먼저 Google Social Login과 StopBell 자체 Token 기반 �
 - [x] Google Login 및 Backend Google ID Token 검증
 - [x] StopBell JWT Access Token과 Refresh Token 발급·회전·무효화
 - [x] Spring Security 기반 인증된 User 식별
-- [ ] 인증된 User 기준 Alarm 소유권 처리
+- [x] 인증된 User 기준 Alarm 소유권 처리
 
 Transit API 조사와 실제 응답 관찰은 Transit Foundation에서 먼저 수행한다. 이후 V1 구현은 Alarm Backend, Transit Integration, Flutter Client, Notification 순으로 진행한다. Flutter Google Login, Secure Storage 기반 로그인 상태 유지, Token 갱신 및 Logout 연동은 이 흐름에서 Flutter Client 단계에 포함한다.
 
@@ -109,6 +109,23 @@ TASK-507 → TASK-513 → TASK-505 → TASK-506
 두 branch 준비 후
 TASK-508 → TASK-509 → TASK-510 → TASK-511 → TASK-512
 ```
+
+## Phase 6 — Flutter Client 의존성
+
+Phase 6의 현재 목표는 iOS 개발 및 실제 기기 vertical slice다. TASK-601~605 Authentication lane은 Backend Authentication이 준비되어 있으므로 Phase 5와 병행할 수 있다. TASK-601 구현 전에는 bundle ID, Google iOS client ID, Backend server/web client ID, API origin 등 필요한 개발 설정을 검증한다. Apple Login과 App Store 계정 삭제 요건은 이 계약에서 확정하지 않고 별도 release readiness에서 재검토한다.
+
+```text
+Authentication lane (Phase 5와 병행 가능)
+TASK-601 ~ TASK-605 (공통 Auth Session 계약)
+
+Transit / Alarm lane
+TASK-513 → TASK-505 → TASK-606
+TASK-506 → TASK-607 → TASK-608
+                         ↓
+             ACTIVE monitoring 종단 검증은 Phase 5 monitoring 완료 후
+```
+
+Flutter는 미확정 Route DTO나 identity를 추측하지 않는다. TASK-606~608은 loading, empty, error, retry와 mutation 진행 중 중복 입력 방지를 포함한다. offline mutation queue/cache는 선행 구축하지 않으며, idempotency 계약이 없는 Alarm create는 timeout으로 자동 POST 재시도하지 않는다. TASK-609는 각 Task의 테스트를 모아 작성하는 항목이 아니라, 이 흐름이 준비된 뒤 Flutter Authentication/Transit/Alarm의 E2E·regression을 보강하는 최종 Task다.
 
 ## Phase 2 — 지하철 기상 알림
 

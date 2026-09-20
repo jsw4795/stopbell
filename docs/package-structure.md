@@ -229,18 +229,20 @@ app/
 
 Flutter 구조는 현재 확정된 Architecture가 아니다. V1의 얇은 client 원칙을 지키며 확장 가능한 방향으로만 제안한다.
 
+V1은 필요한 수준의 Auth API, Transit API, Alarm API, Auth Session 관리, screen-local state로 시작한다. state management library는 이번 범위에서 특정 제품으로 확정하지 않는다. generic `Repository`/`BaseRepository`, 모든 API별 `UseCase` class, global event bus, 복잡한 refresh queue framework, offline mutation queue, notification stub은 미리 만들지 않는다.
+
 ### core
 
-앱 전체에서 사용하는 설정, API client, routing, error handling 등 실제 공통 기반 기능을 둔다.
+앱 전체에서 사용하는 설정, API client, routing, error handling 등 실제 공통 기반 기능을 둔다. authenticated API client는 Auth Session이 제공한 현재 Access Token을 사용하고 refresh lifecycle은 Auth Session에 위임한다.
 
 ### features
 
 사용자 기능을 기준으로 화면, 상태, API 연동 코드를 둔다.
 
-- `auth`: Google Login, StopBell Token 저장, 인증 상태
-- `alarm`: Alarm 생성, 조회, 활성화/비활성화 화면
-- `transit`: Bus Route 검색과 Bus Stop 선택 화면
-- `notification`: Push permission, Push token 처리, 알림 진입 흐름
+- `auth`: Google Login, Token Pair Secure Storage, startup 상태 복구, refresh 및 logout을 포함한 Auth Session
+- `alarm`: `INACTIVE`/`ACTIVE`/`FOLLOW_UP` 상태를 보존하는 Alarm 생성·조회·활성화/비활성화 화면과 Alarm ID 기반 navigation 진입점
+- `transit`: Bus Route 검색과 Bus Stop 선택 화면. Stop response의 `canNotifyOneStopBefore`/`canNotifyOneStopAfter`로 option을 제어하며 stale occurrence 생성 `404`에서는 Stop 재선택 흐름으로 복구
+- `notification`: Phase 7에서 Push permission, Push token 처리, 알림 진입 흐름을 구현한다. Phase 6에서는 notification stub을 만들지 않는다.
 
 ### shared
 
@@ -255,3 +257,4 @@ Flutter 구조는 현재 확정된 Architecture가 아니다. V1의 얇은 clien
 - Flutter state management 방식은 Undecided이다.
 - routing, dependency injection, API client library 선택은 구현 전에 필요성과 트레이드오프를 검토한다.
 - Transit monitoring 비즈니스 로직은 특별한 이유 없이 Flutter Application으로 옮기지 않는다.
+- Phase 6은 Phase 7에 안정적인 Auth Session state, 자동 refresh를 포함한 authenticated API client, logout lifecycle/hook, Alarm ID navigation 진입점, app resume 시 Auth Session 재평가 지점을 제공한다. Device/FCM/logout registration 정책은 TASK-701/702에서 결정하며 Phase 6에서 선행 구현하지 않는다.

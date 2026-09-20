@@ -28,6 +28,8 @@ StopBell은 사용자가 교통 정보를 반복해서 확인해야 하는 필�
 
 사용자는 선택한 버스 노선에 연결된 정류장을 선택할 수 있다.
 
+정류장 선택 UI는 Backend가 전달한 `canNotifyOneStopBefore`와 `canNotifyOneStopAfter`를 사용해 각각 사용할 수 없는 before/after option을 비활성화한다. Stop order를 산술적으로 증감해 인접 정류장을 추측하지 않는다.
+
 ### FR-003 알림 생성
 
 사용자는 최소한 다음을 포함하는 알림을 만들 수 있다.
@@ -40,6 +42,8 @@ StopBell은 사용자가 교통 정보를 반복해서 확인해야 하는 필�
 - 서로 독립적인 한 정거장 전 / 한 정거장 후 추가 알림 옵션
 
 추가 필드는 필요할 때만 도입한다.
+
+Alarm 상태는 `INACTIVE`, `ACTIVE`, `FOLLOW_UP`을 그대로 표시하며 boolean active로 축소하지 않는다. 현재 metadata에서 삭제·교체된 stale `targetStopOccurrenceId`로 생성 요청이 `404 Not Found`가 되면 Client는 이전 ID를 추측해 매칭하거나 자동 POST 재시도를 하지 않고, 사용자가 Stop 목록에서 다시 선택하도록 복구한다.
 
 ### FR-004 알림 활성화 / 비활성화
 
@@ -106,6 +110,8 @@ StopBell은 자체 ID/Password 회원가입을 제공하지 않고 Social Login�
 Flutter는 Google ID Token으로 외부 Identity를 증명하고, Backend는 이를 검증한 뒤 StopBell 자체 Access Token과 Refresh Token을 발급한다. Google Token은 StopBell Application API의 장기 인증 Token으로 사용하지 않는다.
 
 Application API는 JWT Access Token 기반으로 인증하며, Access Token 기본 수명은 1시간이다. Refresh Token은 Access Token 재발급과 현재 Session Logout에 사용하고, 30일 수명 및 Rotation 정책으로 장기 로그인 유지를 지원한다. Logout은 해당 Refresh Token Session만 삭제하며 이미 발급된 Access Token은 만료 시점까지 유효할 수 있다. Refresh Token이 만료되거나 유효하지 않으면 다시 Google Login이 필요하다.
+
+Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고, 하나의 Auth Session 책임 안에서 current Token Pair와 인증 상태를 관리한다. Refresh `401`은 Token Pair 제거와 unauthenticated 전환을 뜻하지만, network/offline/5xx는 장기 session을 즉시 삭제하지 않는다. 보호 요청은 성공한 refresh 뒤 최대 한 번만 재시도하며, Alarm 생성처럼 idempotency 계약이 없는 mutation은 timeout만으로 자동 POST 재시도하지 않는다.
 
 공개 배포 전뿐 아니라 Alarm API 구현부터 인증된 StopBell User를 기준으로 Alarm 소유권을 처리한다. Client가 제공한 `userId`를 신뢰하지 않는다.
 
