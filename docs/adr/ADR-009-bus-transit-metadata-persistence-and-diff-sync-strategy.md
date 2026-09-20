@@ -55,7 +55,7 @@ Provider별 최소 persisted metadata sync state는 `provider`, `lastCompleteSyn
 
 `BusAlarmTarget`은 metadata Entity를 FK로 장기 참조하지 않는다. Alarm 생성 시 metadata에서 필요한 값을 읽어 Target snapshot에 복사하므로 metadata sync가 기존 Alarm target을 자동 변경하지 않는다.
 
-metadata CRUD와 reconciliation은 JPA Entity 상태 관리와 단순 관계 CRUD가 중심이므로 지금 MyBatis를 사용하지 않는다. Route/Stop 검색, Alarm grouping, 대량 조회 성능에서 실제 SQL 제어가 필요할 때 MyBatis를 추가한다. 실제 source adapter, full import command, Scheduler, retry/backoff와 Alarm API는 이 결정과 분리된 후속 Task다.
+metadata CRUD와 reconciliation은 JPA Entity 상태 관리와 단순 관계 CRUD가 중심이므로 현재 MyBatis를 사용하거나 starter를 선행 유지하지 않는다. Route/Stop 검색, Alarm grouping, 대량 조회 성능에서 실제 SQL 제어가 필요할 때 MyBatis 도입을 다시 결정한다. 실제 source adapter, full import command, Scheduler, retry/backoff와 Alarm API는 이 결정과 분리된 후속 Task다.
 
 ## 후속 구현 경계: TASK-513
 
@@ -76,7 +76,7 @@ TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TAS
 - 의미가 바뀐 occurrence는 기존 ID를 재사용하지 않는다
 - partial source failure가 Route 삭제로 오판되지 않도록 provider cleanup 호출을 검증된 complete snapshot 성공 뒤로 제한한다
 - Provider별 마지막 complete sync 성공 시각을 최소 영속 상태로 관리한다
-- MyBatis는 현재 추가하지 않으며 hybrid persistence 결정은 유지한다
+- MyBatis는 실제 SQL 제어 필요가 확인될 때에만 다시 도입한다
 - Source downloader/parser와 one-shot bootstrap은 TASK-513, realtime production client·Scheduler와 Alarm API는 각각 후속 Task로 남는다
 
 ## 재검토 시점

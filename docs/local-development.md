@@ -17,7 +17,6 @@
 - Spring Framework Version: 7.0.9
 - Gradle Version: Gradle Wrapper 8.14.3
 - JPA: Spring Data JPA / Hibernate ORM 7.4.5.Final
-- MyBatis: MyBatis Spring Boot Starter 4.1.0
 - MySQL Connector/J Version: 9.7.0
 - Google API Client for Java Version: 2.9.0
 - MySQL Version: 8.4 LTS

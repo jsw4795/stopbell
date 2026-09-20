@@ -13,7 +13,7 @@ StopBell은 Spring Boot 기반 Backend와 MySQL Database를 사용한다.
 고려 사항:
 
 - JPA Entity와 Database Schema 변경 관리
-- MyBatis SQL 기반 Query 관리
+- JPA와 향후 실제 필요가 확인된 SQL 기반 Query 관리
 - Migration History 관리
 - 새로운 개발 환경 재현성
 
@@ -46,7 +46,7 @@ StopBell은 Spring Boot 기반 Backend와 MySQL Database를 사용한다.
 
 - SQL 기반 Migration
 - Spring Boot 생태계와 높은 호환성
-- MyBatis와 자연스러운 조합
+- JPA 및 향후 SQL 기반 Query와 자연스러운 조합
 - Migration History 관리 용이
 
 ## Decision
@@ -55,7 +55,7 @@ StopBell Database Migration Tool은 Flyway를 사용한다.
 
 ## Rationale
 
-StopBell은 JPA와 MyBatis를 함께 사용하는 구조이다.
+StopBell은 현재 JPA를 사용한다. 향후 실제 SQL 제어 필요가 확인돼 MyBatis 또는 동등한 SQL 기반 Query를 도입하더라도 Flyway Migration 정책은 유지된다.
 
 SQL 기반 Migration 방식이 프로젝트 방향과 가장 잘 맞으며, Database Schema 변경을 명확하게 관리하기 위해 Flyway를 선택한다.
 

@@ -568,7 +568,7 @@ alarmId
 
 이 identity에는 DB Unique Constraint 또는 동등한 atomic uniqueness가 필요하다. `alarmId + eventType`만으로 dedup하지 않는다. 정확한 Schema/constraint 이름은 TASK-707/708에서 결정한다.
 
-Current Alarm lifecycle/activation generation 검증, lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성은 같은 Database transaction에서 수행한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient operational log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. Commit 뒤 worker는 이미 생성된 pending Delivery를 전달하며 recipient를 새로 결정하지 않는다. FCM network I/O는 이 transaction 안에서 실행하지 않는다.
+Current Alarm lifecycle/activation generation 검증, lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성은 같은 Database transaction에서 수행한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient operational log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. Commit 뒤 단일 Backend의 fixed-delay, non-overlapping worker는 due PENDING Delivery만 전달하며 recipient를 새로 결정하지 않는다. FCM network I/O는 이 transaction 안에서 실행하지 않는다.
 
 ------------------------------------------------------------------------
 
@@ -585,24 +585,22 @@ Current Alarm lifecycle/activation generation 검증, lifecycle transition, Noti
 
 각 `NotificationEvent × Device` 조합은 Database 기준 하나다. Provider request는 bounded retry로 여러 번 발생할 수 있지만 모든 attempt를 append-only row로 영속할 필요는 없다.
 
-Delivery recipient는 Device identity다. Worker는 전송 직전에 Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 확인하고 실제 attempt에 사용한 target/revision을 기록한다. Invalid/unregistered 결과는 attempt target/revision이 Device의 current registration과 일치할 때만 현재 registration을 disable한다. 구체 column/schema 이름은 TASK-707/709에서 정한다.
+Delivery recipient는 Device identity다. Worker는 전송 직전에 Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 확인하고 실제 attempt revision을 기록한다. Invalid/unregistered 결과는 attempt revision이 Device의 current registration과 일치할 때만 현재 registration을 disable한다. raw push target을 `NotificationDelivery`에 중복 저장하는 것은 필수가 아니다. 구체 column/schema 이름은 TASK-707/709에서 정한다.
 
 ## Delivery Result Semantics
 
-Provider client와 Delivery state는 최소한 다음 의미를 구분한다.
+Delivery lifecycle status와 Provider result를 분리한다. lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 하며, retry 가능한 실패는 별도 `RETRYING` 상태 없이 `PENDING + attemptCount + nextAttemptAt + freshness`로 표현한다. Provider result는 최소한 다음 의미를 구분한다.
 
 ```text
-accepted
-invalid/unregistered target
-transient provider failure
-rate/quota failure
-provider authentication/configuration failure
-invalid payload/permanent request failure
-timeout/unknown acceptance state
-expired notification
+ACCEPTED
+INVALID_TARGET
+RETRYABLE
+CONFIGURATION
+PERMANENT_REQUEST
+AMBIGUOUS_TIMEOUT
 ```
 
-`accepted`는 Provider가 요청을 접수했다는 뜻이며 실제 사용자 표시 성공이 아니다. Timeout은 실제 접수 여부가 불명확하므로 retry가 중복 표시를 만들 수 있다. 정확한 status/type 이름, 최대 retry 횟수·간격·freshness TTL은 TASK-709에서 결정한다.
+`ACCEPTED`는 Provider가 요청을 접수했다는 뜻이며 실제 사용자 표시 성공이 아니다. `AMBIGUOUS_TIMEOUT`은 실제 접수 여부가 불명확하므로 retry가 duplicate 표시를 만들 수 있다. `EXPIRED`는 Provider result가 아니라 local freshness 종료 의미다. 정확한 field 이름, 최대 retry 횟수·간격·freshness TTL은 TASK-709에서 결정한다.
 
 기존 `NotificationHistory`는 이 logical event와 per-Device delivery 책임을 충분히 표현하지 못한다. 확장·대체·migration 방식은 TASK-707에서 결정하며 Phase 8 Analytics와 operational delivery data는 별도 책임으로 유지한다.
 

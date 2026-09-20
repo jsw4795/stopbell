@@ -6,7 +6,7 @@
 
 데이터베이스: MySQL
 
-데이터 접근: JPA + MyBatis
+데이터 접근: JPA
 
 ## 2. Development Database Environment
 
@@ -43,9 +43,7 @@ Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{
 
 JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, Phase 7의 Notification event/delivery persistence, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`는 Repository 기반으로 관리한다. `BusAlarmTarget`은 Alarm aggregate를 통해 persist/remove한다. Bus metadata는 source-neutral route snapshot을 한 Route 단위로 reconciliation한다.
 
-MyBatis는 Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에 사용할 수 있다. 이번 metadata CRUD와 reconciliation은 JPA Entity 상태 관리가 중심이므로 MyBatis를 사용하지 않는다. Route/Stop 검색, Alarm grouping, 대량 조회 성능에서 실제 SQL 제어 필요성이 확인되면 적용을 결정한다.
-
-JPA Entity와 MyBatis Query Model은 각 책임에 맞게 분리한다. 복잡한 조회를 위해 Domain Entity의 상태 관리 책임을 MyBatis로 옮기지 않는다.
+현재 구현된 Query는 JPA로 충분하며 MyBatis Mapper, Mapper XML, MyBatis 전용 production 설정과 starter를 유지하지 않는다. Route/Stop 검색, Alarm grouping, 대량 조회 성능에서 명시적 SQL 제어의 실제 필요가 확인되면 MyBatis 도입을 다시 결정한다. 그때에도 Domain Entity의 상태 관리 책임을 SQL Query Model로 옮기지 않는다.
 
 ## 6. 핵심 테이블
 
@@ -209,9 +207,9 @@ NotificationDelivery
 
 `alarmId + eventType`만으로 logical dedup하지 않는다. ACTIVE tracking 전체나 raw TransitObservation은 저장하지 않아도 된다. Tracking cycle identity는 logical cycle 시작 시 한 번 생성하고 같은 cycle의 transaction retry에서 유지하며 TransitEvent 발생 시 NotificationEvent에 복사한다.
 
-하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성을 함께 commit한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. Commit 뒤 in-process worker는 이미 생성된 pending Delivery만 처리하고 recipient를 다시 선정하지 않는다. Worker는 전송 직전 Device owner/enabled/current target/revision을 재검증하고 실제 attempt target/revision을 기록한다. Invalid/unregistered 결과는 attempt target/revision이 current registration과 일치할 때만 disable한다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
+하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성을 함께 commit한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. 단일 Spring Backend의 fixed-delay, non-overlapping worker가 due PENDING Delivery를 제한 조회해 처리하고 recipient를 다시 선정하지 않는다. Worker는 전송 직전 Device owner/enabled/current target/revision을 재검증하고 실제 attempt revision을 기록한다. Invalid/unregistered 결과는 attempt revision이 current registration과 일치할 때만 disable한다. `NotificationDelivery`에 raw push target을 중복 저장하는 것은 필수가 아니며, retry와 conditional cleanup에는 attempt revision을 기록한다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
 
-Delivery는 accepted, invalid/unregistered target, transient failure, rate/quota failure, provider authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance state, expired notification을 구분할 수 있어야 한다. 모든 retry attempt를 append-only row로 저장할 필요는 없다. 정확한 status/type, retry count·interval·freshness TTL과 polling query/index는 TASK-707/709에서 정한다. 이 operational data는 Analytics와 별도 책임이며, Analytics persistence는 실제 제품 질문과 보존 근거가 있을 때만 TASK-812에서 결정한다.
+Delivery lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 한다. retry 가능한 실패는 별도 lifecycle state 없이 `PENDING + attemptCount + nextAttemptAt + freshness`로 표현할 수 있다. Push provider result는 `ACCEPTED`, `INVALID_TARGET`, `RETRYABLE`, `CONFIGURATION`, `PERMANENT_REQUEST`, `AMBIGUOUS_TIMEOUT`으로 lifecycle status와 분리한다. `EXPIRED`는 Provider result가 아니라 local freshness 종료 의미다. 모든 retry attempt를 append-only row로 저장할 필요는 없다. 정확한 field, retry count·interval·freshness TTL과 polling query/index는 TASK-707/709에서 정한다. 이 operational data는 Analytics와 별도 책임이며, Analytics persistence는 실제 제품 질문과 보존 근거가 있을 때만 TASK-812에서 결정한다.
 
 ### bus_routes, bus_stops, bus_route_stop_occurrences
 
@@ -269,6 +267,6 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 
 ## 9. 트랜잭션 고려 사항
 
-동일 logical Notification의 중복은 lifecycle transaction 안의 generation 검증과 NotificationEvent atomic uniqueness로 막는다. 구체적인 conditional update/CAS 또는 row locking은 TASK-510/707/708에서 단일 Spring instance 실행 모델에 맞게 정한다.
+동일 logical Notification의 중복은 lifecycle transaction 안의 generation 검증과 NotificationEvent atomic uniqueness로 막는다. TASK-510은 current API/scheduler transaction 구조를 보고 `@Version`, CAS, pessimistic row lock 중 하나의 최소 concurrency mechanism만 선택하며 중복 적용하지 않는다.
 
-MySQL은 durable pending dispatch/outbox의 Source of Truth다. Kafka, RabbitMQ, Redis queue, multi-instance distributed lock은 V1에 도입하지 않는다. Worker claim/polling 방식과 interval은 TASK-706~709에서 결정한다.
+MySQL은 durable pending dispatch/outbox의 Source of Truth다. V1은 하나의 non-overlapping fixed-delay worker가 due PENDING Delivery를 처리한다. Kafka, RabbitMQ, Redis queue, multi-instance distributed lock, claim/lease, `claimedAt`, `SENDING`, stale-claim recovery는 V1에 도입하지 않는다. FCM accepted 뒤 DB update 전 crash하면 PENDING Delivery가 restart 뒤 다시 처리될 수 있고 duplicate Device 표시는 exactly-once 비보장 계약으로 허용한다.

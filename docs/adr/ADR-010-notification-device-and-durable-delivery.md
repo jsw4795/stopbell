@@ -64,7 +64,7 @@ Firebase는 legacy registration token에서 Firebase Installation ID(FID) 기반
 
 단점:
 
-- worker claim, retry, expiry 상태와 polling이 필요함
+- bounded retry, expiry 상태와 polling이 필요함
 - FCM timeout 뒤 실제 접수 여부가 불명확하여 표시 exactly-once는 보장할 수 없음
 
 ### 선택지 E — 기존 NotificationHistory에 최종 SUCCESS/FAILURE만 기록
@@ -140,14 +140,14 @@ Provider I/O / Evaluation
      - durable logical NotificationEvent insert
      - 현재 eligible Device별 NotificationDelivery(PENDING) 생성
   → commit
-  → in-process worker가 기존 pending Delivery 처리
+  → single fixed-delay worker가 기존 due PENDING Delivery 처리
   → FCM I/O
   → NotificationDelivery result update
 ```
 
 Recipient set은 Event 결정 transaction에서 Device identity로 확정한다. Event 뒤 등록된 Device가 과거 Event를 받지 않으며 worker는 recipient를 새로 결정하지 않는다. Eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient operational log/metric으로 관찰한다. 이를 Provider failure나 success로 해석하거나 별도 enum을 강제하지 않는다.
 
-Worker는 전송 직전에 recipient Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 재검증하고 실제 attempt에 사용한 target/revision을 기록한다. FCM I/O를 Alarm lifecycle transaction 안에서 수행하지 않고 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다. 외부 Kafka, RabbitMQ, Redis queue와 Notification microservice는 도입하지 않는다. Worker claim 방식과 polling interval은 TASK-706~709에서 정한다.
+V1은 하나의 Spring Backend와 하나의 fixed-delay, non-overlapping worker를 기본으로 한다. Worker는 전송 직전에 recipient Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 재검증하고 실제 attempt revision을 기록한다. raw push target persistence는 필수가 아니다. FCM I/O를 Alarm lifecycle transaction 안에서 수행하지 않고 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다. 외부 Kafka, RabbitMQ, Redis queue와 Notification microservice는 도입하지 않는다. claim/lease, `claimedAt`, `SENDING`, stale-claim recovery, multi-worker coordination은 V1에서 구현하지 않는다.
 
 `NotificationEvent`는 durable logical decision과 dedup identity를 소유하고 Event 시점에 생성된 recipient Delivery들의 logical source가 된다. `NotificationDelivery`는 Event×Device, Provider delivery/retry/expiry state와 current/final result를 소유한다. 기존 `NotificationHistory` Entity/table을 확장·대체·migration하는 방식은 TASK-707에서 정하며 production legacy compatibility를 과도하게 만들지 않는다. 모든 retry attempt를 append-only row로 저장하지 않는다. Analytics는 실제 제품 질문과 보존 근거가 있을 때만 별도 책임으로 최소 구현하며, Event/Delivery를 장기 Analytics Source of Truth로 사용하지 않는다.
 
@@ -162,9 +162,9 @@ FCM request                       → retry로 여러 번 가능
 실제 Device 표시                  → exactly once 보장하지 않음
 ```
 
-Provider acceptance는 실제 사용자 표시 성공이 아니다. Provider client와 Delivery state는 accepted, invalid/unregistered target, transient failure, rate/quota failure, provider authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance state, expired notification을 구분한다.
+Provider acceptance는 실제 사용자 표시 성공이 아니다. Delivery lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 하고 retry는 `PENDING + attemptCount + nextAttemptAt + freshness`로 표현한다. Provider result는 `ACCEPTED`, `INVALID_TARGET`, `RETRYABLE`, `CONFIGURATION`, `PERMANENT_REQUEST`, `AMBIGUOUS_TIMEOUT`으로 lifecycle status와 분리한다. `EXPIRED`는 Provider result가 아니라 local freshness 종료 의미다.
 
-Invalid/unregistered 결과는 attempt에 사용한 targeting identifier/revision이 Device의 current registration과 일치할 때만 조건부 disable한다. Old attempt 실패가 새 registration을 disable해서는 안 된다. Timeout은 Provider가 실제 접수했는지 알 수 없는 ambiguous 상태다. 최대 retry 횟수·간격·freshness TTL과 최종 status/type 이름은 TASK-709에서 smoke 결과와 함께 정한다. Generic retry framework는 미리 도입하지 않는다.
+Invalid/unregistered 결과는 attempt revision이 Device의 current registration과 일치할 때만 조건부 disable한다. Old attempt 실패가 새 registration을 disable해서는 안 된다. `AMBIGUOUS_TIMEOUT`은 Provider가 실제 접수했는지 알 수 없는 상태다. FCM accepted 뒤 DB update 전 crash하면 Delivery가 PENDING으로 남아 restart 뒤 retry될 수 있으며, 실제 Device duplicate는 exactly-once 비보장 계약으로 허용한다. 최대 retry 횟수·간격·freshness TTL과 구체 field 이름은 TASK-709에서 smoke 결과와 함께 정한다. Generic retry framework는 미리 도입하지 않는다.
 
 ### Permission, payload와 tap
 
@@ -188,14 +188,14 @@ MySQL outbox는 이미 사용하는 infrastructure 안에서 lifecycle transitio
 - TASK-705/709는 명시적인 Provider result/failure와 bounded retry를 구현한다.
 - TASK-704/710은 permission, registration, foreground/background/terminated/tap을 실제 iPhone에서 검증한다.
 - Kafka, RabbitMQ, Redis queue, event sourcing, generic multi-provider/retry framework, Device subtype hierarchy, APNs direct client, multi-instance distributed lock은 V1에서 제외한다.
-- ADR-002의 JPA/MyBatis 역할 분담과 ADR-005의 RefreshToken-Device 비연결, ADR-007/008의 Transit Event와 Alarm lifecycle 결정은 유지한다. 초기 NotificationHistory의 최종 결과 기록 역할은 이 ADR의 Event/Delivery 분리 결정으로 대체한다.
+- ADR-002의 초기 hybrid 검토 이력과 현재 JPA persistence 방향, ADR-005의 RefreshToken-Device 비연결, ADR-007/008의 Transit Event와 Alarm lifecycle 결정은 유지한다. 초기 NotificationHistory의 최종 결과 기록 역할은 이 ADR의 Event/Delivery 분리 결정으로 대체한다.
 
 ## 재검토 시점
 
 다음 중 하나 이상이 확인되면 이 결정을 재검토한다.
 
 - 실제 SDK가 installationId와 별개인 targeting identifier를 안정적으로 제공하지 않음
-- 다중 Backend instance 운영 때문에 현재 MySQL worker claim만으로 안전한 처리가 어려움
+- 다중 Backend instance 운영으로 claim/lease 등 worker coordination이 실제로 필요해짐
 - Delivery 처리량이 MySQL polling으로 감당할 수 없는 측정된 병목이 됨
 - Product가 Provider delivery receipt 또는 별도 APNs direct delivery를 요구함
 - 운영·규제 요구로 모든 Provider attempt의 append-only audit가 필요해짐

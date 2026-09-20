@@ -26,8 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
-        + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration,"
-        + "org.mybatis.spring.boot.autoconfigure.MybatisAutoConfiguration")
+        + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Import(StopBellApplicationTests.TestRepositoryConfiguration.class)

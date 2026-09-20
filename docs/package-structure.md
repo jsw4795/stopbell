@@ -57,7 +57,6 @@ backend/
     │   ├── entity/
     │   ├── repository/
     │   ├── service/
-    │   ├── mapper/
     │   ├── dto/
     │   └── domain/
     │
@@ -130,11 +129,10 @@ Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기
 - `service`: Transit 데이터 조회·정규화와 source-neutral metadata reconciliation
 - `entity`: `BusRoute`, `BusStop`, `BusRouteStopOccurrence` JPA Entity
 - `repository`: Transit metadata JPA Repository
-- `mapper`: MyBatis Mapper 및 SQL
 - `dto`: provider 응답 및 내부 Transit DTO
 - `domain`: `TransitObservation`, `TransitEvent` 등 Transit 관련 Domain Model
 
-Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync의 normalized route snapshot을 JPA로 reconciliation한다. TASK-513 source adapter는 서울 노선마스터·정류장마스터·노선-정류장마스터 CSV와 경기 TAGO city별 Route/Route Stop pagination을 읽어 validation 뒤 snapshot을 만든다. source 일부 실패·불완전 pagination·parser failure·필수 source 누락은 provider-level cleanup을 허용하지 않으며 empty collection만으로 complete snapshot을 뜻하지 않는다. 동일 Route/Stop identity의 metadata는 UPDATE하고, 의미가 바뀐 occurrence는 삭제 후 새 row로 생성한다. Route/Stop 검색, Alarm grouping, Transit 상태 조회, 복잡한 검색은 SQL 제어가 실제로 필요한 경우 MyBatis를 사용한다.
+Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync의 normalized route snapshot을 JPA로 reconciliation한다. TASK-513 source adapter는 서울 노선마스터·정류장마스터·노선-정류장마스터 CSV와 경기 TAGO city별 Route/Route Stop pagination을 읽어 validation 뒤 snapshot을 만든다. source 일부 실패·불완전 pagination·parser failure·필수 source 누락은 provider-level cleanup을 허용하지 않으며 empty collection만으로 complete snapshot을 뜻하지 않는다. 동일 Route/Stop identity의 metadata는 UPDATE하고, 의미가 바뀐 occurrence는 삭제 후 새 row로 생성한다. Route/Stop 검색, Alarm grouping, Transit 상태 조회, 복잡한 검색에서 명시적 SQL 제어의 실제 필요가 확인되면 그때 `transit/mapper/`와 MyBatis 도입을 결정한다.
 
 V1 Provider namespace는 `TAGO`, `SEOUL_BUS`다. static metadata source는 서울 T Data CSV와 경기 TAGO sync이며, 서울 realtime은 Route 전체 roster/coarse 조회 뒤 필요 차량의 vehicle detail을 조회하는 2단계 방향을 사용한다. 구현 시 provider별 client와 response DTO를 `transit` 경계 안에서 역할에 맞게 분리할 수 있지만, generic multi-provider framework나 동적 registry를 만들지 않는다. 기본 polling key는 TAGO의 `(provider, externalRouteId, cityCode)`, 서울의 `(provider, externalRouteId)`다.
 
@@ -172,9 +170,9 @@ transit/repository/BusRouteStopOccurrenceRepository
 
 JPA는 `User`, `Alarm`, `BusAlarmTarget`, Device/Notification persistence, Bus metadata의 단순 CRUD와 Entity 상태 관리에 사용한다. `BusAlarmTarget`은 별도 Repository로 독립 관리하지 않고 Alarm aggregate의 cascade lifecycle을 따른다.
 
-### MyBatis Mapper
+### SQL Mapper (실제 필요 시)
 
-MyBatis Mapper는 SQL 책임을 가진 Domain 안에 둔다.
+MyBatis를 실제 도입할 필요가 확인되면 SQL 책임을 가진 Domain 안에 Mapper를 둔다. 아래 경로는 현재 존재하는 package가 아니다.
 
 ```text
 transit/mapper/TransitQueryMapper
@@ -182,7 +180,7 @@ transit/mapper/AlarmGroupQueryMapper
 transit/mapper/StatisticsQueryMapper
 ```
 
-MyBatis는 Transit 관련 Query, Complex Query, Statistics Query, 성능 최적화가 필요한 조회에서 SQL 제어의 실제 필요가 확인되면 사용한다. Mapper 이름과 SQL file 위치는 구현 시 Spring/MyBatis 설정에 맞추되, Domain 경계를 넘는 범용 Mapper를 만들지 않는다.
+Transit 관련 Query, Complex Query, Statistics Query, 성능 최적화가 필요한 조회에서 SQL 제어의 실제 필요가 확인되면 MyBatis 도입을 결정한다. Mapper 이름과 SQL file 위치는 그 구현 시 Spring/MyBatis 설정에 맞추되, Domain 경계를 넘는 범용 Mapper를 만들지 않는다.
 
 ## DTO Location
 
@@ -201,7 +199,7 @@ notification/dto/
 
 Domain Layer는 Alarm 조건 평가, 상태 전이, Notification 전송 결정처럼 제품 규칙을 표현한다.
 
-Infrastructure Layer는 JPA Repository, MyBatis Mapper, 외부 Transit API client, FCM client처럼 Database 또는 외부 시스템과 통신한다.
+Infrastructure Layer는 JPA Repository, 실제 도입된 SQL Mapper, 외부 Transit API client, FCM client처럼 Database 또는 외부 시스템과 통신한다.
 
 이 구분은 외부 provider와 Persistence 세부사항이 Alarm 규칙에 직접 섞이지 않도록 하기 위함이다. 다만 현재 V1에 불필요한 추상화 계층을 추가하지 않는다.
 

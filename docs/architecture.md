@@ -24,7 +24,6 @@
 │                      │
 │ Persistence Layer    │
 │ - JPA                │
-│ - MyBatis            │
 └───────┬────────┬─────┘
         │        │
         │        ├──────────────► 교통 데이터 API
@@ -55,7 +54,7 @@ Docker Compose configuration은 저장소 루트의 `docker-compose.yml`에서 �
 
 ## 4. Persistence Strategy
 
-StopBell은 JPA와 MyBatis를 함께 사용한다.
+현재 StopBell V1 persistence는 JPA를 사용한다.
 
 ```text
 Spring Boot
@@ -72,17 +71,13 @@ Spring Boot
 │   ├── NotificationEvent
 │   └── NotificationDelivery
 │
-└── MyBatis
-    ├── Transit Query
-    ├── Complex Query
-    └── Statistics Query
         ↓
       MySQL
 ```
 
 JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `RefreshToken`, `Alarm`, `BusAlarmTarget`, `Device`, `NotificationEvent`, `NotificationDelivery`, Bus static metadata는 Repository 기반으로 관리한다. Bus-specific Target은 공통 Alarm table의 nullable column으로 펼치지 않고 Alarm과 공유 PK를 갖는 별도 Entity/table로 관리하며 Alarm aggregate의 persist/remove lifecycle을 따른다. Bus metadata는 source-neutral route snapshot을 한 Route씩 diff sync한다.
 
-MyBatis는 복잡한 Query, 집계, 외부 Transit 데이터 처리 등 SQL 제어가 중요한 영역에서 사용할 수 있다. metadata CRUD와 diff sync는 JPA Entity 상태 관리로 충분하므로 MyBatis를 사용하지 않는다. Route/Stop 검색, Alarm grouping, 성능 최적화에서 실제 SQL 제어 필요성이 확인되면 적용한다.
+현재 구현된 Query는 JPA로 충분하며 MyBatis Mapper, Mapper XML, 전용 production 설정과 starter를 유지하지 않는다. Route/Stop 검색, Alarm grouping, 집계 또는 성능 최적화에서 명시적 SQL 제어의 실제 필요가 확인되면 MyBatis 도입을 다시 결정한다.
 
 ## 5. Authentication Architecture
 
@@ -186,9 +181,9 @@ NotificationDelivery
 - current/final provider result
 ```
 
-하나의 MySQL Alarm lifecycle transaction에서 current Alarm lifecycle/generation 검증, lifecycle transition, `NotificationEvent` insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성을 처리해 recipient set을 확정한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient log/metric을 남긴다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. commit 뒤 같은 Spring Boot application의 worker는 이미 생성된 pending Delivery만 처리하며 recipient를 다시 선정하지 않는다. Worker는 전송 직전에 Device의 current owner/enabled/current target/revision을 재검증하고 실제 attempt target/revision을 기록하며, invalid/unregistered 결과는 attempt target/revision이 current registration과 같을 때만 disable한다. FCM I/O는 transaction 밖에서 수행한다. 외부 Kafka/RabbitMQ/Redis queue, Notification microservice, non-durable after-commit callback만으로 구성한 전달 경로는 사용하지 않는다.
+하나의 MySQL Alarm lifecycle transaction에서 current Alarm lifecycle/generation 검증, lifecycle transition, `NotificationEvent` insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성을 처리해 recipient set을 확정한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient log/metric을 남긴다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. 단일 Spring Backend의 fixed-delay, non-overlapping worker는 commit 뒤 due PENDING Delivery만 제한 조회해 처리하며 recipient를 다시 선정하지 않는다. Worker는 전송 직전에 Device의 current owner/enabled/current target/revision을 재검증하고 실제 attempt revision을 기록하며, invalid/unregistered 결과는 attempt revision이 current registration과 같을 때만 disable한다. FCM I/O는 transaction 밖에서 수행한다. claim/lease, `claimedAt`, `SENDING`, stale-claim recovery와 multi-worker coordination은 현재 V1에 도입하지 않는다. 외부 Kafka/RabbitMQ/Redis queue, Notification microservice, non-durable after-commit callback만으로 구성한 전달 경로는 사용하지 않는다.
 
-Push provider 결과는 accepted, invalid/unregistered target, transient failure, rate/quota failure, provider authentication/configuration failure, invalid payload/permanent request failure, timeout/unknown acceptance, expired notification을 구분한다. Invalid/unregistered 응답은 attempt에 사용한 targeting identifier와 registration revision이 해당 Device의 current registration일 때만 조건부로 disable한다. Provider acceptance는 실제 Device 표시 성공이 아니며 timeout 뒤 retry는 중복 표시 가능성이 있다.
+Delivery lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 하며 retry는 `PENDING + attemptCount + nextAttemptAt + freshness`로 표현한다. Push provider result는 `ACCEPTED`, `INVALID_TARGET`, `RETRYABLE`, `CONFIGURATION`, `PERMANENT_REQUEST`, `AMBIGUOUS_TIMEOUT`으로 Delivery lifecycle과 분리한다. `EXPIRED`는 local freshness 종료 의미다. Invalid target 응답은 attempt revision이 해당 Device의 current registration일 때만 조건부로 disable한다. Provider acceptance는 실제 Device 표시 성공이 아니며 ambiguous timeout 뒤 retry는 duplicate 표시 가능성이 있다.
 
 ### common
 
@@ -208,7 +203,7 @@ Push provider 결과는 accepted, invalid/unregistered target, transient failure
 
 V1의 기본 Provider polling key는 TAGO의 `(provider, externalRouteId, cityCode)`와 서울의 `(provider, externalRouteId)`다. `cityCode`는 Route identity가 아니라 TAGO request context이지만 동일 polling request 재현에는 필요하다. 같은 Route를 사용하는 여러 사용자·target Stop·ACTIVE Alarm·FOLLOW_UP Alarm은 가능한 한 하나의 Route polling response를 공유한다. Alarm별 Provider 호출이나 MyBatis 도입은 기본 구조로 삼지 않는다.
 
-TASK-510 Scheduler는 단일 Spring instance에서 polling cycle overlap을 막는 단순 synchronous/fixed-delay 방식을 우선한다. Provider HTTP I/O 동안 DB transaction 또는 row lock을 오래 유지하지 않으며, polling 뒤 lifecycle이 바뀐 Alarm을 stale 결과가 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation의 race를 안전하게 다뤄야 한다. 서로 다른 activation cycle을 구분하는 persisted semantic activation generation은 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. 구체 conditional update/CAS와 JPA `@Version`의 병행 여부는 TASK-510에서 확정한다.
+TASK-510 Scheduler는 단일 Spring instance에서 polling cycle overlap을 막는 단순 synchronous/fixed-delay 방식을 우선한다. Provider HTTP I/O 동안 DB transaction 또는 row lock을 오래 유지하지 않으며, polling 뒤 lifecycle이 바뀐 Alarm을 stale 결과가 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation의 race를 안전하게 다뤄야 한다. 서로 다른 activation cycle을 구분하는 persisted semantic activation generation은 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. TASK-510은 current API/scheduler transaction 구조를 보고 `@Version`, CAS, pessimistic row lock 중 하나의 최소 concurrency mechanism만 선택하며 중복 적용하지 않는다.
 
 ## 8. 알림 평가
 
@@ -255,7 +250,7 @@ FCM request                       → bounded retry로 여러 번 가능
 실제 Device 표시                  → exactly once 보장하지 않음
 ```
 
-Provider `accepted`는 요청 접수를 뜻하며 실제 표시 성공을 뜻하지 않는다. Timeout은 Provider가 접수했는지 알 수 없는 ambiguous 결과다. Retry 최대 횟수·간격·freshness TTL과 최종 status/type 이름은 TASK-709에서 실제 smoke 결과와 함께 정한다. 모든 attempt를 append-only row로 저장하거나 generic retry framework를 도입하지 않는다.
+Provider `accepted`는 요청 접수를 뜻하며 실제 표시 성공을 뜻하지 않는다. Timeout은 Provider가 접수했는지 알 수 없는 ambiguous 결과다. retry 가능한 Provider result는 `PENDING` Delivery의 attemptCount와 nextAttemptAt으로 재시도하며, 최대 횟수·간격·freshness TTL은 TASK-709에서 실제 smoke 결과와 함께 정한다. 모든 attempt를 append-only row로 저장하거나 generic retry framework를 도입하지 않는다.
 
 Push payload는 navigation hint에 필요한 최소 정보만 포함하고 권한 근거로 사용하지 않는다. Flutter는 Auth Session 초기화 뒤 Alarm ID navigation entry를 사용해 Backend에서 ownership/current state를 재확인한다. Permission이 없어도 다른 Device가 수신할 수 있으므로 Alarm 생성·활성화를 금지하지 않는다. 현재 installation logout은 Device unsubscribe/disable을 시도한 뒤 기존 Auth logout과 local session 종료를 수행하되, offline에서는 Backend disable을 즉시 보장하지 않는다.
 
@@ -287,7 +282,7 @@ liveness는 JVM/process 생존을, readiness는 DB 연결, Flyway migration 적�
 
 최초 fresh DB deployment에서는 필요한 metadata bootstrap이 끝나기 전 public Route/Alarm 생성 traffic을 받지 않는다. 반대로 정상 운영 중 metadata stale만으로 기존 Alarm monitoring을 unready로 만들지 않는다.
 
-deployment와 SIGTERM 때는 새 polling/notification dispatch cycle을 시작하지 않고, 진행 중 DB transaction은 정상 commit 또는 rollback한다. Provider/FCM timeout은 shutdown budget보다 짧게 제한하고 pending delivery는 restart 뒤 durable outbox에서 복구한다. worker claim을 쓴다면 crash 뒤 stale claim을 회수할 lease/claimedAt 또는 동등한 contract가 필요하다. incomplete metadata sync는 provider cleanup의 근거가 아니다.
+deployment와 SIGTERM 때는 새 polling/notification dispatch cycle을 시작하지 않고, 진행 중 DB transaction은 정상 commit 또는 rollback한다. Provider/FCM timeout은 shutdown budget보다 짧게 제한하고 pending delivery는 restart 뒤 durable outbox에서 복구한다. FCM accepted 뒤 DB update 전 crash하면 Delivery가 PENDING으로 남아 retry될 수 있으며 actual Device duplicate는 exactly-once 비보장 계약으로 허용한다. incomplete metadata sync는 provider cleanup의 근거가 아니다.
 
 첫 production 적용 뒤 Flyway migration file은 수정하지 않고 변경을 새 migration으로 추가한다. 배포 전 migration 영향과 backup/restore point를 확인하고 migration 실패 instance는 ready가 되어서는 안 된다. DB downgrade는 임의로 하지 않으며 application rollback은 새 Schema와 old application compatibility를 확인한 경우만 한다. 공개 사용자 데이터를 받기 전 자동 DB backup 또는 platform snapshot, 가능하면 PITR, deploy 전 restore point와 실제 restore drill 최소 1회를 검증한다. Alarm/User/BusAlarmTarget은 복구 중요도가 높고 Transit metadata는 source에서 재생성할 수 있으며 pending notification은 freshness policy를 고려한다. Restore 뒤에는 outbound polling/notification dispatch를 격리한 상태에서 Flyway/schema, RefreshToken 복구 정책, Device ownership/registration, metadata sync, Alarm recovery baseline, stale pending Notification expiry/cutoff를 순서대로 확인한 뒤 worker/scheduler와 public readiness를 재개한다. Restore epoch나 별도 recovery subsystem은 요구하지 않는다.
 

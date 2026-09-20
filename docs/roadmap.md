@@ -51,7 +51,7 @@ TASK-304는 경기 TAGO를 Route/Stop metadata·realtime Location·Arrival 보�
 - [x] Flutter 기본 애플리케이션
 - [x] Spring Boot 백엔드 골격
 - [x] MySQL 8.4 LTS Docker Compose 개발 환경
-- [x] JPA / MyBatis 설정
+- [x] JPA persistence 설정 (초기 JPA / MyBatis 설정 이력 포함)
 - [ ] 버스 노선 검색
 - [ ] 정류장 선택
 - [ ] 알림 생성/목록/삭제
@@ -188,7 +188,7 @@ TASK-805는 structured logging과 최소 operational metric/alerting contract를
 
 TASK-808은 production topology가 아닌 재현 가능한 Backend runtime image 책임이다. TASK-813은 single persistent Backend, durable MySQL, secure public endpoint, secret injection, restart/deployment smoke, rollback, backup/restore와 Flyway 운영 policy를 연결한다. 첫 production 적용 뒤 적용된 migration file은 수정하지 않고 새 migration을 추가하며 migration 실패 instance는 ready가 될 수 없다. V1은 Kubernetes, Kafka/RabbitMQ, Redis, self-hosted Prometheus/Grafana, Vault, distributed tracing, multi-region, read replica, CQRS, event sourcing, microservice split, blue/green framework를 기본 요구로 만들지 않는다.
 
-TASK-814는 persisted operational time을 UTC 의미로 통일하고 host timezone 의존을 제거한다. 다만 그 전 TASK에서 새로 추가하는 timestamp도 처음부터 UTC 의미, test 가능한 Clock과 명시적 Provider timezone parsing을 적용한다. TASK-811은 memory ACTIVE tracking의 safe rebaseline, persisted FOLLOW_UP, durable outbox recovery, FCM ambiguous acceptance와 worker claim recovery를 restart/shutdown 경계에서 검증한다. TASK-810은 Provider freshness, evaluation, outbox, FCM, Backend observable latency를 분리하고 실제 iPhone foreground/background/terminated 반복 측정으로 체감 지연을 보완한다.
+TASK-814는 persisted operational time을 UTC 의미로 통일하고 host timezone 의존을 제거한다. 다만 그 전 TASK에서 새로 추가하는 timestamp도 처음부터 UTC 의미, test 가능한 Clock과 명시적 Provider timezone parsing을 적용한다. TASK-811은 memory ACTIVE tracking의 safe rebaseline, persisted FOLLOW_UP, durable outbox recovery와 FCM ambiguous acceptance를 restart/shutdown 경계에서 검증한다. 단일 non-overlapping worker는 restart 뒤 PENDING Delivery를 다시 처리하며, FCM accepted 뒤 DB update 전 crash에서는 duplicate 가능성을 허용한다. TASK-810은 Provider freshness, evaluation, outbox, FCM, Backend observable latency를 분리하고 실제 iPhone foreground/background/terminated 반복 측정으로 체감 지연을 보완한다.
 
 TASK-812 Analytics는 실제 제품 질문과 보존 근거가 있을 때만 최소 구현하며 public V1 release blocker가 아니다. `NotificationEvent`/`NotificationDelivery`는 operational correctness 데이터이지 장기 Analytics Source of Truth가 아니다. TASK-815는 public App Store 제출 전에만 실행하는 release blocker이며, 제출 시점의 Apple login/account deletion/privacy disclosure 요건을 검토한다. 이는 Phase 6의 iOS actual-device vertical slice를 막지 않는다.
 

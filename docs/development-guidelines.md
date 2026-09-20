@@ -14,7 +14,11 @@
 4. 프레임워크, 인프라, 아키텍처 패턴을 알리지 않고 도입하지 않는다.
 5. 현재 버전의 범위를 기억한다.
 
-## 3. 백엔드 가이드라인
+## 3. 문서 책임
+
+사용자 보장 동작은 `requirements.md`, runtime/component/transaction boundary는 `architecture.md`, Domain 의미와 invariant는 `domain-model.md`, Schema/constraint/index는 `database.md`, HTTP contract는 `api.md`, Task 상태·dependency·acceptance criteria는 `task-list.md`, phase 목표와 release gate는 `roadmap.md`, 결정·대안·근거는 ADR이 상세 Source가 된다. 같은 계약의 상세 규칙을 여러 문서에 복제하지 않고, 다른 문서는 필요한 수준으로 해당 owner 문서를 참조한다.
+
+## 4. 백엔드 가이드라인
 
 기본 스택:
 
@@ -23,7 +27,6 @@
 - Spring Framework 7.0.9
 - Gradle Wrapper 8.14.3
 - Spring Data JPA / Hibernate ORM 7.4.5.Final
-- MyBatis Spring Boot Starter 4.1.0
 - MySQL Connector/J 9.7.0
 - MySQL 8.4 LTS
 
@@ -83,8 +86,7 @@ env -u JAVA_HOME ./gradlew test
 Controller
   ↓
 Service
-  ├── Repository (JPA)
-  └── Mapper (MyBatis)
+  └── Repository (JPA)
   ↓
 Database
 ```
@@ -98,10 +100,10 @@ Database
 - Entity 관계와 상태 전이는 Domain 규칙에 맞게 명확히 유지한다.
 - 복잡한 조회를 위해 불필요하게 JPA Query를 복잡하게 만들지 않는다.
 
-### MyBatis / SQL
+### SQL
 
 - SQL은 읽기 쉽고 명시적이어야 한다.
-- Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에서 SQL 제어의 실제 필요가 확인되면 MyBatis를 사용한다. Provider API가 검색과 Route별 Stop 조회를 제공하고 Local DB 저장의 명확한 이유가 없으면 Transit 검색에 MyBatis를 강제하지 않는다.
+- Transit 관련 Query, 복잡한 검색, 집계 Query, 성능 최적화가 필요한 조회에서 명시적 SQL 제어의 실제 필요가 확인되면 MyBatis 도입을 별도로 결정한다. 현재 V1은 JPA를 사용하며 MyBatis starter를 선행 유지하지 않는다.
 - N+1 쿼리 패턴을 피한다.
 - 의도가 명확하지 않은 복잡한 쿼리는 설명한다.
 - SQL 동작은 테스트할 수 있어야 한다.
@@ -145,7 +147,7 @@ Database
 - 스케줄러 코드는 작업을 조율하고 모든 비즈니스 로직을 담지 않는다.
 - 중복 부작용을 낼 수 있는 실행이 겹치지 않게 한다.
 - 폴링 주기는 제공자 제한과 실제 제품 요구를 반영해야 한다.
-- graceful shutdown 때는 새 cycle을 시작하지 않고 진행 중 transaction을 정상 commit/rollback하며, pending delivery와 stale worker claim은 restart 뒤 복구할 수 있어야 한다.
+- graceful shutdown 때는 새 cycle을 시작하지 않고 진행 중 transaction을 정상 commit/rollback하며, PENDING Delivery는 restart 뒤 single worker가 다시 처리할 수 있어야 한다. FCM accepted 뒤 DB update 전 crash의 duplicate 가능성은 exactly-once 비보장 계약으로 허용한다.
 
 ## 4. Flutter 가이드라인
 
