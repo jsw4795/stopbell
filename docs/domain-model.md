@@ -410,7 +410,7 @@ direct arrival evidence
 
 현재 Stop ID/order가 Provider 응답에서 없으면 억지로 채우지 않는다. `currentStopName`은 PASSED 위치 안내를 위해 Route metadata로 보강할 수 있다. GPS도 optional이며 사용자에게 raw 숫자를 기본 표시하지 않고 Stop name 또는 “최근 확인된 위치” 표현을 보조하는 내부 근거로 사용한다.
 
-`observedAt`은 StopBell이 성공한 Provider response를 받은 직후의 시각이고 항상 존재한다. polling 시작 시각이 아니며, 같은 response에서 mapping한 차량은 같은 receive-time context를 공유한다. `providerDataTime`은 Provider가 제공한 원본 data 시각이며 optional이다. 둘을 구분해야 반복·stale data를 판단할 수 있다. Provider가 data 시각을 주지 않으면 현재 수신 시각만으로 upstream freshness가 보장된다고 가정하지 않는다.
+`observedAt`은 StopBell이 성공한 Provider response를 받은 직후의 시각이고 항상 존재한다. polling 시작 시각이 아니며, 같은 response에서 mapping한 차량은 같은 receive-time context를 공유한다. Java 표현은 UTC `Instant`이며 mapper의 test 가능한 `Clock`에서 한 response당 한 번 얻는다. `providerDataTime`은 Provider가 제공한 원본 data 시각이며 optional이다. 서울 `dataTm`의 `yyyyMMddHHmmss` 값은 조사 시각과 같은 `Asia/Seoul`로 명시 해석해 UTC `Instant`로 변환한다. 둘을 구분해야 반복·stale data를 판단할 수 있다. Provider가 data 시각을 주지 않으면 현재 수신 시각만으로 upstream freshness가 보장된다고 가정하지 않는다.
 
 `directionContext`와 `sectionContext`는 Provider가 제공할 때 같은 Route traversal에서 Stop order를 비교할 수 있는지 판단하는 operational evidence다. Provider raw field 이름을 Domain contract로 노출하지 않고, 없는 방향·회차 정보를 추측하지 않는다. Stop order가 역행하거나 순환·회차·분기로 traversal이 모호하면 위치 관계는 `UNKNOWN`이다.
 

@@ -170,7 +170,7 @@ Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 A
 - [x] TASK-501 Transit provider client interface 정의
 - [x] TASK-502 provider response DTO 정의
 - [x] TASK-503 Transit API Client 구현
-- [ ] TASK-504 StopBell Transit DTO 및 `TransitEvent` 변환 구현
+- [x] TASK-504 StopBell Transit DTO 및 `TransitObservation` 변환 구현
 - [ ] TASK-505 Bus Route 검색 구현
 - [ ] TASK-506 Bus Stop 조회 구현
 - [x] TASK-507 Transit metadata persistence / MyBatis 필요성 결정 및 구현
