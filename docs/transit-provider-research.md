@@ -133,7 +133,7 @@ TASK-303은 Production Transit Client 구현이나 V1 Provider 확정 Task가 �
 ### 실행 시각 및 환경
 
 - 실행일: 2026-09-09 KST. 반복 관찰은 17:36:31~17:37:45 KST에 수행했다.
-- Repository root의 local-only `.env`에서 `TAGO_SERVICE_KEY`를 process environment로만 로드했다. Key의 원문·요청 URL은 출력하거나 저장하지 않았다.
+- Repository root의 local-only `.env`에서 `PUBLIC_DATA_SERVICE_KEY`를 process environment로만 로드했다. Key의 원문·요청 URL은 출력하거나 저장하지 않았다.
 - Production Java code, Dependency, Spring Bean/DTO/Controller는 만들지 않았고, 조사에 사용한 script는 repository 밖의 임시 경로에만 두었다.
 
 ### Service Key 전달 방식
@@ -509,7 +509,7 @@ Stop 이름은 `DMC첨단산업센터`였다. 이 한 Route/Stop row-level 표�
 
 2026-09-13 KST에 Alarm API 설계 전에 국토교통부 [버스노선별 경유정류장](https://www.data.go.kr/data/15142031/openapi.do) 전국 metadata가 기존 V1 realtime Provider의 Route/Stop identifier와 직접 호환되는지 확인했다. Production code, DB Schema, importer, Scheduler, Alarm API와 Task 체크 상태는 변경하지 않았다.
 
-Repository root의 local-only `.env`에 있던 `TAGO_SERVICE_KEY`는 process environment에서만 사용했다. Key 원문, expanded request URL, `.env` 내용은 출력하거나 문서화하지 않았다.
+Repository root의 local-only `.env`에 있던 `PUBLIC_DATA_SERVICE_KEY`는 process environment에서만 사용했다. Key 원문, expanded request URL, `.env` 내용은 출력하거나 문서화하지 않았다.
 
 ### 국토교통부 전국 metadata API 현재 계약
 
@@ -564,7 +564,7 @@ Repository root의 local-only `.env`에 있던 `TAGO_SERVICE_KEY`는 process env
 
 ### 목적과 실행 범위
 
-2026-09-13 KST에 경기도 버스 metadata를 TAGO 기반으로 전체 또는 주기 동기화할 수 있는지 확인했다. 이 PoC는 Production metadata Entity/Schema/importer/Scheduler/Alarm API를 구현하지 않고, 기존 `TAGO` external Route/Stop ID 및 TASK-401 occurrence 계약을 변경하지 않는다. Repository root의 local-only `.env`에 있던 `TAGO_SERVICE_KEY`는 process environment에서만 사용했고, 원문·expanded request URL·`.env` 내용은 출력하거나 기록하지 않았다.
+2026-09-13 KST에 경기도 버스 metadata를 TAGO 기반으로 전체 또는 주기 동기화할 수 있는지 확인했다. 이 PoC는 Production metadata Entity/Schema/importer/Scheduler/Alarm API를 구현하지 않고, 기존 `TAGO` external Route/Stop ID 및 TASK-401 occurrence 계약을 변경하지 않는다. Repository root의 local-only `.env`에 있던 `PUBLIC_DATA_SERVICE_KEY`는 process environment에서만 사용했고, 원문·expanded request URL·`.env` 내용은 출력하거나 기록하지 않았다.
 
 ### 경기도 Route 목록 확보
 
