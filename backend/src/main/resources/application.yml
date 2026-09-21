@@ -16,6 +16,17 @@ jwt:
 google:
   server-client-id: ${GOOGLE_SERVER_CLIENT_ID}
 
+transit:
+  client:
+    connect-timeout: PT2S
+    response-timeout: PT5S
+    tago:
+      base-url: ${TAGO_BASE_URL}
+      service-key: ${TAGO_SERVICE_KEY}
+    seoul:
+      base-url: ${SEOUL_BUS_BASE_URL}
+      service-key: ${SEOUL_BUS_SERVICE_KEY}
+
 management:
   endpoint:
     health:

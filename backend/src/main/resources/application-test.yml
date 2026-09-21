@@ -8,3 +8,14 @@ jwt:
 
 google:
   server-client-id: test-google-server-client-id
+
+transit:
+  client:
+    connect-timeout: PT2S
+    response-timeout: PT5S
+    tago:
+      base-url: https://example.test/tago
+      service-key: test-tago-service-key
+    seoul:
+      base-url: https://example.test/seoul
+      service-key: test-seoul-service-key
