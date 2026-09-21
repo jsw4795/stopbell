@@ -16,7 +16,7 @@ import org.springframework.web.util.UriUtils;
 public class SeoulBusVehicleLocationClient
         implements TransitProviderClient<SeoulBusVehicleLocationResponse, SeoulBusVehicleLocationRequestContext> {
 
-    static final String OPERATION = "getBusPosByRtid";
+    static final String OPERATION = "getBusPosByRtidList";
     private static final String NORMAL_EMPTY_HEADER_CODE = "4";
     private static final String SUCCESS_HEADER_CODE = "0";
 

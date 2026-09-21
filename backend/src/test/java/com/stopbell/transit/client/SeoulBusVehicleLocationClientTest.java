@@ -111,7 +111,7 @@ class SeoulBusVehicleLocationClientTest {
 
     private ResponseActions expectRequest() {
         return server.expect(request -> {
-            assertThat(request.getURI().getPath()).isEqualTo("/seoul/getBusPosByRtid");
+            assertThat(request.getURI().getPath()).isEqualTo("/seoul/getBusPosByRtidList");
             assertThat(request.getURI().getQuery())
                     .isEqualTo("serviceKey=test-service-key&busRouteId=100100118");
         });
