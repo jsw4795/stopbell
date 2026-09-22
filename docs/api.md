@@ -43,7 +43,33 @@ Spring Boot Actuator가 제공하는 공식 Application health endpoint이며, �
 GET /api/v1/bus-routes?query={query}
 ```
 
-응답 형태는 Transit API 구현 Task에서 확정한다.
+JWT Access Token이 필요한 Application API다. `query`는 trim한 뒤 노선번호에 대해 대소문자를 무시하는 prefix 검색을 수행한다. 빈 값, whitespace-only 값, 누락된 `query`는 `400 Bad Request`와 다음 오류를 반환한다.
+
+```json
+{
+  "code": "INVALID_REQUEST",
+  "message": "Request is invalid."
+}
+```
+
+검색 결과는 최대 50건이며 `routeNumber ASC`, 같은 노선번호에서는 `id ASC`로 정렬한다. 결과가 없으면 오류 없이 `200 OK`와 빈 배열을 반환한다.
+
+```json
+[
+  {
+    "id": 754,
+    "routeNumber": "7000",
+    "regionName": "수원시"
+  },
+  {
+    "id": 1390,
+    "routeNumber": "7000",
+    "regionName": "김포시"
+  }
+]
+```
+
+`id`는 `BusRoute.id`인 내부 selection reference다. `routeNumber`는 unique하지 않으므로 같은 번호의 복수 후보가 존재할 수 있으며, `regionName`은 이를 표시용으로 구분한다. Client에는 `provider`, `externalRouteId`, `cityCode`를 노출하지 않는다. Client는 선택한 response의 `id`를 다음 Stop 조회 endpoint의 `{routeId}`로 사용한다.
 
 ### 버스 노선의 정류장 조회
 
@@ -51,7 +77,7 @@ GET /api/v1/bus-routes?query={query}
 GET /api/v1/bus-routes/{routeId}/stops
 ```
 
-Route identifier의 구체적인 표현은 Transit API 구현 Task에서 결정한다. Alarm 생성에 사용하는 Stop selection response는 최소 다음 형태다.
+`{routeId}`는 Route 검색 response의 `BusRoute.id`다. Alarm 생성에 사용하는 Stop selection response는 최소 다음 형태다.
 
 ```json
 {

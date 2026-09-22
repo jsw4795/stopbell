@@ -12,4 +12,6 @@ public interface BusRouteRepository extends JpaRepository<BusRoute, Long> {
     Optional<BusRoute> findByProviderAndExternalRouteId(TransitProvider provider, String externalRouteId);
 
     List<BusRoute> findAllByProvider(TransitProvider provider);
+
+    List<BusRoute> findTop50ByRouteNumberStartingWithIgnoreCaseOrderByRouteNumberAscIdAsc(String routeNumber);
 }
