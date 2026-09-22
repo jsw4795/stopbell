@@ -65,6 +65,31 @@ cd backend
 ./gradlew bootRun
 ```
 
+### One-shot Transit Metadata Bootstrap
+
+metadata bootstrap은 일반 Backend startup과 분리된 명시적 one-shot 실행이다. Servlet endpoint와 SecurityFilterChain을 사용하지 않으므로 `WebApplicationType.NONE`으로 실행한다.
+
+서울 버스 metadata는 필요한 CSV file URI를 함께 전달한다.
+
+```text
+./gradlew bootRun --args='
+--spring.main.web-application-type=none
+--transit.metadata.bootstrap.provider=SEOUL_BUS
+--transit.metadata.seoul.route-master=file:/path/to/route-master.csv
+--transit.metadata.seoul.route-stop-master=file:/path/to/route-stop-master.csv
+--transit.metadata.seoul.stop-master=file:/path/to/stop-master.csv
+'
+```
+
+TAGO metadata bootstrap도 같은 방식으로 provider만 지정해 실행한다.
+
+```text
+./gradlew bootRun --args='
+--spring.main.web-application-type=none
+--transit.metadata.bootstrap.provider=TAGO
+'
+```
+
 실행 전 확인 사항:
 
 - MySQL이 실행 중인지 확인
