@@ -174,7 +174,7 @@ Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 A
 - [ ] TASK-505 Bus Route 검색 구현
 - [ ] TASK-506 Bus Stop 조회 구현
 - [x] TASK-507 Transit metadata persistence / MyBatis 필요성 결정 및 구현
-- [ ] TASK-513 Transit metadata source adapter / bootstrap 구현
+- [x] TASK-513 Transit metadata source adapter / bootstrap 구현
 - [ ] TASK-508 Alarm grouping 조회 전략 결정 및 구현
 - [ ] TASK-509 Alarm Evaluation Logic 구현
 - [ ] TASK-510 Scheduler 실행 모델 결정 및 구현

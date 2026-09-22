@@ -1,6 +1,7 @@
 package com.stopbell.transit.client;
 
 import java.net.http.HttpClient;
+import java.time.Clock;
 
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -56,6 +57,11 @@ public class TransitClientConfiguration {
             org.springframework.core.io.Resource stopMaster
     ) {
         return new SeoulCsvMetadataSource(routeMaster, routeStopMaster, stopMaster);
+    }
+
+    @Bean
+    Clock transitMetadataClock() {
+        return Clock.systemUTC();
     }
 
     private RestClient restClient(TransitClientProperties properties) {

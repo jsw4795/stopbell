@@ -1,12 +1,14 @@
 package com.stopbell.transit.service;
 
 import java.util.Set;
+import java.time.Clock;
 import java.time.Instant;
 
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusMetadataSyncState;
 import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -15,15 +17,18 @@ public class BusMetadataSyncService {
     private final BusRouteMetadataSyncService routeMetadataSyncService;
     private final BusProviderMetadataCleanupService providerMetadataCleanupService;
     private final BusMetadataSyncStateRepository syncStateRepository;
+    private final Clock clock;
 
     public BusMetadataSyncService(
             BusRouteMetadataSyncService routeMetadataSyncService,
             BusProviderMetadataCleanupService providerMetadataCleanupService,
-            BusMetadataSyncStateRepository syncStateRepository
+            BusMetadataSyncStateRepository syncStateRepository,
+            @Qualifier("transitMetadataClock") Clock clock
     ) {
         this.routeMetadataSyncService = routeMetadataSyncService;
         this.providerMetadataCleanupService = providerMetadataCleanupService;
         this.syncStateRepository = syncStateRepository;
+        this.clock = clock;
     }
 
     public BusRoute syncRoute(BusRouteMetadataSnapshot snapshot) {
@@ -39,7 +44,7 @@ public class BusMetadataSyncService {
             syncRoute(snapshot);
         }
         providerMetadataCleanupService.cleanupProvider(provider, externalRouteIds);
-        Instant completedAt = Instant.now();
+        Instant completedAt = Instant.now(clock);
         BusMetadataSyncState state = syncStateRepository.findById(provider)
                 .orElseGet(() -> new BusMetadataSyncState(provider, completedAt));
         state.markComplete(completedAt);
