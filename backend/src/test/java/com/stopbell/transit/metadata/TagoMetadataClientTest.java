@@ -31,19 +31,17 @@ class TagoMetadataClientTest {
     }
 
     @Test
-    @DisplayName("TAGO cityCode JSON 응답을 metadata page로 변환한다")
-    void city_codes_with_valid_response_maps_page() {
-        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&pageNo=2&numOfRows=1000&_type=json")
+    @DisplayName("TAGO cityCode JSON 응답을 metadata 목록으로 변환한다")
+    void city_codes_with_valid_response_maps_list() {
+        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&_type=json")
                 .andRespond(json("""
                         {"response":{"header":{"resultCode":"00"},"body":{"items":{"item":[
-                        {"citycode":"31010","cityname":"수원시"}]},"totalCount":1,"pageNo":2}}}
+                        {"citycode":"31010","cityname":"수원시"}]}}}}
                         """));
 
-        TagoMetadataClient.Page<TagoMetadataClient.City> page = client.cityCodes(2);
+        java.util.List<TagoMetadataClient.City> cities = client.cityCodes();
 
-        assertThat(page.totalCount()).isEqualTo(1);
-        assertThat(page.pageNo()).isEqualTo(2);
-        assertThat(page.items()).containsExactly(new TagoMetadataClient.City("31010", "수원시"));
+        assertThat(cities).containsExactly(new TagoMetadataClient.City("31010", "수원시"));
         server.verify();
     }
 
@@ -93,12 +91,23 @@ class TagoMetadataClientTest {
     @Test
     @DisplayName("TAGO logical failure는 정상 empty가 아닌 PROVIDER 예외로 전달한다")
     void provider_failure_is_not_converted_to_empty_page() {
-        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&pageNo=1&numOfRows=1000&_type=json")
+        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&_type=json")
                 .andRespond(json("""
-                        {"response":{"header":{"resultCode":"99"},"body":{"items":{"item":[]},"totalCount":0,"pageNo":1}}}
+                        {"response":{"header":{"resultCode":"99"},"body":{"items":{"item":[]}}}}
                         """));
 
-        assertFailure(TransitProviderClientFailureKind.PROVIDER, () -> client.cityCodes(1));
+        assertFailure(TransitProviderClientFailureKind.PROVIDER, client::cityCodes);
+    }
+
+    @Test
+    @DisplayName("TAGO cityCode 응답에 item 목록이 없으면 PROTOCOL 예외로 전달한다")
+    void malformed_city_code_response_is_not_converted_to_empty_list() {
+        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&_type=json")
+                .andRespond(json("""
+                        {"response":{"header":{"resultCode":"00"},"body":{"items":{}}}}
+                        """));
+
+        assertFailure(TransitProviderClientFailureKind.PROTOCOL, client::cityCodes);
     }
 
     @Test
