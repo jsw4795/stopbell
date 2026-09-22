@@ -13,7 +13,7 @@ import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
 
 public final class TagoMetadataSource implements BusMetadataSource {
     // The 31 codes returned for Gyeonggi by the documented TAGO PoC; no prefix/name heuristic is used.
-    private static final Set<String> GYEONGGI_CODES = Set.of("31010","31020","31030","31040","31050","31060","31070","31080","31090","31100","31110","31120","31130","31140","31150","31160","31170","31180","31190","31200","31210","31220","31230","31240","31250","31260","31270","31280","31350","31370","31380");
+    private static final Set<String> GYEONGGI_CODES = Set.of("31010","31020","31030","31040","31050","31060","31070","31080","31090","31100","31110","31120","31130","31140","31150","31160","31170","31180","31190","31200","31210","31220","31230","31240","31250","31260","31270","31320","31350","31370","31380");
     private final TagoMetadataClient client; private final long requestIntervalMillis; private final Set<String> gyeonggiCodes;
     public TagoMetadataSource(TagoMetadataClient client, long requestIntervalMillis) { this(client, requestIntervalMillis, GYEONGGI_CODES); }
     TagoMetadataSource(TagoMetadataClient client, long requestIntervalMillis, Set<String> gyeonggiCodes) { this.client=client; this.requestIntervalMillis=requestIntervalMillis; this.gyeonggiCodes=Set.copyOf(gyeonggiCodes); }

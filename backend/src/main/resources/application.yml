@@ -20,6 +20,7 @@ transit:
   client:
     connect-timeout: PT2S
     response-timeout: PT5S
+    metadata-response-timeout: PT30S
     tago:
       base-url: ${TAGO_BASE_URL:https://apis.data.go.kr/1613000/BusLcInfoInqireService}
       metadata-base-url: ${TAGO_METADATA_BASE_URL:https://apis.data.go.kr/1613000/BusRouteInfoInqireService}

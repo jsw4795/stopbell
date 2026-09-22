@@ -8,6 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record TransitClientProperties(
         Duration connectTimeout,
         Duration responseTimeout,
+        Duration metadataResponseTimeout,
         Tago tago,
         Seoul seoul
 ) {
@@ -15,6 +16,7 @@ public record TransitClientProperties(
     public TransitClientProperties {
         requirePositive(connectTimeout, "Transit connect timeout");
         requirePositive(responseTimeout, "Transit response timeout");
+        requirePositive(metadataResponseTimeout, "Transit metadata response timeout");
         if (tago == null || seoul == null) {
             throw new IllegalArgumentException("Transit provider configuration must not be null");
         }

@@ -2,6 +2,9 @@ package com.stopbell.transit.metadata;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
 
@@ -68,5 +71,25 @@ class TagoMetadataSourceTest {
 
         assertThatThrownBy(source::fetchCompleteSnapshot).isInstanceOf(IllegalStateException.class);
     }
+
+    @Test
+    @DisplayName("경기도 allowlist는 여주시 31320을 사용하고 과거 31280은 요청하지 않는다")
+    void uses_current_yeoju_city_code() {
+        TagoMetadataClient client=Mockito.mock(TagoMetadataClient.class); TagoMetadataSource source=new TagoMetadataSource(client,0);
+        when(client.cityCodes()).thenReturn(currentGyeonggiCities());
+        when(client.routes(anyString(),anyInt())).thenReturn(page(List.of(),0,1));
+        when(client.routes("31320",1)).thenReturn(page(List.of(new TagoMetadataClient.Route("yeoju","100")),1,1));
+        when(client.routeStops("31320","yeoju",1)).thenReturn(page(List.of(new TagoMetadataClient.Stop("stop","여주",1,null,null)),1,1));
+
+        assertThat(source.fetchCompleteSnapshot().routes()).singleElement()
+                .satisfies(route -> assertThat(route.cityCode()).isEqualTo("31320"));
+
+        verify(client).routes("31320",1);
+        verify(client,never()).routes("31280",1);
+    }
+
+    private static List<TagoMetadataClient.City> currentGyeonggiCities(){return List.of(
+            new TagoMetadataClient.City("31010","수원시"),new TagoMetadataClient.City("31020","성남시"),new TagoMetadataClient.City("31030","의정부시"),new TagoMetadataClient.City("31040","안양시"),new TagoMetadataClient.City("31050","부천시"),new TagoMetadataClient.City("31060","광명시"),new TagoMetadataClient.City("31070","평택시"),new TagoMetadataClient.City("31080","동두천시"),new TagoMetadataClient.City("31090","안산시"),new TagoMetadataClient.City("31100","고양시"),new TagoMetadataClient.City("31110","과천시"),new TagoMetadataClient.City("31120","구리시"),new TagoMetadataClient.City("31130","남양주시"),new TagoMetadataClient.City("31140","오산시"),new TagoMetadataClient.City("31150","시흥시"),new TagoMetadataClient.City("31160","군포시"),new TagoMetadataClient.City("31170","의왕시"),new TagoMetadataClient.City("31180","하남시"),new TagoMetadataClient.City("31190","용인시"),new TagoMetadataClient.City("31200","파주시"),new TagoMetadataClient.City("31210","이천시"),new TagoMetadataClient.City("31220","안성시"),new TagoMetadataClient.City("31230","김포시"),new TagoMetadataClient.City("31240","화성시"),new TagoMetadataClient.City("31250","광주시"),new TagoMetadataClient.City("31260","양주시"),new TagoMetadataClient.City("31270","포천시"),new TagoMetadataClient.City("31320","여주시"),new TagoMetadataClient.City("31350","연천군"),new TagoMetadataClient.City("31370","가평군"),new TagoMetadataClient.City("31380","양평군"));}
+
     private static <T> TagoMetadataClient.Page<T> page(List<T> items,int total,int number){return new TagoMetadataClient.Page<>(items,total,number);}
 }

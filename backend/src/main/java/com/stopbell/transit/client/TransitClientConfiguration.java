@@ -35,7 +35,7 @@ public class TransitClientConfiguration {
 
     @Bean
     TagoMetadataClient tagoMetadataClient(TransitClientProperties properties) {
-        return new TagoMetadataClient(restClient(properties), properties.tago());
+        return new TagoMetadataClient(metadataRestClient(properties), properties.tago());
     }
 
     @Bean
@@ -65,11 +65,19 @@ public class TransitClientConfiguration {
     }
 
     private RestClient restClient(TransitClientProperties properties) {
+        return restClient(properties, properties.responseTimeout());
+    }
+
+    private RestClient metadataRestClient(TransitClientProperties properties) {
+        return restClient(properties, properties.metadataResponseTimeout());
+    }
+
+    private RestClient restClient(TransitClientProperties properties, java.time.Duration responseTimeout) {
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(properties.connectTimeout())
                 .build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
-        requestFactory.setReadTimeout(properties.responseTimeout());
+        requestFactory.setReadTimeout(responseTimeout);
         return RestClient.builder().requestFactory(requestFactory).build();
     }
 }

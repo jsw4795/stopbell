@@ -13,6 +13,7 @@ transit:
   client:
     connect-timeout: PT2S
     response-timeout: PT5S
+    metadata-response-timeout: PT30S
     tago:
       base-url: https://example.test/tago
       metadata-base-url: https://example.test/tago-metadata

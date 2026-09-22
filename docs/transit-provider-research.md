@@ -571,6 +571,8 @@ Repository root의 local-only `.env`에 있던 `PUBLIC_DATA_SERVICE_KEY`는 proc
 공식 TAGO [버스노선정보](https://www.data.go.kr/data/15098529/openapi.do)의 `getCtyCodeList`는 경기도를 하나의 code로 주지 않고 31개 시·군 cityCode로 반환했다. 이 cityCode를 `getRouteNoList`의 필수 `cityCode`에 넣고, `routeNo` 없이 `pageNo=1`, `numOfRows=1000`으로 호출하면 해당 시·군의 전체 Route 목록을 얻었다. 별도의 경기도 전체 Route 목록 endpoint는 확인하지 못했다.
 
 - `getCtyCodeList` 실제 JSON 응답은 `body.items.item`만 포함하며 `pageNo`와 `totalCount`를 제공하지 않는다. 따라서 cityCode discovery는 단일 요청의 목록 응답으로 처리하고 Route/Stop 목록의 pagination과 구분한다.
+- 2026-09-22 live verification에서 여주시는 과거 implementation allowlist의 `31280`이 아니라 `31320`으로 반환됐다. historical PoC의 당시 관찰을 변경하지 않고, 현재 allowlist는 이 live contract를 사용한다.
+- 같은 live bootstrap에서 metadata 응답이 realtime `PT5S` 제한을 넘을 수 있음을 확인했다. metadata 요청만 별도 `PT30S` response timeout을 사용하며 realtime timeout은 유지한다.
 - 31개 cityCode Route 조회는 모두 `resultCode=00`이었다.
 - 각 cityCode의 `totalCount`와 실제 반환 item 수가 일치했다. 최소는 과천시(`31110`) 4건, 최대는 광주시(`31250`) 227건이었다.
 - 전체 2,155 Route row의 `routeid`는 모두 고유했다. 따라서 이번 데이터 기준 경기도 전체 Route 목록은 **31개 cityCode별 1 page, 2,155개 unique Route**로 수집 가능하다.

@@ -3,6 +3,7 @@ package com.stopbell.transit.client;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
+import java.time.Duration;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,5 +34,7 @@ class TransitClientPropertiesConfigurationTest {
         assertThat(properties.seoul().baseUrl()).isEqualTo("http://ws.bus.go.kr/api/rest/buspos");
         assertThat(properties.tago().serviceKey()).isEqualTo("shared-service-key");
         assertThat(properties.seoul().serviceKey()).isEqualTo("shared-service-key");
+        assertThat(properties.responseTimeout()).isEqualTo(Duration.ofSeconds(5));
+        assertThat(properties.metadataResponseTimeout()).isEqualTo(Duration.ofSeconds(30));
     }
 }
