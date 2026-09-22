@@ -20,10 +20,11 @@ public record TransitClientProperties(
         }
     }
 
-    public record Tago(String baseUrl, String serviceKey) {
+    public record Tago(String baseUrl, String metadataBaseUrl, String serviceKey) {
 
         public Tago {
             requireNotBlank(baseUrl, "TAGO base URL");
+            requireNotBlank(metadataBaseUrl, "TAGO metadata base URL");
             requireNotBlank(serviceKey, "TAGO service key");
         }
     }

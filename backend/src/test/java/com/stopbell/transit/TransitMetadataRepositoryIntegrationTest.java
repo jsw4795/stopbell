@@ -16,6 +16,7 @@ import com.stopbell.transit.repository.BusStopRepository;
 import com.stopbell.transit.service.BusMetadataSyncService;
 import com.stopbell.transit.service.BusRouteMetadataSnapshot;
 import com.stopbell.transit.service.BusStopOccurrenceMetadataSnapshot;
+import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -217,20 +218,20 @@ class TransitMetadataRepositoryIntegrationTest {
                 "41110",
                 List.of(stop("shared-stop", "공유 정류장", 1), stop("exclusive-stop", "단독 정류장", 2))
         );
-        metadataSyncService.syncProviderSnapshot(TransitProvider.TAGO, List.of(firstRoute, secondRoute));
+        metadataSyncService.syncCompleteProviderSnapshot(new CompleteBusMetadataSnapshot(
+                TransitProvider.TAGO, List.of(firstRoute, secondRoute)
+        ));
 
-        metadataSyncService.syncProviderSnapshot(TransitProvider.TAGO, List.of(secondRoute));
+        metadataSyncService.syncCompleteProviderSnapshot(new CompleteBusMetadataSnapshot(
+                TransitProvider.TAGO, List.of(secondRoute)
+        ));
         entityManager.flush();
         entityManager.clear();
         assertThat(busRouteRepository.findByProviderAndExternalRouteId(TransitProvider.TAGO, "route-1")).isEmpty();
         assertThat(busStopRepository.findByProviderAndExternalStopId(TransitProvider.TAGO, "shared-stop")).isPresent();
 
-        metadataSyncService.syncProviderSnapshot(TransitProvider.TAGO, List.of());
-        entityManager.flush();
-        entityManager.clear();
-        assertThat(busRouteRepository.findAllByProvider(TransitProvider.TAGO)).isEmpty();
-        assertThat(busStopRepository.findByProviderAndExternalStopId(TransitProvider.TAGO, "shared-stop")).isEmpty();
-        assertThat(busStopRepository.findByProviderAndExternalStopId(TransitProvider.TAGO, "exclusive-stop")).isEmpty();
+        assertThatThrownBy(() -> new CompleteBusMetadataSnapshot(TransitProvider.TAGO, List.of()))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     private BusRouteMetadataSnapshot routeSnapshot(

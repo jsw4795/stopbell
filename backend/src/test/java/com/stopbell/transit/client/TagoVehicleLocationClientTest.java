@@ -28,7 +28,7 @@ class TagoVehicleLocationClientTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         client = new TagoVehicleLocationClient(builder.build(), new TransitClientProperties.Tago(
-                "https://provider.test/tago", "test-service-key"
+                "https://provider.test/tago", "https://provider.test/tago-metadata", "test-service-key"
         ));
     }
 

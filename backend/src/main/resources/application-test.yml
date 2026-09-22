@@ -15,6 +15,7 @@ transit:
     response-timeout: PT5S
     tago:
       base-url: https://example.test/tago
+      metadata-base-url: https://example.test/tago-metadata
       service-key: test-tago-service-key
     seoul:
       base-url: https://example.test/seoul

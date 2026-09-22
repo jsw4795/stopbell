@@ -1,11 +1,12 @@
 package com.stopbell.transit.service;
 
-import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
+import java.time.Instant;
 
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusRoute;
+import com.stopbell.transit.entity.BusMetadataSyncState;
+import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -13,46 +14,35 @@ public class BusMetadataSyncService {
 
     private final BusRouteMetadataSyncService routeMetadataSyncService;
     private final BusProviderMetadataCleanupService providerMetadataCleanupService;
+    private final BusMetadataSyncStateRepository syncStateRepository;
 
     public BusMetadataSyncService(
             BusRouteMetadataSyncService routeMetadataSyncService,
-            BusProviderMetadataCleanupService providerMetadataCleanupService
+            BusProviderMetadataCleanupService providerMetadataCleanupService,
+            BusMetadataSyncStateRepository syncStateRepository
     ) {
         this.routeMetadataSyncService = routeMetadataSyncService;
         this.providerMetadataCleanupService = providerMetadataCleanupService;
+        this.syncStateRepository = syncStateRepository;
     }
 
     public BusRoute syncRoute(BusRouteMetadataSnapshot snapshot) {
         return routeMetadataSyncService.syncRoute(snapshot);
     }
 
-    /**
-     * Call only after a provider's complete source snapshot has been fetched successfully.
-     */
-    public void syncProviderSnapshot(TransitProvider provider, List<BusRouteMetadataSnapshot> snapshots) {
-        Set<String> externalRouteIds = validateProviderSnapshot(provider, snapshots);
-        for (BusRouteMetadataSnapshot snapshot : snapshots) {
+    public void syncCompleteProviderSnapshot(CompleteBusMetadataSnapshot completeSnapshot) {
+        TransitProvider provider = completeSnapshot.provider();
+        Set<String> externalRouteIds = completeSnapshot.routes().stream()
+                .map(BusRouteMetadataSnapshot::externalRouteId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        for (BusRouteMetadataSnapshot snapshot : completeSnapshot.routes()) {
             syncRoute(snapshot);
         }
         providerMetadataCleanupService.cleanupProvider(provider, externalRouteIds);
-    }
-
-    private Set<String> validateProviderSnapshot(TransitProvider provider, List<BusRouteMetadataSnapshot> snapshots) {
-        if (provider == null || snapshots == null) {
-            throw new IllegalArgumentException("Provider and snapshots must not be null");
-        }
-        Set<String> externalRouteIds = new HashSet<>();
-        for (BusRouteMetadataSnapshot snapshot : snapshots) {
-            if (snapshot == null) {
-                throw new IllegalArgumentException("Provider snapshot must not contain null");
-            }
-            if (snapshot.provider() != provider) {
-                throw new IllegalArgumentException("Provider snapshot contains a route from another provider");
-            }
-            if (!externalRouteIds.add(snapshot.externalRouteId())) {
-                throw new IllegalArgumentException("Provider snapshot contains duplicate route identity");
-            }
-        }
-        return externalRouteIds;
+        Instant completedAt = Instant.now();
+        BusMetadataSyncState state = syncStateRepository.findById(provider)
+                .orElseGet(() -> new BusMetadataSyncState(provider, completedAt));
+        state.markComplete(completedAt);
+        syncStateRepository.save(state);
     }
 }

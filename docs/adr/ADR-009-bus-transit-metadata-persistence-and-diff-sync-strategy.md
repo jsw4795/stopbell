@@ -59,7 +59,9 @@ metadata CRUD와 reconciliation은 JPA Entity 상태 관리와 단순 관계 CRU
 
 ## 후속 구현 경계: TASK-513
 
-TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TASK-513은 source adapter와 production ingestion을 담당한다. 서울은 노선마스터·정류장마스터·노선-정류장마스터 T Data CSV를 parsing·validation해 normalized metadata snapshot을 만들고, 경기는 TAGO city별 Route와 Route Stop을 pagination 완료까지 수집해 snapshot을 만든다. CSV header, encoding, GPS column은 실제 fixture 또는 source 파일을 확인한 TASK-513 구현 시점에 확정한다.
+TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TASK-513은 source adapter와 production ingestion을 담당한다. 서울은 노선마스터·정류장마스터·노선-정류장마스터 T Data CSV를 parsing·validation해 normalized metadata snapshot을 만들고, 경기는 TAGO city별 Route와 Route Stop을 pagination 완료까지 수집해 snapshot을 만든다. 2026-09-22 실제 서울 T Data source는 UTF-8 BOM CSV이며 노선은 `노선ID`/`노선명`, 노선-노드는 `노선ID`/`노드ID`/`정류장순번`, 정류장은 `정류장ID`/`정류장명`/`좌표X`(longitude)/`좌표Y`(latitude)를 사용한다. Parser는 세 파일의 정확한 header, 필수 값, 양의·Route 내 unique stop order, master join 및 GPS 범위를 검증하며 같은 Route의 동일 Stop 재등장은 허용한다. `노선유형`, `거리`, `링크거리누계`, `정류장유형`, `정류장번호`, `BIT설치여부`는 현재 persistence에 넣지 않는다.
+
+서울 T Data의 공식 노선유형 중 `공항`, `마을`, `간선`, `지선`, `순환`, `광역`, `관광`은 `SEOUL_BUS` complete snapshot에 포함하고 `경기`, `인천`은 TAGO provider routing과 충돌하지 않도록 제외한다. 이는 Route ID prefix나 이름이 아닌 source의 공식 노선유형 semantic에 따른 provider scope다. 노선유형이 null이면 occurrence가 모두 확인된 일반 버스 정류장유형(`일반차로`, `중앙차로`, `일반중앙차로`, `가로변전일`, `가로변시간`, `마을버스`, `가상정류장`)일 때만 포함하고, 모두 `선착장`이면 한강버스 등 수상교통 Route로 제외한다. null Route의 occurrence 없음, 일반 버스/선착장 혼재, 미확인 정류장유형 또는 안전하게 판정할 수 없는 구조는 complete snapshot 실패이며 provider cleanup과 `lastCompleteSyncAt` 갱신으로 진행하지 않는다.
 
 최초 bootstrap은 일반 Backend startup에 묶지 않는 명시적 one-shot import/sync 실행을 기본으로 한다. 자동 refresh 주기는 이 ADR이나 TASK-513 문서 범위에서 확정하지 않는다. partial source fetch, parser failure, pagination incomplete, required source missing, provider request 일부 실패와 검증되지 않은 empty result는 모두 complete snapshot이 아니므로 provider 전체 cleanup을 실행하지 않는다. Incomplete snapshot을 absence/deletion으로 해석하지 않는다.
 
