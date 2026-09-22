@@ -82,6 +82,7 @@ metadata bootstrap은 일반 Backend startup과 분리된 명시적 one-shot 실
 ```
 
 TAGO metadata bootstrap도 같은 방식으로 provider만 지정해 실행한다.
+경기도 full sync는 city/route/API collection 및 DB reconciliation 진행률을 INFO log로 출력한다.
 
 ```text
 ./gradlew bootRun --args='
