@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.UUID;
 
 import com.stopbell.alarm.entity.AdjacentStopSnapshot;
@@ -227,6 +228,51 @@ class BusAlarmEvaluatorTest {
     }
 
     @Test
+    @DisplayName("roster에만 남은 baseline-after 차량은 missing grace 이후에도 보존한다")
+    void preserves_baseline_after_vehicle_when_present_without_detail_observation() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        BusAlarmEvaluationResult baseline = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "later-stop", 90, ArrivalEvidence.MOVING, NOW));
+
+        BusAlarmEvaluationResult presentWithoutDetail = evaluatePresent(alarm, baseline.nextState(), Set.of("vehicle"),
+                List.of(), NOW.plusSeconds(61));
+
+        assertThat(presentWithoutDetail.eventCandidates()).isEmpty();
+        assertThat(presentWithoutDetail.nextState().baselineAfterVehicles()).containsKey("vehicle");
+    }
+
+    @Test
+    @DisplayName("상세 조회가 정상 empty여도 roster에 있는 tracked 차량의 위치와 event는 추측하지 않는다")
+    void preserves_tracked_vehicle_when_present_without_detail_observation() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        TransitObservation observation = observation(
+                TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10, ArrivalEvidence.MOVING, NOW
+        );
+        BusAlarmEvaluationResult baseline = evaluate(alarm, BusAlarmEvaluationState.initial(), observation);
+
+        BusAlarmEvaluationResult presentWithoutDetail = evaluatePresent(alarm, baseline.nextState(), Set.of("vehicle"),
+                List.of(), NOW.plusSeconds(61));
+
+        VehicleTrackingState tracking = presentWithoutDetail.nextState().trackedVehicles().get("vehicle");
+        assertThat(presentWithoutDetail.eventCandidates()).isEmpty();
+        assertThat(tracking.lastObservation()).isEqualTo(observation);
+        assertThat(tracking.lastSeenAt()).isEqualTo(NOW.plusSeconds(61));
+    }
+
+    @Test
+    @DisplayName("roster에서도 사라진 차량은 기존 missing grace 뒤에 제거한다")
+    void expires_vehicle_when_not_present_in_roster() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        BusAlarmEvaluationResult baseline = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10, ArrivalEvidence.MOVING, NOW));
+
+        BusAlarmEvaluationResult expired = evaluatePresent(alarm, baseline.nextState(), Set.of(), List.of(),
+                NOW.plusSeconds(61));
+
+        assertThat(expired.nextState().trackedVehicles()).doesNotContainKey("vehicle");
+    }
+
+    @Test
     @DisplayName("직접 ARRIVED evidence는 같은 transition의 PASSED보다 우선한다")
     void gives_arrived_precedence_over_passed() {
         Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
@@ -363,6 +409,16 @@ class BusAlarmEvaluatorTest {
             Instant now
     ) {
         return evaluator.evaluate(alarm, state, observations, now);
+    }
+
+    private BusAlarmEvaluationResult evaluatePresent(
+            Alarm alarm,
+            BusAlarmEvaluationState state,
+            Set<String> presentVehicleIds,
+            List<TransitObservation> observations,
+            Instant now
+    ) {
+        return evaluator.evaluate(alarm, state, presentVehicleIds, observations, now);
     }
 
     private static Alarm activeAlarm(TransitProvider provider) {

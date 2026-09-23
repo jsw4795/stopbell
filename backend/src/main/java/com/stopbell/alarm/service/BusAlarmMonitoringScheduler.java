@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import com.stopbell.alarm.entity.Alarm;
@@ -17,6 +18,8 @@ import com.stopbell.transit.client.SeoulBusVehicleLocationRequestContext;
 import com.stopbell.transit.client.TagoVehicleLocationClient;
 import com.stopbell.transit.client.TagoVehicleLocationRequestContext;
 import com.stopbell.transit.client.VehicleLocationRequest;
+import com.stopbell.transit.domain.TransitEvent;
+import com.stopbell.transit.domain.TransitEventType;
 import com.stopbell.transit.domain.TransitObservation;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.dto.seoul.SeoulBusVehicleLocationItem;
@@ -85,46 +88,41 @@ public class BusAlarmMonitoringScheduler {
     }
 
     private void pollGroup(BusAlarmPollingGroup group) {
-        List<TransitObservation> observations = switch (group.key().provider()) {
+        PollSnapshot snapshot = switch (group.key().provider()) {
             case TAGO -> pollTago(group);
             case SEOUL_BUS -> pollSeoul(group);
         };
         Instant now = clock.instant();
         for (Alarm alarm : group.alarms()) {
-            evaluateAndApply(alarm, observations, now);
+            evaluateAndApply(alarm, snapshot, now);
         }
     }
 
-    private List<TransitObservation> pollTago(BusAlarmPollingGroup group) {
+    private PollSnapshot pollTago(BusAlarmPollingGroup group) {
         VehicleLocationRequest<TagoVehicleLocationRequestContext> request = new VehicleLocationRequest<>(
                 group.key().externalRouteId(), new TagoVehicleLocationRequestContext(group.key().cityCode())
         );
-        return tagoMapper.map(request, tagoVehicleLocationClient.fetchVehicleLocations(request));
+        List<TransitObservation> observations = tagoMapper.map(request, tagoVehicleLocationClient.fetchVehicleLocations(request));
+        return new PollSnapshot(observations, vehicleIds(observations));
     }
 
-    private List<TransitObservation> pollSeoul(BusAlarmPollingGroup group) {
+    private PollSnapshot pollSeoul(BusAlarmPollingGroup group) {
         VehicleLocationRequest<SeoulBusVehicleLocationRequestContext> request = new VehicleLocationRequest<>(
                 group.key().externalRouteId(), new SeoulBusVehicleLocationRequestContext()
         );
         List<SeoulBusVehicleLocationItem> roster = rosterItems(
                 seoulBusVehicleLocationClient.fetchVehicleLocations(request)
         );
-        Set<String> vehicleIds = selectSeoulDetailVehicleIds(group.alarms(), roster);
+        Set<String> presentVehicleIds = rosterVehicleIds(roster);
+        Set<String> vehicleIds = selectSeoulDetailVehicleIds(group.alarms(), presentVehicleIds);
         List<TransitObservation> observations = new ArrayList<>();
         for (String vehicleId : vehicleIds) {
             observations.addAll(seoulMapper.map(request, seoulBusVehicleDetailClient.fetchVehicleDetail(vehicleId)));
         }
-        return observations;
+        return new PollSnapshot(observations, presentVehicleIds);
     }
 
-    private Set<String> selectSeoulDetailVehicleIds(List<Alarm> alarms, List<SeoulBusVehicleLocationItem> roster) {
-        Set<String> rosterVehicleIds = new LinkedHashSet<>();
-        for (SeoulBusVehicleLocationItem item : roster) {
-            if (item.vehId() != null && !item.vehId().isBlank()) {
-                rosterVehicleIds.add(item.vehId());
-            }
-        }
-
+    private Set<String> selectSeoulDetailVehicleIds(List<Alarm> alarms, Set<String> rosterVehicleIds) {
         Set<String> detailVehicleIds = new LinkedHashSet<>();
         for (Alarm alarm : alarms) {
             AlarmEvaluationKey key = evaluationKey(alarm);
@@ -155,12 +153,24 @@ public class BusAlarmMonitoringScheduler {
         return detailVehicleIds;
     }
 
-    private void evaluateAndApply(Alarm alarm, List<TransitObservation> observations, Instant now) {
+    private void evaluateAndApply(Alarm alarm, PollSnapshot snapshot, Instant now) {
         AlarmEvaluationKey key = evaluationKey(alarm);
         BusAlarmEvaluationState currentState = evaluationStates.getOrDefault(key, BusAlarmEvaluationState.initial());
-        BusAlarmEvaluationResult result = evaluator.evaluate(alarm, currentState, observations, now);
-        if (lifecycleService.applyIfCurrent(key, alarm.getStatus(), result, now)) {
-            evaluationStates.put(key, result.nextState());
+        BusAlarmEvaluationResult result = evaluator.evaluate(
+                alarm, currentState, snapshot.presentVehicleIds(), snapshot.observations(), now
+        );
+        Optional<TransitEvent> selectedEvent = BusAlarmLifecycleService.selectEvent(
+                result.eventCandidates(), alarm.getStatus()
+        );
+        BusAlarmEvaluationResult selectedResult = new BusAlarmEvaluationResult(
+                selectedEvent.map(List::of).orElseGet(List::of), result.nextState(), result.followUpExpired()
+        );
+        if (lifecycleService.applyIfCurrent(key, alarm.getStatus(), selectedResult)) {
+            BusAlarmEvaluationState nextState = selectedResult.nextState();
+            if (isFollowUpTransition(alarm, selectedEvent)) {
+                nextState = nextState.forFollowUp(selectedEvent.orElseThrow().vehicleTrackingId());
+            }
+            evaluationStates.put(key, nextState);
         }
     }
 
@@ -181,6 +191,34 @@ public class BusAlarmMonitoringScheduler {
             return List.of();
         }
         return response.body().itemList();
+    }
+
+    private static Set<String> vehicleIds(List<TransitObservation> observations) {
+        Set<String> vehicleIds = new LinkedHashSet<>();
+        for (TransitObservation observation : observations) {
+            vehicleIds.add(observation.vehicleTrackingId());
+        }
+        return vehicleIds;
+    }
+
+    private static Set<String> rosterVehicleIds(List<SeoulBusVehicleLocationItem> roster) {
+        Set<String> vehicleIds = new LinkedHashSet<>();
+        for (SeoulBusVehicleLocationItem item : roster) {
+            if (item.vehId() != null && !item.vehId().isBlank()) {
+                vehicleIds.add(item.vehId());
+            }
+        }
+        return vehicleIds;
+    }
+
+    private static boolean isFollowUpTransition(Alarm alarm, Optional<TransitEvent> selectedEvent) {
+        return alarm.getStatus() == AlarmStatus.ACTIVE
+                && alarm.getBusAlarmTarget().isNotifyOneStopAfter()
+                && selectedEvent.isPresent()
+                && selectedEvent.get().type() == TransitEventType.ARRIVED;
+    }
+
+    private record PollSnapshot(List<TransitObservation> observations, Set<String> presentVehicleIds) {
     }
 
     private static AlarmEvaluationKey evaluationKey(Alarm alarm) {

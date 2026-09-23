@@ -41,15 +41,31 @@ public class BusAlarmEvaluator {
             List<TransitObservation> observations,
             Instant now
     ) {
-        if (alarm == null || state == null || observations == null || now == null) {
-            throw new IllegalArgumentException("Alarm, state, observations, and evaluation time must not be null");
+        Set<String> presentVehicleIds = observations == null ? null : observations.stream()
+                .map(TransitObservation::vehicleTrackingId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        return evaluate(alarm, state, presentVehicleIds, observations, now);
+    }
+
+    public BusAlarmEvaluationResult evaluate(
+            Alarm alarm,
+            BusAlarmEvaluationState state,
+            Set<String> presentVehicleIds,
+            List<TransitObservation> observations,
+            Instant now
+    ) {
+        if (alarm == null || state == null || presentVehicleIds == null || observations == null || now == null) {
+            throw new IllegalArgumentException("Alarm, state, present vehicles, observations, and evaluation time must not be null");
+        }
+        if (presentVehicleIds.stream().anyMatch(vehicleId -> vehicleId == null || vehicleId.isBlank())) {
+            throw new IllegalArgumentException("Present vehicle IDs must not be blank");
         }
         BusAlarmTarget target = requireTarget(alarm);
         validateObservationRoute(target, observations);
 
         return switch (alarm.getStatus()) {
-            case ACTIVE -> evaluateActive(target, state, observations, now);
-            case FOLLOW_UP -> evaluateFollowUp(alarm, target, state, observations, now);
+            case ACTIVE -> evaluateActive(target, state, presentVehicleIds, observations, now);
+            case FOLLOW_UP -> evaluateFollowUp(alarm, target, state, presentVehicleIds, observations, now);
             case INACTIVE -> throw new IllegalStateException("Inactive alarm cannot be evaluated");
         };
     }
@@ -57,10 +73,12 @@ public class BusAlarmEvaluator {
     private BusAlarmEvaluationResult evaluateActive(
             BusAlarmTarget target,
             BusAlarmEvaluationState state,
+            Set<String> presentVehicleIds,
             List<TransitObservation> observations,
             Instant now
     ) {
         BusAlarmEvaluationState.Mutable next = state.mutableCopy();
+        touchPresentVehicles(next, presentVehicleIds, now);
         expireMissingVehicles(next.trackedVehicles(), now);
         expireMissingBaselineAfterVehicles(next.baselineAfterVehicles(), now);
 
@@ -194,6 +212,7 @@ public class BusAlarmEvaluator {
             Alarm alarm,
             BusAlarmTarget target,
             BusAlarmEvaluationState state,
+            Set<String> presentVehicleIds,
             List<TransitObservation> observations,
             Instant now
     ) {
@@ -207,6 +226,7 @@ public class BusAlarmEvaluator {
         }
 
         BusAlarmEvaluationState.Mutable next = state.mutableCopy();
+        touchPresentVehicles(next, presentVehicleIds, now);
         Snapshot snapshot = uniqueSnapshot(observations);
         String followUpVehicleId = alarm.getFollowUpVehicleTrackingId();
         TransitObservation observation = snapshot.observations().get(followUpVehicleId);
@@ -396,6 +416,20 @@ public class BusAlarmEvaluator {
         VehicleTrackingState tracking = vehicles.get(vehicleId);
         if (tracking != null) {
             vehicles.put(vehicleId, tracking.observe(tracking.lastObservation(), now));
+        }
+    }
+
+    private static void touchPresentVehicles(
+            BusAlarmEvaluationState.Mutable state,
+            Set<String> presentVehicleIds,
+            Instant now
+    ) {
+        for (String vehicleId : presentVehicleIds) {
+            touch(state.trackedVehicles(), vehicleId, now);
+            if (state.baselineAfterVehicles().containsKey(vehicleId)) {
+                state.baselineAfterVehicles().put(vehicleId, now);
+            }
+            touch(state.followUpVehicles(), vehicleId, now);
         }
     }
 

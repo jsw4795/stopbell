@@ -35,7 +35,7 @@ class BusAlarmLifecycleServiceTest {
         when(alarmRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(alarm));
 
         boolean applied = lifecycleService.applyIfCurrent(
-                key, AlarmStatus.ACTIVE, result(TransitEventType.ARRIVED), Instant.parse("2026-09-23T00:00:00Z")
+                key, AlarmStatus.ACTIVE, result(TransitEventType.ARRIVED)
         );
 
         assertThat(applied).isTrue();
@@ -53,13 +53,45 @@ class BusAlarmLifecycleServiceTest {
         boolean applied = lifecycleService.applyIfCurrent(
                 new AlarmEvaluationKey(1L, alarm.getActivationGeneration() - 1),
                 AlarmStatus.ACTIVE,
-                result(TransitEventType.ARRIVED),
-                Instant.parse("2026-09-23T00:00:00Z")
+                result(TransitEventType.ARRIVED)
         );
 
         assertThat(applied).isFalse();
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
         verify(alarmRepository).findByIdForUpdate(1L);
+    }
+
+    @Test
+    @DisplayName("ARRIVED follow-up 시작과 만료는 scheduler 시간이 아닌 event observedAt UTC를 사용한다")
+    void starts_follow_up_from_event_observed_at() {
+        Alarm alarm = activeAlarm();
+        AlarmEvaluationKey key = new AlarmEvaluationKey(1L, alarm.getActivationGeneration());
+        Instant observedAt = Instant.parse("2026-09-23T00:00:00Z");
+        when(alarmRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(alarm));
+
+        lifecycleService.applyIfCurrent(key, AlarmStatus.ACTIVE, result(TransitEventType.ARRIVED, observedAt));
+
+        assertThat(alarm.getFollowUpStartedAt()).isEqualTo(java.time.LocalDateTime.of(2026, 9, 23, 0, 0));
+        assertThat(alarm.getFollowUpExpiresAt()).isEqualTo(java.time.LocalDateTime.of(2026, 9, 23, 0, 5));
+    }
+
+    @Test
+    @DisplayName("ACTIVE event 후보는 우선순위와 vehicleTrackingId로 하나를 일정하게 선택한다")
+    void selects_one_active_event_deterministically() {
+        List<TransitEvent> candidates = List.of(
+                event(TransitEventType.ONE_STOP_BEFORE, "vehicle-z"),
+                event(TransitEventType.ARRIVED, "vehicle-z"),
+                event(TransitEventType.PASSED, "vehicle-a"),
+                event(TransitEventType.ARRIVED, "vehicle-a")
+        );
+        TransitEvent selected = BusAlarmLifecycleService.selectEvent(candidates, AlarmStatus.ACTIVE).orElseThrow();
+        TransitEvent selectedFromReversed = BusAlarmLifecycleService.selectEvent(
+                List.of(candidates.get(3), candidates.get(2), candidates.get(1), candidates.getFirst()), AlarmStatus.ACTIVE
+        ).orElseThrow();
+
+        assertThat(selected.type()).isEqualTo(TransitEventType.ARRIVED);
+        assertThat(selected.vehicleTrackingId()).isEqualTo("vehicle-a");
+        assertThat(selectedFromReversed).isEqualTo(selected);
     }
 
     private static Alarm activeAlarm() {
@@ -74,10 +106,20 @@ class BusAlarmLifecycleServiceTest {
     }
 
     private static BusAlarmEvaluationResult result(TransitEventType eventType) {
-        TransitEvent event = new TransitEvent(
-                eventType, "vehicle-1", UUID.randomUUID(), Instant.parse("2026-09-23T00:00:00Z"),
-                "stop-1", null, 3, null, null, null, null
-        );
+        return result(eventType, Instant.parse("2026-09-23T00:00:00Z"));
+    }
+
+    private static BusAlarmEvaluationResult result(TransitEventType eventType, Instant observedAt) {
+        TransitEvent event = event(eventType, "vehicle-1", observedAt);
         return new BusAlarmEvaluationResult(List.of(event), BusAlarmEvaluationState.initial(), false);
+    }
+
+    private static TransitEvent event(TransitEventType type, String vehicleTrackingId) {
+        return event(type, vehicleTrackingId, Instant.parse("2026-09-23T00:00:00Z"));
+    }
+
+    private static TransitEvent event(TransitEventType type, String vehicleTrackingId, Instant observedAt) {
+        return new TransitEvent(type, vehicleTrackingId, UUID.randomUUID(), observedAt,
+                "stop-1", null, 3, null, null, null, null);
     }
 }

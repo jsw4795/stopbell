@@ -33,6 +33,14 @@ public record BusAlarmEvaluationState(
         );
     }
 
+    public BusAlarmEvaluationState forFollowUp(String vehicleTrackingId) {
+        VehicleTrackingState tracking = trackedVehicles.get(vehicleTrackingId);
+        if (tracking == null) {
+            throw new IllegalArgumentException("Follow-up vehicle must have active tracking state");
+        }
+        return new BusAlarmEvaluationState(true, Map.of(), Map.of(), Map.of(vehicleTrackingId, tracking));
+    }
+
     public static final class Mutable {
         private boolean baselineEstablished;
         private final Map<String, VehicleTrackingState> trackedVehicles;
