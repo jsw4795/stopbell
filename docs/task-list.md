@@ -176,7 +176,7 @@ Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 A
 - [x] TASK-507 Transit metadata persistence / MyBatis 필요성 결정 및 구현
 - [x] TASK-513 Transit metadata source adapter / bootstrap 구현
 - [x] TASK-508 Alarm grouping 조회 전략 결정 및 구현
-- [ ] TASK-509 Alarm Evaluation Logic 구현
+- [x] TASK-509 Alarm Evaluation Logic 구현
 - [ ] TASK-510 Scheduler 실행 모델 결정 및 구현
 - [ ] TASK-511 Transit API failure를 `UNKNOWN` 상태로 처리
 - [ ] TASK-512 Transit Integration Test 작성
@@ -208,7 +208,7 @@ TASK-513 ingestion은 단일 Backend 환경에서 동일 Provider full sync sing
 
 TASK-508은 기본 polling key를 TAGO의 `(provider, externalRouteId, cityCode)`, 서울의 `(provider, externalRouteId)`로 grouping한다. `cityCode`는 Route identity가 아니라 TAGO request 재현 문맥이지만 동일 request 공유에는 필요하다. `AlarmRepository`는 `EntityGraph`로 BUS `ACTIVE`/`FOLLOW_UP` Alarm과 `BusAlarmTarget`을 함께 조회하고, Java가 조회 순서대로 group을 구성한다. `INACTIVE`는 제외하며 같은 Route를 쓰는 여러 사용자·target Stop·ACTIVE Alarm·FOLLOW_UP Alarm은 가능한 한 한 Route polling response를 공유한다. target 누락 또는 Provider request context가 깨진 monitoring Alarm은 query에서 숨기거나 보정하지 않고 명시적으로 실패시킨다. 현재 JPA + Java grouping으로 충분하며 MyBatis와 실제 Provider 호출은 도입하지 않는다. Observation 평가, Scheduler와 Provider failure의 `UNKNOWN` 처리는 후속 Task에 남긴다.
 
-TASK-509은 ACTIVE Alarm의 필요한 vehicle tracking을 V1에서 memory 기반으로 관리할 수 있다. Backend restart 뒤에는 이전 memory tracking과 새 cycle을 연결하지 않고 안전한 recovery baseline을 만들며, restart 전 Observation과 연결해 PASSED를 추론하거나 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 일부 Event 누락보다 false-positive 방지를 우선하며, 모든 raw Provider observation 저장이나 event sourcing은 도입하지 않는다. FOLLOW_UP은 영속된 `status`, `vehicleTrackingId`, `startedAt`, `expiresAt`을 실제 scheduler가 재사용해 유효한 동일 vehicle tracking을 재개해야 한다. restart continuity 충족 여부는 TASK-811에서 검증하고 필요하면 최소 persistence를 재검토한다.
+TASK-509은 `BusAlarmEvaluator`와 memory 기반 `BusAlarmEvaluationState`로 ACTIVE 차량별 최신 Observation, 마지막 관찰 시각, cycle별 emitted Event만 보존한다. logical `trackingCycleId`는 cycle 시작 시 한 번 생성한 UUID이며 raw Observation history, tracking DB table, event sourcing은 도입하지 않는다. baseline target-after 차량은 60초 missing grace 동안 별도로 보존하며, ACTIVE memory state는 restart 뒤 복원하거나 이전 Observation과 연결하지 않고 새 baseline으로 시작한다. V1 evidence policy는 TAGO target GPS 100m, Observation/서울 provider data freshness 60초, vehicle missing grace 60초, FOLLOW_UP timeout 5분이다. `TransitEvent`는 provider-neutral candidate로 type, vehicle/cycle ID, 최신 위치와 optional metadata edge-count `stopsPastTarget`을 전달한다. FOLLOW_UP은 영속된 `status`, `vehicleTrackingId`, `startedAt`, `expiresAt`을 Evaluation이 사용해 동일 차량의 ONE_STOP_AFTER 또는 event 없는 expiry를 판단하며, 실제 scheduler/lifecycle 적용은 TASK-510이 맡는다.
 
 TASK-510은 단일 Spring instance 기준으로 polling cycle overlap을 막는 synchronous/fixed-delay 모델을 우선한다. Provider HTTP I/O 중 DB transaction/row lock을 장시간 유지하지 않고, Alarm을 읽은 뒤 deactivate/delete/reactivate될 수 있음을 고려해 stale polling 결과가 최신 lifecycle을 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation race를 안전하게 처리한다. Persisted semantic activation generation은 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. `trackingCycleId` 또는 동등한 logical vehicle tracking cycle identity는 cycle 시작 시 한 번 생성하며 같은 logical cycle의 transaction retry에서 재생성하지 않는다. TASK-510 구현 시 current API/scheduler transaction 구조를 보고 `@Version`, CAS, pessimistic row lock 중 하나의 최소 concurrency mechanism만 선택하며 중복 적용하지 않는다.
 

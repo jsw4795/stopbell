@@ -533,15 +533,17 @@ UNKNOWN → Notification 없이 다음 Observation 대기
 
 새 차량이 이후 나타나 Target 이전에서 관찰되면 새 tracking 후보가 될 수 있다. PASSED 뒤 해당 차량 cycle은 종료하고 같은 Event를 다시 만들지 않는다. 같은 tracking reference가 순환해 다시 Target 이전에 나타나는 경우에는 차량 소실·새 운행 시작 등 새 cycle 근거가 있어야 하며 단순 order 역행만으로 재사용하지 않는다.
 
-ARRIVED 뒤 after 옵션이 꺼져 있으면 Alarm을 INACTIVE로 전환하고 모든 차량 tracking을 끝낸다. 옵션이 켜져 있으면 Alarm을 FOLLOW_UP으로 전환하고 다른 차량 tracking을 끝내며, 성공 차량만 ONE_STOP_AFTER까지 short follow-up 한다. FOLLOW_UP runtime은 Alarm에 영속되어 재시작 뒤 복구할 수 있고 timeout 숫자는 TASK-509/510에서 결정한다.
+ARRIVED 뒤 after 옵션이 꺼져 있으면 Alarm을 INACTIVE로 전환하고 모든 차량 tracking을 끝낸다. 옵션이 켜져 있으면 Alarm을 FOLLOW_UP으로 전환하고 다른 차량 tracking을 끝내며, 성공 차량만 ONE_STOP_AFTER까지 short follow-up 한다. FOLLOW_UP runtime은 Alarm에 영속되어 재시작 뒤 복구할 수 있다. V1 follow-up timeout은 ARRIVED 시점부터 5분이며, timeout은 Transit Event 없이 후속 orchestration이 `completeFollowUp()`할 수 있는 평가 결과다.
 
 FOLLOW_UP 상태의 동일 Alarm을 사용자가 다시 활성화하면 이전 activation cycle의 follow-up runtime을 지우고 새 baseline으로 새 monitoring cycle을 시작한다. 비활성화와 follow-up 완료도 runtime을 지운다. Alarm 삭제 시에는 Alarm column인 runtime과 공유 PK BusAlarmTarget이 함께 삭제된다.
 
-반복 Observation 억제와 중복 Event candidate 억제는 tracking/Evaluation 책임이다. ACTIVE tracking은 V1에서 memory 기반일 수 있다. `trackingCycleId` 또는 동등한 값은 transaction ID가 아니라 logical vehicle tracking cycle identity이며 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction retry에서는 identity를 유지해 Notification dedup uniqueness를 우회하지 않는다. TransitEvent가 Notification candidate가 되면 cycle identity를 durable `NotificationEvent`에 복사한다. 모든 raw Observation이나 ACTIVE tracking state를 영속하지 않는다.
+반복 Observation 억제와 중복 Event candidate 억제는 tracking/Evaluation 책임이다. ACTIVE tracking은 V1에서 memory 기반이며, `BusAlarmEvaluationState`는 차량별 최신 Observation, 마지막 관찰 시각, 해당 cycle에서 이미 낸 Event type만 보존한다. raw Observation history 전체는 저장하지 않는다. `trackingCycleId`는 `UUID`이고 transaction ID가 아니라 logical vehicle tracking cycle identity이며 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction retry에서는 identity를 유지해 Notification dedup uniqueness를 우회하지 않는다. TransitEvent가 Notification candidate가 되면 cycle identity를 durable `NotificationEvent`에 복사한다. ACTIVE state는 재시작 뒤 복원하거나 이전 Observation과 연결하지 않고 새 baseline으로 시작한다.
+
+TASK-509의 V1 evidence policy는 다음과 같다. `observedAt`과 서울의 `providerDataTime`은 평가 시각보다 60초를 초과해 오래되었거나 미래이면 `UNKNOWN`이다. TAGO target ARRIVED는 exact Stop ID/order와 target GPS 100m 이내 corroboration을 baseline에서 요구하며, 이미 같은 cycle에서 target 이전을 관찰한 경우에는 단조 진행도 근거가 된다. Target GPS와 Observation GPS가 모두 있고 거리가 100m를 넘으면 도착 신호와 충돌하므로 `UNKNOWN`이다. 차량은 한 snapshot에 없다는 이유만으로 종료하지 않고 마지막 관찰 후 60초가 지난 뒤에만 tracking cycle을 종료한다. baseline에서 이미 target 이후였던 차량은 이 grace 동안 별도로 기억해 order regression만으로 새 cycle을 만들지 않는다. Stop ID/order conflict, order regression, direction conflict, stale data, duplicate vehicle Observation 또는 근거 부족은 기존 state를 즉시 파괴하지 않는 `UNKNOWN`이다.
 
 ## Persistence
 
-`TransitObservation`과 ACTIVE Vehicle tracking state 전체는 V1에서 영속하지 않을 수 있다. Durable Notification dedup에 필요한 activation generation, tracking cycle identity, event type은 TransitEvent에서 `NotificationEvent`로 전달한다. 구체 Schema, Java DTO/record, scheduler, GPS/freshness 수치와 평가 구현은 후속 Task 범위다.
+`TransitObservation`과 ACTIVE Vehicle tracking state 전체는 V1에서 영속하지 않는다. Durable Notification dedup에 필요한 activation generation, tracking cycle identity, event type은 TransitEvent에서 `NotificationEvent`로 전달한다. `TransitEvent`는 type, vehicle tracking ID, UUID cycle ID, latest observed time/position, optional provider data time 및 PASSED의 optional metadata-derived `stopsPastTarget`을 provider-neutral하게 전달한다. Scheduler와 lifecycle persistence/concurrency는 후속 Task 범위다.
 
 ------------------------------------------------------------------------
 
