@@ -112,7 +112,7 @@ Device internal PK
 
 ### Alarm activation과 tracking identity
 
-Alarm은 새 monitoring activation cycle마다 증가하는 persisted semantic activation generation을 가진다. `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. 이는 deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation Notification candidate를 현재 activation과 구분한다. 구체 이름 후보는 `activationSequence`이며 CAS/query와 JPA `@Version` 병행 여부는 TASK-510에서 확정한다.
+Alarm은 새 monitoring activation cycle마다 증가하는 `activationGeneration` persisted semantic generation을 가진다. 이는 `BIGINT NOT NULL DEFAULT 0`이며 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation Notification candidate를 현재 activation과 구분한다. TASK-510은 API lifecycle mutation과 Scheduler result 적용에 `PESSIMISTIC_WRITE` 하나를 사용하며 CAS와 JPA `@Version`을 병행하지 않는다.
 
 ACTIVE vehicle tracking은 기존 Phase 5 결정대로 V1에서 memory 기반일 수 있다. `trackingCycleId` 또는 동등한 값은 DB transaction ID가 아니라 logical vehicle tracking cycle identity로 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction이 deadlock/optimistic conflict로 retry되어도 identity를 다시 만들지 않으며 retry로 Notification dedup uniqueness를 우회해서는 안 된다. TransitEvent 발생 시 이 identity를 durable NotificationEvent에 복사할 수 있다. Restart 뒤에는 이전 tracking을 새 cycle과 임의로 연결하지 않고 safe recovery baseline을 사용한다. Notification correctness를 이유로 raw TransitObservation 또는 ACTIVE tracking 전체를 영속하지 않는다.
 
@@ -182,7 +182,7 @@ MySQL outbox는 이미 사용하는 infrastructure 안에서 lifecycle transitio
 
 - TASK-701은 SDK 버전과 실제 iOS targeting/local unregister 동작 및 early device smoke를 먼저 확인한다.
 - TASK-702/703은 installation identity, multi-device, stale registration ordering과 별도 disable API를 정의·구현한다.
-- TASK-510은 persisted activation generation의 정확한 증가/CAS 계약을 구현한다.
+- TASK-510은 persisted activation generation의 정확한 증가와 `PESSIMISTIC_WRITE` stale-result 검증을 구현했다.
 - TASK-707/708은 NotificationEvent/Delivery persistence와 logical DB uniqueness를 구현한다.
 - TASK-707은 Alarm 삭제 시 이미 생성된 Event/Delivery를 유지·취소·cascade 삭제할지 lifecycle과 outbox recovery 의미로 결정하며 FK cascade에 우연히 맡기지 않는다.
 - TASK-705/709는 명시적인 Provider result/failure와 bounded retry를 구현한다.

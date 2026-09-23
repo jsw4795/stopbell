@@ -47,7 +47,7 @@ JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `
 
 ## 6. 핵심 테이블
 
-`users`, `refresh_tokens`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 physical Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`, Alarm activation generation, `NotificationEvent`/`NotificationDelivery` physical Schema는 각각 TASK-702, TASK-510, TASK-707에서 별도 Migration으로 추가하거나 기존 Schema를 대체한다.
+`users`, `refresh_tokens`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 physical Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`, `NotificationEvent`/`NotificationDelivery` physical Schema는 각각 TASK-702, TASK-707에서 별도 Migration으로 추가하거나 기존 Schema를 대체한다. Alarm activation generation은 TASK-510의 V11 Migration으로 `alarms`에 추가됐다.
 
 ### users
 
@@ -121,6 +121,7 @@ id BIGINT AUTO_INCREMENT PRIMARY KEY
 user_id BIGINT NOT NULL REFERENCES users(id)
 transit_type VARCHAR(20) NOT NULL
 status VARCHAR(20) NOT NULL
+activation_generation BIGINT NOT NULL DEFAULT 0 CHECK (activation_generation >= 0)
 follow_up_vehicle_tracking_id VARCHAR(255) NULL
 follow_up_started_at DATETIME(6) NULL
 follow_up_expires_at DATETIME(6) NULL
@@ -135,7 +136,7 @@ V6 Migration은 nullable `status`를 먼저 추가하고 기존 `active=true`를
 
 Transit API 조회 실패, Notification 발송 결과, ARRIVED/PASSED Event는 Alarm status로 저장하지 않는다. ACTIVE 중 차량별 tracking 및 Event consumption field도 이 table에 추가하지 않으며 TASK-509/708에서 별도 책임을 결정한다.
 
-Phase 7 Notification correctness를 위해 Alarm에는 서로 다른 activation cycle을 구분하는 persisted semantic activation generation이 필요하다. `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset 없이 idempotent하다. Deactivate 뒤 reactivate, FOLLOW_UP 중 reactivate와 stale scheduler 결과를 구분한다. 구체 column 이름·초기값과 CAS/query 구현은 TASK-510에서 결정하며 현재 physical Schema 설명에는 추측성 column을 추가하지 않는다.
+`activation_generation`은 서로 다른 activation cycle을 구분하는 persisted semantic generation이다. 새 Alarm은 0에서 시작하고 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하며 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset 없이 idempotent하다. Deactivate 뒤 reactivate, FOLLOW_UP 중 reactivate와 stale scheduler 결과를 구분한다. V11 Migration은 0 이상 CHECK를 함께 추가한다. lifecycle mutation과 Scheduler 결과 반영은 결과 적용 직전의 짧은 Alarm row `PESSIMISTIC_WRITE` transaction으로 보호하며 Provider I/O 중에는 lock을 잡지 않는다.
 
 ### bus_alarm_targets
 
@@ -267,6 +268,6 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 
 ## 9. 트랜잭션 고려 사항
 
-동일 logical Notification의 중복은 lifecycle transaction 안의 generation 검증과 NotificationEvent atomic uniqueness로 막는다. TASK-510은 current API/scheduler transaction 구조를 보고 `@Version`, CAS, pessimistic row lock 중 하나의 최소 concurrency mechanism만 선택하며 중복 적용하지 않는다.
+동일 logical Notification의 중복은 lifecycle transaction 안의 generation 검증과 NotificationEvent atomic uniqueness로 막는다. TASK-510은 API lifecycle mutation과 Scheduler 결과 반영에 `PESSIMISTIC_WRITE` 하나를 사용한다. Provider I/O 뒤 결과 적용 직전에 짧은 row-lock transaction에서 current generation/status를 검증하며 `@Version`, CAS, optimistic locking을 병행하지 않는다.
 
 MySQL은 durable pending dispatch/outbox의 Source of Truth다. V1은 하나의 non-overlapping fixed-delay worker가 due PENDING Delivery를 처리한다. Kafka, RabbitMQ, Redis queue, multi-instance distributed lock, claim/lease, `claimedAt`, `SENDING`, stale-claim recovery는 V1에 도입하지 않는다. FCM accepted 뒤 DB update 전 crash하면 PENDING Delivery가 restart 뒤 다시 처리될 수 있고 duplicate Device 표시는 exactly-once 비보장 계약으로 허용한다.

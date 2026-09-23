@@ -121,7 +121,7 @@ Alarm 설정, 상태 전이, 활성화/비활성화 책임을 둔다.
 
 Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기 설정은 같은 aggregate의 공유 PK `BusAlarmTarget` Entity로 분리한다. `AdjacentStopSnapshot`은 Target 생성 시 option과 필요한 predecessor/successor occurrence를 함께 표현한다. Alarm Evaluation은 scheduler에 묻지 않는다. provider-neutral `TransitObservation`과 Alarm Transit Target을 받아 위치 관계 및 `TransitEvent` 후보를 판단하는 Domain/비즈니스 로직은 `alarm`의 책임으로 둔다. Scheduler/orchestration은 같은 Route polling response를 여러 Alarm에 공유하고, Provider failure를 Event 없는 UNKNOWN으로 전달하며, lifecycle 변경과 stale polling 결과의 race를 조정한다.
 
-`BusAlarmPollingService`는 monitoring 대상 BUS `ACTIVE`/`FOLLOW_UP` Alarm을 `AlarmRepository`에서 `BusAlarmTarget`과 함께 조회해 provider route polling key별로 묶는다. 이 내부 grouping 경로는 target 또는 provider request context 불변 조건이 깨진 Alarm을 조용히 제외하지 않는다. 실제 polling과 Scheduler orchestration은 후속 Task에서 구현한다.
+`BusAlarmPollingService`는 monitoring 대상 BUS `ACTIVE`/`FOLLOW_UP` Alarm을 `AlarmRepository`에서 `BusAlarmTarget`과 함께 조회해 provider route polling key별로 묶는다. 이 내부 grouping 경로는 target 또는 provider request context 불변 조건이 깨진 Alarm을 조용히 제외하지 않는다. `BusAlarmMonitoringScheduler`는 enabled일 때 synchronous fixed-delay cycle에서 group별 Provider 조회·Observation 변환·Evaluation을 실행하고, `BusAlarmLifecycleService`가 짧은 `PESSIMISTIC_WRITE` transaction에서 stale result 검증과 lifecycle transition을 적용한다. Provider I/O는 transaction 밖에서 실행하며 memory evaluation state는 `(alarmId, activationGeneration)`별로 보관한다.
 
 ### transit
 

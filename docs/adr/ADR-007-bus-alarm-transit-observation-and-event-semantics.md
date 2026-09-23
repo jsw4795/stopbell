@@ -120,7 +120,7 @@ ARRIVED만 Alarm 성공으로 두면 정상 성공 lifecycle이 단순해지고,
 - TASK-402는 생성·조회·활성화·삭제 계약, before/after validation과 오류 응답을 구체화한다.
 - TASK-504는 Provider raw DTO를 `TransitObservation`으로 변환하고 `TransitEvent`의 provider-neutral 표현을 정의한다. Event 판정 자체는 Provider mapper가 아니라 TASK-509 Evaluation이 담당한다.
 - TASK-509는 evidence 조합, transition precedence, activation 시 predecessor, `stopsPastTarget`, tracking cycle과 UNKNOWN 규칙을 구현했다. V1 초기값은 TAGO target GPS 100m, Observation/서울 provider data freshness 60초, vehicle missing grace 60초, follow-up timeout 5분이며 상세 policy는 Domain Model이 소유한다.
-- TASK-510은 Alarm active lifecycle과 short follow-up lifecycle을 구분하고 재활성화·삭제의 취소 의미를 반영해 scheduling한다.
+- TASK-510은 single-instance synchronous fixed-delay polling에서 Alarm active lifecycle과 short follow-up lifecycle을 구분하고 재활성화·삭제의 취소 의미를 반영한다. Provider I/O 뒤 `PESSIMISTIC_WRITE`로 current status/activation generation을 검증해 stale result를 적용하지 않는다.
 - Provider identifier는 ADR-006의 namespace·opaque String 정책을 그대로 따른다.
 - 실제 Entity, Migration, polling interval, persistence와 durable 중복 방지 저장소는 이 ADR에서 결정하지 않는다.
 

@@ -31,6 +31,9 @@ public class SeoulBusTransitObservationMapper {
             SeoulBusVehicleDetailResponse response
     ) {
         Instant observedAt = clock.instant();
+        if (response.body() == null || response.body().itemList() == null) {
+            return List.of();
+        }
         List<SeoulBusVehicleDetailItem> items = response.body().itemList();
 
         return items.stream()

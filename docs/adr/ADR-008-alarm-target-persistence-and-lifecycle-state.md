@@ -108,6 +108,8 @@ ARRIVED 뒤 after follow-up은 서버 재시작 뒤에도 같은 차량을 이�
 
 FOLLOW_UP runtime은 `alarms`의 `follow_up_vehicle_tracking_id`, `follow_up_started_at`, `follow_up_expires_at`에 저장한다. FOLLOW_UP이면 세 값과 after 옵션이 필요하고, 다른 status이면 세 값은 모두 비운다. Domain은 전체 불변 조건을 검사하고 Database CHECK는 같은 table 안의 status/runtime 완전성과 시간 순서를 강제한다. cross-table after option 조건은 Database CHECK로 복잡하게 만들지 않고 Domain에서 강제한다.
 
+`activation_generation BIGINT NOT NULL DEFAULT 0`은 새 Alarm의 persisted activation cycle 값이다. `INACTIVE → ACTIVE`와 `FOLLOW_UP → ACTIVE`에서만 증가하고 `ACTIVE → ACTIVE`는 idempotent하게 값을 유지한다. lifecycle mutation과 Scheduler result 적용은 `PESSIMISTIC_WRITE` 하나로 보호한다. Provider I/O는 lock 밖에서 끝내고, 결과 적용 직전에 current status/generation을 다시 검증해 stale result를 폐기한다.
+
 BUS 전용 장기 설정은 `bus_alarm_targets` 별도 Entity/table로 분리한다. `alarm_id`는 PK이자 `alarms.id` FK이며 `@MapsId` shared-primary-key one-to-one을 사용한다. Alarm이 aggregate lifecycle을 소유해 persist/remove를 cascade하고 FK도 `ON DELETE CASCADE`를 사용한다. 현재 V1이 지원하는 모든 BUS Alarm은 BusAlarmTarget을 반드시 가진다. V6 당시 가짜 Target을 만들지 않아 pre-production migration 과정에 targetless row가 존재할 수 있었지만 이는 public V1 지원 상태가 아니다. Production 전 개발 DB reset/cleanup 또는 migration 검증으로 해당 row가 없음을 보장하고 별도 compatibility code는 추가하지 않는다. generic inheritance나 polymorphic target framework는 도입하지 않는다.
 
 Provider namespace는 ADR-006의 `TAGO`, `SEOUL_BUS`를 `TransitProvider` Enum으로 저장한다. Route/Stop external ID는 opaque `VARCHAR(255)`이고 `target_stop_order`는 occurrence operational snapshot이다. `(provider, external_route_id, external_stop_id)` Unique Constraint는 두지 않는다.

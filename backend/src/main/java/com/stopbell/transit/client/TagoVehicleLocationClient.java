@@ -79,9 +79,7 @@ public class TagoVehicleLocationClient
         if (!"00".equals(resultCode)) {
             throw TransitProviderClientException.provider(provider(), OPERATION, resultCode);
         }
-        if (response.response().body() == null
-                || response.response().body().items() == null
-                || response.response().body().items().item() == null) {
+        if (response.response().body() == null) {
             throw TransitProviderClientException.protocol(provider(), OPERATION, null);
         }
     }

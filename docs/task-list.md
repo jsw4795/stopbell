@@ -177,7 +177,7 @@ Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 A
 - [x] TASK-513 Transit metadata source adapter / bootstrap 구현
 - [x] TASK-508 Alarm grouping 조회 전략 결정 및 구현
 - [x] TASK-509 Alarm Evaluation Logic 구현
-- [ ] TASK-510 Scheduler 실행 모델 결정 및 구현
+- [x] TASK-510 Scheduler 실행 모델 결정 및 구현
 - [ ] TASK-511 Transit API failure를 `UNKNOWN` 상태로 처리
 - [ ] TASK-512 Transit Integration Test 작성
 
@@ -210,7 +210,7 @@ TASK-508은 기본 polling key를 TAGO의 `(provider, externalRouteId, cityCode)
 
 TASK-509은 `BusAlarmEvaluator`와 memory 기반 `BusAlarmEvaluationState`로 ACTIVE 차량별 최신 Observation, 마지막 관찰 시각, cycle 내 target 이전 관찰 history, cycle별 emitted Event만 보존한다. logical `trackingCycleId`는 cycle 시작 시 한 번 생성한 UUID이며 raw Observation history, tracking DB table, event sourcing은 도입하지 않는다. baseline target-after 차량은 60초 missing grace 동안 별도로 보존하며, ACTIVE memory state는 restart 뒤 복원하거나 이전 Observation과 연결하지 않고 새 baseline으로 시작한다. V1 evidence policy는 TAGO target GPS 100m, Observation/서울 provider data freshness 60초, vehicle missing grace 60초, FOLLOW_UP timeout 5분이다. `TransitEvent`는 provider-neutral candidate로 type, vehicle/cycle ID, 최신 위치와 optional metadata edge-count `stopsPastTarget`을 전달한다. FOLLOW_UP은 영속된 `status`, `vehicleTrackingId`, `startedAt`, `expiresAt`을 Evaluation이 사용해 동일 차량의 ONE_STOP_AFTER 또는 event 없는 expiry를 판단하며, 실제 scheduler/lifecycle 적용은 TASK-510이 맡는다.
 
-TASK-510은 단일 Spring instance 기준으로 polling cycle overlap을 막는 synchronous/fixed-delay 모델을 우선한다. Provider HTTP I/O 중 DB transaction/row lock을 장시간 유지하지 않고, Alarm을 읽은 뒤 deactivate/delete/reactivate될 수 있음을 고려해 stale polling 결과가 최신 lifecycle을 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation race를 안전하게 처리한다. Persisted semantic activation generation은 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. `trackingCycleId` 또는 동등한 logical vehicle tracking cycle identity는 cycle 시작 시 한 번 생성하며 같은 logical cycle의 transaction retry에서 재생성하지 않는다. TASK-510 구현 시 current API/scheduler transaction 구조를 보고 `@Version`, CAS, pessimistic row lock 중 하나의 최소 concurrency mechanism만 선택하며 중복 적용하지 않는다.
+TASK-510은 단일 Spring instance에서 Spring Scheduler의 synchronous fixed-delay 방식으로 구현한다. `transit.monitoring.enabled=false`가 기본이고, 명시적으로 켰을 때만 `PT20S` 기본 fixed-delay cycle이 이전 cycle 완료 뒤 시작된다. Provider HTTP I/O는 monitoring Alarm snapshot을 읽은 뒤 transaction/row lock 밖에서 수행하고, 결과 반영 직전에만 `PESSIMISTIC_WRITE`로 Alarm을 다시 조회한다. API activate/deactivate/delete도 같은 row-lock 원칙을 사용한다. `activation_generation BIGINT NOT NULL DEFAULT 0`은 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. Scheduler는 `(alarmId, activationGeneration)` key로 memory evaluation state를 분리하며, 잠금 재조회 결과의 generation/status가 request snapshot과 달라졌거나 row가 삭제됐으면 lifecycle과 memory state 모두 적용하지 않는다. TAGO group은 Route Location 호출 하나를 공유하고 정상 empty를 평가에 전달한다. 서울 group은 roster를 한 번 공유한 뒤 baseline, tracked/new vehicle, FOLLOW_UP vehicle에 필요한 detail만 조회해 `TransitObservation`으로 변환한다. `trackingCycleId`는 evaluation이 관리하는 logical vehicle tracking cycle identity이며 같은 logical cycle의 transaction retry에서 재생성하지 않는다.
 
 TASK-511은 TASK-503 Provider failure를 Transit/Alarm orchestration에서 Event 없는 UNKNOWN으로 처리한다. failure 때문에 Alarm lifecycle을 진행하거나 기존 vehicle tracking state를 즉시 삭제하거나 synthetic PASSED/ARRIVED를 만들지 않는다. retry/backoff 정책과 Resilience4j/circuit breaker 도입 여부는 TASK-510/511 구현 시 결정한다.
 

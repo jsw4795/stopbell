@@ -221,7 +221,7 @@ StopBell이 앱 installation 자체의 identity, 현재 owner와 Push delivery r
 
 `activate()`는 `INACTIVE` 또는 `FOLLOW_UP`을 `ACTIVE`로 전환해 새 monitoring cycle을 시작한다. FOLLOW_UP에서 호출되면 이전 follow-up runtime을 지워 old follow-up을 취소한다. 이미 ACTIVE이면 generation 증가와 baseline reset 없이 idempotent하게 상태를 유지한다. `deactivate()`는 ACTIVE/FOLLOW_UP을 `INACTIVE`로 전환하고 follow-up runtime을 지운다.
 
-`activationGeneration`은 서로 다른 monitoring activation cycle을 구분하는 persisted semantic generation이다. `INACTIVE → ACTIVE`와 `FOLLOW_UP → ACTIVE`에서 증가하여 deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation의 Notification candidate를 현재 activation과 구분한다. `ACTIVE → ACTIVE`에서는 증가하지 않는다. 초기값과 CAS/query 구현은 TASK-510에서 확정하며 JPA `@Version` 같은 일반 optimistic locking 검토를 대체하지 않는다.
+`activationGeneration`은 서로 다른 monitoring activation cycle을 구분하는 persisted semantic generation이며 `BIGINT NOT NULL DEFAULT 0`으로 저장한다. `INACTIVE → ACTIVE`와 `FOLLOW_UP → ACTIVE`에서 증가하여 deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation의 Notification candidate를 현재 activation과 구분한다. `ACTIVE → ACTIVE`에서는 증가하지 않는다. lifecycle mutation과 Scheduler 결과 반영은 Alarm row `PESSIMISTIC_WRITE` 하나로 보호하며 `@Version`, CAS, optimistic locking을 함께 추가하지 않는다.
 
 `startFollowUp(vehicleTrackingId, startedAt, expiresAt)`은 ACTIVE이며 `notifyOneStopAfter`가 설정된 Bus Alarm에서만 FOLLOW_UP을 시작한다. 만료시간 숫자는 이 Domain이 정하지 않고 호출자가 명시적으로 전달한다. `completeFollowUp()`은 FOLLOW_UP을 INACTIVE로 전환하고 runtime을 지운다.
 
@@ -543,7 +543,7 @@ TASK-509의 V1 evidence policy는 다음과 같다. `observedAt`과 서울의 `p
 
 ## Persistence
 
-`TransitObservation`과 ACTIVE Vehicle tracking state 전체는 V1에서 영속하지 않는다. Durable Notification dedup에 필요한 activation generation, tracking cycle identity, event type은 TransitEvent에서 `NotificationEvent`로 전달한다. `TransitEvent`는 type, vehicle tracking ID, UUID cycle ID, latest observed time/position, optional provider data time 및 PASSED의 optional metadata-derived `stopsPastTarget`을 provider-neutral하게 전달한다. Scheduler와 lifecycle persistence/concurrency는 후속 Task 범위다.
+`TransitObservation`과 ACTIVE Vehicle tracking state 전체는 V1에서 영속하지 않는다. Scheduler는 `(alarmId, activationGeneration)` key로 ACTIVE/FOLLOW_UP evaluation state를 memory에 보관하고 restart 뒤에는 `initial()` baseline으로 시작한다. Provider I/O 뒤 lifecycle 반영 직전에 `PESSIMISTIC_WRITE`로 current generation/status를 다시 검증하므로 stale result는 lifecycle과 memory state 모두 바꾸지 않는다. Durable Notification dedup에 필요한 activation generation, tracking cycle identity, event type은 TransitEvent에서 `NotificationEvent`로 전달한다. `TransitEvent`는 type, vehicle tracking ID, UUID cycle ID, latest observed time/position, optional provider data time 및 PASSED의 optional metadata-derived `stopsPastTarget`을 provider-neutral하게 전달한다.
 
 ------------------------------------------------------------------------
 

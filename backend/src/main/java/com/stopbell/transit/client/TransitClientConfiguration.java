@@ -12,6 +12,8 @@ import org.springframework.web.client.RestClient;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
 import com.stopbell.transit.metadata.TagoMetadataClient;
 import com.stopbell.transit.metadata.TagoMetadataSource;
+import com.stopbell.transit.mapper.SeoulBusTransitObservationMapper;
+import com.stopbell.transit.mapper.TagoTransitObservationMapper;
 import com.stopbell.transit.service.BusMetadataSource;
 
 @Configuration(proxyBeanMethods = false)
@@ -62,6 +64,16 @@ public class TransitClientConfiguration {
     @Bean
     Clock transitMetadataClock() {
         return Clock.systemUTC();
+    }
+
+    @Bean
+    TagoTransitObservationMapper tagoTransitObservationMapper(Clock transitMetadataClock) {
+        return new TagoTransitObservationMapper(transitMetadataClock);
+    }
+
+    @Bean
+    SeoulBusTransitObservationMapper seoulBusTransitObservationMapper(Clock transitMetadataClock) {
+        return new SeoulBusTransitObservationMapper(transitMetadataClock);
     }
 
     private RestClient restClient(TransitClientProperties properties) {

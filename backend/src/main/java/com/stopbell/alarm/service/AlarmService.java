@@ -110,7 +110,7 @@ public class AlarmService {
 
     @Transactional
     public AlarmResponse activate(Long userId, Long alarmId) {
-        Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
+        Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         alarm.activate();
         return toResponse(alarm);
@@ -118,7 +118,7 @@ public class AlarmService {
 
     @Transactional
     public AlarmResponse deactivate(Long userId, Long alarmId) {
-        Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
+        Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         alarm.deactivate();
         return toResponse(alarm);
@@ -126,7 +126,7 @@ public class AlarmService {
 
     @Transactional
     public void delete(Long userId, Long alarmId) {
-        Alarm alarm = alarmRepository.findByIdAndUserId(alarmId, userId)
+        Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         alarmRepository.delete(alarm);
     }

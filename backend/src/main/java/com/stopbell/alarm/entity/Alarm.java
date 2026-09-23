@@ -39,6 +39,9 @@ public class Alarm {
     @Column(nullable = false, length = 20)
     private AlarmStatus status = AlarmStatus.INACTIVE;
 
+    @Column(name = "activation_generation", nullable = false)
+    private long activationGeneration;
+
     @Column(name = "follow_up_vehicle_tracking_id", length = 255)
     private String followUpVehicleTrackingId;
 
@@ -108,12 +111,19 @@ public class Alarm {
         return status;
     }
 
+    public long getActivationGeneration() {
+        return activationGeneration;
+    }
+
     public void activate() {
         if (transitType == TransitType.BUS && busAlarmTarget == null) {
             throw new IllegalStateException("Bus alarm cannot activate without a BusAlarmTarget");
         }
-        status = AlarmStatus.ACTIVE;
-        clearFollowUpRuntime();
+        if (status != AlarmStatus.ACTIVE) {
+            activationGeneration++;
+            status = AlarmStatus.ACTIVE;
+            clearFollowUpRuntime();
+        }
     }
 
     public void deactivate() {

@@ -66,6 +66,19 @@ class TagoTransitObservationMapperTest {
     }
 
     @Test
+    @DisplayName("TAGO 성공 empty envelope의 item 누락은 빈 Observation으로 정규화한다")
+    void map_normal_empty_without_item_list() {
+        TagoVehicleLocationResponse response = new TagoVehicleLocationResponse(
+                new TagoVehicleLocationResponse.Response(
+                        new TagoVehicleLocationResponse.Header("00", "NORMAL SERVICE."),
+                        new TagoVehicleLocationResponse.Body(null, 0, 1, 10)
+                )
+        );
+
+        assertThat(mapper.map(request(), response)).isEmpty();
+    }
+
+    @Test
     @DisplayName("TAGO 차량 식별자가 없으면 임의의 tracking ID를 만들지 않는다")
     void map_without_vehicle_id_fails() {
         assertThatThrownBy(() -> mapper.map(request(), response(

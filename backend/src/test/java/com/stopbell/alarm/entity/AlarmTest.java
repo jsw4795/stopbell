@@ -18,6 +18,7 @@ class AlarmTest {
         Alarm alarm = createBusAlarm(null, null);
 
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.INACTIVE);
+        assertThat(alarm.getActivationGeneration()).isZero();
     }
 
     @Test
@@ -28,6 +29,7 @@ class AlarmTest {
         alarm.activate();
 
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
+        assertThat(alarm.getActivationGeneration()).isOne();
     }
 
     @Test
@@ -39,6 +41,7 @@ class AlarmTest {
         alarm.activate();
 
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
+        assertThat(alarm.getActivationGeneration()).isOne();
     }
 
     @Test
@@ -66,6 +69,7 @@ class AlarmTest {
 
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
         assertFollowUpRuntimeIsCleared(alarm);
+        assertThat(alarm.getActivationGeneration()).isEqualTo(2);
     }
 
     @Test
