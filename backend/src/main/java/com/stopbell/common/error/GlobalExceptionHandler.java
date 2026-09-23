@@ -6,6 +6,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -20,7 +21,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
             MethodArgumentNotValidException.class,
             HttpMessageNotReadableException.class,
-            MissingServletRequestParameterException.class
+            MissingServletRequestParameterException.class,
+            MethodArgumentTypeMismatchException.class
     })
     public ResponseEntity<ApiErrorResponse> handleInvalidRequest(Exception exception) {
         ErrorCode errorCode = ErrorCode.INVALID_REQUEST;

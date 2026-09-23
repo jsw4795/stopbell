@@ -77,21 +77,25 @@ JWT Access Token이 필요한 Application API다. `query`는 trim한 뒤 노선�
 GET /api/v1/bus-routes/{routeId}/stops
 ```
 
-`{routeId}`는 Route 검색 response의 `BusRoute.id`다. Alarm 생성에 사용하는 Stop selection response는 최소 다음 형태다.
+JWT Access Token이 필요한 Application API다. `{routeId}`는 Route 검색 response의 `BusRoute.id`인 양의 내부 selection reference다. 응답은 Route traversal 순서인 `stopOrder ASC`로 반환하며 pagination은 사용하지 않는다.
 
 ```json
-{
-  "id": 12345,
-  "name": "사색의광장",
-  "order": 1,
-  "canNotifyOneStopBefore": false,
-  "canNotifyOneStopAfter": true
-}
+[
+  {
+    "id": 12345,
+    "name": "사색의광장",
+    "order": 1,
+    "canNotifyOneStopBefore": false,
+    "canNotifyOneStopAfter": true
+  }
+]
 ```
 
-`id`는 current metadata의 `BusRouteStopOccurrence.id`이며 Alarm 생성 Request의 `targetStopOccurrenceId`와 같은 selection reference다. `name`과 `order`는 Stop 선택 UI용 metadata다. `canNotifyOneStopBefore`와 `canNotifyOneStopAfter`는 현재 Route traversal에서 실제 predecessor/successor occurrence 존재 여부를 나타내며, `order`의 산술 증감으로 계산하지 않는다.
+`id`는 current metadata의 `BusRouteStopOccurrence.id`이며 Alarm 생성 Request의 `targetStopOccurrenceId`와 같은 selection reference다. `name`은 연결된 `BusStop.stopName`이고 `order`는 `BusRouteStopOccurrence.stopOrder`다. `canNotifyOneStopBefore`와 `canNotifyOneStopAfter`는 정렬된 현재 Route traversal에서 실제 predecessor/successor occurrence 존재 여부를 나타내며, `order`의 산술 증감으로 계산하지 않는다. 같은 `BusStop`이 Route에 여러 번 나타나도 occurrence를 dedup하지 않고 각각 반환한다.
 
-Stop selection response에는 `provider`, `externalRouteId`, `externalStopId`, `cityCode`, GPS를 노출하지 않는다. 이 값들은 Provider 또는 Backend metadata implementation detail이며, GPS는 현재 Flutter 기능에 필요하지 않다.
+Route가 current metadata에 없으면 `404 Not Found`와 `BUS_ROUTE_NOT_FOUND` (`Bus route was not found.`)를 반환한다. Long으로 변환할 수 없거나 양수가 아닌 `{routeId}`는 `400 Bad Request`와 `INVALID_REQUEST`를 반환한다. Route에는 하나 이상의 occurrence가 있어야 한다는 metadata invariant를 유지하며, 이 상태가 깨진 Route를 정상적인 빈 선택 결과나 Route 없음으로 처리하지 않는다.
+
+Stop selection response에는 `provider`, `externalRouteId`, `externalStopId`, `cityCode`, GPS, `BusStop.id`, predecessor/successor external ID를 노출하지 않는다. 이 값들은 Provider 또는 Backend metadata implementation detail이며, GPS는 현재 Flutter 기능에 필요하지 않다.
 
 ### 알림 생성
 
@@ -266,11 +270,12 @@ Alarm API의 error code와 HTTP status는 다음과 같다.
 | Code | HTTP status | 의미 |
 | --- | --- | --- |
 | `ALARM_NOT_FOUND` | `404 Not Found` | Alarm이 없거나 현재 User 소유가 아님 |
+| `BUS_ROUTE_NOT_FOUND` | `404 Not Found` | 요청한 BusRoute가 current metadata에 없음 |
 | `TARGET_STOP_OCCURRENCE_NOT_FOUND` | `404 Not Found` | Alarm 생성 대상 occurrence가 현재 metadata에 없음 |
 | `INVALID_ALARM_REQUEST` | `400 Bad Request` | predecessor/successor 없이 before/after option을 요청하는 등 Alarm Domain 규칙 위반 |
 | `INVALID_REQUEST` | `400 Bad Request` | 필수 ID 누락, 0 이하 ID, body 누락 또는 읽을 수 없는 JSON 등 기본 요청 형식 오류 |
 
-`ALARM_NOT_FOUND`의 message는 `Alarm was not found.`이며, `TARGET_STOP_OCCURRENCE_NOT_FOUND`의 message는 `Target stop occurrence was not found.`이다. `INVALID_ALARM_REQUEST`는 `Target stop has no predecessor stop.` 또는 `Target stop has no successor stop.`처럼 구체적 사유를 message로 전달한다. `INVALID_REQUEST`의 message는 `Request is invalid.`이다.
+`ALARM_NOT_FOUND`의 message는 `Alarm was not found.`이며, `BUS_ROUTE_NOT_FOUND`의 message는 `Bus route was not found.`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`의 message는 `Target stop occurrence was not found.`이다. `INVALID_ALARM_REQUEST`는 `Target stop has no predecessor stop.` 또는 `Target stop has no successor stop.`처럼 구체적 사유를 message로 전달한다. `INVALID_REQUEST`의 message는 `Request is invalid.`이다.
 
 ## 6. 인증
 
