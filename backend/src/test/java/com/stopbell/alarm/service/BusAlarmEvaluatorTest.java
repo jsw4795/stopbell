@@ -125,6 +125,87 @@ class BusAlarmEvaluatorTest {
     }
 
     @Test
+    @DisplayName("target과 같은 order의 다른 Stop ID는 UNKNOWN으로 보존하고 PASSED를 만들지 않는다")
+    void preserves_unknown_for_target_order_conflict() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        BusAlarmEvaluationResult baseline = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10, ArrivalEvidence.MOVING, NOW));
+
+        BusAlarmEvaluationResult conflict = evaluate(alarm, baseline.nextState(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "different-stop", 20, ArrivalEvidence.MOVING,
+                        NOW.plusSeconds(1)));
+
+        assertThat(conflict.eventCandidates()).isEmpty();
+        assertThat(conflict.nextState().trackedVehicles().get("vehicle").hasObservedBeforeTarget()).isTrue();
+        assertThat(conflict.nextState().trackedVehicles().get("vehicle").lastObservation().currentStopExternalId())
+                .isEqualTo("predecessor");
+    }
+
+    @Test
+    @DisplayName("target과 같은 Stop ID의 다른 order는 계속 UNKNOWN으로 보존한다")
+    void preserves_unknown_for_target_stop_id_conflict() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+
+        BusAlarmEvaluationResult result = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "target", 21, ArrivalEvidence.MOVING, NOW));
+
+        assertThat(result.eventCandidates()).isEmpty();
+        assertThat(result.nextState().trackedVehicles()).isEmpty();
+        assertThat(result.nextState().baselineAfterVehicles()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("predecessor와 같은 order의 다른 Stop ID는 ONE_STOP_BEFORE 후보를 만들지 않는다")
+    void does_not_emit_before_for_predecessor_order_conflict() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+
+        BusAlarmEvaluationResult result = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "different-stop", 10, ArrivalEvidence.MOVING, NOW));
+
+        assertThat(result.eventCandidates()).isEmpty();
+        assertThat(result.nextState().trackedVehicles()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("target 이전 history는 non-arrived target observation 뒤에도 유지되어 PASSED로 이어진다")
+    void emits_passed_after_non_arrived_target_observation() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        when(routeTraversalService.stopsPastTarget(any(), any())).thenReturn(OptionalInt.of(1));
+        BusAlarmEvaluationResult before = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "earlier-stop", 5, ArrivalEvidence.MOVING, NOW));
+        BusAlarmEvaluationResult atTarget = evaluate(alarm, before.nextState(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20, ArrivalEvidence.MOVING,
+                        NOW.plusSeconds(1)));
+
+        BusAlarmEvaluationResult after = evaluate(alarm, atTarget.nextState(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "later-stop", 90, ArrivalEvidence.MOVING,
+                        NOW.plusSeconds(2)));
+
+        assertThat(atTarget.eventCandidates()).isEmpty();
+        assertThat(atTarget.nextState().trackedVehicles().get("vehicle").hasObservedBeforeTarget()).isTrue();
+        assertThat(after.eventCandidates()).extracting(event -> event.type()).containsExactly(TransitEventType.PASSED);
+    }
+
+    @Test
+    @DisplayName("ONE_STOP_BEFORE 뒤에도 target 이전 history를 유지해 PASSED로 이어진다")
+    void preserves_before_history_after_emitting_one_stop_before() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        BusAlarmEvaluationResult before = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10, ArrivalEvidence.MOVING, NOW));
+        BusAlarmEvaluationResult atTarget = evaluate(alarm, before.nextState(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20, ArrivalEvidence.MOVING,
+                        NOW.plusSeconds(1)));
+
+        BusAlarmEvaluationResult after = evaluate(alarm, atTarget.nextState(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "later-stop", 90, ArrivalEvidence.MOVING,
+                        NOW.plusSeconds(2)));
+
+        assertThat(before.eventCandidates()).extracting(event -> event.type())
+                .containsExactly(TransitEventType.ONE_STOP_BEFORE);
+        assertThat(after.eventCandidates()).extracting(event -> event.type()).containsExactly(TransitEventType.PASSED);
+    }
+
+    @Test
     @DisplayName("baseline에서 target 이후인 차량은 PASSED를 만들지 않고 missing grace 동안 재추적하지 않는다")
     void suppresses_baseline_after_vehicle_until_missing_grace_expires() {
         Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
@@ -137,6 +218,12 @@ class BusAlarmEvaluatorTest {
         assertThat(returnedBefore.eventCandidates()).isEmpty();
         assertThat(returnedBefore.nextState().trackedVehicles()).doesNotContainKey("vehicle");
         assertThat(returnedBefore.nextState().baselineAfterVehicles()).containsKey("vehicle");
+
+        BusAlarmEvaluationResult returnedAfter = evaluate(alarm, returnedBefore.nextState(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "later-stop", 90, ArrivalEvidence.MOVING,
+                        NOW.plusSeconds(2)));
+
+        assertThat(returnedAfter.eventCandidates()).isEmpty();
     }
 
     @Test
@@ -148,8 +235,12 @@ class BusAlarmEvaluatorTest {
 
         BusAlarmEvaluationResult result = evaluate(alarm, baseline.nextState(),
                 observation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20, ArrivalEvidence.ARRIVED, NOW.plusSeconds(1)));
+        BusAlarmEvaluationResult after = evaluate(alarm, result.nextState(),
+                observation(TransitProvider.SEOUL_BUS, "vehicle", "later-stop", 90, ArrivalEvidence.MOVING,
+                        NOW.plusSeconds(2)));
 
         assertThat(result.eventCandidates()).extracting(event -> event.type()).containsExactly(TransitEventType.ARRIVED);
+        assertThat(after.eventCandidates()).isEmpty();
     }
 
     @Test
@@ -216,6 +307,18 @@ class BusAlarmEvaluatorTest {
         assertThat(ignored.eventCandidates()).isEmpty();
         assertThat(arrivedAfter.eventCandidates()).extracting(event -> event.type())
                 .containsExactly(TransitEventType.ONE_STOP_AFTER);
+    }
+
+    @Test
+    @DisplayName("FOLLOW_UP successor와 같은 order의 다른 Stop ID는 ONE_STOP_AFTER 후보를 만들지 않는다")
+    void does_not_emit_after_for_successor_order_conflict() {
+        Alarm alarm = followUpAlarm();
+
+        BusAlarmEvaluationResult result = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                observation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "different-stop", 35,
+                        ArrivalEvidence.MOVING, NOW));
+
+        assertThat(result.eventCandidates()).isEmpty();
     }
 
     @Test

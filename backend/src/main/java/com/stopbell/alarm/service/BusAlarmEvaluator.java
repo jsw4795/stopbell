@@ -101,7 +101,7 @@ public class BusAlarmEvaluator {
     ) {
         switch (relation) {
             case BEFORE_TARGET -> {
-                VehicleTrackingState tracking = VehicleTrackingState.begin(observation, now);
+                VehicleTrackingState tracking = VehicleTrackingState.beginBeforeTarget(observation, now);
                 next.trackedVehicles().put(observation.vehicleTrackingId(), tracking);
                 emitOneStopBeforeIfEligible(target, tracking, observation, now, events, next.trackedVehicles());
             }
@@ -138,7 +138,7 @@ public class BusAlarmEvaluator {
         VehicleTrackingState tracking = next.trackedVehicles().get(vehicleId);
         if (tracking == null) {
             if (relation == PositionRelation.BEFORE_TARGET) {
-                tracking = VehicleTrackingState.begin(observation, now);
+                tracking = VehicleTrackingState.beginBeforeTarget(observation, now);
                 next.trackedVehicles().put(vehicleId, tracking);
                 emitOneStopBeforeIfEligible(target, tracking, observation, now, events, next.trackedVehicles());
             } else if (relation == PositionRelation.AFTER_TARGET) {
@@ -168,7 +168,8 @@ public class BusAlarmEvaluator {
             }
             case AFTER_TARGET -> {
                 if (!tracking.hasEmitted(TransitEventType.PASSED)
-                        && positionOf(target, tracking.lastObservation()) == PositionRelation.BEFORE_TARGET
+                        && !tracking.hasEmitted(TransitEventType.ARRIVED)
+                        && tracking.hasObservedBeforeTarget()
                         && hasNewProgressEvidence(tracking.lastObservation(), observation)) {
                     OptionalInt stopsPastTarget = routeTraversalService.stopsPastTarget(target, observation);
                     emit(TransitEventType.PASSED, tracking, observation,
@@ -326,8 +327,15 @@ public class BusAlarmEvaluator {
     }
 
     private static boolean conflicts(TransitObservation observation, String stopId, Integer stopOrder) {
-        return stopId != null && stopOrder != null && stopId.equals(observation.currentStopExternalId())
+        boolean sameStopIdWithDifferentOrder = stopId != null && observation.currentStopExternalId() != null
+                && stopId.equals(observation.currentStopExternalId())
+                && stopOrder != null && observation.currentStopOrder() != null
                 && !stopOrder.equals(observation.currentStopOrder());
+        boolean sameStopOrderWithDifferentId = stopOrder != null && observation.currentStopOrder() != null
+                && stopOrder.equals(observation.currentStopOrder())
+                && stopId != null && observation.currentStopExternalId() != null
+                && !stopId.equals(observation.currentStopExternalId());
+        return sameStopIdWithDifferentOrder || sameStopOrderWithDifferentId;
     }
 
     private static boolean isExact(TransitObservation observation, String stopId, Integer stopOrder) {

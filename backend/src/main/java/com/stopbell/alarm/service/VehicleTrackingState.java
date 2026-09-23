@@ -15,6 +15,7 @@ public record VehicleTrackingState(
         UUID trackingCycleId,
         TransitObservation lastObservation,
         Instant lastSeenAt,
+        boolean hasObservedBeforeTarget,
         Set<TransitEventType> emittedEventTypes
 ) {
 
@@ -26,11 +27,15 @@ public record VehicleTrackingState(
     }
 
     public static VehicleTrackingState begin(TransitObservation observation, Instant seenAt) {
-        return new VehicleTrackingState(UUID.randomUUID(), observation, seenAt, Set.of());
+        return new VehicleTrackingState(UUID.randomUUID(), observation, seenAt, false, Set.of());
+    }
+
+    public static VehicleTrackingState beginBeforeTarget(TransitObservation observation, Instant seenAt) {
+        return new VehicleTrackingState(UUID.randomUUID(), observation, seenAt, true, Set.of());
     }
 
     public VehicleTrackingState observe(TransitObservation observation, Instant seenAt) {
-        return new VehicleTrackingState(trackingCycleId, observation, seenAt, emittedEventTypes);
+        return new VehicleTrackingState(trackingCycleId, observation, seenAt, hasObservedBeforeTarget, emittedEventTypes);
     }
 
     public VehicleTrackingState emit(TransitEventType eventType, TransitObservation observation, Instant seenAt) {
@@ -38,7 +43,7 @@ public record VehicleTrackingState(
                 ? EnumSet.noneOf(TransitEventType.class)
                 : EnumSet.copyOf(emittedEventTypes);
         emitted.add(eventType);
-        return new VehicleTrackingState(trackingCycleId, observation, seenAt, emitted);
+        return new VehicleTrackingState(trackingCycleId, observation, seenAt, hasObservedBeforeTarget, emitted);
     }
 
     public boolean hasEmitted(TransitEventType eventType) {
