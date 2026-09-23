@@ -175,7 +175,7 @@ Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 A
 - [x] TASK-506 Bus Stop 조회 구현
 - [x] TASK-507 Transit metadata persistence / MyBatis 필요성 결정 및 구현
 - [x] TASK-513 Transit metadata source adapter / bootstrap 구현
-- [ ] TASK-508 Alarm grouping 조회 전략 결정 및 구현
+- [x] TASK-508 Alarm grouping 조회 전략 결정 및 구현
 - [ ] TASK-509 Alarm Evaluation Logic 구현
 - [ ] TASK-510 Scheduler 실행 모델 결정 및 구현
 - [ ] TASK-511 Transit API failure를 `UNKNOWN` 상태로 처리
@@ -206,7 +206,7 @@ TASK-513의 최초 bootstrap 기본 방향은 Backend startup이 아닌 명시�
 
 TASK-513 ingestion은 단일 Backend 환경에서 동일 Provider full sync single-flight를 보장하고, current Route reconciliation의 Stop lazy-loading N+1 여부를 확인·개선한다. Provider 전체를 하나의 장시간 DB transaction으로 묶지 않으며 Route 단위 transaction과 successful complete snapshot 뒤 cleanup 방향을 유지한다. Provider별 최소 persisted sync state로 `provider`, `lastCompleteSyncAt` 의미를 저장해 fresh DB bootstrap, readiness와 last successful complete sync age를 판단한다. 필요하면 in-progress/failure 정보를 확장할 수 있지만 sync/checksum history, staging table, error journal은 요구하지 않는다. Redis, distributed lock, queue는 V1에 도입하지 않는다.
 
-TASK-508은 기본 polling key를 TAGO의 `(provider, externalRouteId, cityCode)`, 서울의 `(provider, externalRouteId)`로 grouping한다. `cityCode`는 Route identity가 아니라 TAGO request 재현 문맥이지만 동일 request 공유에는 필요하다. 같은 Route를 쓰는 여러 사용자·target Stop·ACTIVE Alarm·FOLLOW_UP Alarm은 가능한 한 한 Route polling response를 공유하며 Alarm별 Provider 호출은 만들지 않는다. 현재 JPA + Java grouping으로 충분하며 MyBatis는 도입하지 않는다.
+TASK-508은 기본 polling key를 TAGO의 `(provider, externalRouteId, cityCode)`, 서울의 `(provider, externalRouteId)`로 grouping한다. `cityCode`는 Route identity가 아니라 TAGO request 재현 문맥이지만 동일 request 공유에는 필요하다. `AlarmRepository`는 `EntityGraph`로 BUS `ACTIVE`/`FOLLOW_UP` Alarm과 `BusAlarmTarget`을 함께 조회하고, Java가 조회 순서대로 group을 구성한다. `INACTIVE`는 제외하며 같은 Route를 쓰는 여러 사용자·target Stop·ACTIVE Alarm·FOLLOW_UP Alarm은 가능한 한 한 Route polling response를 공유한다. target 누락 또는 Provider request context가 깨진 monitoring Alarm은 query에서 숨기거나 보정하지 않고 명시적으로 실패시킨다. 현재 JPA + Java grouping으로 충분하며 MyBatis와 실제 Provider 호출은 도입하지 않는다. Observation 평가, Scheduler와 Provider failure의 `UNKNOWN` 처리는 후속 Task에 남긴다.
 
 TASK-509은 ACTIVE Alarm의 필요한 vehicle tracking을 V1에서 memory 기반으로 관리할 수 있다. Backend restart 뒤에는 이전 memory tracking과 새 cycle을 연결하지 않고 안전한 recovery baseline을 만들며, restart 전 Observation과 연결해 PASSED를 추론하거나 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 일부 Event 누락보다 false-positive 방지를 우선하며, 모든 raw Provider observation 저장이나 event sourcing은 도입하지 않는다. FOLLOW_UP은 영속된 `status`, `vehicleTrackingId`, `startedAt`, `expiresAt`을 실제 scheduler가 재사용해 유효한 동일 vehicle tracking을 재개해야 한다. restart continuity 충족 여부는 TASK-811에서 검증하고 필요하면 최소 persistence를 재검토한다.
 

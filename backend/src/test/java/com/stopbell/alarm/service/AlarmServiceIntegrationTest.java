@@ -72,6 +72,9 @@ class AlarmServiceIntegrationTest {
     private AlarmService alarmService;
 
     @Autowired
+    private BusAlarmPollingService busAlarmPollingService;
+
+    @Autowired
     private AlarmRepository alarmRepository;
 
     @Autowired
@@ -847,6 +850,46 @@ class AlarmServiceIntegrationTest {
         try {
             statistics.clear();
             assertThat(alarmService.findAll(owner.getId())).hasSize(3);
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
+        } finally {
+            statistics.setStatisticsEnabled(originallyEnabled);
+        }
+    }
+
+    @Test
+    @DisplayName("monitoring Alarm과 BusAlarmTarget을 한 쿼리로 조회해 polling group을 구성한다")
+    void find_monitoring_groups_fetches_bus_targets_in_one_query() {
+        User owner = user();
+        RouteFixture route = route();
+        Long activeAlarmId = alarmService.create(
+                owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)
+        ).id();
+        Long followUpAlarmId = alarmService.create(
+                owner.getId(), new CreateAlarmRequest(route.middleId(), false, true)
+        ).id();
+        alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false));
+        alarmRepository.findById(activeAlarmId).orElseThrow().activate();
+        Alarm followUpAlarm = alarmRepository.findById(followUpAlarmId).orElseThrow();
+        followUpAlarm.activate();
+        LocalDateTime startedAt = LocalDateTime.of(2026, 9, 23, 12, 0);
+        followUpAlarm.startFollowUp("vehicle-1", startedAt, startedAt.plusMinutes(10));
+        entityManager.flush();
+        entityManager.clear();
+
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        boolean originallyEnabled = statistics.isStatisticsEnabled();
+        statistics.setStatisticsEnabled(true);
+        try {
+            statistics.clear();
+
+            List<BusAlarmPollingGroup> groups = busAlarmPollingService.findMonitoringGroups();
+
+            assertThat(groups).hasSize(1);
+            assertThat(groups.getFirst().key()).isEqualTo(new BusPollingKey(
+                    TransitProvider.TAGO, route.externalRouteId(), "41110"
+            ));
+            assertThat(groups.getFirst().alarms()).extracting(Alarm::getId)
+                    .containsExactly(activeAlarmId, followUpAlarmId);
             assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
         } finally {
             statistics.setStatisticsEnabled(originallyEnabled);

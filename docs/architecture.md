@@ -205,6 +205,8 @@ Delivery lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기�
 
 V1의 기본 Provider polling key는 TAGO의 `(provider, externalRouteId, cityCode)`와 서울의 `(provider, externalRouteId)`다. `cityCode`는 Route identity가 아니라 TAGO request context이지만 동일 polling request 재현에는 필요하다. 같은 Route를 사용하는 여러 사용자·target Stop·ACTIVE Alarm·FOLLOW_UP Alarm은 가능한 한 하나의 Route polling response를 공유한다. Alarm별 Provider 호출이나 MyBatis 도입은 기본 구조로 삼지 않는다.
 
+TASK-508은 JPA `EntityGraph`로 BUS `ACTIVE`/`FOLLOW_UP` Alarm과 `BusAlarmTarget`을 함께 조회한 뒤 Java에서 polling key별로 그룹화한다. `INACTIVE`는 조회 대상이 아니며, target 누락이나 provider request context가 깨진 monitoring Alarm을 query에서 누락·보정하지 않고 명시적으로 실패시킨다. 실제 Provider 호출, Observation 평가, Scheduler와 Provider failure의 `UNKNOWN` 처리는 후속 Task의 책임이다.
+
 TASK-510 Scheduler는 단일 Spring instance에서 polling cycle overlap을 막는 단순 synchronous/fixed-delay 방식을 우선한다. Provider HTTP I/O 동안 DB transaction 또는 row lock을 오래 유지하지 않으며, polling 뒤 lifecycle이 바뀐 Alarm을 stale 결과가 덮어쓰지 않게 한다. ARRIVED와 manual deactivate, FOLLOW_UP completion과 reactivation의 race를 안전하게 다뤄야 한다. 서로 다른 activation cycle을 구분하는 persisted semantic activation generation은 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. TASK-510은 current API/scheduler transaction 구조를 보고 `@Version`, CAS, pessimistic row lock 중 하나의 최소 concurrency mechanism만 선택하며 중복 적용하지 않는다.
 
 ## 8. 알림 평가
