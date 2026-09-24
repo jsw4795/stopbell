@@ -94,7 +94,7 @@ TAGO metadata bootstrap도 같은 방식으로 provider만 지정해 실행한�
 실행 전 확인 사항:
 
 - MySQL이 실행 중인지 확인
-- 필요한 Environment Variable이 설정되었는지 확인
+- 저장소 루트의 `.env`에 필요한 Local Development용 설정값이 준비되었는지 확인
 - 외부 Transit API 또는 FCM 연동이 필요한 경우 Local Development용 credential이 준비되었는지 확인
 
 ## Database Connection
@@ -132,7 +132,9 @@ OAUTH_CLIENT_SECRET
 
 `GOOGLE_SERVER_CLIENT_ID`에는 iOS Client ID가 아니라 Backend Authentication audience 검증에 사용할 Google Cloud Web application(Server) Client ID를 설정한다.
 
-Environment Variable을 Spring Boot에 전달하는 방법은 To be decided이다. Local file, IDE run configuration, shell Environment Variable 중 하나를 선택할 때는 시크릿 노출 위험과 팀 사용성을 함께 검토한다.
+Local profile은 Spring Boot Config Data import로 Backend 디렉터리의 상위 경로(저장소 루트)에 있는 `.env`를 optional properties file로 자동 로드한다. 따라서 일반적인 실행 방식인 `cd backend && ./gradlew bootRun`과 Backend 프로젝트를 working directory로 사용하는 IDE/STS 실행에서 별도 Environment Variable 등록 없이 `.env`의 `KEY=value` 설정을 사용할 수 있다. `.env`가 없는 경우에도 Local profile의 설정 로딩은 실패하지 않는다.
+
+`.env`는 Git에 커밋하지 않으며, `.env.example`에는 필요한 key만 유지한다. 운영·배포 환경에서는 OS Environment Variable 또는 배포 환경의 Secret 관리 기능을 사용한다. Spring Boot 기본 property precedence에 따라 OS Environment Variable과 command-line property는 `.env`에서 import한 Config Data보다 우선한다.
 
 ------------------------------------------------------------------------
 
