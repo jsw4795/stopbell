@@ -179,7 +179,7 @@ Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 A
 - [x] TASK-509 Alarm Evaluation Logic 구현
 - [x] TASK-510 Scheduler 실행 모델 결정 및 구현
 - [x] TASK-511 Transit API failure를 `UNKNOWN` 상태로 처리
-- [ ] TASK-512 Transit Integration Test 작성
+- [x] TASK-512 Transit Integration Test 작성
 
 Phase 5의 dependency는 다음과 같다. TASK-513 때문에 TASK-503을 선행 차단하지 않으며 기존 Task 번호와 완료 이력도 유지한다.
 
