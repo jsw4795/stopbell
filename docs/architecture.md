@@ -227,7 +227,7 @@ Event 후보: ONE_STOP_BEFORE / ARRIVED / PASSED / ONE_STOP_AFTER / 없음
 Notification 전송 결정 또는 UNKNOWN 대기
 ```
 
-`UNKNOWN`은 Notification Event가 아니라 판단 불가 결과다. 정상 응답 안의 애매한 관측과 TASK-503에서 구분한 Provider failure는 원인이 다르지만 둘 다 거짓 ARRIVED/PASSED Event를 만들지 않는다. TASK-511은 Provider failure를 Event 없는 UNKNOWN으로 처리하며 Alarm lifecycle을 진행하거나 기존 vehicle tracking state를 즉시 삭제하거나 synthetic PASSED/ARRIVED를 만들지 않는다. retry/backoff와 circuit breaker 도입 여부는 TASK-510/511 구현에서 결정한다.
+`UNKNOWN`은 Notification Event가 아니라 판단 불가 결과다. 정상 응답 안의 애매한 관측과 TASK-503에서 구분한 Provider failure는 원인이 다르지만 둘 다 거짓 ARRIVED/PASSED Event를 만들지 않는다. TASK-511은 Provider failure를 정상 empty와 분리해 Event 없는 UNKNOWN으로 처리한다. TAGO Route 또는 서울 roster 실패는 해당 Route 전체의 평가를 건너뛰고, 서울 detail 일부 실패는 성공 차량과 roster 전체 presence를 즉시 평가하면서 실패 차량의 위치만 판단하지 않는다. 첫 단계의 모든 Route를 처리한 뒤 실패한 Route 요청과 vehicle detail 요청만 모아 `transit.monitoring.failure-retry-delay=PT5S`로 한 번 기다리고 각각 1회 재시도한다. detail 재시도는 roster를 다시 조회하거나 이전 roster를 새 presence로 재사용하지 않고 성공 Observation만 최신 memory state에 적용한다. 재시도 중 새 실패는 다시 재시도하지 않으며 최종 실패는 기존 tracking/lifecycle을 보존하고 다음 일반 cycle을 기다린다. 지연과 Provider HTTP 동안 transaction 또는 row lock을 유지하지 않고, 재시도 결과도 적용 직전에 status/generation을 검증한다. 별도 retry framework, circuit breaker, 비동기 worker는 도입하지 않는다.
 
 일반 tracking의 Event precedence는 target에서 도착을 충분히 관찰한 `ARRIVED`, target 이전에서 이후로 건너뛴 `PASSED`, `ONE_STOP_BEFORE` 순이다. ARRIVED 후 동일 차량 follow-up에서는 `ONE_STOP_AFTER`만 평가하며 PASSED로 재분류하지 않는다. Stop order는 같은 방향·Route traversal 문맥에서 비교할 수 있을 때만 사용한다.
 

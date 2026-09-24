@@ -517,7 +517,7 @@ ARRIVED follow-up: ONE_STOP_AFTER > 없음
 - 평가에 필요한 Route/Stop reference 누락
 - 정상 응답이지만 현재 차량 진행을 확정할 근거 부족
 
-Timeout, HTTP error, Provider error는 정상 응답 안의 ambiguity와 구분되는 Provider failure다. 실패 자체는 `TransitObservation`이 아니지만 Alarm Evaluation에는 Event 없는 UNKNOWN으로 전달되어 Alarm 상태를 손상하지 않는다.
+Timeout, HTTP error, Provider error, protocol error는 정상 empty 및 정상 응답 안의 ambiguity와 구분되는 Provider failure다. 실패 자체는 `TransitObservation`이나 `TransitEvent`가 아니며 Event 없는 UNKNOWN으로 취급한다. TAGO Route 또는 서울 roster 실패는 해당 Route의 평가를 생략해 기존 tracking과 Alarm lifecycle을 보존한다. 서울 detail 일부 실패는 실패 차량의 위치·Event 판단만 생략하고, 성공 차량은 즉시 평가하며 roster에서 확인한 실패 차량의 presence는 유지한다. 첫 실패 요청만 모든 첫 조회 후 약 5초 뒤 한 번 재시도하고, 다시 실패하면 상태를 보존한 채 다음 일반 cycle을 기다린다.
 
 ## Tracking Lifecycle
 

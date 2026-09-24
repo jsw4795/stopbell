@@ -54,6 +54,28 @@ public class BusAlarmEvaluator {
             List<TransitObservation> observations,
             Instant now
     ) {
+        return evaluate(alarm, state, presentVehicleIds, observations, now, true);
+    }
+
+    /** Evaluates a retried detail without treating the earlier roster as a fresh complete snapshot. */
+    public BusAlarmEvaluationResult evaluatePartial(
+            Alarm alarm,
+            BusAlarmEvaluationState state,
+            Set<String> presentVehicleIds,
+            List<TransitObservation> observations,
+            Instant now
+    ) {
+        return evaluate(alarm, state, presentVehicleIds, observations, now, false);
+    }
+
+    private BusAlarmEvaluationResult evaluate(
+            Alarm alarm,
+            BusAlarmEvaluationState state,
+            Set<String> presentVehicleIds,
+            List<TransitObservation> observations,
+            Instant now,
+            boolean completePresence
+    ) {
         if (alarm == null || state == null || presentVehicleIds == null || observations == null || now == null) {
             throw new IllegalArgumentException("Alarm, state, present vehicles, observations, and evaluation time must not be null");
         }
@@ -64,7 +86,7 @@ public class BusAlarmEvaluator {
         validateObservationRoute(target, observations);
 
         return switch (alarm.getStatus()) {
-            case ACTIVE -> evaluateActive(target, state, presentVehicleIds, observations, now);
+            case ACTIVE -> evaluateActive(target, state, presentVehicleIds, observations, now, completePresence);
             case FOLLOW_UP -> evaluateFollowUp(alarm, target, state, presentVehicleIds, observations, now);
             case INACTIVE -> throw new IllegalStateException("Inactive alarm cannot be evaluated");
         };
@@ -75,12 +97,15 @@ public class BusAlarmEvaluator {
             BusAlarmEvaluationState state,
             Set<String> presentVehicleIds,
             List<TransitObservation> observations,
-            Instant now
+            Instant now,
+            boolean completePresence
     ) {
         BusAlarmEvaluationState.Mutable next = state.mutableCopy();
         touchPresentVehicles(next, presentVehicleIds, now);
-        expireMissingVehicles(next.trackedVehicles(), now);
-        expireMissingBaselineAfterVehicles(next.baselineAfterVehicles(), now);
+        if (completePresence) {
+            expireMissingVehicles(next.trackedVehicles(), now);
+            expireMissingBaselineAfterVehicles(next.baselineAfterVehicles(), now);
+        }
 
         Snapshot snapshot = uniqueSnapshot(observations);
         List<TransitEvent> events = new ArrayList<>();

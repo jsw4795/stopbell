@@ -20,6 +20,7 @@ transit:
   monitoring:
     enabled: false
     fixed-delay: PT20S
+    failure-retry-delay: PT5S
   client:
     connect-timeout: PT2S
     response-timeout: PT5S

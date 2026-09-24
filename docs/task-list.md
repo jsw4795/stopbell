@@ -178,7 +178,7 @@ Phase 3에서 결정한 실제 Provider를 Backend에 연결하고, Phase 4의 A
 - [x] TASK-508 Alarm grouping 조회 전략 결정 및 구현
 - [x] TASK-509 Alarm Evaluation Logic 구현
 - [x] TASK-510 Scheduler 실행 모델 결정 및 구현
-- [ ] TASK-511 Transit API failure를 `UNKNOWN` 상태로 처리
+- [x] TASK-511 Transit API failure를 `UNKNOWN` 상태로 처리
 - [ ] TASK-512 Transit Integration Test 작성
 
 Phase 5의 dependency는 다음과 같다. TASK-513 때문에 TASK-503을 선행 차단하지 않으며 기존 Task 번호와 완료 이력도 유지한다.
@@ -212,7 +212,7 @@ TASK-509은 `BusAlarmEvaluator`와 memory 기반 `BusAlarmEvaluationState`로 AC
 
 TASK-510은 단일 Spring instance에서 Spring Scheduler의 synchronous fixed-delay 방식으로 구현한다. `transit.monitoring.enabled=false`가 기본이고, 명시적으로 켰을 때만 `PT20S` 기본 fixed-delay cycle이 이전 cycle 완료 뒤 시작된다. Provider HTTP I/O는 monitoring Alarm snapshot을 읽은 뒤 transaction/row lock 밖에서 수행하고, 결과 반영 직전에만 `PESSIMISTIC_WRITE`로 Alarm을 다시 조회한다. API activate/deactivate/delete도 같은 row-lock 원칙을 사용한다. `activation_generation BIGINT NOT NULL DEFAULT 0`은 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. Scheduler는 `(alarmId, activationGeneration)` key로 memory evaluation state를 분리하며, 잠금 재조회 결과의 generation/status가 request snapshot과 달라졌거나 row가 삭제됐으면 lifecycle과 memory state 모두 적용하지 않는다. TAGO group은 Route Location 호출 하나를 공유하고 Observation vehicle ID 전체를 현재 존재 집합으로 평가에 전달한다. 서울 group은 roster를 한 번 공유한 뒤 baseline, tracked/new vehicle, FOLLOW_UP vehicle에 필요한 detail만 조회해 `TransitObservation`으로 변환하며 roster `vehId` 전체를 detail Observation과 분리해 전달한다. detail normal empty는 차량 존재만 보존하고 위치나 Event를 만들지 않는다. ACTIVE 후보는 `ARRIVED`·`PASSED`·`ONE_STOP_BEFORE` 우선순위와 `vehicleTrackingId` 오름차순으로 하나만 채택하고 FOLLOW_UP은 `ONE_STOP_AFTER`만 사용한다. current ARRIVED가 after option으로 FOLLOW_UP이 되면 선택 차량의 `trackingCycleId`를 가진 state만 이어가며 시작·만료 시각은 Event `observedAt`의 UTC와 5분 timeout으로 정한다. `trackingCycleId`는 evaluation이 관리하는 logical vehicle tracking cycle identity이며 같은 logical cycle의 transaction retry에서 재생성하지 않는다.
 
-TASK-511은 TASK-503 Provider failure를 Transit/Alarm orchestration에서 Event 없는 UNKNOWN으로 처리한다. failure 때문에 Alarm lifecycle을 진행하거나 기존 vehicle tracking state를 즉시 삭제하거나 synthetic PASSED/ARRIVED를 만들지 않는다. retry/backoff 정책과 Resilience4j/circuit breaker 도입 여부는 TASK-510/511 구현 시 결정한다.
+TASK-511은 TASK-503의 `TRANSPORT`/`HTTP`/`PROVIDER`/`PROTOCOL` failure를 정상 empty와 분리해 Event 없는 UNKNOWN으로 처리한다. TAGO Route·서울 roster failure는 해당 Route만 평가하지 않고, 서울 detail 일부 failure는 roster presence와 성공 차량을 즉시 평가하되 실패 차량의 위치는 보존한다. 모든 첫 요청 뒤 실패 요청만 `PT5S` 지연 한 번으로 1회 재시도하며 재시도 단계의 새 실패는 반복하지 않는다. 최종 실패는 Event·Alarm lifecycle·기존 tracking state를 변경하지 않고 다음 fixed-delay cycle을 기다린다. Provider HTTP와 지연 중 DB lock을 유지하지 않으며 결과 적용 시 current status/generation 검증을 유지한다. Resilience4j, circuit breaker, 별도 비동기 retry framework는 도입하지 않는다.
 
 ------------------------------------------------------------------------
 

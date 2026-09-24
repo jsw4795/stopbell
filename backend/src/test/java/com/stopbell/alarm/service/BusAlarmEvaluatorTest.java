@@ -32,6 +32,24 @@ class BusAlarmEvaluatorTest {
     private final BusAlarmEvaluator evaluator = new BusAlarmEvaluator(routeTraversalService);
 
     @Test
+    @DisplayName("detail 재시도 부분 평가는 다른 차량을 소실로 처리하거나 오래된 roster를 다시 touch하지 않는다")
+    void partial_detail_retry_preserves_unrelated_vehicle_presence() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        TransitObservation older = observation(TransitProvider.SEOUL_BUS, "other", "predecessor", 10,
+                ArrivalEvidence.MOVING, NOW.minusSeconds(55));
+        BusAlarmEvaluationState state = new BusAlarmEvaluationState(true,
+                java.util.Map.of("other", VehicleTrackingState.beginBeforeTarget(older, NOW.minusSeconds(55))),
+                java.util.Map.of(), java.util.Map.of());
+
+        BusAlarmEvaluationResult result = evaluator.evaluatePartial(alarm, state, Set.of("retried"),
+                List.of(observation(TransitProvider.SEOUL_BUS, "retried", "predecessor", 10,
+                        ArrivalEvidence.MOVING, NOW)), NOW.plusSeconds(6));
+
+        assertThat(result.nextState().trackedVehicles()).containsKeys("other", "retried");
+        assertThat(result.nextState().trackedVehicles().get("other").lastSeenAt()).isEqualTo(NOW.minusSeconds(55));
+    }
+
+    @Test
     @DisplayName("baseline predecessor는 ONE_STOP_BEFORE 후보를 만들고 같은 차량을 계속 추적한다")
     void emits_before_at_baseline_and_keeps_tracking() {
         Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
