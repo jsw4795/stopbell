@@ -196,9 +196,13 @@ Test Schema는 Hibernate가 자동 생성하지 않는다. Test에서도 `ddl-au
 
 ## Project Run
 
-Flutter project가 생성된 후 Flutter SDK가 설치되어 있고, 필요한 platform toolchain이 준비되었는지 확인한다.
+Flutter SDK와 iOS platform toolchain을 준비하고, `app/config/local.example.json`을 참고해 Git에서 제외되는 `app/config/local.json`을 만든다. 설정에는 `API_BASE_URL`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_SERVER_CLIENT_ID`를 넣는다. iOS Client ID는 Google Cloud iOS OAuth Client의 값이며, Server Client ID는 Backend의 `GOOGLE_SERVER_CLIENT_ID`와 동일한 Web/Server OAuth Client 값이다. Client Secret은 Flutter 설정에 넣지 않는다.
 
-정확한 Flutter 실행 command와 flavor/environment 분리 방식은 To be decided이다.
+Flutter 기본 Dart define 파일로 설정을 주입한다. `app` 디렉터리에서 실행한다.
+
+```text
+flutter run --dart-define-from-file=config/local.json
+```
 
 ## Device Connection
 
@@ -208,9 +212,7 @@ Push notification 검증은 실제 Device에서 수행해야 한다. emulator/si
 
 ## Backend Connection
 
-Flutter Application은 Local Backend의 HTTPS/HTTP endpoint에 연결한다.
-
-Local Device, emulator/simulator, Backend 실행 위치에 따라 host 주소가 달라질 수 있다. 정확한 Local API base URL 설정 방식은 구현 전에 결정한다.
+Mac에서 Backend를 실행하는 iPhone Simulator의 Local `API_BASE_URL`은 `http://localhost:8080`이다. 실제 iPhone의 `localhost`는 Mac을 가리키지 않으므로, 실제 기기 검증 시에는 Mac의 접근 가능한 Local 주소 또는 개발 서버 주소를 사용한다.
 
 ------------------------------------------------------------------------
 
