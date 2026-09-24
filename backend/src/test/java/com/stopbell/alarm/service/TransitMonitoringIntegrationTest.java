@@ -37,7 +37,8 @@ import com.stopbell.transit.mapper.TagoTransitObservationMapper;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.UserRepository;
-import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -45,7 +46,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -54,7 +55,6 @@ import org.testcontainers.mysql.MySQLContainer;
 @SpringBootTest
 @ActiveProfiles("test")
 @Testcontainers
-@Transactional
 class TransitMonitoringIntegrationTest {
 
     private static final Instant NOW = Instant.parse("2026-09-23T00:00:00Z");
@@ -79,18 +79,23 @@ class TransitMonitoringIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
-    @Autowired
-    private EntityManager entityManager;
+    @BeforeEach
+    @AfterEach
+    void clearTestData() {
+        alarmRepository.deleteAll();
+        userRepository.deleteAll();
+    }
 
     @Test
     @DisplayName("TAGO target 도착 raw 응답은 mapper와 lifecycle을 거쳐 Alarm을 종료한다")
     void tago_arrival_deactivates_alarm_through_full_monitoring_flow() {
         Alarm alarm = activeAlarm(tagoTarget("route-tago", false));
         TagoVehicleLocationClient tagoClient = mock(TagoVehicleLocationClient.class);
-        when(tagoClient.fetchVehicleLocations(any())).thenReturn(tagoResponse(
-                new TagoVehicleLocationItem("vehicle-1", "target", 20,
-                        new BigDecimal("37.5000000"), new BigDecimal("127.1000000"))
-        ));
+        when(tagoClient.fetchVehicleLocations(any())).thenAnswer(ignored -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return tagoResponse(new TagoVehicleLocationItem("vehicle-1", "target", 20,
+                    new BigDecimal("37.5000000"), new BigDecimal("127.1000000")));
+        });
 
         scheduler(tagoClient, mock(SeoulBusVehicleLocationClient.class), mock(SeoulBusVehicleDetailClient.class))
                 .pollMonitoringAlarms();
@@ -227,8 +232,6 @@ class TransitMonitoringIntegrationTest {
     }
 
     private Alarm reload(Alarm alarm) {
-        entityManager.flush();
-        entityManager.clear();
         return alarmRepository.findById(alarm.getId()).orElseThrow();
     }
 
