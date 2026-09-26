@@ -129,6 +129,94 @@ void main() {
     expect(sends, 0);
   });
 
+  test(
+    'different-origin URI is rejected before sending or exposing a token',
+    () async {
+      final backend = FakeBackend();
+      final authSession = await session(FakeStorage(oldPair), backend);
+      var sends = 0;
+      final client = AuthenticatedApiClient(
+        apiBaseUrl: baseUrl,
+        authSession: authSession,
+        client: MockClient((_) async {
+          sends++;
+          return http.Response('', 200);
+        }),
+      );
+
+      for (final path in [
+        'https://example.com/api/v1/test',
+        '//example.com/api/v1/test',
+        'http://localhost:8081/api/v1/test',
+        'https://localhost:8080/api/v1/test',
+      ]) {
+        await expectLater(
+          client.request('GET', path),
+          throwsA(
+            isA<ArgumentError>().having(
+              (error) => error.toString(),
+              'message',
+              isNot(contains('old-access')),
+            ),
+          ),
+        );
+      }
+      expect(sends, 0);
+      expect(backend.calls, 0);
+    },
+  );
+
+  test(
+    'same-origin absolute-path and relative references use Bearer token',
+    () async {
+      final authSession = await session(FakeStorage(oldPair), FakeBackend());
+      final requestedUris = <Uri>[];
+      final client = AuthenticatedApiClient(
+        apiBaseUrl: baseUrl,
+        authSession: authSession,
+        client: MockClient((request) async {
+          requestedUris.add(request.url);
+          expect(request.headers['authorization'], 'Bearer old-access');
+          return http.Response('', 200);
+        }),
+      );
+
+      await client.request('GET', '/api/v1/bus-routes?query=7000');
+      await client.request('GET', 'api/v1/fixture');
+      await client.request('GET', 'http://localhost:8080/api/v1/fixture');
+
+      expect(requestedUris.map((uri) => uri.path), [
+        '/api/v1/bus-routes',
+        '/api/v1/fixture',
+        '/api/v1/fixture',
+      ]);
+      expect(requestedUris.first.queryParameters['query'], '7000');
+    },
+  );
+
+  test(
+    'implicit and explicit HTTP default ports have the same origin',
+    () async {
+      final authSession = await session(FakeStorage(oldPair), FakeBackend());
+      final client = AuthenticatedApiClient(
+        apiBaseUrl: Uri.parse('http://localhost'),
+        authSession: authSession,
+        client: MockClient((request) async {
+          expect(request.url.host, 'localhost');
+          expect(request.url.port, 80);
+          return http.Response('', 200);
+        }),
+      );
+      expect(
+        (await client.request(
+          'GET',
+          'http://localhost:80/api/v1/fixture',
+        )).statusCode,
+        200,
+      );
+    },
+  );
+
   for (final status in [200, 400, 403, 404, 409, 500]) {
     test('response $status passes through without refresh', () async {
       final backend = FakeBackend();

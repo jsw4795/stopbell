@@ -19,7 +19,13 @@ class AuthenticatedApiClient {
     Map<String, String> headers = const {},
     String? body,
   }) async {
-    final endpoint = apiBaseUrl.resolve(path).path;
+    final requestUri = apiBaseUrl.resolve(path);
+    if (requestUri.scheme != apiBaseUrl.scheme ||
+        requestUri.host != apiBaseUrl.host ||
+        requestUri.port != apiBaseUrl.port) {
+      throw ArgumentError('Backend origin 밖의 보호 API는 요청할 수 없습니다.');
+    }
+    final endpoint = requestUri.path;
     if (endpoint == '/auth/google' ||
         endpoint == '/auth/refresh' ||
         endpoint == '/auth/logout') {
@@ -30,21 +36,27 @@ class AuthenticatedApiClient {
       throw const UnauthenticatedApiException();
     }
 
-    final response = await _send(method, path, headers, body, accessToken);
+    final response = await _send(
+      method,
+      requestUri,
+      headers,
+      body,
+      accessToken,
+    );
     if (response.statusCode != 401) return response;
 
     final rotated = await authSession.refreshAfterUnauthorized(accessToken);
-    return _send(method, path, headers, body, rotated.accessToken);
+    return _send(method, requestUri, headers, body, rotated.accessToken);
   }
 
   Future<http.Response> _send(
     String method,
-    String path,
+    Uri requestUri,
     Map<String, String> headers,
     String? body,
     String accessToken,
   ) async {
-    final request = http.Request(method, apiBaseUrl.resolve(path));
+    final request = http.Request(method, requestUri);
     request.headers.addAll({
       for (final entry in headers.entries)
         if (entry.key.toLowerCase() != 'authorization') entry.key: entry.value,
