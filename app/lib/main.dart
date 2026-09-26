@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'core/app_config.dart';
 import 'features/auth/backend_auth_client.dart';
 import 'features/auth/google_auth_service.dart';
+import 'features/auth/token_pair_storage.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   final config = AppConfig.fromEnvironment();
   runApp(
     StopBellApplication(
@@ -13,6 +15,7 @@ void main() {
         backend: BackendAuthClient(
           apiBaseUrl: Uri.tryParse(config.apiBaseUrl) ?? Uri(),
         ),
+        tokenStorage: SecureTokenPairStorage(),
       ),
     ),
   );

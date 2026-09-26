@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'token_pair.dart';
+
 class BackendAuthClient {
   BackendAuthClient({required this.apiBaseUrl, http.Client? client})
     : _client = client ?? http.Client();
@@ -38,13 +40,6 @@ class BackendAuthClient {
       throw const BackendAuthException('서버 로그인 응답이 올바르지 않습니다.');
     }
   }
-}
-
-class TokenPair {
-  const TokenPair({required this.accessToken, required this.refreshToken});
-
-  final String accessToken;
-  final String refreshToken;
 }
 
 class BackendAuthException implements Exception {
