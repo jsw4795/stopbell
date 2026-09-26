@@ -2,35 +2,32 @@ import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../core/app_config.dart';
 import 'backend_auth_client.dart';
-import 'token_pair_storage.dart';
+import 'token_pair.dart';
 
 abstract class Authenticator {
-  Future<void> login();
+  Future<TokenPair> login();
 }
 
 class GoogleAuthService implements Authenticator {
   GoogleAuthService({
     required this.config,
     required this.backend,
-    required this.tokenStorage,
     this.googleIdTokenProvider,
   });
 
   final AppConfig config;
   final BackendAuthClient backend;
-  final TokenPairStorage tokenStorage;
   final Future<String> Function()? googleIdTokenProvider;
   Future<void>? _initialization;
 
   @override
-  Future<void> login() async {
+  Future<TokenPair> login() async {
     config.validate();
 
     try {
       final idToken =
           await (googleIdTokenProvider?.call() ?? _authenticateWithGoogle());
-      final pair = await backend.login(idToken);
-      await tokenStorage.save(pair);
+      return await backend.login(idToken);
     } on GoogleSignInException catch (error) {
       if (error.code == GoogleSignInExceptionCode.canceled) {
         throw const LoginException('로그인이 취소되었습니다.');

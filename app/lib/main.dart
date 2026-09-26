@@ -2,43 +2,62 @@ import 'package:flutter/material.dart';
 
 import 'core/app_config.dart';
 import 'features/auth/backend_auth_client.dart';
+import 'features/auth/auth_session.dart';
 import 'features/auth/google_auth_service.dart';
 import 'features/auth/token_pair_storage.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   final config = AppConfig.fromEnvironment();
+  final backend = BackendAuthClient(
+    apiBaseUrl: Uri.tryParse(config.apiBaseUrl) ?? Uri(),
+  );
   runApp(
     StopBellApplication(
-      authenticator: GoogleAuthService(
-        config: config,
-        backend: BackendAuthClient(
-          apiBaseUrl: Uri.tryParse(config.apiBaseUrl) ?? Uri(),
-        ),
+      authSession: AuthSession(
+        authenticator: GoogleAuthService(config: config, backend: backend),
+        backend: backend,
         tokenStorage: SecureTokenPairStorage(),
       ),
     ),
   );
 }
 
-class StopBellApplication extends StatelessWidget {
-  const StopBellApplication({super.key, required this.authenticator});
+class StopBellApplication extends StatefulWidget {
+  const StopBellApplication({super.key, required this.authSession});
 
-  final Authenticator authenticator;
+  final AuthSession authSession;
+
+  @override
+  State<StopBellApplication> createState() => _StopBellApplicationState();
+}
+
+class _StopBellApplicationState extends State<StopBellApplication> {
+  @override
+  void initState() {
+    super.initState();
+    widget.authSession.initialize().catchError((Object _) {});
+  }
+
+  @override
+  void dispose() {
+    widget.authSession.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'StopBell',
-      home: LoginScreen(authenticator: authenticator),
+      home: LoginScreen(authSession: widget.authSession),
     );
   }
 }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.authenticator});
+  const LoginScreen({super.key, required this.authSession});
 
-  final Authenticator authenticator;
+  final AuthSession authSession;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -46,20 +65,19 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
-  bool _isLoggedIn = false;
   String? _message;
 
   Future<void> _login() async {
-    if (_isLoading || _isLoggedIn) return;
+    if (_isLoading || widget.authSession.state != AuthState.unauthenticated) {
+      return;
+    }
     setState(() {
       _isLoading = true;
       _message = null;
     });
 
     try {
-      await widget.authenticator.login();
-      if (!mounted) return;
-      setState(() => _isLoggedIn = true);
+      await widget.authSession.login();
     } on AppConfigException catch (error) {
       if (mounted) setState(() => _message = error.message);
     } on LoginException catch (error) {
@@ -75,31 +93,36 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('StopBell', style: TextStyle(fontSize: 32)),
-            const SizedBox(height: 24),
-            if (_isLoggedIn)
-              const Text('로그인 성공')
-            else ...[
-              ElevatedButton(
-                onPressed: _isLoading ? null : _login,
-                child: const Text('Google로 계속하기'),
-              ),
-              if (_isLoading) ...[
-                const SizedBox(height: 16),
-                const CircularProgressIndicator(),
-                const Text('로그인 중...'),
-              ],
-              if (_message != null) ...[
-                const SizedBox(height: 16),
-                Text(_message!, textAlign: TextAlign.center),
+    return ListenableBuilder(
+      listenable: widget.authSession,
+      builder: (context, _) => Scaffold(
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('StopBell', style: TextStyle(fontSize: 32)),
+              const SizedBox(height: 24),
+              if (widget.authSession.state == AuthState.initializing)
+                const Text('인증 상태 확인 중...')
+              else if (widget.authSession.state == AuthState.authenticated)
+                const Text('로그인 성공')
+              else ...[
+                ElevatedButton(
+                  onPressed: _isLoading ? null : _login,
+                  child: const Text('Google로 계속하기'),
+                ),
+                if (_isLoading) ...[
+                  const SizedBox(height: 16),
+                  const CircularProgressIndicator(),
+                  const Text('로그인 중...'),
+                ],
+                if (_message != null) ...[
+                  const SizedBox(height: 16),
+                  Text(_message!, textAlign: TextAlign.center),
+                ],
               ],
             ],
-          ],
+          ),
         ),
       ),
     );
