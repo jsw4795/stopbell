@@ -6,7 +6,7 @@
 
 Task 상태는 실제 완료 여부를 기준으로 관리한다. 실제 구현 전에 `requirements.md`, `architecture.md`, `database.md`, `domain-model.md`, 관련 ADR을 확인한다.
 
-------------------------------------------------------------------------
+---
 
 # Task Completion Workflow
 
@@ -45,7 +45,7 @@ Task 상태는 실제 완료 여부를 기준으로 관리한다. 실제 구현 
 - 프로젝트 진행 상황 추적 가능
 - Codex와 개발자가 동일한 진행 상태 공유
 
-------------------------------------------------------------------------
+---
 
 # Phase 0 - Foundation
 
@@ -62,7 +62,7 @@ Task 상태는 실제 완료 여부를 기준으로 관리한다. 실제 구현 
 - [x] TASK-007 Health endpoint 구현
 - [x] TASK-008 `.env.example` 또는 동등한 설정 placeholder 작성
 
-------------------------------------------------------------------------
+---
 
 # Phase 1 - Domain Foundation
 
@@ -80,7 +80,7 @@ JPA를 사용하는 핵심 Domain과 Repository 기반 상태 관리를 준비�
 - [x] TASK-108 Database migration 또는 schema 관리 방식 결정
 - [x] TASK-109 Entity 및 Repository Test 작성
 
-------------------------------------------------------------------------
+---
 
 # Phase 2 - Backend Authentication
 
@@ -98,7 +98,7 @@ StopBell의 사용자 식별과 장기 로그인 유지에 필요한 Backend Aut
 - [x] TASK-207 Logout 및 Refresh Token 무효화 구현
 - [x] TASK-208 Authentication Test 작성
 
-------------------------------------------------------------------------
+---
 
 # Phase 3 - Transit Foundation
 
@@ -134,7 +134,7 @@ TASK-303은 Production Transit Client를 구현하는 Task가 아니다. 실제 
 
 TASK-305는 Provider raw DTO와 provider-neutral `TransitObservation`을 분리하고, Alarm Transit Target의 external reference/occurrence metadata/options, ARRIVED·PASSED·UNKNOWN, before/after Event, baseline 및 Vehicle tracking lifecycle을 계약으로 확정했다. 실제 Schema/DTO/Evaluation/Scheduler는 각각 TASK-401/402/504/509/510에서 구현한다.
 
-------------------------------------------------------------------------
+---
 
 # Phase 4 - Alarm Backend
 
@@ -159,7 +159,7 @@ TASK-507은 client 최소 입력과 metadata DB lookup 기반 Alarm Create를 �
 
 모든 Alarm API는 Phase 2 Authentication의 인증된 StopBell User를 기준으로 소유권을 처리한다. Client Request Body 또는 Query Parameter의 `userId`를 받지 않으며, 생성·조회·수정·삭제 모두 해당 User 소유 Alarm만 처리한다.
 
-------------------------------------------------------------------------
+---
 
 # Phase 5 - Transit Integration
 
@@ -214,7 +214,7 @@ TASK-510은 단일 Spring instance에서 Spring Scheduler의 synchronous fixed-d
 
 TASK-511은 TASK-503의 `TRANSPORT`/`HTTP`/`PROVIDER`/`PROTOCOL` failure를 정상 empty와 분리해 Event 없는 UNKNOWN으로 처리한다. TAGO Route·서울 roster failure는 해당 Route만 평가하지 않고, 서울 detail 일부 failure는 roster presence와 성공 차량을 즉시 평가하되 실패 차량의 위치는 보존한다. 모든 첫 요청 뒤 실패 요청만 `PT5S` 지연 한 번으로 1회 재시도하며 재시도 단계의 새 실패는 반복하지 않는다. 최종 실패는 Event·Alarm lifecycle·기존 tracking state를 변경하지 않고 다음 fixed-delay cycle을 기다린다. Provider HTTP와 지연 중 DB lock을 유지하지 않으며 결과 적용 시 current status/generation 검증을 유지한다. Resilience4j, circuit breaker, 별도 비동기 retry framework는 도입하지 않는다.
 
-------------------------------------------------------------------------
+---
 
 # Phase 6 - Flutter Client
 
@@ -230,9 +230,10 @@ TASK-511은 TASK-503의 `TRANSPORT`/`HTTP`/`PROVIDER`/`PROTOCOL` failure를 정�
 - [x] TASK-606 Flutter Bus Route 검색 연동: TASK-513 → TASK-505 완료 뒤 구현하며 loading, empty, error, retry 상태를 제공한다.
 - [x] TASK-607 Flutter Bus Stop 조회 및 선택 구현: TASK-506 완료 뒤 구현하며 loading, empty, error, retry 상태와 `canNotifyOneStopBefore`/`canNotifyOneStopAfter` 기반 option 비활성화를 제공한다.
 - [x] TASK-608 Flutter Alarm 생성 및 관리 화면/API 연동: TASK-607 뒤 구현하며 `INACTIVE`/`ACTIVE`/`FOLLOW_UP`을 그대로 표현한다. Alarm 목록/조회에는 loading, empty, error, retry 상태를 제공하고 mutation 진행 중 중복 입력을 막는다. stale `targetStopOccurrenceId`의 생성 `404`는 old ID 추측 매칭·자동 POST 재시도 대신 Stop 목록 재선택 흐름으로 복구하며, idempotency contract가 없는 create timeout도 자동 POST 재시도하지 않는다. 실제 ACTIVE monitoring 종단 검증은 Phase 5 monitoring 완료 후 수행한다.
-- [ ] TASK-608A Bus Stop 방향 식별 metadata/API/UI 보완: TASK-607 실제 iPhone smoke에서 Stop 목록만으로 어느 진행 방향의 occurrence인지 구분하기 어렵다는 문제가 확인됐다. 동일 정류장명이 Route에 여러 번 등장하거나 왕복·순환·회차 Route에서는 잘못된 occurrence를 선택할 UX 위험이 있다. 현재 Stop API에는 신뢰 가능한 direction display field가 없다. Flutter는 Stop order, Stop name, Route number, `regionName`, 기점/종점 이름의 임의 조합, 의미가 검증되지 않은 Provider raw field로 방향을 추측하지 않는다. 먼저 Backend metadata 기준으로 신뢰 가능한 방향/행선지/traversal 표시 계약을 확정하고, 필요할 경우 이를 표현하는 최소 범위만 metadata/API에 추가한 뒤 Flutter Stop 선택 UI에서 occurrence를 충분히 구분할 수 있게 표시한다. Provider별 데이터가 실제 제공할 수 없는 정보는 만들어내지 않는다. 실제 iPhone에서 왕복·순환·동일 정류장명 등 대표 사례를 확인한다. 구체 field 이름, DB column, response JSON 구조, Provider별 direction mapping은 이 Task의 설계/구현에서 결정한다.
+- [x] TASK-608A Bus Stop 방향 식별 metadata/API/UI 보완: TASK-607 실제 iPhone smoke에서 Stop 목록만으로 어느 진행 방향의 occurrence인지 구분하기 어렵다는 문제가 확인됐다. 동일 정류장명이 Route에 여러 번 등장하거나 왕복·순환·회차 Route에서는 잘못된 occurrence를 선택할 UX 위험이 있다. 현재 Stop API에는 신뢰 가능한 direction display field가 없다. Flutter는 Stop order, Stop name, Route number, `regionName`, 기점/종점 이름의 임의 조합, 의미가 검증되지 않은 Provider raw field로 방향을 추측하지 않는다. 먼저 Backend metadata 기준으로 신뢰 가능한 방향/행선지/traversal 표시 계약을 확정하고, 필요할 경우 이를 표현하는 최소 범위만 metadata/API에 추가한 뒤 Flutter Stop 선택 UI에서 occurrence를 충분히 구분할 수 있게 표시한다. Provider별 데이터가 실제 제공할 수 없는 정보는 만들어내지 않는다. 실제 iPhone에서 왕복·순환·동일 정류장명 등 대표 사례를 확인한다. 구체 field 이름, DB column, response JSON 구조, Provider별 direction mapping은 이 Task의 설계/구현에서 결정한다.
 
 TASK-608A의 metadata/API/UI 구현과 자동 검증 뒤에도 실제 iPhone smoke가 끝나기 전에는 위 checkbox를 완료 처리하지 않는다.
+
 - [ ] TASK-608B Alarm 생성 후 즉시 활성화 UX 보완: TASK-608 초기 구현은 correctness 확인을 위해 사용자 `알람 만들기` 동작에서 Backend create를 호출하고 `INACTIVE` Alarm을 생성한 뒤, 사용자가 상세에서 별도로 `활성화`한다. 최종 Flutter UX는 사용자의 한 번의 `알람 시작` 동작으로 create 성공 후 activate를 이어서 수행한다. Backend `POST /api/v1/alarms`의 새 Alarm `INACTIVE` 생성 계약은 유지하고 Flutter orchestration으로 create → activate를 연결한다. create 성공 후 activate 성공 시 ACTIVE Alarm으로 완료하며, activate 실패 시 이미 생성된 Alarm을 잃거나 create를 다시 호출하지 않고 생성된 `INACTIVE` Alarm 상세로 복구해 재활성화를 시도할 수 있게 한다. create timeout/network처럼 결과가 불명확하면 TASK-608 계약대로 같은 create POST를 자동 재시도하지 않고 Alarm 목록에서 생성 여부를 확인하게 한다. activate 실패를 이유로 create를 다시 호출해 duplicate Alarm을 만들지 않으며 mutation 중 중복 사용자 입력도 막는다. 실제 iPhone에서 Stop 선택 → `알람 시작` → ACTIVE 흐름과 partial-success 복구를 확인한다.
 - [ ] TASK-609 Flutter Client Authentication / Transit / Alarm E2E·regression Test 보강: 각 Task 테스트를 몰아서 작성하는 Task가 아니라, TASK-608A/B 완료 뒤 최종 Flutter 인증·Transit·Alarm 흐름의 E2E·regression을 보강한다.
 
@@ -240,7 +241,7 @@ TASK-601~605 Authentication lane은 Backend Authentication이 준비되어 있�
 
 Phase 6은 Phase 7에 안정적인 Auth Session state, 자동 refresh를 포함한 authenticated API client, logout lifecycle/hook, Alarm ID 기반 navigation 진입점, app resume 시 Auth Session 재평가 가능 지점을 제공한다. Device/FCM 구현은 TASK-701~704에서 맡는다. Flutter logout은 이 hook에서 현재 Device disable을 시도한 뒤 Auth logout과 local session 종료를 수행하는 방향이며 offline에서 Backend disable을 즉시 보장하지 않는다. Apple Login과 App Store 계정 삭제 요건은 별도 release readiness에서 재검토한다.
 
-------------------------------------------------------------------------
+---
 
 # Phase 7 - Notification
 
@@ -279,7 +280,7 @@ TASK-701
 
 FCM targeting identifier와 Device field/column 길이는 TASK-701/702, activation generation increment/CAS는 TASK-510, Notification Schema/constraint 이름은 TASK-707/708, retry 수치는 TASK-709에서 확정한다. MySQL durable pending dispatch와 단일 non-overlapping in-process worker를 사용하며 Kafka, RabbitMQ, Redis queue, Notification microservice, event sourcing, generic multi-provider/retry framework, Device subtype hierarchy, APNs direct client, multi-instance distributed lock, claim/lease, `claimedAt`, `SENDING`, stale-claim recovery는 V1에 도입하지 않는다.
 
-------------------------------------------------------------------------
+---
 
 # Phase 8 - Quality and Operations
 
