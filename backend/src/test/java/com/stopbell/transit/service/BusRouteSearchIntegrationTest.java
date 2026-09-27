@@ -66,6 +66,39 @@ class BusRouteSearchIntegrationTest {
     }
 
     @Test
+    @DisplayName("선행 영문자를 생략한 숫자 prefix로 검색하되 중간 substring은 검색하지 않는다")
+    void search_by_prefix_after_leading_letters() {
+        route(TransitProvider.SEOUL_BUS, "route-m2352", "M2352", null);
+        route(TransitProvider.SEOUL_BUS, "route-n26", "N26", null);
+        route(TransitProvider.TAGO, "route-g6000", "G6000", "31010");
+        route(TransitProvider.SEOUL_BUS, "route-ab1234", "AB1234", null);
+
+        for (String query : List.of("M23", "m2352", "2352", "235", "23")) {
+            assertThat(busRouteSearchService.search(query)).extracting(BusRouteSearchResponse::routeNumber)
+                    .containsExactly("M2352");
+        }
+        assertThat(busRouteSearchService.search("26")).extracting(BusRouteSearchResponse::routeNumber)
+                .containsExactly("N26");
+        assertThat(busRouteSearchService.search("6000")).extracting(BusRouteSearchResponse::routeNumber)
+                .containsExactly("G6000");
+        assertThat(busRouteSearchService.search("123")).extracting(BusRouteSearchResponse::routeNumber)
+                .containsExactly("AB1234");
+        assertThat(busRouteSearchService.search("352")).isEmpty();
+        assertThat(busRouteSearchService.search("6")).extracting(BusRouteSearchResponse::routeNumber)
+                .containsExactly("G6000");
+    }
+
+    @Test
+    @DisplayName("숫자 노선과 선행 영문자 노선이 모두 일치하면 두 후보를 노선번호 순으로 반환한다")
+    void return_direct_and_prefixed_route_candidates() {
+        BusRoute prefixed = route(TransitProvider.SEOUL_BUS, "route-m2352", "M2352", null);
+        BusRoute direct = route(TransitProvider.TAGO, "route-2352", "2352", "31010");
+
+        assertThat(busRouteSearchService.search("2352")).extracting(BusRouteSearchResponse::id)
+                .containsExactly(direct.getId(), prefixed.getId());
+    }
+
+    @Test
     @DisplayName("동일 노선번호 후보를 내부 ID와 지역명으로 각각 반환하고 ID 오름차순으로 정렬한다")
     void return_duplicate_route_number_candidates_in_id_order() throws Exception {
         BusRoute suwon = route(TransitProvider.TAGO, "route-suwon", "7000", "31010");
@@ -111,14 +144,30 @@ class BusRouteSearchIntegrationTest {
     }
 
     @Test
+    @DisplayName("영문 prefix를 생략한 검색 결과도 최대 50건으로 제한한다")
+    void limit_search_results_after_leading_letters() {
+        for (int index = 50; index >= 0; index--) {
+            route(TransitProvider.SEOUL_BUS, "route-m-" + index, "M88" + String.format("%02d", index), null);
+        }
+
+        assertThat(busRouteSearchService.search("88")).extracting(BusRouteSearchResponse::routeNumber)
+                .containsExactlyElementsOf(java.util.stream.IntStream.range(0, 50)
+                        .mapToObj(index -> "M88" + String.format("%02d", index))
+                        .toList());
+    }
+
+    @Test
     @DisplayName("LIKE wildcard 문자는 literal prefix로 처리한다")
     void treat_like_wildcards_as_literals() {
         route(TransitProvider.TAGO, "route-percent", "70%1", "31010");
         route(TransitProvider.TAGO, "route-plain", "701", "31010");
         route(TransitProvider.TAGO, "route-underscore", "70A1", "31010");
+        route(TransitProvider.SEOUL_BUS, "route-prefixed-percent", "M70%1", null);
+        route(TransitProvider.SEOUL_BUS, "route-prefixed-plain", "M701", null);
+        route(TransitProvider.SEOUL_BUS, "route-prefixed-underscore", "M70A1", null);
 
         assertThat(busRouteSearchService.search("70%")).extracting(BusRouteSearchResponse::routeNumber)
-                .containsExactly("70%1");
+                .containsExactly("70%1", "M70%1");
         assertThat(busRouteSearchService.search("70_")).isEmpty();
     }
 

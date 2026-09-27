@@ -23,7 +23,7 @@ public class BusRouteSearchService {
     public List<BusRouteSearchResponse> search(String query) {
         String normalizedQuery = normalizeQuery(query);
         return busRouteRepository
-                .findTop50ByRouteNumberStartingWithIgnoreCaseOrderByRouteNumberAscIdAsc(normalizedQuery)
+                .searchByRouteNumberPrefix(normalizedQuery)
                 .stream()
                 .map(route -> new BusRouteSearchResponse(
                         route.getId(),

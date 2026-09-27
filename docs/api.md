@@ -43,7 +43,7 @@ Spring Boot Actuator가 제공하는 공식 Application health endpoint이며, �
 GET /api/v1/bus-routes?query={query}
 ```
 
-JWT Access Token이 필요한 Application API다. `query`는 trim한 뒤 노선번호에 대해 대소문자를 무시하는 prefix 검색을 수행한다. 빈 값, whitespace-only 값, 누락된 `query`는 `400 Bad Request`와 다음 오류를 반환한다.
+JWT Access Token이 필요한 Application API다. `query`는 trim한 뒤 노선번호 원문 또는 시작의 연속된 영문자 prefix(`[A-Za-z]+`)를 생략한 값에 대해 대소문자를 무시하는 prefix 검색을 수행한다. 예를 들어 `2352`는 `M2352`에 일치하지만 `352`는 일치하지 않으며, 일반 substring 검색은 수행하지 않는다. 빈 값, whitespace-only 값, 누락된 `query`는 `400 Bad Request`와 다음 오류를 반환한다.
 
 ```json
 {
