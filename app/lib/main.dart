@@ -2,16 +2,16 @@ import 'package:flutter/material.dart';
 
 import 'core/app_config.dart';
 import 'core/authenticated_api_client.dart';
+import 'features/alarm/alarm_api_client.dart';
+import 'features/alarm/alarm_home.dart';
 import 'features/auth/backend_auth_client.dart';
 import 'features/auth/auth_session.dart';
 import 'features/auth/google_auth_service.dart';
 import 'features/auth/token_pair_storage.dart';
 import 'features/transit/bus_route.dart';
 import 'features/transit/bus_route_search_client.dart';
-import 'features/transit/bus_route_search_screen.dart';
 import 'features/transit/bus_route_stop_client.dart';
 import 'features/transit/bus_route_stop_occurrence.dart';
-import 'features/transit/bus_route_stop_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,11 +30,13 @@ void main() {
   );
   final routeSearch = BusRouteSearchClient(apiClient);
   final routeStops = BusRouteStopClient(apiClient);
+  final alarms = AlarmApiClient(apiClient);
   runApp(
     StopBellApplication(
       authSession: authSession,
       searchRoutes: routeSearch.search,
       findStops: routeStops.findStops,
+      alarmClient: alarms,
     ),
   );
 }
@@ -45,11 +47,13 @@ class StopBellApplication extends StatefulWidget {
     required this.authSession,
     required this.searchRoutes,
     required this.findStops,
+    required this.alarmClient,
   });
 
   final AuthSession authSession;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
+  final AlarmClient alarmClient;
 
   @override
   State<StopBellApplication> createState() => _StopBellApplicationState();
@@ -76,6 +80,7 @@ class _StopBellApplicationState extends State<StopBellApplication> {
         authSession: widget.authSession,
         searchRoutes: widget.searchRoutes,
         findStops: widget.findStops,
+        alarmClient: widget.alarmClient,
       ),
     );
   }
@@ -87,11 +92,13 @@ class LoginScreen extends StatefulWidget {
     required this.authSession,
     required this.searchRoutes,
     required this.findStops,
+    required this.alarmClient,
   });
 
   final AuthSession authSession;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
+  final AlarmClient alarmClient;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -100,25 +107,6 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   String? _message;
-  BusRoute? _selectedRoute;
-
-  @override
-  void initState() {
-    super.initState();
-    widget.authSession.addListener(_clearRouteWhenUnauthenticated);
-  }
-
-  void _clearRouteWhenUnauthenticated() {
-    if (widget.authSession.state != AuthState.authenticated) {
-      _selectedRoute = null;
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.authSession.removeListener(_clearRouteWhenUnauthenticated);
-    super.dispose();
-  }
 
   Future<void> _login() async {
     if (_isLoading || widget.authSession.state != AuthState.unauthenticated) {
@@ -174,7 +162,8 @@ class _LoginScreenState extends State<LoginScreen> {
     return ListenableBuilder(
       listenable: widget.authSession,
       builder: (context, _) {
-        if (widget.authSession.state == AuthState.authenticated) {
+        if (widget.authSession.state == AuthState.authenticated &&
+            !widget.authSession.isLoggingOut) {
           return Scaffold(
             appBar: AppBar(
               title: const Text('StopBell'),
@@ -188,17 +177,13 @@ class _LoginScreenState extends State<LoginScreen> {
             body: Column(
               children: [
                 Expanded(
-                  child: _selectedRoute == null
-                      ? BusRouteSearchScreen(
-                          search: widget.searchRoutes,
-                          onSelect: (route) =>
-                              setState(() => _selectedRoute = route),
-                        )
-                      : BusRouteStopScreen(
-                          route: _selectedRoute!,
-                          findStops: widget.findStops,
-                          onBack: () => setState(() => _selectedRoute = null),
-                        ),
+                  child: AlarmHome(
+                    key: ValueKey(widget.authSession.generation),
+                    client: widget.alarmClient,
+                    authSession: widget.authSession,
+                    searchRoutes: widget.searchRoutes,
+                    findStops: widget.findStops,
+                  ),
                 ),
                 if (_isLoading) const Text('로그아웃 중...'),
                 if (_message != null)

@@ -234,6 +234,8 @@ TASK-511은 TASK-503의 `TRANSPORT`/`HTTP`/`PROVIDER`/`PROTOCOL` failure를 정�
 
 후속 UX 검토: TASK-607 실제 iPhone smoke에서 Stop 목록의 방향 식별 정보 부족이 확인됐다. 현재 Stop API에는 신뢰 가능한 direction display field가 없으므로 Flutter에서 방향을 추측하지 않는다. TASK-608 진행을 막지는 않으며, Phase 6 최종 E2E·UX 검증 전에 Backend metadata/API의 신뢰 가능한 방향 표시 계약을 결정하고 필요한 UI 보완 여부를 재검토한다.
 
+후속 UX 검토: TASK-608 초기 구현에서는 정확성 검증을 위해 Alarm 생성과 활성화를 분리한다. 안정화 후 Flutter의 한 번의 `알람 시작` 동작에서 create 성공 직후 activate를 연결한다. Backend create의 `INACTIVE` 계약은 유지할 수 있으며, create 성공 후 activate 실패 시 생성된 INACTIVE Alarm 상세에서 복구한다. 이 연속 동작은 TASK-608 초기 구현에 적용하지 않는다.
+
 TASK-601~605 Authentication lane은 Backend Authentication이 준비되어 있으므로 Phase 5와 병행할 수 있다. TASK-606은 TASK-513 → TASK-505 뒤, TASK-607은 TASK-506 뒤, TASK-608은 TASK-607 뒤 진행한다. offline mutation queue/cache, generic `Repository`/`BaseRepository`, 모든 API별 `UseCase` class, global event bus, 복잡한 refresh queue framework, notification stub은 이번 Phase에 도입하지 않는다. state management library도 특정 제품으로 확정하지 않는다.
 
 Phase 6은 Phase 7에 안정적인 Auth Session state, 자동 refresh를 포함한 authenticated API client, logout lifecycle/hook, Alarm ID 기반 navigation 진입점, app resume 시 Auth Session 재평가 가능 지점을 제공한다. Device/FCM 구현은 TASK-701~704에서 맡는다. Flutter logout은 이 hook에서 현재 Device disable을 시도한 뒤 Auth logout과 local session 종료를 수행하는 방향이며 offline에서 Backend disable을 즉시 보장하지 않는다. Apple Login과 App Store 계정 삭제 요건은 별도 release readiness에서 재검토한다.

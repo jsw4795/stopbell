@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../alarm/alarm.dart';
+import '../alarm/alarm_api_client.dart';
 import 'bus_route.dart';
 import 'bus_route_stop_occurrence.dart';
 
@@ -11,11 +13,17 @@ class BusRouteStopScreen extends StatefulWidget {
     required this.route,
     required this.findStops,
     required this.onBack,
+    required this.alarmClient,
+    required this.onCreated,
+    required this.onShowAlarms,
   });
 
   final BusRoute route;
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
   final VoidCallback onBack;
+  final AlarmClient alarmClient;
+  final ValueChanged<Alarm> onCreated;
+  final VoidCallback onShowAlarms;
 
   @override
   State<BusRouteStopScreen> createState() => _BusRouteStopScreenState();
@@ -28,6 +36,9 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
   bool _notifyOneStopBefore = false;
   bool _notifyOneStopAfter = false;
   int _requestGeneration = 0;
+  bool _creating = false;
+  bool _outcomeUnknown = false;
+  String? _createMessage;
 
   @override
   void initState() {
@@ -48,6 +59,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
   }
 
   Future<void> _load() async {
+    if (_creating) return;
     final request = ++_requestGeneration;
     final routeId = widget.route.id;
     setState(() {
@@ -72,11 +84,65 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
   }
 
   void _select(BusRouteStopOccurrence occurrence) {
+    if (_creating || _outcomeUnknown) return;
     setState(() {
       _selectedOccurrenceId = occurrence.id;
       _notifyOneStopBefore = false;
       _notifyOneStopAfter = false;
+      _createMessage = null;
     });
+  }
+
+  Future<void> _create() async {
+    final id = _selectedOccurrenceId;
+    if (_creating || _outcomeUnknown || id == null) return;
+    final before = _notifyOneStopBefore;
+    final after = _notifyOneStopAfter;
+    setState(() {
+      _creating = true;
+      _createMessage = null;
+    });
+    try {
+      final alarm = await widget.alarmClient.create(
+        targetStopOccurrenceId: id,
+        notifyOneStopBefore: before,
+        notifyOneStopAfter: after,
+      );
+      if (mounted) widget.onCreated(alarm);
+    } on AlarmApiException catch (error) {
+      if (!mounted) return;
+      if (error.isStaleTarget) {
+        setState(() {
+          _creating = false;
+          _createMessage = '정류장 정보가 변경됐습니다. 새 목록에서 정류장을 다시 선택해 주세요.';
+        });
+        _load();
+      } else if (error.statusCode == 400 &&
+          error.code == 'INVALID_ALARM_REQUEST') {
+        setState(
+          () => _createMessage =
+              '현재 정류장 정보로 선택한 알림 조건을 생성할 수 없습니다. 목록을 새로 조회해 주세요.',
+        );
+      } else if (error.statusCode == null) {
+        setState(() {
+          _outcomeUnknown = true;
+          _createMessage =
+              '알람 생성 결과를 확인할 수 없습니다. 중복 생성을 피하려면 알람 목록에서 생성 여부를 확인해 주세요.';
+        });
+      } else {
+        setState(() => _createMessage = '알람을 생성하지 못했습니다.');
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _outcomeUnknown = true;
+          _createMessage =
+              '알람 생성 결과를 확인할 수 없습니다. 중복 생성을 피하려면 알람 목록에서 생성 여부를 확인해 주세요.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _creating = false);
+    }
   }
 
   @override
@@ -90,7 +156,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           leading: IconButton(
             tooltip: '노선 다시 선택',
             icon: const Icon(Icons.arrow_back),
-            onPressed: widget.onBack,
+            onPressed: _creating ? null : widget.onBack,
           ),
           title: Text(widget.route.routeNumber),
           subtitle: Text(widget.route.regionName),
@@ -105,18 +171,44 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           SwitchListTile(
             title: const Text('한 정거장 전 알림'),
             value: _notifyOneStopBefore,
-            onChanged: target.canNotifyOneStopBefore
+            onChanged:
+                !_creating && !_outcomeUnknown && target.canNotifyOneStopBefore
                 ? (value) => setState(() => _notifyOneStopBefore = value)
                 : null,
           ),
           SwitchListTile(
             title: const Text('한 정거장 후 알림'),
             value: _notifyOneStopAfter,
-            onChanged: target.canNotifyOneStopAfter
+            onChanged:
+                !_creating && !_outcomeUnknown && target.canNotifyOneStopAfter
                 ? (value) => setState(() => _notifyOneStopAfter = value)
                 : null,
           ),
         ],
+        if (target != null && !_outcomeUnknown)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: FilledButton(
+              onPressed: _creating ? null : _create,
+              child: const Text('알람 만들기'),
+            ),
+          ),
+        if (_creating) const Center(child: CircularProgressIndicator()),
+        if (_createMessage != null)
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(_createMessage!, textAlign: TextAlign.center),
+          ),
+        if (_outcomeUnknown)
+          OutlinedButton(
+            onPressed: widget.onShowAlarms,
+            child: const Text('알람 목록 보기'),
+          ),
+        if (!_creating &&
+            !_outcomeUnknown &&
+            _createMessage != null &&
+            _state == _StopState.success)
+          OutlinedButton(onPressed: _load, child: const Text('정류장 목록 새로고침')),
       ],
     );
   }
@@ -143,7 +235,10 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
             children: [
               const Text('정류장 정보를 불러오지 못했습니다.'),
               const SizedBox(height: 12),
-              OutlinedButton(onPressed: _load, child: const Text('다시 시도')),
+              OutlinedButton(
+                onPressed: _creating ? null : _load,
+                child: const Text('다시 시도'),
+              ),
             ],
           ),
         );
@@ -159,7 +254,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
               subtitle: Text('순서 ${stop.order}'),
               selected: isSelected,
               trailing: isSelected ? const Icon(Icons.check) : null,
-              onTap: () => _select(stop),
+              onTap: _creating || _outcomeUnknown ? null : () => _select(stop),
             );
           },
         );

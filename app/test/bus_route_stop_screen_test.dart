@@ -6,6 +6,8 @@ import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/features/transit/bus_route_stop_screen.dart';
 
+import 'alarm_test_fakes.dart';
+
 const route = BusRoute(id: 754, routeNumber: '7000', regionName: '수원시');
 const first = BusRouteStopOccurrence(
   id: 11,
@@ -36,6 +38,9 @@ Widget screen(Future<List<BusRouteStopOccurrence>> Function(int) findStops) =>
           route: route,
           findStops: findStops,
           onBack: () {},
+          alarmClient: EmptyAlarmClient(),
+          onCreated: (_) {},
+          onShowAlarms: () {},
         ),
       ),
     );
