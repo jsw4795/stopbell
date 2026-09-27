@@ -50,6 +50,9 @@ public class BusRouteStopService {
                 occurrence.getId(),
                 occurrence.getStop().getStopName(),
                 occurrence.getStopOrder(),
+                occurrence.getDestinationName(),
+                index > 0 ? occurrences.get(index - 1).getStop().getStopName() : null,
+                index < occurrences.size() - 1 ? occurrences.get(index + 1).getStop().getStopName() : null,
                 index > 0,
                 index < occurrences.size() - 1
         );

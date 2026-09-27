@@ -145,10 +145,40 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
     }
   }
 
+  String? _context(BusRouteStopOccurrence stop) {
+    final sameName = _stops.where((item) => item.name == stop.name).toList();
+    final details = <String>[];
+    if (stop.destinationName != null) {
+      details.add('${stop.destinationName} 방면');
+    }
+    final sameDestination = sameName
+        .where((item) => item.destinationName == stop.destinationName)
+        .toList();
+    if (sameName.length > 1 &&
+        (stop.destinationName == null || sameDestination.length > 1)) {
+      details.add(
+        '이전: ${stop.previousStopName ?? '없음'} · 다음: ${stop.nextStopName ?? '없음'}',
+      );
+    }
+    if (sameDestination.length > 1 &&
+        sameDestination
+                .where(
+                  (item) =>
+                      item.previousStopName == stop.previousStopName &&
+                      item.nextStopName == stop.nextStopName,
+                )
+                .length >
+            1) {
+      details.add('노선 순서 ${stop.order}');
+    }
+    return details.isEmpty ? null : details.join('\n');
+  }
+
   @override
   Widget build(BuildContext context) {
     final selected = _stops.where((stop) => stop.id == _selectedOccurrenceId);
     final target = selected.isEmpty ? null : selected.first;
+    final selectedContext = target == null ? null : _context(target);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -166,7 +196,9 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           const Divider(),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text('선택한 정류장: ${target.name} · 순서 ${target.order}'),
+            child: Text(
+              '선택한 정류장: ${target.name}${selectedContext == null ? '' : '\n$selectedContext'}',
+            ),
           ),
           SwitchListTile(
             title: const Text('한 정거장 전 알림'),
@@ -248,10 +280,11 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           itemBuilder: (context, index) {
             final stop = _stops[index];
             final isSelected = stop.id == _selectedOccurrenceId;
+            final context = _context(stop);
             return ListTile(
               key: ValueKey(stop.id),
               title: Text(stop.name),
-              subtitle: Text('순서 ${stop.order}'),
+              subtitle: context == null ? null : Text(context),
               selected: isSelected,
               trailing: isSelected ? const Icon(Icons.check) : null,
               onTap: _creating || _outcomeUnknown ? null : () => _select(stop),

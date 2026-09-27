@@ -13,6 +13,8 @@ const first = BusRouteStopOccurrence(
   id: 11,
   name: '재방문 정류장',
   order: 1,
+  previousStopName: null,
+  nextStopName: '중간 정류장',
   canNotifyOneStopBefore: false,
   canNotifyOneStopAfter: true,
 );
@@ -20,6 +22,9 @@ const middle = BusRouteStopOccurrence(
   id: 22,
   name: '중간 정류장',
   order: 3,
+  destinationName: '종점',
+  previousStopName: '재방문 정류장',
+  nextStopName: '재방문 정류장',
   canNotifyOneStopBefore: true,
   canNotifyOneStopAfter: true,
 );
@@ -27,6 +32,8 @@ const last = BusRouteStopOccurrence(
   id: 33,
   name: '재방문 정류장',
   order: 7,
+  previousStopName: '중간 정류장',
+  nextStopName: null,
   canNotifyOneStopBefore: true,
   canNotifyOneStopAfter: false,
 );
@@ -84,9 +91,9 @@ void main() {
     await tester.pumpWidget(screen((_) async => [first, middle, last]));
     await tester.pumpAndSettle();
     expect(find.text('재방문 정류장'), findsNWidgets(2));
-    expect(find.text('순서 1'), findsOneWidget);
-    expect(find.text('순서 3'), findsOneWidget);
-    expect(find.text('순서 7'), findsOneWidget);
+    expect(find.text('이전: 없음 · 다음: 중간 정류장'), findsOneWidget);
+    expect(find.text('종점 방면'), findsOneWidget);
+    expect(find.text('이전: 중간 정류장 · 다음: 없음'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey(22)));
     await tester.pump();
@@ -130,4 +137,43 @@ void main() {
       isTrue,
     );
   });
+
+  testWidgets(
+    'same destination and adjacent names use order only for unresolved duplicates',
+    (tester) async {
+      const repeatedA = BusRouteStopOccurrence(
+        id: 41,
+        name: '순환 정류장',
+        order: 8,
+        destinationName: '종점',
+        previousStopName: '이전',
+        nextStopName: '다음',
+        canNotifyOneStopBefore: true,
+        canNotifyOneStopAfter: true,
+      );
+      const repeatedB = BusRouteStopOccurrence(
+        id: 42,
+        name: '순환 정류장',
+        order: 34,
+        destinationName: '종점',
+        previousStopName: '이전',
+        nextStopName: '다음',
+        canNotifyOneStopBefore: true,
+        canNotifyOneStopAfter: true,
+      );
+      await tester.pumpWidget(screen((_) async => [repeatedA, repeatedB]));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('노선 순서 8'), findsOneWidget);
+      expect(find.textContaining('노선 순서 34'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey(42)));
+      await tester.pump();
+      expect(
+        find.textContaining(
+          '선택한 정류장: 순환 정류장\n종점 방면\n이전: 이전 · 다음: 다음\n노선 순서 34',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
 }

@@ -239,6 +239,7 @@ id BIGINT AUTO_INCREMENT PRIMARY KEY
 route_id BIGINT NOT NULL REFERENCES bus_routes(id) ON DELETE CASCADE
 stop_id BIGINT NOT NULL REFERENCES bus_stops(id)
 stop_order INT NOT NULL
+destination_name VARCHAR(255) NULL
 UNIQUE(route_id, stop_order)
 ```
 
@@ -246,11 +247,13 @@ Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, 
 
 Route snapshot sync는 동일 Route/Stop identity의 display·operational metadata를 UPDATE해 내부 ID를 유지한다. occurrence는 `(route, stop, stopOrder)`가 완전히 같을 때만 내부 ID를 유지하며 Stop 또는 order가 바뀌면 기존 row를 삭제하고 새 row를 만든다. Route snapshot에서 사라진 occurrence는 제거한다. 검증된 complete provider snapshot만 typed boundary, completeness token/result, destructive method visibility 제한 또는 동등한 구조적 보호를 거쳐 provider-level cleanup에 들어간다. Partial fetch, pagination incomplete, parser failure, required source 누락, provider request 일부 실패와 검증되지 않은 empty result는 cleanup 근거가 아니다.
 
+`destination_name`은 V12 nullable migration으로 추가한 사용자 표시 metadata다. 동일 occurrence의 목적지만 변경되거나 검증 실패로 null이 되면 기존 내부 ID를 유지하며 current snapshot 값으로 갱신한다. GBIS ID나 방향 raw field는 영속하지 않는다.
+
 TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `lastCompleteSyncAt` 의미를 저장해 fresh DB bootstrap 완료, readiness와 last successful complete sync age를 판단한다. 구체 table/column/type은 구현 시 정하며 sync/checksum history, staging table, error journal은 요구하지 않는다.
 
 ## 7. 외부 교통 데이터
 
-서울은 T Data CSV full import, 경기는 TAGO throttled full sync를 source로 사용한다. static metadata를 DB에 보관하면 사용자 Route/Stop 조회와 Alarm 생성이 외부 metadata 호출·rate limit에 매번 의존하지 않고, identifier와 traversal 정보를 현재 metadata로 관리할 수 있다. 실제 source downloader/parser, production client, scheduler는 별도 Transit Task에서 구현한다.
+서울은 T Data CSV full import, 경기는 TAGO throttled full sync를 identity/traversal source로 사용한다. 경기는 GBIS route/routeStation bulk를 검증된 목적지 표시 metadata의 보강 source로만 사용하며 GBIS-only Route는 TAGO scope에 추가하지 않는다. static metadata를 DB에 보관하므로 사용자 Route/Stop 조회와 Alarm 생성이 외부 metadata 호출에 매번 의존하지 않는다.
 
 ## 8. 인덱싱
 

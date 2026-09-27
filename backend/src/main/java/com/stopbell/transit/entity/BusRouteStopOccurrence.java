@@ -36,10 +36,17 @@ public class BusRouteStopOccurrence {
     @Column(name = "stop_order", nullable = false)
     private int stopOrder;
 
+    @Column(name = "destination_name", length = 255)
+    private String destinationName;
+
     protected BusRouteStopOccurrence() {
     }
 
     public BusRouteStopOccurrence(BusRoute route, BusStop stop, int stopOrder) {
+        this(route, stop, stopOrder, null);
+    }
+
+    public BusRouteStopOccurrence(BusRoute route, BusStop stop, int stopOrder, String destinationName) {
         if (route == null || stop == null) {
             throw new IllegalArgumentException("Route and stop must not be null");
         }
@@ -52,6 +59,7 @@ public class BusRouteStopOccurrence {
         this.route = route;
         this.stop = stop;
         this.stopOrder = stopOrder;
+        updateDestinationName(destinationName);
     }
 
     public Long getId() {
@@ -68,5 +76,16 @@ public class BusRouteStopOccurrence {
 
     public int getStopOrder() {
         return stopOrder;
+    }
+
+    public String getDestinationName() {
+        return destinationName;
+    }
+
+    public void updateDestinationName(String destinationName) {
+        if (destinationName != null && (destinationName.isBlank() || destinationName.length() > 255)) {
+            throw new IllegalArgumentException("Destination name must be non-blank and at most 255 characters");
+        }
+        this.destinationName = destinationName;
     }
 }

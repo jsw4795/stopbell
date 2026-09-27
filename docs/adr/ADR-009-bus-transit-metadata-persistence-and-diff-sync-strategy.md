@@ -81,6 +81,12 @@ TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TAS
 - MyBatis는 실제 SQL 제어 필요가 확인될 때에만 다시 도입한다
 - Source downloader/parser와 one-shot bootstrap은 TASK-513, realtime production client·Scheduler와 Alarm API는 각각 후속 Task로 남는다
 
+## TASK-608A 후속 결정 (2026-09-27)
+
+경기 Route/Stop의 `(TAGO, external ID)`, cityCode, traversal 및 realtime 요청은 유지한다. GBIS 기반정보 bulk의 route와 routeStation은 목적지 표시만 보강한다. `GGB` 제거는 GBIS 후보 조회에만 사용하고 identity 계약으로 삼지 않는다. 후보 Route 번호, occurrence 수, 모든 순번과 Stop ID, 유효한 회차 순번 및 목적지 정류장명을 검증한 경우에만 보강한다. GBIS-only Route는 추가하지 않는다. 전체 bulk의 fetch, 버전 일치, parsing 또는 구조 검증에 실패하면 complete TAGO snapshot을 만들지 않는다. 개별 Route 불일치는 해당 Route만 destination 없이 유지한다.
+
+목적지는 `staOrder < turnSeq`에서 회차 occurrence의 stationName, `staOrder >= turnSeq`에서 실제 마지막 traversal occurrence의 stationName이다. 기점/종점 이름과 raw `upDown`은 생성에 사용하지 않는다. nullable `destination_name`은 occurrence identity가 아니며 동일 `(route, stop, stopOrder)`의 변경에 내부 ID를 유지한다. Stop API는 persisted traversal의 인접 Stop 이름을 함께 제공해 서울 및 보강 실패 Route에서도 중복 occurrence를 구분한다.
+
 ## 재검토 시점
 
 다음 중 하나 이상이 확인되면 이 결정을 재검토한다.

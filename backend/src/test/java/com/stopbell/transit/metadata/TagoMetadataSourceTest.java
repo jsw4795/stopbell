@@ -10,12 +10,48 @@ import static org.mockito.Mockito.verify;
 
 import java.util.List;
 import java.util.Set;
+import java.nio.charset.StandardCharsets;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 class TagoMetadataSourceTest {
+    @Test
+    void invalid_gbis_bulk_prevents_complete_tago_snapshot() {
+        TagoMetadataClient tago = Mockito.mock(TagoMetadataClient.class);
+        GbisMetadataClient gbis = Mockito.mock(GbisMetadataClient.class);
+        when(gbis.fetch()).thenThrow(new IllegalStateException("version mismatch"));
+        TagoMetadataSource source = new TagoMetadataSource(tago, gbis, 0, Set.of("31010"));
+
+        assertThatThrownBy(source::fetchCompleteSnapshot).isInstanceOf(IllegalStateException.class);
+        verify(tago, never()).cityCodes();
+    }
+
+    @Test
+    void production_source_enriches_only_existing_tago_routes() {
+        TagoMetadataClient tago = Mockito.mock(TagoMetadataClient.class);
+        GbisMetadataClient gbis = Mockito.mock(GbisMetadataClient.class);
+        String routes = "routeId|routeName|turnSeq^200|300|2^999|999|1";
+        String stations = "routeId|routeName|upDown|staOrder|stationId|stationName|x|y^"
+                + "200|300|상행|1|10|출발|127|37^200|300|하행|2|20|종점|127|37^"
+                + "999|999|상행|1|99|GBIS 전용|127|37";
+        when(gbis.fetch()).thenReturn(GbisBulkMetadata.parse(
+                routes.getBytes(StandardCharsets.UTF_8), stations.getBytes(StandardCharsets.UTF_8), "1", "1"));
+        when(tago.cityCodes()).thenReturn(List.of(new TagoMetadataClient.City("31010", "수원시")));
+        when(tago.routes("31010", 1)).thenReturn(page(List.of(new TagoMetadataClient.Route("GGB200", "300")), 1, 1));
+        when(tago.routeStops("31010", "GGB200", 1)).thenReturn(page(List.of(
+                new TagoMetadataClient.Stop("GGB10", "출발", 1, null, null),
+                new TagoMetadataClient.Stop("GGB20", "종점", 2, null, null)), 2, 1));
+        TagoMetadataSource source = new TagoMetadataSource(tago, gbis, 0, Set.of("31010"));
+
+        var complete = source.fetchCompleteSnapshot();
+        assertThat(complete.routes()).singleElement().satisfies(route -> {
+            assertThat(route.externalRouteId()).isEqualTo("GGB200");
+            assertThat(route.occurrences().getFirst().destinationName()).isEqualTo("종점");
+        });
+    }
+
     @Test
     @DisplayName("TAGO Route와 Route Stop의 모든 페이지를 수집한 뒤 complete snapshot을 만든다")
     void collects_every_route_and_stop_page_before_creating_complete_snapshot() {

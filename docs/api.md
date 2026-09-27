@@ -85,6 +85,9 @@ JWT Access Token이 필요한 Application API다. `{routeId}`는 Route 검색 re
     "id": 12345,
     "name": "사색의광장",
     "order": 1,
+    "destinationName": "사당역4번출구",
+    "previousStopName": null,
+    "nextStopName": "다음 정류장",
     "canNotifyOneStopBefore": false,
     "canNotifyOneStopAfter": true
   }
@@ -92,6 +95,8 @@ JWT Access Token이 필요한 Application API다. `{routeId}`는 Route 검색 re
 ```
 
 `id`는 current metadata의 `BusRouteStopOccurrence.id`이며 Alarm 생성 Request의 `targetStopOccurrenceId`와 같은 selection reference다. `name`은 연결된 `BusStop.stopName`이고 `order`는 `BusRouteStopOccurrence.stopOrder`다. `canNotifyOneStopBefore`와 `canNotifyOneStopAfter`는 정렬된 현재 Route traversal에서 실제 predecessor/successor occurrence 존재 여부를 나타내며, `order`의 산술 증감으로 계산하지 않는다. 같은 `BusStop`이 Route에 여러 번 나타나도 occurrence를 dedup하지 않고 각각 반환한다.
+
+`destinationName`은 검증된 경기 GBIS traversal에서 계산한 사용자용 목적지이며 서울 또는 검증 실패 경기 Route에서는 `null`이다. `previousStopName`/`nextStopName`은 저장된 traversal의 실제 앞뒤 occurrence 이름이고 양 끝에서는 각각 `null`이다. Client는 같은 이름 occurrence를 `destinationName`의 `○○ 방면`, 인접 Stop 문맥, 마지막으로 `order`로 구분한다. `order`는 표시용 최종 구분값이며 Alarm 선택 identity는 `id`다.
 
 Route가 current metadata에 없으면 `404 Not Found`와 `BUS_ROUTE_NOT_FOUND` (`Bus route was not found.`)를 반환한다. Long으로 변환할 수 없거나 양수가 아닌 `{routeId}`는 `400 Bad Request`와 `INVALID_REQUEST`를 반환한다. Route에는 하나 이상의 occurrence가 있어야 한다는 metadata invariant를 유지하며, 이 상태가 깨진 Route를 정상적인 빈 선택 결과나 Route 없음으로 처리하지 않는다.
 

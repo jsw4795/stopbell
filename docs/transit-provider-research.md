@@ -1,5 +1,13 @@
 # Transit Provider 조사
 
+## TASK-608A GBIS 기반정보 재검증 (2026-09-27)
+
+[경기버스정보 공식 기반정보 관리 서비스](https://www.gbis.go.kr/gbis2014/publicService.action?cmd=mBaseInfo)는 `getBaseInfoItemv2`에서 route/routeStation의 download URL과 version을 제공한다. 같은 local 공공데이터 service key로 live 응답을 확인했으며 두 version은 `20260927`이었다. 실제 bulk는 UTF-8, `^` record delimiter, `|` field delimiter다. route는 3,139건, routeStation은 197,508건이었다. route header에는 `routeId`, `routeName`, `turnSeq`가 있고 routeStation header에는 `routeId|routeName|upDown|staOrder|stationId|stationName|x|y`가 있다. GBIS가 반환하는 다운로드 URL은 현재 `http://openapi.gbis.go.kr/ws/download`다.
+
+이번 구현은 TAGO Route/Stop ID의 `GGB` 제거값을 GBIS 후보 조회에만 사용한다. TAGO Route 번호, 전체 occurrence 수, 모든 순번과 Stop ID가 일치할 때만 destination을 보강한다. `staOrder < turnSeq`의 목적지는 회차 occurrence 정류장명, 그 이후는 마지막 traversal occurrence 정류장명이다. Route 300의 기점명 `수월암리공단`과 마지막 occurrence `수월암차고지`는 다르므로 기점명을 하행 목적지로 사용하지 않는다. raw `upDown`은 반복 occurrence를 식별하지 못한다. 서울은 목적지를 추측하지 않고 persisted traversal의 인접 Stop 및 순번으로 구분한다.
+
+이 결정은 기존의 GBIS identifier 호환성 `UNRESOLVED` 조사 기록을 삭제하지 않는다. 당시에는 API 접근이 실패했고, 이번 live bulk와 full traversal 검증으로 **표시 metadata 보강에 한정한** 후보 연결을 확인했다. 이를 영구 identity 또는 GBIS realtime 호환성 보장으로 해석하지 않는다.
+
 ## 목적과 범위
 
 이 문서는 Phase 3 Transit Foundation에서 Transit Provider 후보의 공식 계약과 실제 관찰 결과를 누적한다.

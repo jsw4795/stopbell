@@ -19,11 +19,21 @@ public final class TagoMetadataSource implements BusMetadataSource {
     private static final Logger log = LoggerFactory.getLogger(TagoMetadataSource.class);
     private static final int PROGRESS_LOG_INTERVAL = 100;
 
-    private final TagoMetadataClient client; private final long requestIntervalMillis; private final Set<String> gyeonggiCodes;
-    public TagoMetadataSource(TagoMetadataClient client, long requestIntervalMillis) { this(client, requestIntervalMillis, GYEONGGI_CODES); }
-    TagoMetadataSource(TagoMetadataClient client, long requestIntervalMillis, Set<String> gyeonggiCodes) { this.client=client; this.requestIntervalMillis=requestIntervalMillis; this.gyeonggiCodes=Set.copyOf(gyeonggiCodes); }
+    private final TagoMetadataClient client; private final GbisMetadataClient gbisClient;
+    private final long requestIntervalMillis; private final Set<String> gyeonggiCodes;
+    public TagoMetadataSource(TagoMetadataClient client, GbisMetadataClient gbisClient, long requestIntervalMillis) {
+        this(client, gbisClient, requestIntervalMillis, GYEONGGI_CODES);
+    }
+    TagoMetadataSource(TagoMetadataClient client, long requestIntervalMillis) { this(client, null, requestIntervalMillis, GYEONGGI_CODES); }
+    TagoMetadataSource(TagoMetadataClient client, long requestIntervalMillis, Set<String> gyeonggiCodes) { this(client, null, requestIntervalMillis, gyeonggiCodes); }
+    TagoMetadataSource(TagoMetadataClient client, GbisMetadataClient gbisClient, long requestIntervalMillis, Set<String> gyeonggiCodes) {
+        this.client=client; this.gbisClient=gbisClient; this.requestIntervalMillis=requestIntervalMillis;
+        this.gyeonggiCodes=Set.copyOf(gyeonggiCodes);
+    }
     @Override public TransitProvider provider() { return TransitProvider.TAGO; }
     @Override public CompleteBusMetadataSnapshot fetchCompleteSnapshot() {
+        // A failed bulk fetch is never treated as an empty, complete enrichment source.
+        GbisBulkMetadata gbis = gbisClient == null ? null : gbisClient.fetch();
         pace(); Set<String> discovered = new HashSet<>(); for (TagoMetadataClient.City city : client.cityCodes()) { if (city.citycode()==null) throw new IllegalStateException("TAGO city code missing"); discovered.add(city.citycode()); }
         if (!discovered.containsAll(gyeonggiCodes)) throw new IllegalStateException("TAGO city discovery did not verify every Gyeonggi city code");
         log.info("TAGO city discovery complete: gyeonggiCities={}", gyeonggiCodes.size());
@@ -42,6 +52,13 @@ public final class TagoMetadataSource implements BusMetadataSource {
         }
         int stopOccurrences = snapshots.stream().mapToInt(snapshot -> snapshot.occurrences().size()).sum();
         log.info("TAGO metadata collection complete: routes={}, stopOccurrences={}", snapshots.size(), stopOccurrences);
+        if (gbis != null) {
+            GbisDestinationEnricher.Result enriched = GbisDestinationEnricher.enrich(snapshots, gbis);
+            log.info("GBIS destination enrichment complete: tagoRoutes={}, gbisRoutes={}, enrichedRoutes={}, skippedRoutes={}, destinationOccurrences={}, skipReasons={}",
+                    snapshots.size(), gbis.routes().size(), enriched.enrichedRoutes(),
+                    snapshots.size() - enriched.enrichedRoutes(), enriched.destinationOccurrences(), enriched.skippedRoutes());
+            snapshots = enriched.routes();
+        }
         return new CompleteBusMetadataSnapshot(provider(), snapshots);
     }
     private <T> List<T> pages(java.util.function.IntFunction<TagoMetadataClient.Page<T>> fetch) { List<T> all=new ArrayList<>(); int page=1,total=-1; while(total<0||all.size()<total){ pace(); TagoMetadataClient.Page<T> result=fetch.apply(page++); if(result.totalCount()<0||result.pageNo()!=page-1||result.items()==null) throw new IllegalStateException("TAGO pagination protocol failure"); if(total<0)total=result.totalCount(); else if(total!=result.totalCount())throw new IllegalStateException("TAGO pagination total changed"); if(result.items().isEmpty()&&all.size()<total)throw new IllegalStateException("TAGO pagination incomplete"); all.addAll(result.items()); if(all.size()>total)throw new IllegalStateException("TAGO pagination overflow"); } return all; }

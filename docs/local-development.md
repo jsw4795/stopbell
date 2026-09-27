@@ -83,6 +83,7 @@ metadata bootstrap은 일반 Backend startup과 분리된 명시적 one-shot 실
 
 TAGO metadata bootstrap도 같은 방식으로 provider만 지정해 실행한다.
 경기도 full sync는 city/route/API collection 및 DB reconciliation 진행률을 INFO log로 출력한다.
+이 실행은 먼저 같은 `PUBLIC_DATA_SERVICE_KEY`로 GBIS 기반정보의 route/routeStation bulk와 version을 검증한 뒤 TAGO traversal을 수집한다. 전체 GBIS bulk 검증에 실패하면 complete sync와 cleanup을 진행하지 않는다. 개별 Route가 TAGO traversal과 일치하지 않으면 해당 Route의 destination만 비워 둔다.
 
 ```text
 ./gradlew bootRun --args='

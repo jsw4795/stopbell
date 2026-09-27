@@ -48,7 +48,7 @@ public class BusRouteMetadataSyncService {
             ), occurrence);
         }
 
-        Map<OccurrenceKey, BusStop> incomingOccurrences = new HashMap<>();
+        Map<OccurrenceKey, IncomingOccurrence> incomingOccurrences = new HashMap<>();
         for (BusStopOccurrenceMetadataSnapshot occurrenceSnapshot : snapshot.occurrences()) {
             OccurrenceKey key = new OccurrenceKey(occurrenceSnapshot.externalStopId(), occurrenceSnapshot.stopOrder());
             BusStop stop = busStopRepository
@@ -63,7 +63,7 @@ public class BusRouteMetadataSyncService {
             stop.updateMetadata(
                     occurrenceSnapshot.stopName(), occurrenceSnapshot.latitude(), occurrenceSnapshot.longitude()
             );
-            incomingOccurrences.put(key, stop);
+            incomingOccurrences.put(key, new IncomingOccurrence(stop, occurrenceSnapshot.destinationName()));
         }
 
         existingOccurrences.entrySet().stream()
@@ -72,12 +72,17 @@ public class BusRouteMetadataSyncService {
                 .forEach(occurrenceRepository::delete);
         occurrenceRepository.flush();
 
-        for (Map.Entry<OccurrenceKey, BusStop> incomingOccurrence : incomingOccurrences.entrySet()) {
-            if (!existingOccurrences.containsKey(incomingOccurrence.getKey())) {
+        for (Map.Entry<OccurrenceKey, IncomingOccurrence> incomingOccurrence : incomingOccurrences.entrySet()) {
+            IncomingOccurrence incoming = incomingOccurrence.getValue();
+            BusRouteStopOccurrence existing = existingOccurrences.get(incomingOccurrence.getKey());
+            if (existing != null) {
+                existing.updateDestinationName(incoming.destinationName());
+            } else {
                 occurrenceRepository.save(new BusRouteStopOccurrence(
                         route,
-                        incomingOccurrence.getValue(),
-                        incomingOccurrence.getKey().stopOrder()
+                        incoming.stop(),
+                        incomingOccurrence.getKey().stopOrder(),
+                        incoming.destinationName()
                 ));
             }
         }
@@ -85,5 +90,8 @@ public class BusRouteMetadataSyncService {
     }
 
     private record OccurrenceKey(String externalStopId, int stopOrder) {
+    }
+
+    private record IncomingOccurrence(BusStop stop, String destinationName) {
     }
 }

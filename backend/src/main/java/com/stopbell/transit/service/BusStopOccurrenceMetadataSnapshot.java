@@ -7,8 +7,14 @@ public record BusStopOccurrenceMetadataSnapshot(
         String stopName,
         BigDecimal latitude,
         BigDecimal longitude,
-        int stopOrder
+        int stopOrder,
+        String destinationName
 ) {
+
+    public BusStopOccurrenceMetadataSnapshot(String externalStopId, String stopName,
+            BigDecimal latitude, BigDecimal longitude, int stopOrder) {
+        this(externalStopId, stopName, latitude, longitude, stopOrder, null);
+    }
 
     public BusStopOccurrenceMetadataSnapshot {
         if (externalStopId == null || externalStopId.isBlank()) {
@@ -30,6 +36,9 @@ public record BusStopOccurrenceMetadataSnapshot(
         }
         if (stopOrder <= 0) {
             throw new IllegalArgumentException("Stop order must be positive");
+        }
+        if (destinationName != null && (destinationName.isBlank() || destinationName.length() > 255)) {
+            throw new IllegalArgumentException("Destination name must be non-blank and at most 255 characters");
         }
     }
 }

@@ -64,6 +64,7 @@ class BusRouteStopIntegrationTest {
         BusRouteStopOccurrence last = occurrence(route, repeatedStop, 7);
         BusRouteStopOccurrence first = occurrence(route, firstStop, 1);
         BusRouteStopOccurrence middle = occurrence(route, repeatedStop, 3);
+        middle.updateDestinationName("종점");
 
         mockMvc.perform(get("/api/v1/bus-routes/{routeId}/stops", route.getId())
                         .header("Authorization", authorization()))
@@ -72,16 +73,23 @@ class BusRouteStopIntegrationTest {
                 .andExpect(jsonPath("$[0].id").value(first.getId()))
                 .andExpect(jsonPath("$[0].name").value("첫 정류장"))
                 .andExpect(jsonPath("$[0].order").value(1))
+                .andExpect(jsonPath("$[0].destinationName").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$[0].previousStopName").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$[0].nextStopName").value("재방문 정류장"))
                 .andExpect(jsonPath("$[0].canNotifyOneStopBefore").value(false))
                 .andExpect(jsonPath("$[0].canNotifyOneStopAfter").value(true))
                 .andExpect(jsonPath("$[1].id").value(middle.getId()))
                 .andExpect(jsonPath("$[1].name").value("재방문 정류장"))
                 .andExpect(jsonPath("$[1].order").value(3))
+                .andExpect(jsonPath("$[1].destinationName").value("종점"))
+                .andExpect(jsonPath("$[1].previousStopName").value("첫 정류장"))
+                .andExpect(jsonPath("$[1].nextStopName").value("재방문 정류장"))
                 .andExpect(jsonPath("$[1].canNotifyOneStopBefore").value(true))
                 .andExpect(jsonPath("$[1].canNotifyOneStopAfter").value(true))
                 .andExpect(jsonPath("$[2].id").value(last.getId()))
                 .andExpect(jsonPath("$[2].name").value("재방문 정류장"))
                 .andExpect(jsonPath("$[2].order").value(7))
+                .andExpect(jsonPath("$[2].nextStopName").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$[2].canNotifyOneStopBefore").value(true))
                 .andExpect(jsonPath("$[2].canNotifyOneStopAfter").value(false))
                 .andExpect(jsonPath("$[0].provider").doesNotExist())

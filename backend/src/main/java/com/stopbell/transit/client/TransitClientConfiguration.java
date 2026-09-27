@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClient;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
 import com.stopbell.transit.metadata.TagoMetadataClient;
 import com.stopbell.transit.metadata.TagoMetadataSource;
+import com.stopbell.transit.metadata.GbisMetadataClient;
 import com.stopbell.transit.mapper.SeoulBusTransitObservationMapper;
 import com.stopbell.transit.mapper.TagoTransitObservationMapper;
 import com.stopbell.transit.service.BusMetadataSource;
@@ -41,8 +42,14 @@ public class TransitClientConfiguration {
     }
 
     @Bean
-    BusMetadataSource tagoMetadataSource(TagoMetadataClient client) {
-        return new TagoMetadataSource(client, 100);
+    GbisMetadataClient gbisMetadataClient(TransitClientProperties properties,
+            @org.springframework.beans.factory.annotation.Value("${transit.metadata.gbis.base-url:https://apis.data.go.kr/6410000/baseinfoservice/v2/getBaseInfoItemv2}") String baseUrl) {
+        return new GbisMetadataClient(metadataRestClient(properties), baseUrl, properties.tago().serviceKey());
+    }
+
+    @Bean
+    BusMetadataSource tagoMetadataSource(TagoMetadataClient client, GbisMetadataClient gbisClient) {
+        return new TagoMetadataSource(client, gbisClient, 100);
     }
 
     @Bean

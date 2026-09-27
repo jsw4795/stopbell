@@ -157,6 +157,32 @@ class TransitMetadataRepositoryIntegrationTest {
     }
 
     @Test
+    @DisplayName("목적지 변경과 제거는 동일 occurrence ID에 반영된다")
+    void destination_changes_and_null_fallback_preserve_occurrence_id() {
+        metadataSyncService.syncRoute(routeSnapshot("7000", "41110", new BusStopOccurrenceMetadataSnapshot(
+                "stop-1", "정류장", null, null, 1, "첫 목적지")));
+        BusRoute route = busRouteRepository.findByProviderAndExternalRouteId(TransitProvider.TAGO, "route-1").orElseThrow();
+        Long id = occurrenceRepository.findAllByRouteOrderByStopOrderAsc(route).getFirst().getId();
+
+        metadataSyncService.syncRoute(routeSnapshot("7000", "41110", new BusStopOccurrenceMetadataSnapshot(
+                "stop-1", "정류장", null, null, 1, "바뀐 목적지")));
+        entityManager.flush();
+        entityManager.clear();
+        route = busRouteRepository.findByProviderAndExternalRouteId(TransitProvider.TAGO, "route-1").orElseThrow();
+        BusRouteStopOccurrence updated = occurrenceRepository.findAllByRouteOrderByStopOrderAsc(route).getFirst();
+        assertThat(updated.getId()).isEqualTo(id);
+        assertThat(updated.getDestinationName()).isEqualTo("바뀐 목적지");
+
+        metadataSyncService.syncRoute(routeSnapshot("7000", "41110", stop("stop-1", "정류장", 1)));
+        entityManager.flush();
+        entityManager.clear();
+        route = busRouteRepository.findByProviderAndExternalRouteId(TransitProvider.TAGO, "route-1").orElseThrow();
+        BusRouteStopOccurrence cleared = occurrenceRepository.findAllByRouteOrderByStopOrderAsc(route).getFirst();
+        assertThat(cleared.getId()).isEqualTo(id);
+        assertThat(cleared.getDestinationName()).isNull();
+    }
+
+    @Test
     @DisplayName("Route와 Stop metadata 변경은 identity row의 내부 ID를 유지한다")
     void update_route_and_stop_metadata_preserves_ids() {
         metadataSyncService.syncRoute(routeSnapshot("7000", "41110", stop("stop-1", "기존 정류장", 1)));

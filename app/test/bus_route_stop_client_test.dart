@@ -47,7 +47,7 @@ Future<BusRouteStopClient> client(http.Client transport) async {
   );
 }
 
-Map<String, Object> stop(
+Map<String, Object?> stop(
   int id,
   String name,
   int order,
@@ -57,6 +57,9 @@ Map<String, Object> stop(
   'id': id,
   'name': name,
   'order': order,
+  'destinationName': null,
+  'previousStopName': null,
+  'nextStopName': null,
   'canNotifyOneStopBefore': before,
   'canNotifyOneStopAfter': after,
 };
@@ -70,7 +73,11 @@ void main() {
         expect(request.headers['authorization'], 'Bearer fixture-access');
         return http.Response(
           jsonEncode([
-            stop(11, '첫 정류장', 1, false, true),
+            <String, Object?>{
+              ...stop(11, '첫 정류장', 1, false, true),
+              'destinationName': '사당역',
+              'nextStopName': '재방문 정류장',
+            },
             stop(10, '재방문 정류장', 3, true, true),
             stop(20, '재방문 정류장', 7, true, false),
           ]),
@@ -83,6 +90,8 @@ void main() {
     expect(result.map((stop) => stop.id), [11, 10, 20]);
     expect(result.map((stop) => stop.name), ['첫 정류장', '재방문 정류장', '재방문 정류장']);
     expect(result.map((stop) => stop.order), [1, 3, 7]);
+    expect(result.map((stop) => stop.destinationName), ['사당역', null, null]);
+    expect(result.first.nextStopName, '재방문 정류장');
     expect(result.map((stop) => stop.canNotifyOneStopBefore), [
       false,
       true,
@@ -127,7 +136,7 @@ void main() {
         '{}',
         for (final field in valid.keys)
           jsonEncode([
-            <String, Object>{...valid}..remove(field),
+            <String, Object?>{...valid}..remove(field),
           ]),
         for (final change in <Map<String, Object?>>[
           {'id': null},
@@ -139,6 +148,10 @@ void main() {
           {'order': null},
           {'order': '1'},
           {'order': 0},
+          {'destinationName': 1},
+          {'destinationName': ' '},
+          {'previousStopName': 1},
+          {'nextStopName': ' '},
           {'canNotifyOneStopBefore': null},
           {'canNotifyOneStopBefore': 1},
           {'canNotifyOneStopAfter': null},

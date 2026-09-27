@@ -84,7 +84,7 @@ V1의 초기 버스 지원 대상 지역은 다음과 같다.
 
 ### V1 Transit Provider
 
-V1은 지역별 공식 Provider와 source를 사용한다. 경기도는 국토교통부 TAGO가 Route/Stop metadata, realtime Location, Arrival 보조 정보를 제공한다. 서울특별시의 static Route/Stop metadata는 서울 T Data CSV full import를 사용하고, realtime Location은 서울특별시 버스위치정보조회 서비스를 사용한다. 서울 static metadata의 후행 결정은 `adr/ADR-009-bus-transit-metadata-persistence-and-diff-sync-strategy.md`를 따른다.
+V1은 지역별 공식 Provider와 source를 사용한다. 경기도는 국토교통부 TAGO가 Route/Stop identity와 traversal metadata, realtime Location, Arrival 보조 정보를 제공한다. 경기 GBIS 기반정보는 검증된 Route의 목적지 표시 metadata만 보강하며 GBIS-only Route를 추가하지 않는다. 서울특별시의 static Route/Stop metadata는 서울 T Data CSV full import를 사용하고, realtime Location은 서울특별시 버스위치정보조회 서비스를 사용한다. static metadata의 후행 결정은 `adr/ADR-009-bus-transit-metadata-persistence-and-diff-sync-strategy.md`를 따른다.
 
 Provider external Route/Stop ID는 provider namespace 안의 opaque String이다. 노선번호와 정류소명은 검색·표시 metadata이고, Stop order는 Route 진행 metadata이며 identity가 아니다. 세부 근거와 제한은 `adr/ADR-006-v1-transit-provider-and-external-identifier-strategy.md`를 따른다.
 

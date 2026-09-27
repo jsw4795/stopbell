@@ -362,14 +362,18 @@ Stop identity는 `(provider, externalStopId)`다. Route 안의 Stop order, name,
     route
     stop
     stopOrder
+    destinationName (optional)
 
 `route`와 `stop`은 같은 provider여야 하고 `stopOrder`는 양수다. Route 안에서 `(route, stopOrder)`는 유일하지만 `(route, stop)`은 유일하지 않다.
+
+`destinationName`은 경기 TAGO traversal 전체가 GBIS route/routeStation과 검증되어 일치할 때만 붙는 표시 metadata다. occurrence identity가 아니며 서울 또는 검증 실패 Route에서는 `null`이다. GBIS raw ID, `upDown`, `turnSeq`는 이 Entity의 영속 identity가 아니다.
 
 ## Persistence
 
     JPA
 
 Route snapshot reconciliation은 `(route, stop, stopOrder)`가 완전히 같은 occurrence만 같은 내부 ID를 유지한다. Stop 또는 order가 바뀌면 기존 occurrence를 삭제하고 새 row를 생성해 의미가 바뀐 occurrence ID를 재사용하지 않는다.
+동일 occurrence의 destination 변경 또는 제거는 기존 ID를 유지한 채 nullable metadata를 갱신한다.
 
 ------------------------------------------------------------------------
 
