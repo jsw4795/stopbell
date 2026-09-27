@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'core/app_config.dart';
+import 'core/authenticated_api_client.dart';
 import 'features/auth/backend_auth_client.dart';
 import 'features/auth/auth_session.dart';
 import 'features/auth/google_auth_service.dart';
 import 'features/auth/token_pair_storage.dart';
+import 'features/transit/bus_route.dart';
+import 'features/transit/bus_route_search_client.dart';
+import 'features/transit/bus_route_search_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -12,21 +16,33 @@ void main() {
   final backend = BackendAuthClient(
     apiBaseUrl: Uri.tryParse(config.apiBaseUrl) ?? Uri(),
   );
+  final authSession = AuthSession(
+    authenticator: GoogleAuthService(config: config, backend: backend),
+    backend: backend,
+    tokenStorage: SecureTokenPairStorage(),
+  );
+  final apiClient = AuthenticatedApiClient(
+    apiBaseUrl: Uri.tryParse(config.apiBaseUrl) ?? Uri(),
+    authSession: authSession,
+  );
+  final routeSearch = BusRouteSearchClient(apiClient);
   runApp(
     StopBellApplication(
-      authSession: AuthSession(
-        authenticator: GoogleAuthService(config: config, backend: backend),
-        backend: backend,
-        tokenStorage: SecureTokenPairStorage(),
-      ),
+      authSession: authSession,
+      searchRoutes: routeSearch.search,
     ),
   );
 }
 
 class StopBellApplication extends StatefulWidget {
-  const StopBellApplication({super.key, required this.authSession});
+  const StopBellApplication({
+    super.key,
+    required this.authSession,
+    required this.searchRoutes,
+  });
 
   final AuthSession authSession;
+  final Future<List<BusRoute>> Function(String query) searchRoutes;
 
   @override
   State<StopBellApplication> createState() => _StopBellApplicationState();
@@ -49,15 +65,23 @@ class _StopBellApplicationState extends State<StopBellApplication> {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'StopBell',
-      home: LoginScreen(authSession: widget.authSession),
+      home: LoginScreen(
+        authSession: widget.authSession,
+        searchRoutes: widget.searchRoutes,
+      ),
     );
   }
 }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key, required this.authSession});
+  const LoginScreen({
+    super.key,
+    required this.authSession,
+    required this.searchRoutes,
+  });
 
   final AuthSession authSession;
+  final Future<List<BusRoute>> Function(String query) searchRoutes;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -120,52 +144,63 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: widget.authSession,
-      builder: (context, _) => Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('StopBell', style: TextStyle(fontSize: 32)),
-              const SizedBox(height: 24),
-              if (widget.authSession.state == AuthState.initializing)
-                const Text('인증 상태 확인 중...')
-              else if (widget.authSession.state == AuthState.authenticated) ...[
-                const Text('로그인 성공'),
-                const SizedBox(height: 16),
+      builder: (context, _) {
+        if (widget.authSession.state == AuthState.authenticated) {
+          return Scaffold(
+            appBar: AppBar(
+              title: const Text('StopBell'),
+              actions: [
                 ElevatedButton(
                   onPressed: _isLoading ? null : _logout,
                   child: const Text('로그아웃'),
                 ),
-                if (_isLoading) ...[
-                  const SizedBox(height: 16),
-                  const CircularProgressIndicator(),
-                  const Text('로그아웃 중...'),
-                ],
-                if (_message != null) ...[
-                  const SizedBox(height: 16),
-                  Text(_message!, textAlign: TextAlign.center),
-                ],
-              ] else ...[
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _login,
-                  child: const Text('Google로 계속하기'),
+              ],
+            ),
+            body: Column(
+              children: [
+                Expanded(
+                  child: BusRouteSearchScreen(search: widget.searchRoutes),
                 ),
-                if (_isLoading) ...[
-                  const SizedBox(height: 16),
-                  const CircularProgressIndicator(),
-                  Text(
-                    widget.authSession.isLoggingOut ? '로그아웃 중...' : '로그인 중...',
-                  ),
-                ],
-                if (_message != null) ...[
-                  const SizedBox(height: 16),
+                if (_isLoading) const Text('로그아웃 중...'),
+                if (_message != null)
                   Text(_message!, textAlign: TextAlign.center),
+              ],
+            ),
+          );
+        }
+        return Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('StopBell', style: TextStyle(fontSize: 32)),
+                const SizedBox(height: 24),
+                if (widget.authSession.state == AuthState.initializing)
+                  const Text('인증 상태 확인 중...')
+                else ...[
+                  ElevatedButton(
+                    onPressed: _isLoading ? null : _login,
+                    child: const Text('Google로 계속하기'),
+                  ),
+                  if (_isLoading) ...[
+                    const SizedBox(height: 16),
+                    const CircularProgressIndicator(),
+                    Text(
+                      widget.authSession.isLoggingOut
+                          ? '로그아웃 중...'
+                          : '로그인 중...',
+                    ),
+                  ],
+                  if (_message != null) ...[
+                    const SizedBox(height: 16),
+                    Text(_message!, textAlign: TextAlign.center),
+                  ],
                 ],
               ],
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
