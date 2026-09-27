@@ -30,6 +30,8 @@ StopBell은 사용자가 교통 정보를 반복해서 확인해야 하는 필�
 
 정류장 선택 UI는 Backend가 전달한 `canNotifyOneStopBefore`와 `canNotifyOneStopAfter`를 사용해 각각 사용할 수 없는 before/after option을 비활성화한다. Stop order를 산술적으로 증감해 인접 정류장을 추측하지 않는다.
 
+사용자는 Route traversal 안에서 선택할 Stop occurrence를 충분히 구분할 수 있어야 하며, 동일 정류장명이나 왕복·순환·회차로 방향 구분이 필요한 경우 UI는 Backend가 제공하는 검증된 metadata/계약을 사용해야 한다. 방향/traversal 식별 정보는 Stop order, 정류장명 또는 다른 표시 metadata로 추측하지 않으며, 현재 display contract가 확정되지 않아 후속 UX/metadata 작업에서 결정한다.
+
 ### FR-003 알림 생성
 
 사용자는 최소한 다음을 포함하는 알림을 만들 수 있다.
