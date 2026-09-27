@@ -41,14 +41,29 @@ class FakeStorage implements TokenPairStorage {
   Future<void> delete() async => pair = null;
 }
 
-AuthSession session(FakeAuthenticator authenticator, FakeStorage storage) =>
-    AuthSession(
-      authenticator: authenticator,
-      backend: BackendAuthClient(
-        apiBaseUrl: Uri.parse('http://localhost:8080'),
-      ),
-      tokenStorage: storage,
-    );
+class FakeBackend extends BackendAuthClient {
+  FakeBackend() : super(apiBaseUrl: Uri.parse('http://localhost:8080'));
+  final Completer<void> logoutGate = Completer<void>();
+  int logoutCalls = 0;
+  @override
+  Future<void> logout(String refreshToken) {
+    logoutCalls++;
+    expect(refreshToken, 'fixture-refresh');
+    return logoutGate.future;
+  }
+}
+
+AuthSession session(
+  FakeAuthenticator authenticator,
+  FakeStorage storage, {
+  BackendAuthClient? backend,
+}) => AuthSession(
+  authenticator: authenticator,
+  backend:
+      backend ??
+      BackendAuthClient(apiBaseUrl: Uri.parse('http://localhost:8080')),
+  tokenStorage: storage,
+);
 
 void main() {
   testWidgets('startup 복구 중 표시하고 저장된 Pair로 로그인 상태를 복구한다', (tester) async {
@@ -102,5 +117,29 @@ void main() {
     await tester.pumpAndSettle();
     expect(storage.pair, same(pair));
     expect(find.text('로그인 성공'), findsOneWidget);
+  });
+
+  testWidgets('Logout 버튼은 중복 입력을 막고 완료 뒤 Google login을 표시한다', (tester) async {
+    final backend = FakeBackend();
+    final storage = FakeStorage(pair: pair);
+    await tester.pumpWidget(
+      StopBellApplication(
+        authSession: session(FakeAuthenticator(), storage, backend: backend),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('로그아웃'), findsOneWidget);
+    await tester.tap(find.text('로그아웃'));
+    await tester.pump();
+    expect(find.text('로그아웃 중...'), findsOneWidget);
+    expect(
+      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      isNull,
+    );
+    expect(backend.logoutCalls, 1);
+    backend.logoutGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Google로 계속하기'), findsOneWidget);
+    expect(storage.pair, isNull);
   });
 }

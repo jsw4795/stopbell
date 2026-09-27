@@ -40,12 +40,17 @@ class FakeBackend extends BackendAuthClient {
   FakeBackend() : super(apiBaseUrl: baseUrl);
   int calls = 0;
   Future<TokenPair> Function()? refreshResult;
+  Future<void> Function()? logoutResult;
   @override
   Future<TokenPair> refresh(String token) {
     expect(token, 'old-refresh');
     calls++;
     return refreshResult!();
   }
+
+  @override
+  Future<void> logout(String token) =>
+      logoutResult?.call() ?? Future<void>.value();
 }
 
 Future<AuthSession> session(FakeStorage storage, FakeBackend backend) async {
@@ -400,4 +405,104 @@ void main() {
       expect(headers.where((h) => h == 'Bearer new-access').length, 2);
     },
   );
+
+  test('logout 뒤 늦은 protected response는 caller에게 전달되지 않는다', () async {
+    final gate = Completer<http.Response>();
+    final backend = FakeBackend();
+    final authSession = await session(FakeStorage(oldPair), backend);
+    var sends = 0;
+    final client = AuthenticatedApiClient(
+      apiBaseUrl: baseUrl,
+      authSession: authSession,
+      client: MockClient((_) {
+        sends++;
+        return gate.future;
+      }),
+    );
+    final request = client.request('GET', '/api/v1/fixture');
+    await Future<void>.delayed(Duration.zero);
+    await authSession.logout();
+    gate.complete(http.Response('{"stale":true}', 200));
+    await expectLater(request, throwsA(isA<StaleSessionException>()));
+    await expectLater(
+      client.request('GET', '/api/v1/fixture'),
+      throwsA(isA<UnauthenticatedApiException>()),
+    );
+    expect(sends, 1);
+    expect(backend.calls, 0);
+  });
+
+  test('logout 뒤 늦은 401은 refresh를 시작하지 않는다', () async {
+    final gate = Completer<http.Response>();
+    final backend = FakeBackend();
+    final authSession = await session(FakeStorage(oldPair), backend);
+    final client = AuthenticatedApiClient(
+      apiBaseUrl: baseUrl,
+      authSession: authSession,
+      client: MockClient((_) => gate.future),
+    );
+    final request = client.request('GET', '/api/v1/fixture');
+    await Future<void>.delayed(Duration.zero);
+    await authSession.logout();
+    gate.complete(http.Response('', 401));
+    await expectLater(request, throwsA(isA<StaleSessionException>()));
+    expect(backend.calls, 0);
+  });
+
+  test('새 login 뒤에도 이전 session의 late response를 반환하지 않는다', () async {
+    final gate = Completer<http.Response>();
+    final backend = FakeBackend();
+    final authSession = await session(FakeStorage(oldPair), backend);
+    var sends = 0;
+    final client = AuthenticatedApiClient(
+      apiBaseUrl: baseUrl,
+      authSession: authSession,
+      client: MockClient((_) {
+        sends++;
+        return sends == 1
+            ? gate.future
+            : Future.value(http.Response('new', 200));
+      }),
+    );
+    final oldRequest = client.request('GET', '/api/v1/fixture');
+    await Future<void>.delayed(Duration.zero);
+    await authSession.logout();
+    await authSession.login();
+    gate.complete(http.Response('old', 200));
+    await expectLater(oldRequest, throwsA(isA<StaleSessionException>()));
+    expect((await client.request('GET', '/api/v1/fixture')).body, 'new');
+    expect(authSession.state, AuthState.authenticated);
+  });
+
+  test('beforeLogout hook의 protected API는 전송되지만 그 뒤 새 요청은 거절한다', () async {
+    final logoutGate = Completer<void>();
+    final backend = FakeBackend()..logoutResult = () => logoutGate.future;
+    final authSession = await session(FakeStorage(oldPair), backend);
+    var sends = 0;
+    final client = AuthenticatedApiClient(
+      apiBaseUrl: baseUrl,
+      authSession: authSession,
+      client: MockClient((_) async {
+        sends++;
+        return http.Response('', 204);
+      }),
+    );
+    final logout = authSession.logout(
+      beforeLogout: () async {
+        expect(
+          (await client.request('POST', '/api/v1/devices/fixture')).statusCode,
+          204,
+        );
+      },
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(sends, 1);
+    await expectLater(
+      client.request('GET', '/api/v1/fixture'),
+      throwsA(isA<UnauthenticatedApiException>()),
+    );
+    expect(sends, 1);
+    logoutGate.complete();
+    await logout;
+  });
 }

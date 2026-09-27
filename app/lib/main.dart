@@ -91,6 +91,31 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _logout() async {
+    if (_isLoading || widget.authSession.state != AuthState.authenticated) {
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _message = null;
+    });
+    try {
+      await widget.authSession.logout();
+    } on AuthSessionPersistenceException {
+      if (mounted) {
+        setState(() => _message = '저장된 인증 정보를 삭제하지 못했습니다. 다시 시도해 주세요.');
+      }
+    } on BackendLogoutCleanupException {
+      if (mounted) {
+        setState(() => _message = '이 기기에서는 로그아웃했습니다. 서버 세션은 정리하지 못했습니다.');
+      }
+    } catch (_) {
+      if (mounted) setState(() => _message = '로그아웃 중 오류가 발생했습니다. 다시 시도해 주세요.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -104,9 +129,23 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 24),
               if (widget.authSession.state == AuthState.initializing)
                 const Text('인증 상태 확인 중...')
-              else if (widget.authSession.state == AuthState.authenticated)
-                const Text('로그인 성공')
-              else ...[
+              else if (widget.authSession.state == AuthState.authenticated) ...[
+                const Text('로그인 성공'),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _isLoading ? null : _logout,
+                  child: const Text('로그아웃'),
+                ),
+                if (_isLoading) ...[
+                  const SizedBox(height: 16),
+                  const CircularProgressIndicator(),
+                  const Text('로그아웃 중...'),
+                ],
+                if (_message != null) ...[
+                  const SizedBox(height: 16),
+                  Text(_message!, textAlign: TextAlign.center),
+                ],
+              ] else ...[
                 ElevatedButton(
                   onPressed: _isLoading ? null : _login,
                   child: const Text('Google로 계속하기'),
@@ -114,7 +153,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 if (_isLoading) ...[
                   const SizedBox(height: 16),
                   const CircularProgressIndicator(),
-                  const Text('로그인 중...'),
+                  Text(
+                    widget.authSession.isLoggingOut ? '로그아웃 중...' : '로그인 중...',
+                  ),
                 ],
                 if (_message != null) ...[
                   const SizedBox(height: 16),
