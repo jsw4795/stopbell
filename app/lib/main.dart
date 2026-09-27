@@ -9,6 +9,9 @@ import 'features/auth/token_pair_storage.dart';
 import 'features/transit/bus_route.dart';
 import 'features/transit/bus_route_search_client.dart';
 import 'features/transit/bus_route_search_screen.dart';
+import 'features/transit/bus_route_stop_client.dart';
+import 'features/transit/bus_route_stop_occurrence.dart';
+import 'features/transit/bus_route_stop_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,10 +29,12 @@ void main() {
     authSession: authSession,
   );
   final routeSearch = BusRouteSearchClient(apiClient);
+  final routeStops = BusRouteStopClient(apiClient);
   runApp(
     StopBellApplication(
       authSession: authSession,
       searchRoutes: routeSearch.search,
+      findStops: routeStops.findStops,
     ),
   );
 }
@@ -39,10 +44,12 @@ class StopBellApplication extends StatefulWidget {
     super.key,
     required this.authSession,
     required this.searchRoutes,
+    required this.findStops,
   });
 
   final AuthSession authSession;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
+  final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
 
   @override
   State<StopBellApplication> createState() => _StopBellApplicationState();
@@ -68,6 +75,7 @@ class _StopBellApplicationState extends State<StopBellApplication> {
       home: LoginScreen(
         authSession: widget.authSession,
         searchRoutes: widget.searchRoutes,
+        findStops: widget.findStops,
       ),
     );
   }
@@ -78,10 +86,12 @@ class LoginScreen extends StatefulWidget {
     super.key,
     required this.authSession,
     required this.searchRoutes,
+    required this.findStops,
   });
 
   final AuthSession authSession;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
+  final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -90,6 +100,25 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   String? _message;
+  BusRoute? _selectedRoute;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.authSession.addListener(_clearRouteWhenUnauthenticated);
+  }
+
+  void _clearRouteWhenUnauthenticated() {
+    if (widget.authSession.state != AuthState.authenticated) {
+      _selectedRoute = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.authSession.removeListener(_clearRouteWhenUnauthenticated);
+    super.dispose();
+  }
 
   Future<void> _login() async {
     if (_isLoading || widget.authSession.state != AuthState.unauthenticated) {
@@ -159,7 +188,17 @@ class _LoginScreenState extends State<LoginScreen> {
             body: Column(
               children: [
                 Expanded(
-                  child: BusRouteSearchScreen(search: widget.searchRoutes),
+                  child: _selectedRoute == null
+                      ? BusRouteSearchScreen(
+                          search: widget.searchRoutes,
+                          onSelect: (route) =>
+                              setState(() => _selectedRoute = route),
+                        )
+                      : BusRouteStopScreen(
+                          route: _selectedRoute!,
+                          findStops: widget.findStops,
+                          onBack: () => setState(() => _selectedRoute = null),
+                        ),
                 ),
                 if (_isLoading) const Text('로그아웃 중...'),
                 if (_message != null)

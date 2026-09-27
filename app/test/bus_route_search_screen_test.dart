@@ -12,6 +12,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: BusRouteSearchScreen(
+            onSelect: (_) {},
             search: (_) async {
               calls++;
               return [];
@@ -38,6 +39,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: BusRouteSearchScreen(
+              onSelect: (_) {},
               search: (query) {
                 queries.add(query);
                 return pending.future;
@@ -73,7 +75,9 @@ void main() {
   testWidgets('empty response has a distinct empty state', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: BusRouteSearchScreen(search: (_) async => [])),
+        home: Scaffold(
+          body: BusRouteSearchScreen(search: (_) async => [], onSelect: (_) {}),
+        ),
       ),
     );
     await tester.enterText(find.byType(TextField), 'ZZZ');
@@ -92,6 +96,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: BusRouteSearchScreen(
+            onSelect: (_) {},
             search: (query) async {
               queries.add(query);
               if (fail) throw Exception('internal detail');

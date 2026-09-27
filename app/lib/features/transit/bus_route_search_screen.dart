@@ -5,9 +5,14 @@ import 'bus_route.dart';
 enum _SearchState { idle, loading, success, empty, error }
 
 class BusRouteSearchScreen extends StatefulWidget {
-  const BusRouteSearchScreen({super.key, required this.search});
+  const BusRouteSearchScreen({
+    super.key,
+    required this.search,
+    required this.onSelect,
+  });
 
   final Future<List<BusRoute>> Function(String query) search;
+  final ValueChanged<BusRoute> onSelect;
 
   @override
   State<BusRouteSearchScreen> createState() => _BusRouteSearchScreenState();
@@ -117,6 +122,7 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
               key: ValueKey(route.id),
               title: Text(route.routeNumber),
               subtitle: Text(route.regionName),
+              onTap: () => widget.onSelect(route),
             );
           },
         );

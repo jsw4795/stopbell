@@ -8,6 +8,7 @@ import 'package:stopbell/features/auth/google_auth_service.dart';
 import 'package:stopbell/features/auth/token_pair.dart';
 import 'package:stopbell/features/auth/token_pair_storage.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
+import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/main.dart';
 
 const pair = TokenPair(
@@ -69,12 +70,93 @@ AuthSession session(
 StopBellApplication app(
   AuthSession authSession, {
   Future<List<BusRoute>> Function(String)? searchRoutes,
+  Future<List<BusRouteStopOccurrence>> Function(int)? findStops,
 }) => StopBellApplication(
   authSession: authSession,
   searchRoutes: searchRoutes ?? (String _) async => <BusRoute>[],
+  findStops: findStops ?? (int _) async => <BusRouteStopOccurrence>[],
 );
 
 void main() {
+  testWidgets('route candidate opens its stops and back returns to search', (
+    tester,
+  ) async {
+    final ids = <int>[];
+    await tester.pumpWidget(
+      app(
+        session(FakeAuthenticator(), FakeStorage(pair: pair)),
+        searchRoutes: (_) async => const [
+          BusRoute(id: 754, routeNumber: '7000', regionName: '수원시'),
+        ],
+        findStops: (id) async {
+          ids.add(id);
+          return const [
+            BusRouteStopOccurrence(
+              id: 11,
+              name: '첫 정류장',
+              order: 1,
+              canNotifyOneStopBefore: false,
+              canNotifyOneStopAfter: true,
+            ),
+          ];
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '7000');
+    await tester.tap(find.text('검색'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('수원시'));
+    await tester.pumpAndSettle();
+    expect(ids, [754]);
+    expect(find.text('7000'), findsOneWidget);
+    expect(find.text('수원시'), findsOneWidget);
+    expect(find.text('첫 정류장'), findsOneWidget);
+    await tester.tap(find.byTooltip('노선 다시 선택'));
+    await tester.pumpAndSettle();
+    expect(find.text('노선번호를 입력해 검색하세요.'), findsOneWidget);
+  });
+
+  testWidgets('logout during Stop fetch keeps Login even after late result', (
+    tester,
+  ) async {
+    final backend = FakeBackend();
+    final pending = Completer<List<BusRouteStopOccurrence>>();
+    await tester.pumpWidget(
+      app(
+        session(FakeAuthenticator(), FakeStorage(pair: pair), backend: backend),
+        searchRoutes: (_) async => const [
+          BusRoute(id: 754, routeNumber: '7000', regionName: '수원시'),
+        ],
+        findStops: (_) => pending.future,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '7000');
+    await tester.tap(find.text('검색'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('수원시'));
+    await tester.pump();
+    expect(find.text('정류장 조회 중...'), findsOneWidget);
+    await tester.tap(find.text('로그아웃'));
+    await tester.pump();
+    backend.logoutGate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Google로 계속하기'), findsOneWidget);
+    pending.complete(const [
+      BusRouteStopOccurrence(
+        id: 11,
+        name: '늦은 정류장',
+        order: 1,
+        canNotifyOneStopBefore: false,
+        canNotifyOneStopAfter: false,
+      ),
+    ]);
+    await tester.pumpAndSettle();
+    expect(find.text('Google로 계속하기'), findsOneWidget);
+    expect(find.text('늦은 정류장'), findsNothing);
+  });
+
   testWidgets('startup 복구 중 표시하고 저장된 Pair로 로그인 상태를 복구한다', (tester) async {
     final auth = FakeAuthenticator();
     final gate = Completer<void>();
