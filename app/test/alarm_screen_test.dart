@@ -180,11 +180,20 @@ void main() {
   });
 
   testWidgets(
-    'create snapshots occurrence ID/options and blocks duplicate tap',
+    'start creates then activates and blocks input throughout both requests',
     (tester) async {
       final pending = Completer<Alarm>();
+      final activation = Completer<Alarm>();
+      final active = withStatus(AlarmStatus.active);
+      final calls = <String>[];
       final client = StubAlarms();
+      client.activateAlarm = (id) {
+        expect(id, sample.id);
+        calls.add('activate');
+        return activation.future;
+      };
       client.createAlarm = (id, before, after) {
+        calls.add('create');
         expect(id, 12345);
         expect(before, isTrue);
         expect(after, isFalse);
@@ -194,7 +203,16 @@ void main() {
       await tester.pumpWidget(
         stopScreen(
           client,
-          (_) async => [stop],
+          (_) async => [
+            stop,
+            const BusRouteStopOccurrence(
+              id: 54321,
+              name: '다른 정류장',
+              order: 4,
+              canNotifyOneStopBefore: true,
+              canNotifyOneStopAfter: true,
+            ),
+          ],
           onCreated: (alarm) => created = alarm,
         ),
       );
@@ -203,27 +221,54 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('한 정거장 전 알림'));
       await tester.pump();
-      await tester.tap(find.text('알람 만들기'));
+      await tester.tap(find.text('알람 시작'));
       await tester.pump();
-      expect(
-        tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, '알람 만들기'))
-            .onPressed,
-        isNull,
-      );
-      expect(
-        tester
-            .widget<SwitchListTile>(
-              find.widgetWithText(SwitchListTile, '한 정거장 전 알림'),
-            )
-            .onChanged,
-        isNull,
-      );
+      void expectInputBlocked() {
+        expect(
+          tester
+              .widget<FilledButton>(find.widgetWithText(FilledButton, '알람 시작'))
+              .onPressed,
+          isNull,
+        );
+        expect(
+          tester
+              .widgetList<SwitchListTile>(find.byType(SwitchListTile))
+              .every((tile) => tile.onChanged == null),
+          isTrue,
+        );
+        expect(
+          tester.widget<ListTile>(find.byKey(const ValueKey(54321))).onTap,
+          isNull,
+        );
+        expect(
+          tester.widget<IconButton>(find.byType(IconButton)).onPressed,
+          isNull,
+        );
+      }
+
+      expectInputBlocked();
+      await tester.tap(find.text('알람 시작'));
+      await tester.tap(find.byKey(const ValueKey(54321)));
+      await tester.pump();
       expect(client.createCalls, 1);
-      pending.complete(sample);
-      await tester.pumpAndSettle();
-      expect(created?.status, AlarmStatus.inactive);
       expect(client.activateCalls, 0);
+      expect(created, isNull);
+      pending.complete(sample);
+      await tester.pump();
+      expectInputBlocked();
+      await tester.tap(find.text('알람 시작'));
+      await tester.tap(find.byKey(const ValueKey(54321)));
+      await tester.pump();
+      expect(client.createCalls, 1);
+      expect(client.activateCalls, 1);
+      expect(calls, ['create', 'activate']);
+      expect(created, isNull);
+      activation.complete(active);
+      await tester.pumpAndSettle();
+      expect(created, same(active));
+      expect(created?.status, AlarmStatus.active);
+      expect(client.createCalls, 1);
+      expect(client.activateCalls, 1);
     },
   );
 
@@ -247,13 +292,14 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('한 정거장 전 알림'));
       await tester.pump();
-      await tester.tap(find.text('알람 만들기'));
+      await tester.tap(find.text('알람 시작'));
       await tester.pumpAndSettle();
       expect(ids, [754, 754]);
       expect(client.createCalls, 1);
+      expect(client.activateCalls, 0);
       expect(find.textContaining('정류장 정보가 변경됐습니다.'), findsOneWidget);
       expect(find.text('선택한 정류장:'), findsNothing);
-      expect(find.text('알람 만들기'), findsNothing);
+      expect(find.text('알람 시작'), findsNothing);
       await tester.tap(find.byKey(const ValueKey(12345)));
       await tester.pump();
       await tester.pump();
@@ -268,28 +314,46 @@ void main() {
     },
   );
 
-  testWidgets(
-    'ambiguous create result gives list verification without create retry',
-    (tester) async {
-      final client = StubAlarms()
-        ..createAlarm = (_, _, _) async => throw TimeoutException('timeout');
-      var showList = 0;
-      await tester.pumpWidget(
-        stopScreen(client, (_) async => [stop], onShowAlarms: () => showList++),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey(12345)));
-      await tester.pump();
-      await tester.tap(find.text('알람 만들기'));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('중복 생성을 피하려면 알람 목록에서'), findsOneWidget);
-      expect(find.text('알람 만들기'), findsNothing);
-      expect(find.text('다시 시도'), findsNothing);
-      expect(client.createCalls, 1);
-      await tester.tap(find.text('알람 목록 보기'));
-      expect(showList, 1);
-    },
-  );
+  for (final failure in [
+    TimeoutException('timeout'),
+    const AlarmApiException(),
+    Exception('network'),
+  ]) {
+    testWidgets(
+      'ambiguous create result ($failure) gives list verification without create retry',
+      (tester) async {
+        final client = StubAlarms()
+          ..createAlarm = (_, _, _) async => throw failure;
+        var createdCalls = 0;
+        var showList = 0;
+        await tester.pumpWidget(
+          stopScreen(
+            client,
+            (_) async => [stop],
+            onShowAlarms: () => showList++,
+            onCreated: (_) => createdCalls++,
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey(12345)));
+        await tester.pump();
+        await tester.tap(find.text('알람 시작'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('중복 생성을 피하려면 알람 목록에서'), findsOneWidget);
+        expect(find.text('알람 시작'), findsNothing);
+        expect(find.text('다시 시도'), findsNothing);
+        expect(client.createCalls, 1);
+        expect(client.activateCalls, 0);
+        expect(createdCalls, 0);
+        expect(
+          tester.widget<ListTile>(find.byKey(const ValueKey(12345))).onTap,
+          isNull,
+        );
+        await tester.tap(find.text('알람 목록 보기'));
+        expect(showList, 1);
+      },
+    );
+  }
 
   testWidgets(
     'invalid current option requires user refresh without automatic POST',
@@ -309,16 +373,67 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey(12345)));
       await tester.pump();
-      await tester.tap(find.text('알람 만들기'));
+      await tester.tap(find.text('알람 시작'));
       await tester.pumpAndSettle();
       expect(find.textContaining('선택한 알림 조건을 생성할 수 없습니다.'), findsOneWidget);
       expect(client.createCalls, 1);
+      expect(client.activateCalls, 0);
       await tester.tap(find.text('정류장 목록 새로고침'));
       await tester.pumpAndSettle();
       expect(routes, [754, 754]);
-      expect(find.text('알람 만들기'), findsNothing);
+      expect(find.text('알람 시작'), findsNothing);
     },
   );
+
+  for (final failure in [
+    const AlarmApiException(statusCode: 500, code: 'INTERNAL_ERROR'),
+    TimeoutException('activation timeout'),
+    Exception('network'),
+  ]) {
+    testWidgets(
+      'activate failure ($failure) preserves created alarm and manual recovery',
+      (tester) async {
+        final client = StubAlarms();
+        client.createAlarm = (_, _, _) async => sample;
+        client.activateAlarm = (_) async => throw failure;
+        Alarm? created;
+        var createdCalls = 0;
+        await tester.pumpWidget(
+          stopScreen(
+            client,
+            (_) async => [stop],
+            onCreated: (alarm) {
+              created = alarm;
+              createdCalls++;
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey(12345)));
+        await tester.pump();
+        await tester.tap(find.text('알람 시작'));
+        await tester.pumpAndSettle();
+        expect(client.createCalls, 1);
+        expect(client.activateCalls, 1);
+        expect(createdCalls, 1);
+        expect(created, same(sample));
+        expect(created?.status, AlarmStatus.inactive);
+        expect(find.textContaining('알람 생성 결과를 확인할 수 없습니다.'), findsNothing);
+        await tester.pumpWidget(detailScreen(client, created: created));
+        expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
+        expect(find.text('활성화'), findsOneWidget);
+        client.activateAlarm = (id) async {
+          expect(id, sample.id);
+          return withStatus(AlarmStatus.active);
+        };
+        await tester.tap(find.text('활성화'));
+        await tester.pumpAndSettle();
+        expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+        expect(client.createCalls, 1);
+        expect(client.activateCalls, 2);
+      },
+    );
+  }
 
   testWidgets('detail fetch retry and not found recovery', (tester) async {
     final client = StubAlarms();

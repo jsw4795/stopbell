@@ -103,11 +103,18 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
       _createMessage = null;
     });
     try {
-      final alarm = await widget.alarmClient.create(
+      final createdAlarm = await widget.alarmClient.create(
         targetStopOccurrenceId: id,
         notifyOneStopBefore: before,
         notifyOneStopAfter: after,
       );
+      if (!mounted) return;
+      var alarm = createdAlarm;
+      try {
+        alarm = await widget.alarmClient.activate(createdAlarm.id);
+      } catch (_) {
+        // Creation succeeded; recover in detail without creating another alarm.
+      }
       if (mounted) widget.onCreated(alarm);
     } on AlarmApiException catch (error) {
       if (!mounted) return;
@@ -222,7 +229,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
             padding: const EdgeInsets.all(16),
             child: FilledButton(
               onPressed: _creating ? null : _create,
-              child: const Text('알람 만들기'),
+              child: const Text('알람 시작'),
             ),
           ),
         if (_creating) const Center(child: CircularProgressIndicator()),

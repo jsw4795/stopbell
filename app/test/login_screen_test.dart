@@ -93,6 +93,16 @@ const createdAlarm = Alarm(
   notifyOneStopAfter: false,
 );
 
+const activeAlarm = Alarm(
+  id: 15,
+  transitType: AlarmTransitType.bus,
+  status: AlarmStatus.active,
+  routeNumber: '7000',
+  stopName: '첫 정류장',
+  notifyOneStopBefore: false,
+  notifyOneStopAfter: false,
+);
+
 class FlowAlarms extends Fake implements AlarmClient {
   Future<List<Alarm>> Function() list = () async => [];
   Future<Alarm> Function(int) detail = (_) async => createdAlarm;
@@ -313,54 +323,69 @@ void main() {
     expect(find.text('서울'), findsNothing);
   });
 
-  testWidgets(
-    'create opens INACTIVE detail without activate and back refreshes list',
-    (tester) async {
-      final alarms = FlowAlarms();
-      var lists = 0;
-      alarms.list = () async {
-        lists++;
-        return lists == 1 ? [] : [createdAlarm];
-      };
-      await tester.pumpWidget(
-        app(
-          session(FakeAuthenticator(), FakeStorage(pair: pair)),
-          alarmClient: alarms,
-          searchRoutes: (_) async => const [
-            BusRoute(id: 754, routeNumber: '7000', regionName: '수원시'),
-          ],
-          findStops: (_) async => const [
-            BusRouteStopOccurrence(
-              id: 12345,
-              name: '첫 정류장',
-              order: 1,
-              canNotifyOneStopBefore: false,
-              canNotifyOneStopAfter: true,
-            ),
-          ],
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('새 알림 만들기'));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), '7000');
-      await tester.tap(find.text('검색'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('수원시'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey(12345)));
-      await tester.pump();
-      await tester.tap(find.text('알람 만들기'));
-      await tester.pumpAndSettle();
-      expect(alarms.createCalls, 1);
-      expect(alarms.activateCalls, 0);
-      expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
-      await tester.tap(find.byTooltip('알람 목록으로'));
-      await tester.pumpAndSettle();
-      expect(lists, 2);
-      expect(find.text('7000 · 첫 정류장'), findsOneWidget);
-    },
-  );
+  for (final activationFails in [false, true]) {
+    testWidgets(
+      'start opens created detail (activation failure: $activationFails) and back refreshes list',
+      (tester) async {
+        final alarms = FlowAlarms();
+        alarms.activateAction = (id) async {
+          expect(id, createdAlarm.id);
+          if (activationFails) throw const AlarmApiException(statusCode: 500);
+          return activeAlarm;
+        };
+        var lists = 0;
+        alarms.list = () async {
+          lists++;
+          return lists == 1
+              ? []
+              : [activationFails ? createdAlarm : activeAlarm];
+        };
+        await tester.pumpWidget(
+          app(
+            session(FakeAuthenticator(), FakeStorage(pair: pair)),
+            alarmClient: alarms,
+            searchRoutes: (_) async => const [
+              BusRoute(id: 754, routeNumber: '7000', regionName: '수원시'),
+            ],
+            findStops: (_) async => const [
+              BusRouteStopOccurrence(
+                id: 12345,
+                name: '첫 정류장',
+                order: 1,
+                canNotifyOneStopBefore: false,
+                canNotifyOneStopAfter: true,
+              ),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('새 알림 만들기'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), '7000');
+        await tester.tap(find.text('검색'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('수원시'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey(12345)));
+        await tester.pump();
+        await tester.tap(find.text('알람 시작'));
+        await tester.pumpAndSettle();
+        expect(alarms.createCalls, 1);
+        expect(alarms.activateCalls, 1);
+        expect(
+          find.text(
+            activationFails ? '상태: INACTIVE · 비활성' : '상태: ACTIVE · 감시 중',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text(activationFails ? '활성화' : '비활성화'), findsOneWidget);
+        await tester.tap(find.byTooltip('알람 목록으로'));
+        await tester.pumpAndSettle();
+        expect(lists, 2);
+        expect(find.text('7000 · 첫 정류장'), findsOneWidget);
+      },
+    );
+  }
 
   testWidgets(
     'logout during Alarm list fetch discards late list and new login starts fresh',
@@ -460,7 +485,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey(12345)));
     await tester.pump();
-    await tester.tap(find.text('알람 만들기'));
+    await tester.tap(find.text('알람 시작'));
     await tester.pump();
     await tester.tap(find.text('로그아웃'));
     await tester.pump();
@@ -468,6 +493,8 @@ void main() {
     await tester.pumpAndSettle();
     pending.complete(createdAlarm);
     await tester.pumpAndSettle();
+    expect(alarms.createCalls, 1);
+    expect(alarms.activateCalls, 0);
     expect(find.text('Google로 계속하기'), findsOneWidget);
     expect(find.text('알람 상세'), findsNothing);
   });
