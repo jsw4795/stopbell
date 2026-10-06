@@ -211,6 +211,50 @@ flutter run --dart-define-from-file=config/local.json
 
 Push notification 검증은 실제 Device에서 수행해야 한다. emulator/simulator 지원 범위와 iOS/Android 차이는 Future Consideration이다.
 
+## Firebase iOS early smoke (TASK-701)
+
+SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-701-firebase-ios-기술-계약-2026-10-06)이다. 현재 Firebase config/APNs key 및 실제 iPhone 수신 확인은 준비되지 않았다. TASK-701은 `[ ]`를 유지하며 사용자가 실제 수신 확인 후 별도로 완료 처리한다.
+
+### Firebase Console / Apple Developer 설정 순서
+
+1. 사용할 실제 Firebase project를 선택한다. 기존 Google OAuth project를 Firebase에 연결할 수 있으나 프로젝트를 임의로 선택·생성하거나 OAuth 값을 바꾸지 않는다. 이 작업은 Google OAuth + Backend Auth를 Firebase Auth로 대체하지 않는다. Analytics 등 다른 Firebase 제품은 이번 smoke에 추가하지 않는다.
+2. Firebase Console → Project settings → General에서 iOS App을 등록/확인한다. Bundle ID는 정확히 `com.stopbell.stopbell`이다. 해당 앱의 실제 `GoogleService-Info.plist`를 내려받는다.
+3. 파일을 `app/ios/Runner/GoogleService-Info.plist`에 둔 뒤 `app/ios/Runner.xcworkspace`를 Xcode로 연다. Add Files to Runner에서 해당 파일을 Runner target에 포함하고 Build Phases → Copy Bundle Resources에 실제 파일이 있는지 확인한다. 파일 이름에 `(2)` 등의 suffix를 붙이지 않는다. 가짜 plist/placeholder 값은 사용하지 않는다. Dart는 native default config로 `Firebase.initializeApp()`를 호출하므로 이번 경로에는 임의의 `firebase_options.dart`가 필요하지 않다.
+4. Apple Developer Portal에서 해당 Team의 명시적 App ID `com.stopbell.stopbell`에 Push Notifications가 활성화되어 있는지 확인한다. APNs 사용 가능한 Authentication Key를 준비하고 `.p8`, Key ID, Team ID를 확인한다. Firebase Console → Project settings → Cloud Messaging → 해당 iOS App의 APNs authentication key에 실제 key를 업로드한다. Debug development 환경을 지원하는 key인지 확인한다.
+5. Xcode Runner → Signing & Capabilities에서 올바른 Apple Developer Team과 실제 iPhone을 선택하고 Push Notifications, Background Modes의 Background fetch/Remote notifications를 확인한다. 저장소에는 capability 및 `aps-environment`가 구성되어 있지만 Portal App ID와 provisioning profile의 권한까지 대신 설정하지는 않는다. Push entitlement를 포함하는 개발 profile을 갱신하고 실제 signed debug install로 확인한다. Xcode가 unrelated upgrade metadata를 바꾸면 해당 변경은 제외한다.
+6. Firebase method swizzling은 기본 enabled 상태를 유지한다. `FirebaseAppDelegateProxyEnabled = NO`를 추가하지 않는다. Firebase SDK는 Flutter의 생성 SPM graph가 공급한다. Xcode Add Packages에서 Firebase를 중복 추가하거나 Podfile/pod install을 도입하지 않는다.
+7. Google Cloud Console에서 같은 project의 Firebase Cloud Messaging API (`fcm.googleapis.com`) 활성화를 확인한다. 전송할 계정에 해당 project의 `cloudmessaging.messages.create` 권한이 필요하며 Firebase Cloud Messaging API Admin 역할이 이를 제공한다. Smoke에는 기존 gcloud 로그인 계정을 사용하고 Service Account private key를 생성/저장하지 않는다.
+
+`GoogleService-Info.plist`는 공식적으로 non-secret app/project config다. 기존 저장소에 별도 Firebase config ignore 정책이 없으므로 실제 파일과 Xcode resource reference는 리뷰 가능한 tracked config로 관리한다. 현재 실제 파일이 없어 이번 변경에는 포함하지 않았다. `.p8`, Service Account private key 및 access token은 repository에 넣지 않는다. Firebase 설정을 위해 기존 Google Sign-In URL scheme/client ID를 자동 교체하지 않는다.
+
+### 실제 iPhone 실행과 FID 전송
+
+1. iPhone을 Mac에 연결하고 Trust / Developer Mode / signing 준비를 마친다. `app` 디렉터리에서 `flutter devices`로 실제 iPhone ID를 확인한다.
+2. 제품 앱과 분리된 smoke entrypoint를 실행한다. Backend 실행이나 Google 로그인은 필요 없다.
+
+   ```text
+   flutter run --debug --no-pub -t lib/firebase_smoke.dart -d <실제-iPhone-ID>
+   ```
+
+3. iPhone에서 `Firebase / APNs / FID 준비`를 누르고 알림을 허용한다. Firebase 초기화, APNs 준비와 native FCM `register()`가 성공하면 Firebase project ID와 **FID**가 화면에 표시된다. APNs 원문과 legacy FCM token은 표시/저장하지 않는다. APNs를 10초 이내 얻지 못하거나 FID가 바뀌면 준비 버튼으로 다시 확인한다. 권한을 거부했다면 iPhone 설정에서 smoke 앱의 알림을 허용한 뒤 재시도한다. 이는 최종 제품 permission UX가 아니다.
+4. 표시된 FID를 Mac 전송 도구에 입력할 수 있도록 복사한 뒤 iPhone 앱을 background로 보낸다. Notification Center/배너 수신을 직접 볼 수 있게 Focus/알림 표시 설정을 확인한다. Foreground 표시 및 tap lifecycle 전체 검증은 이번 Task에 포함하지 않는다.
+5. Google Cloud CLI가 설치된 Mac에서 사용할 계정으로 `gcloud auth login`을 수행한다. 이미 올바른 계정으로 로그인했다면 생략한다. Repository root에서 다음을 실행하고 hidden prompt에 iPhone 화면의 FID를 입력한다. `<실제-Firebase-project-ID>`는 display name/project number가 아닌 화면/config의 project ID다.
+
+   ```text
+   python3 tools/fcm_ios_smoke_send.py --project-id <실제-Firebase-project-ID>
+   ```
+
+   도구는 한 번만 HTTP v1 `message.fid` 대상으로 alert notification을 전송한다. Target/access token을 command argument나 로그에 남기지 않으며 retry, credential file, production Provider Client를 만들지 않는다. Firebase Console의 legacy registration-token 입력 화면만으로 FID 지원을 추정하지 않고 명시적 `fid` 요청을 사용한다. CLI 설치가 안 된 환경은 Cloud Shell에 이 단일 script를 업로드해 같은 명령을 실행할 수 있다.
+
+6. `FCM accepted: projects/.../messages/...`는 Provider 접수만 의미한다. 실제 iPhone에서 `StopBell TASK-701 smoke` 알림을 **한 번 이상 직접 수신 확인**한다. 준비/전송 상태만으로 smoke 성공을 기록하지 않는다.
+7. SDK/OS 버전, 수신 확인 시각, background 여부, Provider 접수 여부 및 실제 수신 여부를 결과로 알려준다. 원문 FID/APNs token/credential은 보고나 로그에 붙이지 않는다. 수신 전에는 TASK-701 `[ ]`이며 TASK-702 계약 확정의 hardware gate가 남아 있다.
+
+실패 시 `401/403`은 로그인·IAM·API/project 설정, `404`는 올바른 project의 현재 FCM 등록 FID인지, APNs 미준비는 entitlement/profile/signing/network, 접수 후 미수신은 APNs key 환경·permission·알림 표시 설정을 확인한다. Smoke 도구는 raw error body를 로그에 쓰지 않으므로 상세 진단이 필요하면 secret/target을 노출하지 않는 범위에서 해당 설정을 확인한다.
+
+Smoke 앱은 명시적 FCM 등록을 남기지만 auto-init을 켜지 않으며 StopBell Backend Device에는 등록하지 않는다. 반복하려면 현재 FID를 다시 준비한다. 일반 product entrypoint로 돌아오려면 기존 `flutter run --dart-define-from-file=config/local.json`을 사용한다. 이번 smoke에서 Firebase installation deletion을 logout/정리 수단으로 호출하지 않는다.
+
+공식 setup 근거: [Flutter FCM Apple capability/APNs/swizzling](https://firebase.google.com/docs/cloud-messaging/flutter/get-started), [Firebase Apple app/config setup](https://firebase.google.com/docs/ios/setup), [HTTP v1 fid targeting](https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages), [FCM authorization](https://firebase.google.com/docs/cloud-messaging/send/v1-api).
+
 ## Backend Connection
 
 Mac에서 Backend를 실행하는 iPhone Simulator의 Local `API_BASE_URL`은 `http://localhost:8080`이다. 실제 iPhone의 `localhost`는 Mac을 가리키지 않으므로, 실제 기기 검증 시에는 Mac의 접근 가능한 Local 주소 또는 개발 서버 주소를 사용한다.
