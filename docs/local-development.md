@@ -241,15 +241,21 @@ SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-devic
 5. Google Cloud CLI가 설치된 Mac에서 사용할 계정으로 `gcloud auth login`을 수행한다. 이미 올바른 계정으로 로그인했다면 생략한다. Repository root에서 다음을 실행하고 hidden prompt에 iPhone 화면의 FID를 입력한다. `<실제-Firebase-project-ID>`는 display name/project number가 아닌 화면/config의 project ID다.
 
    ```text
-   python3 tools/fcm_ios_smoke_send.py --project-id <실제-Firebase-project-ID>
+   python3 tools/fcm_ios_smoke_send.py --project-id <실제-Firebase-project-ID> --target-field fid
    ```
 
    도구는 한 번만 HTTP v1 `message.fid` 대상으로 alert notification을 전송한다. Target/access token을 command argument나 로그에 남기지 않으며 retry, credential file, production Provider Client를 만들지 않는다. Firebase Console의 legacy registration-token 입력 화면만으로 FID 지원을 추정하지 않고 명시적 `fid` 요청을 사용한다. CLI 설치가 안 된 환경은 Cloud Shell에 이 단일 script를 업로드해 같은 명령을 실행할 수 있다.
 
+   `--target-field`를 생략해도 기본값은 `fid`이며 정식 TASK-701/production 계약은 FID를 유지한다. Legacy registration compatibility 비교가 필요할 때만 같은 registration value로 아래 명령을 별도 실행한다. `token`은 diagnostic-only이며 실행마다 선택한 field 하나로 한 번만 전송한다. Retry나 `fid` → `token` 자동 fallback은 없다.
+
+   ```text
+   python3 tools/fcm_ios_smoke_send.py --project-id <실제-Firebase-project-ID> --target-field token
+   ```
+
 6. `FCM accepted: projects/.../messages/...`는 Provider 접수만 의미한다. 실제 iPhone에서 `StopBell TASK-701 smoke` 알림을 **한 번 이상 직접 수신 확인**한다. 준비/전송 상태만으로 smoke 성공을 기록하지 않는다.
 7. SDK/OS 버전, 수신 확인 시각, background 여부, Provider 접수 여부 및 실제 수신 여부를 결과로 알려준다. 원문 FID/APNs token/credential은 보고나 로그에 붙이지 않는다. 수신 전에는 TASK-701 `[ ]`이며 TASK-702 계약 확정의 hardware gate가 남아 있다.
 
-실패 시 `401/403`은 로그인·IAM·API/project 설정, `404`는 올바른 project의 현재 FCM 등록 FID인지, APNs 미준비는 entitlement/profile/signing/network, 접수 후 미수신은 APNs key 환경·permission·알림 표시 설정을 확인한다. Smoke 도구는 raw error body를 로그에 쓰지 않으므로 상세 진단이 필요하면 secret/target을 노출하지 않는 범위에서 해당 설정을 확인한다.
+실패 시 `401/403`은 로그인·IAM·API/project 설정, `404`는 올바른 project의 현재 FCM 등록 FID인지, APNs 미준비는 entitlement/profile/signing/network, 접수 후 미수신은 APNs key 환경·permission·알림 표시 설정을 확인한다. Smoke 도구는 raw error body를 출력하지 않고 알려진 top-level status와 FCM errorCode만 출력한다(예: `FCM HTTP 404: status=NOT_FOUND, fcmErrorCode=UNREGISTERED`). JSON 파싱 실패나 예상 밖의 schema에서는 확인 가능한 항목만 출력하며, 확인할 항목이 없으면 HTTP status만 출력한다.
 
 Smoke 앱은 명시적 FCM 등록을 남기지만 auto-init을 켜지 않으며 StopBell Backend Device에는 등록하지 않는다. 반복하려면 현재 FID를 다시 준비한다. 일반 product entrypoint로 돌아오려면 기존 `flutter run --dart-define-from-file=config/local.json`을 사용한다. 이번 smoke에서 Firebase installation deletion을 logout/정리 수단으로 호출하지 않는다.
 
