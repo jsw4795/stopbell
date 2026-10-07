@@ -130,10 +130,10 @@ FID 조회와 FCM delivery registration은 서로 다르다.
 
 1. `FirebaseInstallations.instance.getId()`는 FID가 없으면 생성하고 현재 ID를 조회한다. 조회 성공만으로 APNs 준비나 FCM 등록 성공을 뜻하지 않는다.
 2. Apple `Info.plist`의 `FirebaseMessagingInstallationIdEnabled = YES`로 FID mode를 선택한다. 기본값은 NO이며 YES에서는 token 조회/삭제 API가 unsupported로 실패한다.
-3. Notification permission 요청 뒤 APNs availability를 확인하고 native `Messaging.messaging().register(completion:)` 성공을 확인한다. Network가 필요하며 기존 등록에서도 등록 callback을 다시 발생시킨다.
-4. 등록 전후 `getId()`가 같을 때 현재 FID를 targeting reference로 사용한다. Smoke 중 ID 변경이 감지되면 기존 target 표시를 폐기하고 다시 준비한다.
+3. Notification permission 요청 뒤 APNs availability를 확인하고 native `Messaging.messaging().register(completion:)` 성공과 `MessagingDelegate.messaging(_:didReceiveRegistration:)`의 FID 수신을 모두 확인한다. Network가 필요하며 기존 등록에서도 등록 callback을 다시 발생시킨다.
+4. Targeting reference는 registration delegate callback으로 받은 FID만 사용한다. 등록 전후 `getId()`와 `onIdChange`는 raw FIS ID의 lifecycle/rotation 확인에만 사용하며, 등록 중 또는 Smoke 중 변경이 감지되면 기존 target 표시를 폐기하고 다시 준비한다.
 
-`firebase_messaging 16.7.0`에는 Dart `register()`/`unregister()`나 FID registration callback이 없다. `onTokenRefresh`는 FID 변경 stream이 아니다. 이번 Task는 plugin source 수정 없이 이미 FlutterFire가 연결한 native SDK의 `register()`를 debug smoke 전용 MethodChannel로 호출한다. Firebase Messaging delegate는 교체하지 않는다. 이 bridge는 production Device registration 구현이 아니며, 후속 Flutter registration 구현 전에 당시 FlutterFire FID API 지원을 다시 확인해야 한다.
+`firebase_messaging 16.7.0`에는 Dart `register()`/`unregister()`나 FID registration callback이 없다. `onTokenRefresh`는 FID 변경 stream이 아니다. 이번 Task는 plugin source 수정 없이 이미 FlutterFire가 연결한 native SDK의 `register()`를 debug smoke 전용 MethodChannel로 호출한다. Firebase 초기화 뒤 명시적 smoke 등록 요청에서 AppDelegate를 MessagingDelegate로 설정하며 callback FID를 Dart에 반환한다. Completion/callback 순서와 무관하게 한 번만 반환하고, 중복 pending 요청은 거부하며 30초 이내 완료되지 않으면 오류로 반환한다. 이 bridge는 production Device registration 구현이 아니며, 후속 Flutter registration 구현 전에 당시 FlutterFire FID API 지원을 다시 확인해야 한다.
 
 FID는 재설치·다른 기기 복원, 앱/device 데이터 초기화, 명시적 installation deletion, Firebase backend의 inactivity deletion 등으로 바뀔 수 있다. 공식 FIS 문서의 현재 inactivity 기준은 270일이며 StopBell 영구 identity/DB 보존 정책으로 고정하지 않는다. `FirebaseInstallations.instance.onIdChange`로 변경을 관찰하고 `getId()`로 현재 값을 다시 조회한다. FIS auth token의 refresh와 FID rotation, APNs token 변경은 같은 사건이 아니다. Startup/resume에서도 현재 FID와 FCM/APNs readiness를 다시 확인해 Backend와 재동기화하는 계약을 사용하되 실제 제품 구현은 이번 Task에 포함하지 않는다.
 

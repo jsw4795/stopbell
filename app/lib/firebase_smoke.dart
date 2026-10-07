@@ -30,6 +30,8 @@ class _FirebaseSmokeScreenState extends State<FirebaseSmokeScreen> {
   String _status = 'TASK-701: Firebase 구성 후 준비 버튼을 누르세요.';
   String? _projectId;
   String? _fid;
+  String? _installationId;
+  int _idChangeRevision = 0;
   bool _preparing = false;
 
   Future<void> _prepare() async {
@@ -37,6 +39,7 @@ class _FirebaseSmokeScreenState extends State<FirebaseSmokeScreen> {
     setState(() {
       _preparing = true;
       _fid = null;
+      _installationId = null;
       _projectId = null;
       _status = 'Firebase 초기화 중...';
     });
@@ -48,7 +51,11 @@ class _FirebaseSmokeScreenState extends State<FirebaseSmokeScreen> {
       final installations = FirebaseInstallations.instance;
       _idChanges ??= installations.onIdChange.listen(
         (id) {
-          if (!mounted || _fid == null || id == _fid) return;
+          if (!mounted || _installationId == null || id == _installationId) {
+            return;
+          }
+          _installationId = id;
+          _idChangeRevision++;
           setState(() {
             _fid = null;
             _status = 'FID가 변경됐습니다. 준비 버튼으로 다시 등록하세요.';
@@ -56,6 +63,7 @@ class _FirebaseSmokeScreenState extends State<FirebaseSmokeScreen> {
         },
         onError: (Object _) {
           if (!mounted) return;
+          _idChangeRevision++;
           setState(() {
             _fid = null;
             _status = 'FID 변경 감지가 실패했습니다. 다시 준비하세요.';
@@ -84,17 +92,23 @@ class _FirebaseSmokeScreenState extends State<FirebaseSmokeScreen> {
         );
       }
       final before = await installations.getId();
-      await _channel.invokeMethod<void>('register');
+      // Raw FIS IDs are only for rotation checks, never the push target.
+      _installationId = before;
+      final revision = _idChangeRevision;
+      final registeredFid = await _channel.invokeMethod<String>('register');
+      if (registeredFid == null || registeredFid.isEmpty) {
+        throw StateError('FCM registration callback FID가 없습니다. 다시 준비하세요.');
+      }
       final current = await installations.getId();
-      if (before != current) {
+      if (before != current || revision != _idChangeRevision) {
         throw StateError('등록 중 FID가 변경됐습니다. 다시 준비하세요.');
       }
       if (!mounted) return;
       setState(() {
         _projectId = app.options.projectId;
-        _fid = current;
+        _fid = registeredFid;
         _status =
-            'Firebase 초기화 / APNs 준비 / FCM FID 등록 성공\n'
+            'Firebase 초기화 / APNs 준비 / FCM registration callback으로 FID 확보\n'
             '앱을 background로 보내고 이 FID로 test notification을 전송하세요.\n'
             '이 상태는 실제 iPhone 수신 성공을 뜻하지 않습니다.';
       });
@@ -137,7 +151,7 @@ class _FirebaseSmokeScreenState extends State<FirebaseSmokeScreen> {
           if (_fid != null) ...[
             const SizedBox(height: 24),
             Text('Firebase project: $_projectId'),
-            const Text('Push target: Firebase Installation ID (FID)'),
+            const Text('Push target: FCM 등록 FID'),
             SelectableText(_fid!),
             const Text('FID는 이 debug 화면에서만 확인하며 로그에 기록하지 않습니다.'),
           ],
