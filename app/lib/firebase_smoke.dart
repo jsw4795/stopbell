@@ -109,6 +109,7 @@ class _FirebaseSmokeScreenState extends State<FirebaseSmokeScreen> {
         _fid = registeredFid;
         _status =
             'Firebase 초기화 / APNs 준비 / FCM registration callback으로 FID 확보\n'
+            'Installations FID ↔ FCM 등록 FID: ${registeredFid == current ? '일치' : '불일치'}\n'
             '앱을 background로 보내고 이 FID로 test notification을 전송하세요.\n'
             '이 상태는 실제 iPhone 수신 성공을 뜻하지 않습니다.';
       });

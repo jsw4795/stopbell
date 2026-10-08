@@ -237,6 +237,7 @@ SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-devic
    ```
 
 3. iPhone에서 `Firebase / APNs / FID 준비`를 누르고 알림을 허용한다. Firebase 초기화, APNs 준비와 native FCM `register()`가 성공하면 Firebase project ID와 **FID**가 화면에 표시된다. APNs 원문과 legacy FCM token은 표시/저장하지 않는다. APNs를 10초 이내 얻지 못하거나 FID가 바뀌면 준비 버튼으로 다시 확인한다. 권한을 거부했다면 iPhone 설정에서 smoke 앱의 알림을 허용한 뒤 재시도한다. 이는 최종 제품 permission UX가 아니다.
+   준비 성공 화면의 `Installations FID ↔ FCM 등록 FID: 일치/불일치`는 등록 후 조회한 Installations FID와 등록 callback FID의 문자열 동등성 진단이다. 불일치해도 기존 등록 FID와 준비 결과는 표시하며, 재시도·FID 변경·실패 시 이전 비교 결과는 폐기한다. 이 비교만으로 전송 실패 원인이나 SDK 버그를 확정하지 않는다.
 4. 표시된 FID를 Mac 전송 도구에 입력할 수 있도록 복사한 뒤 iPhone 앱을 background로 보낸다. Notification Center/배너 수신을 직접 볼 수 있게 Focus/알림 표시 설정을 확인한다. Foreground 표시 및 tap lifecycle 전체 검증은 이번 Task에 포함하지 않는다.
 5. Google Cloud CLI가 설치된 Mac에서 사용할 계정으로 `gcloud auth login`을 수행한다. 이미 올바른 계정으로 로그인했다면 생략한다. Repository root에서 다음을 실행하고 hidden prompt에 iPhone 화면의 FID를 입력한다. `<실제-Firebase-project-ID>`는 display name/project number가 아닌 화면/config의 project ID다.
 
