@@ -110,7 +110,7 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 ### V1 Push Notification 계약
 
 - StopBell Device identity는 Client가 앱 installation마다 생성한 `installationId`를 기준으로 하며 User-scoped identity가 아니다. 하나의 `installationId`에는 동시에 current owner가 최대 한 명이어야 하고, 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference로 분리하고 APNs device token은 StopBell Device identity로 사용하지 않는다. Firebase targeting identifier 자체의 global uniqueness는 TASK-701 확인 뒤 결정한다.
-- TASK-701의 SDK/API 조사에서 delivery target으로 Firebase Installation ID(FID)를 선택했다. 실제 iPhone 수신 smoke는 대기 중이며 상세 SDK/readiness/lifecycle 계약은 ADR-010을 따른다.
+- TASK-701의 SDK/API 조사에서 delivery target으로 Firebase Installation ID(FID)를 선택했다. 사용자 확인에 근거한 실제 iPhone FID targeting 수신 smoke는 통과했으며 상세 SDK/readiness/lifecycle 계약은 ADR-010을 따른다.
 - 동일 installation의 registration update는 monotonic revision 또는 동등한 계약으로 순서 역전된 stale update가 최신 push target을 덮어쓰지 못하게 한다. 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
 - 현재 installation logout은 해당 Device의 Push subscription disable/unregister를 시도하지만 Alarm lifecycle과 다른 Device는 변경하지 않는다. Auth logout은 Refresh Session 종료 책임을 유지하며 Device lifecycle은 별도 authenticated API 또는 동등한 명시적 흐름으로 처리한다. Offline logout에서 Backend Device disable을 즉시 보장하지 않는다.
 - 첫 Alarm activation 직전에 기능 맥락을 설명한 뒤 Notification permission을 요청하는 것을 기본 방향으로 한다. Permission이 거부되어도 Alarm 생성·활성화를 Backend에서 금지하지 않으며, 현재 Device가 Push를 받을 수 없다는 안내와 Settings 진입을 제공하고 app resume에서 상태를 재동기화할 수 있어야 한다.
@@ -211,5 +211,5 @@ Persisted operational time은 host local timezone과 무관하게 UTC 의미로 
 - Transit metadata persistence는 서울 T Data CSV full import와 경기 TAGO throttled full sync를 위해 필요하며 JPA diff sync로 구현한다. Route/Stop 검색·Alarm grouping의 MyBatis 필요성은 실제 SQL 제어 요구가 확인될 때 결정한다.
 - 어떤 폴링 주기가 허용되며 유용한가?
 - 어떤 요청 제한이 적용되는가?
-- TASK-701에서 선택한 FID targeting이 실제 iPhone 수신 smoke에서도 검증되는가? SDK/local unregister 계약은 ADR-010을 따른다.
+- TASK-701에서 선택한 FID targeting은 사용자 확인에 근거한 실제 iPhone 수신 smoke를 통과했다. SDK/local unregister 계약과 아직 실기기 검증하지 않은 항목은 ADR-010을 따른다.
 - 공개 App Store 제출 시점 Apple Guideline 4.8의 적용 여부와 가장 단순한 login/account deletion 준수 방식은 무엇인가?

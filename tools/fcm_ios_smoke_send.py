@@ -1,4 +1,4 @@
-"""TASK-701 one-shot FID notification; token targeting is diagnostic-only."""
+"""TASK-701 one-shot FCM HTTP v1 message.fid notification."""
 
 import argparse
 import getpass
@@ -10,13 +10,10 @@ import urllib.error
 import urllib.request
 
 
-def build_payload(target, target_field="fid"):
-    # FID remains the TASK-701 contract; token is only a legacy compatibility diagnostic.
-    if target_field not in ("fid", "token"):
-        raise ValueError("Unsupported target field")
+def build_payload(fid):
     return {
         "message": {
-            target_field: target,
+            "fid": fid,
             "notification": {
                 "title": "StopBell TASK-701 smoke",
                 "body": "실제 iPhone에서 이 알림의 수신을 확인하세요.",
@@ -69,16 +66,12 @@ def format_http_error(http_status, body):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-id", required=True)
-    parser.add_argument(
-        "--target-field", choices=("fid", "token"), default="fid",
-        help="Target field (default: fid); token is diagnostic-only for legacy registration compatibility.",
-    )
     args = parser.parse_args()
     if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", args.project_id):
         parser.error("실제 Firebase project ID를 입력하세요.")
-    target = getpass.getpass("iPhone debug 화면의 registration value (입력 숨김): ").strip()
+    target = getpass.getpass("iPhone debug 화면의 FCM 등록 FID (입력 숨김): ").strip()
     if not target or any(char.isspace() for char in target):
-        parser.error("등록 성공 화면의 registration value를 입력하세요.")
+        parser.error("등록 성공 화면의 FCM 등록 FID를 입력하세요.")
     try:
         access_token = subprocess.run(
             ["gcloud", "auth", "print-access-token"],
@@ -87,7 +80,7 @@ def main():
             text=True,
             timeout=30,
         ).stdout.strip()
-        payload = build_payload(target, args.target_field)
+        payload = build_payload(target)
         request = urllib.request.Request(
             f"https://fcm.googleapis.com/v1/projects/{args.project_id}/messages:send",
             data=json.dumps(payload).encode("utf-8"),

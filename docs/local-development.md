@@ -213,7 +213,7 @@ Push notification 검증은 실제 Device에서 수행해야 한다. emulator/si
 
 ## Firebase iOS early smoke (TASK-701)
 
-SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-701-firebase-ios-기술-계약-2026-10-06)이다. 현재 Firebase config/APNs key 및 실제 iPhone 수신 확인은 준비되지 않았다. TASK-701은 `[ ]`를 유지하며 사용자가 실제 수신 확인 후 별도로 완료 처리한다.
+SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-701-firebase-ios-기술-계약-2026-10-06)이다. 사용자의 실기기 검증 보고로 실제 Firebase config/APNs 준비, HTTP v1 `message.fid` 전송·서버 접수와 실제 iPhone notification 수신 성공을 확인했다. TASK-701의 hardware smoke gate는 통과했으며 다음 단계는 TASK-702다. 완료 결과와 미검증 항목은 ADR-010에 기록한다.
 
 ### Firebase Console / Apple Developer 설정 순서
 
@@ -225,7 +225,7 @@ SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-devic
 6. Firebase method swizzling은 기본 enabled 상태를 유지한다. `FirebaseAppDelegateProxyEnabled = NO`를 추가하지 않는다. Firebase SDK는 Flutter의 생성 SPM graph가 공급한다. Xcode Add Packages에서 Firebase를 중복 추가하거나 Podfile/pod install을 도입하지 않는다.
 7. Google Cloud Console에서 같은 project의 Firebase Cloud Messaging API (`fcm.googleapis.com`) 활성화를 확인한다. 전송할 계정에 해당 project의 `cloudmessaging.messages.create` 권한이 필요하며 Firebase Cloud Messaging API Admin 역할이 이를 제공한다. Smoke에는 기존 gcloud 로그인 계정을 사용하고 Service Account private key를 생성/저장하지 않는다.
 
-`GoogleService-Info.plist`는 공식적으로 non-secret app/project config다. 기존 저장소에 별도 Firebase config ignore 정책이 없으므로 실제 파일과 Xcode resource reference는 리뷰 가능한 tracked config로 관리한다. 현재 실제 파일이 없어 이번 변경에는 포함하지 않았다. `.p8`, Service Account private key 및 access token은 repository에 넣지 않는다. Firebase 설정을 위해 기존 Google Sign-In URL scheme/client ID를 자동 교체하지 않는다.
+`GoogleService-Info.plist`는 공식적으로 non-secret app/project config다. 기존 저장소에 별도 Firebase config ignore 정책이 없으므로 실제 파일과 Xcode resource reference는 리뷰 가능한 tracked config로 관리한다. 현재 실제 설정은 준비됐으며 이번 정리에서 config 값을 변경하지 않는다. `.p8`, Service Account private key 및 access token은 repository에 넣지 않는다. Firebase 설정을 위해 기존 Google Sign-In URL scheme/client ID를 자동 교체하지 않는다.
 
 ### 실제 iPhone 실행과 FID 전송
 
@@ -237,26 +237,21 @@ SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-devic
    ```
 
 3. iPhone에서 `Firebase / APNs / FID 준비`를 누르고 알림을 허용한다. Firebase 초기화, APNs 준비와 native FCM `register()`가 성공하면 Firebase project ID와 **FID**가 화면에 표시된다. APNs 원문과 legacy FCM token은 표시/저장하지 않는다. APNs를 10초 이내 얻지 못하거나 FID가 바뀌면 준비 버튼으로 다시 확인한다. 권한을 거부했다면 iPhone 설정에서 smoke 앱의 알림을 허용한 뒤 재시도한다. 이는 최종 제품 permission UX가 아니다.
-   준비 성공 화면의 `Installations FID ↔ FCM 등록 FID: 일치/불일치`는 등록 후 조회한 Installations FID와 등록 callback FID의 문자열 동등성 진단이다. 불일치해도 기존 등록 FID와 준비 결과는 표시하며, 재시도·FID 변경·실패 시 이전 비교 결과는 폐기한다. 이 비교만으로 전송 실패 원인이나 SDK 버그를 확정하지 않는다.
-4. 표시된 FID를 Mac 전송 도구에 입력할 수 있도록 복사한 뒤 iPhone 앱을 background로 보낸다. Notification Center/배너 수신을 직접 볼 수 있게 Focus/알림 표시 설정을 확인한다. Foreground 표시 및 tap lifecycle 전체 검증은 이번 Task에 포함하지 않는다.
-5. Google Cloud CLI가 설치된 Mac에서 사용할 계정으로 `gcloud auth login`을 수행한다. 이미 올바른 계정으로 로그인했다면 생략한다. Repository root에서 다음을 실행하고 hidden prompt에 iPhone 화면의 FID를 입력한다. `<실제-Firebase-project-ID>`는 display name/project number가 아닌 화면/config의 project ID다.
+4. FID는 `SelectableText`로 표시되므로 길게 눌러 선택·복사할 수 있다. FID는 대소문자를 구분한다. 비슷하게 보이는 `I`, `l`, `1` 등의 문자에 주의하고 수동 입력보다 복사·붙여넣기를 권장한다. iPhone과 Mac이 같은 Apple Account를 사용하고 Handoff 조건을 충족하면 Universal Clipboard로 붙여넣을 수 있다. 표시된 FID를 복사한 뒤 iPhone 앱을 background로 보낸다. Notification Center/배너 수신을 직접 볼 수 있게 Focus/알림 표시 설정을 확인한다. Foreground 표시 및 tap lifecycle 전체 검증은 이번 Task에 포함하지 않는다.
+5. Google Cloud CLI가 설치된 Mac에서 사용할 계정으로 `gcloud auth login`을 수행한다. 이미 올바른 계정으로 로그인했다면 생략한다. Repository root에서 다음을 실행하고 hidden prompt에 iPhone 화면의 FID를 입력한다. 아래 `stopbell`은 현재 Firebase project ID이며 다른 환경에서는 display name/project number가 아닌 화면/config의 project ID를 사용한다.
 
    ```text
-   python3 tools/fcm_ios_smoke_send.py --project-id <실제-Firebase-project-ID> --target-field fid
+   python3 tools/fcm_ios_smoke_send.py --project-id stopbell
    ```
 
    도구는 한 번만 HTTP v1 `message.fid` 대상으로 alert notification을 전송한다. Target/access token을 command argument나 로그에 남기지 않으며 retry, credential file, production Provider Client를 만들지 않는다. Firebase Console의 legacy registration-token 입력 화면만으로 FID 지원을 추정하지 않고 명시적 `fid` 요청을 사용한다. CLI 설치가 안 된 환경은 Cloud Shell에 이 단일 script를 업로드해 같은 명령을 실행할 수 있다.
 
-   `--target-field`를 생략해도 기본값은 `fid`이며 정식 TASK-701/production 계약은 FID를 유지한다. Legacy registration compatibility 비교가 필요할 때만 같은 registration value로 아래 명령을 별도 실행한다. `token`은 diagnostic-only이며 실행마다 선택한 field 하나로 한 번만 전송한다. Retry나 `fid` → `token` 자동 fallback은 없다.
-
-   ```text
-   python3 tools/fcm_ios_smoke_send.py --project-id <실제-Firebase-project-ID> --target-field token
-   ```
-
 6. `FCM accepted: projects/.../messages/...`는 Provider 접수만 의미한다. 실제 iPhone에서 `StopBell TASK-701 smoke` 알림을 **한 번 이상 직접 수신 확인**한다. 준비/전송 상태만으로 smoke 성공을 기록하지 않는다.
-7. SDK/OS 버전, 수신 확인 시각, background 여부, Provider 접수 여부 및 실제 수신 여부를 결과로 알려준다. 원문 FID/APNs token/credential은 보고나 로그에 붙이지 않는다. 수신 전에는 TASK-701 `[ ]`이며 TASK-702 계약 확정의 hardware gate가 남아 있다.
+7. 재실행 결과는 직접 확인한 Provider 접수 여부 및 실제 수신 여부를 기록한다. SDK/OS 버전, 수신 시각, 기기 모델이나 앱 상태는 확인한 경우에만 기록하며 추정하지 않는다. 원문 FID/APNs token/credential은 보고나 로그에 붙이지 않는다.
 
-실패 시 `401/403`은 로그인·IAM·API/project 설정, `404`는 올바른 project의 현재 FCM 등록 FID인지, APNs 미준비는 entitlement/profile/signing/network, 접수 후 미수신은 APNs key 환경·permission·알림 표시 설정을 확인한다. Smoke 도구는 raw error body를 출력하지 않고 알려진 top-level status와 FCM errorCode만 출력한다(예: `FCM HTTP 404: status=NOT_FOUND, fcmErrorCode=UNREGISTERED`). JSON 파싱 실패나 예상 밖의 schema에서는 확인 가능한 항목만 출력하며, 확인할 항목이 없으면 HTTP status만 출력한다.
+실패 시 `401/403`은 로그인·IAM·API/project 설정, `404`는 FID 복사·입력의 정확성과 올바른 project의 현재 FCM 등록 FID인지, APNs 미준비는 entitlement/profile/signing/network, 접수 후 미수신은 APNs key 환경·permission·알림 표시 설정을 확인한다. Smoke 도구는 raw error body를 출력하지 않고 알려진 top-level status와 FCM errorCode만 출력한다(예: `FCM HTTP 404: status=NOT_FOUND, fcmErrorCode=UNREGISTERED`). JSON 파싱 실패나 예상 밖의 schema에서는 확인 가능한 항목만 출력하며, 확인할 항목이 없으면 HTTP status만 출력한다.
+
+사용자가 확인한 이전 404의 최종 원인은 수동 FID 입력 오류(`I`/`l` 혼동)이며 SDK/FCM 결함으로 확정된 문제는 없다. Native unregister, foreground/terminated 수신과 tap navigation, Backend Admin SDK 연동은 아직 미검증이다. 실제 제품의 Device 등록과 Backend Provider Client는 아직 구현되지 않았다.
 
 Smoke 앱은 명시적 FCM 등록을 남기지만 auto-init을 켜지 않으며 StopBell Backend Device에는 등록하지 않는다. 반복하려면 현재 FID를 다시 준비한다. 일반 product entrypoint로 돌아오려면 기존 `flutter run --dart-define-from-file=config/local.json`을 사용한다. 이번 smoke에서 Firebase installation deletion을 logout/정리 수단으로 호출하지 않는다.
 

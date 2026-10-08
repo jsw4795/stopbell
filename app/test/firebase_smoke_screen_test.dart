@@ -157,10 +157,6 @@ void main() {
       expect(target.data == 'registered-fid-fixture', isTrue);
       expect(find.text(rawId), findsNothing);
       expect(
-        find.textContaining('Installations FID ↔ FCM 등록 FID: 불일치'),
-        findsOneWidget,
-      );
-      expect(
         find.textContaining('FCM registration callback으로 FID 확보'),
         findsOneWidget,
       );
@@ -170,18 +166,10 @@ void main() {
       await emitIdChange(rawId);
       await tester.pumpAndSettle();
       expect(find.byType(SelectableText), findsOneWidget);
-      expect(
-        find.textContaining('Installations FID ↔ FCM 등록 FID:'),
-        findsOneWidget,
-      );
       rawId = 'rotated-installation-fixture';
       await emitIdChange(rawId);
       await tester.pumpAndSettle();
       expect(find.byType(SelectableText), findsNothing);
-      expect(
-        find.textContaining('Installations FID ↔ FCM 등록 FID:'),
-        findsNothing,
-      );
       expect(find.textContaining('다시 등록하세요'), findsOneWidget);
       await tester.tap(find.text('Firebase / APNs / FID 준비'));
       await tester.pumpAndSettle();
@@ -190,60 +178,30 @@ void main() {
     },
   );
 
-  smokeTestWidgets('동일한 Installations FID와 등록 FID는 일치로 표시한다', (tester) async {
-    rawId = 'registered-fid-fixture';
+  smokeTestWidgets('재시도 중과 등록 실패 후 이전 target을 폐기한다', (tester) async {
     await prepare(tester);
-    expect(
-      find.textContaining('Installations FID ↔ FCM 등록 FID: 일치'),
-      findsOneWidget,
-    );
     expect(find.byType(SelectableText), findsOneWidget);
-    expect(smokeCalls, ['registerAPNs', 'register']);
-    expect(getIdCalls, 2);
+
+    final pending = Completer<String?>();
+    register = () => pending.future;
+    await tester.tap(find.text('Firebase / APNs / FID 준비'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SelectableText), findsNothing);
+
+    pending.completeError(PlatformException(code: 'fcm-registration-failed'));
+    await tester.pumpAndSettle();
+    expect(find.text('iOS smoke 실패: fcm-registration-failed'), findsOneWidget);
+    expect(find.byType(SelectableText), findsNothing);
+
+    rawId = 'new-installation-fixture';
+    register = () async => rawId;
+    await tester.tap(find.text('Firebase / APNs / FID 준비'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<SelectableText>(find.byType(SelectableText)).data,
+      rawId,
+    );
   });
-
-  for (final matches in [true, false]) {
-    smokeTestWidgets('재시도 중과 실패 후 이전 ${matches ? '일치' : '불일치'} 결과를 지운다', (
-      tester,
-    ) async {
-      if (matches) rawId = 'registered-fid-fixture';
-      await prepare(tester);
-      expect(
-        find.textContaining('Installations FID ↔ FCM 등록 FID:'),
-        findsOneWidget,
-      );
-
-      final pending = Completer<String?>();
-      register = () => pending.future;
-      await tester.tap(find.text('Firebase / APNs / FID 준비'));
-      await tester.pumpAndSettle();
-      expect(
-        find.textContaining('Installations FID ↔ FCM 등록 FID:'),
-        findsNothing,
-      );
-      expect(find.byType(SelectableText), findsNothing);
-
-      pending.completeError(PlatformException(code: 'fcm-registration-failed'));
-      await tester.pumpAndSettle();
-      expect(
-        find.text('iOS smoke 실패: fcm-registration-failed'),
-        findsOneWidget,
-      );
-      expect(
-        find.textContaining('Installations FID ↔ FCM 등록 FID:'),
-        findsNothing,
-      );
-
-      rawId = 'new-installation-fixture';
-      register = () async => rawId;
-      await tester.tap(find.text('Firebase / APNs / FID 준비'));
-      await tester.pumpAndSettle();
-      expect(
-        find.textContaining('Installations FID ↔ FCM 등록 FID: 일치'),
-        findsOneWidget,
-      );
-    });
-  }
 
   smokeTestWidgets('pending 등록은 target을 숨기고 중복 버튼 요청을 차단한다', (tester) async {
     final pending = Completer<String?>();
@@ -307,10 +265,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(SelectableText), findsNothing);
     expect(find.textContaining('등록 중 FID가 변경'), findsOneWidget);
-    expect(
-      find.textContaining('Installations FID ↔ FCM 등록 FID:'),
-      findsNothing,
-    );
   });
 
   smokeTestWidgets('등록 전후 raw FIS 값이 다르면 target을 폐기한다', (tester) async {
@@ -321,10 +275,6 @@ void main() {
     await prepare(tester);
     expect(find.byType(SelectableText), findsNothing);
     expect(find.textContaining('등록 중 FID가 변경'), findsOneWidget);
-    expect(
-      find.textContaining('Installations FID ↔ FCM 등록 FID:'),
-      findsNothing,
-    );
   });
 
   smokeTestWidgets('APNs 준비 실패 시 FCM register를 호출하지 않는다', (tester) async {

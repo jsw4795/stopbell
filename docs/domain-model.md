@@ -154,7 +154,7 @@ StopBell이 앱 installation 자체의 identity, 현재 owner와 Push delivery r
 
     updatedAt
 
-`installationId`는 Client가 앱 installation마다 생성하는 StopBell Device identity이며 User-scoped identity가 아니다. Firebase targeting identifier는 rotation/re-registration될 수 있는 현재 delivery reference이며 Device identity가 아니다. APNs device token도 StopBell Device identity로 사용하지 않는다. SDK/API 기준 delivery reference는 Firebase Installation ID(FID)를 선택했으며 실제 iPhone smoke는 대기 중이다. FID/readiness/rotation 계약은 ADR-010을 따르고 field 이름·길이·constraint는 TASK-702에서 정한다.
+`installationId`는 Client가 앱 installation마다 생성하는 StopBell Device identity이며 User-scoped identity가 아니다. Firebase targeting identifier는 rotation/re-registration될 수 있는 현재 delivery reference이며 Device identity가 아니다. APNs device token도 StopBell Device identity로 사용하지 않는다. SDK/API 기준 delivery reference는 Firebase Installation ID(FID)를 선택했으며 사용자 확인에 근거한 실제 iPhone FID targeting smoke는 통과했다. FID/readiness/rotation 계약은 ADR-010을 따르고 field 이름·길이·constraint는 TASK-702에서 정한다.
 
 ## Relationship and Lifecycle
 

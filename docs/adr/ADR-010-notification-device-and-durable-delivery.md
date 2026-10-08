@@ -104,7 +104,7 @@ Device internal PK
 
 `installationId`는 StopBell이 한 앱 installation을 구분하는 identity이며 User-scoped identity가 아니다. 하나의 installation에는 동시에 current owner가 최대 한 명이어야 한다. 같은 installation에서 다른 User가 로그인하면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase targeting identifier는 rotation/re-registration 가능한 delivery reference이며 Device identity가 아니다. APNs device token은 Apple/Firebase bridge와 readiness에만 사용하며 StopBell Device identity, Backend Push target, Domain identifier로 저장·노출하지 않는다.
 
-TASK-701의 공식 SDK/API 조사 기준 V1 delivery target은 FID를 선택한다. 실제 iPhone FID targeting 수신은 아직 미검증이므로 TASK-701은 미완료이며, hardware smoke 결과를 확인한 뒤 TASK-702가 이 계약을 사용한다. FID를 Firebase project/app 문맥과 무관한 영구적·전역 Device identity로 가정하지 않는다. 구체 field 이름, column 길이와 constraint는 TASK-702에서 정한다.
+TASK-701의 공식 SDK/API 조사 기준 V1 delivery target은 FID를 선택했으며, 사용자 확인에 근거해 HTTP v1 `message.fid` 전송과 실제 iPhone notification 수신의 hardware smoke gate를 통과했다. TASK-701은 완료이며 TASK-702에서 이 계약을 사용해 Device Domain/Schema를 구체화한다. FID를 Firebase project/app 문맥과 무관한 영구적·전역 Device identity로 가정하지 않는다. 구체 field 이름, column 길이와 constraint는 TASK-702에서 정한다.
 
 한 User는 여러 Device를 가질 수 있다. 단일 Device 제한을 두지 않고 RefreshToken Session과 Device를 FK로 직접 연결하지 않는다. Installation ownership takeover의 구체 DB constraint와 API transaction은 TASK-702/703에서 정한다. 동일 installation의 update에는 monotonic revision 또는 동등한 stale-write 보호가 필요하다. 오래된 update는 최신 target을 덮어쓸 수 없고 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
 
@@ -148,9 +148,18 @@ FID는 재설치·다른 기기 복원, 앱/device 데이터 초기화, 명시�
 
 `/auth/logout`에는 Device 책임을 추가하지 않는다. Offline Device disable은 즉시 보장되지 않으며 Auth session 종료를 영구 차단하지 않는다. Firebase installation deletion은 개인정보/installation lifecycle의 별도 동작이고 관련 데이터 삭제에는 공식 보존·삭제 기간이 적용된다.
 
-이번 smoke는 normal product entrypoint와 분리한 debug iOS 앱에서 실행한다. `FirebaseMessagingAutoInitEnabled = NO`를 유지하고 smoke 버튼에서 APNs와 FCM을 명시적으로 등록하여 auto-init의 persisted opt-in을 남기지 않는다. 실제 config가 공급되면 Firebase native core 초기화가 가능하지만 일반 앱의 permission/Device registration UX는 아직 구현하지 않는다. Firebase Auth 등 다른 제품과 production Provider Client는 추가하지 않는다.
+이번 smoke는 normal product entrypoint와 분리한 debug iOS 앱에서 실행한다. `FirebaseMessagingAutoInitEnabled = NO`를 유지하고 smoke 버튼에서 APNs와 FCM을 명시적으로 등록하여 auto-init의 persisted opt-in을 남기지 않는다. 실제 config와 APNs key 준비 및 Firebase native core 초기화는 사용자 실기기 확인으로 검증됐지만 일반 앱의 permission/Device registration UX는 아직 구현하지 않는다. Firebase Auth 등 다른 제품과 production Provider Client는 추가하지 않는다.
 
-실제 project/iOS App config 및 APNs key가 아직 공급되지 않았고 실제 iPhone 수신은 미확인이다. Config/서명/수신 확인 및 완료 gate는 [Local early smoke 절차](../local-development.md#firebase-ios-early-smoke-task-701)를 따른다. Provider accepted 응답, unsigned build 성공, 화면의 등록 성공 중 어느 것도 실제 수신 성공을 대신하지 않는다.
+TASK-701 완료 기록은 사용자의 실제 iPhone 검증 보고에 근거한다.
+
+- Firebase Core 초기화, APNs token 확보, `Messaging.register()` completion 성공 및 `MessagingDelegate.didReceiveRegistration`의 FID 수신 확인
+- Firebase Installations FID와 등록 callback FID 일치 및 앱 삭제 후 재설치 시 FID 변경 확인
+- FCM HTTP v1 `message.fid` 전송과 서버 접수 및 실제 iPhone의 `StopBell TASK-701 smoke` notification 수신 성공
+- 이전 `404 NOT_FOUND / UNREGISTERED`의 최종 원인은 FID를 Mac에 수동 입력할 때 대문자 `I`와 소문자 `l`을 혼동한 오류이며, 정확한 FID로 전송·수신 성공
+
+SDK/FCM 결함이나 APNs 연동·FID registration 실패로 확정된 문제는 없다. 과거 `message.token` 시도는 입력 FID의 정확성이 보장되지 않아 token targeting 실패를 입증한 실험으로 기록하지 않는다. V1 전송 계약은 `message.fid`를 유지한다.
+
+위 native `unregister()` 의미는 공식 SDK 계약 확인이며 실기기 동작 검증은 아직 수행하지 않았다. Foreground/terminated 수신과 tap navigation, Backend Firebase Admin SDK 연동도 미검증이다. StopBell `installationId`와 Firebase FID의 분리 및 rotation 계약을 유지하며 다음 단계는 TASK-702다. 재현 절차는 [Local early smoke 절차](../local-development.md#firebase-ios-early-smoke-task-701)를 따른다. Provider accepted 응답, unsigned build 성공, 화면의 등록 성공만으로 실제 수신 성공을 대신하지 않는다.
 
 공식 근거:
 

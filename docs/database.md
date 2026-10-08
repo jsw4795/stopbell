@@ -108,7 +108,7 @@ Device internal PK
 
 동일 installation의 더 오래된 registration update가 최신 target을 덮어쓰지 못해야 하고 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다. Invalid/unregistered provider 결과는 실패한 target/revision이 current registration과 일치할 때만 조건부 disable한다.
 
-SDK/API 기준 targeting identifier로 FID를 선택했으며 실제 iPhone smoke는 대기 중이다(ADR-010). Field/column 이름과 길이, uniqueness와 index는 TASK-702에서 정한다.
+SDK/API 기준 targeting identifier로 FID를 선택했으며 사용자 확인에 근거한 실제 iPhone FID targeting smoke는 통과했다(ADR-010). Field/column 이름과 길이, uniqueness와 index는 TASK-702에서 정한다.
 
 ### alarms
 

@@ -1,4 +1,4 @@
-"""Targeted sender diagnostics; run with stdlib unittest, without real sends."""
+"""One-shot FID sender contract; run with stdlib unittest, without real sends."""
 
 import contextlib
 import io
@@ -48,30 +48,23 @@ class SenderTest(unittest.TestCase):
         payload = json.loads(send.call_args.args[0].data)
         return payload, stderr.getvalue().strip()
 
-    def test_default_and_explicit_fields_send_only_selected_target(self):
-        for options, field in (([], "fid"), (["--target-field", "fid"], "fid"),
-                               (["--target-field", "token"], "token")):
-            with self.subTest(field=field, options=options):
-                payload, output = self.run_main(options, UNREGISTERED_BODY)
-                message = payload["message"]
-                self.assertEqual(set(message) & {"fid", "token"}, {field})
-                self.assertEqual(message[field], TARGET)
-                self.assertEqual(output, "FCM HTTP 404: status=NOT_FOUND, fcmErrorCode=UNREGISTERED")
+    def test_sends_only_fid_once_without_fallback(self):
+        payload, output = self.run_main([], UNREGISTERED_BODY)
+        message = payload["message"]
+        self.assertEqual(set(message) & {"fid", "token"}, {"fid"})
+        self.assertEqual(message["fid"], TARGET)
+        self.assertEqual(output, "FCM HTTP 404: status=NOT_FOUND, fcmErrorCode=UNREGISTERED")
 
     def test_payload_preserves_notification_and_apns(self):
-        for field in ("fid", "token"):
-            message = sender.build_payload(TARGET, field)["message"]
-            self.assertEqual(message["notification"], {
-                "title": "StopBell TASK-701 smoke",
-                "body": "실제 iPhone에서 이 알림의 수신을 확인하세요.",
-            })
-            self.assertEqual(message["apns"], {
-                "headers": {"apns-push-type": "alert", "apns-priority": "10"},
-                "payload": {"aps": {"sound": "default"}},
-            })
-        self.assertIn("fid", sender.build_payload(TARGET)["message"])
-        with self.assertRaises(ValueError):
-            sender.build_payload(TARGET, "topic")
+        message = sender.build_payload(TARGET)["message"]
+        self.assertEqual(message["notification"], {
+            "title": "StopBell TASK-701 smoke",
+            "body": "실제 iPhone에서 이 알림의 수신을 확인하세요.",
+        })
+        self.assertEqual(message["apns"], {
+            "headers": {"apns-push-type": "alert", "apns-priority": "10"},
+            "payload": {"aps": {"sound": "default"}},
+        })
 
     def test_malformed_body_exits_without_disclosing_body(self):
         for body in (b"", TARGET.encode(), b'{"error":', b"\xff", b"[" * 2000):
