@@ -229,6 +229,8 @@ TASK-702는 `notification.entity.Device`, `DevicePlatform`과 V13 매핑만 구�
 
 FOLLOW_UP이면 non-blank `followUpVehicleTrackingId`, `followUpStartedAt`, `followUpExpiresAt`이 모두 존재하고 expiry가 start보다 뒤여야 한다. FOLLOW_UP이 아니면 세 runtime field는 모두 비어 있어야 한다. after 옵션과 runtime의 교차-table 불변 조건은 Domain이, runtime field의 완전성과 status 조합은 Domain과 Database CHECK가 함께 강제한다.
 
+TASK-708 설계는 후속 TASK-707에서 `followUpTrackingCycleId`(UUID)를 네 번째 runtime field로 추가하기로 확정했다. 위 세 값은 현재 구현이고 cycle ID는 아직 미구현이다. 후속 `startFollowUp(vehicleTrackingId, trackingCycleId, startedAt, expiresAt)`은 ARRIVED candidate의 원래 UUID를 필수로 받아 보존하고, activate/deactivate/completeFollowUp 시 네 값을 함께 비운다. FOLLOW_UP이면 네 값 모두 존재하고 그 외 상태이면 모두 없어야 한다. ARRIVED와 ONE_STOP_AFTER는 동일 `activationGeneration`/`trackingCycleId`를 공유하며 vehicle correlation ID만으로 cycle을 대체하지 않는다. 결정 근거는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#follow_up-cycle-continuity-결정), Schema/적용 전제는 [alarms](database.md#alarms)가 소유한다.
+
 Transit API 조회 실패, Notification delivery 결과, Alarm trigger는 Alarm의 상태가 아니다. Logical notification 결정은 `NotificationEvent`, Device별 전달 상태는 `NotificationDelivery`로 분리한다. ACTIVE의 차량별 tracking state는 V1에서 memory 기반일 수 있으므로 Backend restart 뒤에는 이전 state와 새 Observation을 연결하지 않고 안전한 baseline부터 시작한다. 이는 restart 직후 false PASSED 또는 ONE_STOP_BEFORE 재발행을 피하기 위한 방향이다. 반면 FOLLOW_UP runtime은 이 Entity에 영속된 값으로 유효 기간 안에 재개한다.
 
 `transitType`은 `BUS`, `SUBWAY`를 표현하는 Enum으로 관리하며, Database에는 문자열로 저장한다.
@@ -551,6 +553,8 @@ TASK-509의 V1 evidence policy는 다음과 같다. `observedAt`과 서울의 `p
 
 `TransitObservation`과 ACTIVE Vehicle tracking state 전체는 V1에서 영속하지 않는다. Scheduler는 `(alarmId, activationGeneration)` key로 ACTIVE/FOLLOW_UP evaluation state를 memory에 보관하고 restart 뒤에는 `initial()` baseline으로 시작한다. Provider I/O 뒤 lifecycle 반영 직전에 `PESSIMISTIC_WRITE`로 current generation/status를 다시 검증하므로 stale result는 lifecycle과 memory state 모두 바꾸지 않는다. Durable Notification dedup에 필요한 activation generation, tracking cycle identity, event type은 TransitEvent에서 `NotificationEvent`로 전달한다. `TransitEvent`는 type, vehicle tracking ID, UUID cycle ID, latest observed time/position, optional provider data time 및 PASSED의 optional metadata-derived `stopsPastTarget`을 provider-neutral하게 전달한다.
 
+TASK-708 implementation에서는 FOLLOW_UP memory가 없을 때 `followUpTrackingCycleId`로 원래 cycle identity를 복원한다. 새 UUID나 과거 Observation을 만들지 않고 현재의 fresh Observation으로 기존 after 판정만 수행한다. DB retry는 선택한 `TransitEvent`와 원래 evaluation result를 재사용하며 evaluator 재실행으로 UUID를 바꾸지 않는다. ACTIVE restart의 새 cycle과 이전 cycle은 자동 연결하지 않는다. 현재 FOLLOW_UP UUID 재생성 및 ACTIVE baseline 재발행의 구현상 한계는 [ADR-010의 조사 결과](adr/ADR-010-notification-device-and-durable-delivery.md#현재-구현-조사와-보장-한계)를 따른다.
+
 ------------------------------------------------------------------------
 
 # NotificationEvent
@@ -574,7 +578,9 @@ alarmId
 + eventType
 ```
 
-이 identity에는 DB Unique Constraint 또는 동등한 atomic uniqueness가 필요하다. `alarmId + eventType`만으로 dedup하지 않는다. 정확한 Schema/constraint 이름은 TASK-707/708에서 결정한다.
+네 identity 값은 필수이며 생성 후 불변이다. `alarmId + eventType`만으로 dedup하지 않는다. 확정한 [Database UNIQUE](database.md#notification_events-identity)는 TASK-707에서 구현한다. candidate는 평가 당시 `AlarmEvaluationKey`의 alarmId/generation과 선택한 `TransitEvent`의 cycle ID/type을 사용하며 적용 시점 current generation으로 바꿔 이전 후보를 새 activation에 연결하지 않는다. Event owner도 결정 당시 Alarm owner로 고정한다.
+
+이미 존재하는 동일 logical Event의 재제출은 무변경 duplicate다. 기존 Event, payload, recipient set, Delivery 상태와 Alarm lifecycle을 변경하지 않으며 새 Device Delivery를 추가하지 않는다. 서로 다른 cycle/type은 별도 identity지만 current lifecycle/evidence를 통과한 candidate만 새 결정이 될 수 있다. 상황별 정책은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#상황별-정책), transaction/retry는 [Architecture](architecture.md#notification-decision-transaction-task-708)가 소유한다.
 
 Current Alarm lifecycle/activation generation 검증, lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성은 같은 Database transaction에서 수행한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient operational log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. Commit 뒤 단일 Backend의 fixed-delay, non-overlapping worker는 due PENDING Delivery만 전달하며 recipient를 새로 결정하지 않는다. FCM network I/O는 이 transaction 안에서 실행하지 않는다.
 
@@ -593,7 +599,9 @@ Current Alarm lifecycle/activation generation 검증, lifecycle transition, Noti
 
 각 `NotificationEvent × Device` 조합은 Database 기준 하나다. Provider request는 bounded retry로 여러 번 발생할 수 있지만 모든 attempt를 append-only row로 영속할 필요는 없다.
 
-Delivery recipient는 Device identity다. Worker는 전송 직전에 Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 확인하고 실제 attempt revision을 기록한다. Invalid/unregistered 결과는 attempt revision이 Device의 current registration과 일치할 때만 현재 registration을 disable한다. raw push target을 `NotificationDelivery`에 중복 저장하는 것은 필수가 아니다. 구체 column/schema 이름은 TASK-707/709에서 정한다.
+Event와 recipient Device identity는 필수·불변이며 [Delivery UNIQUE](database.md#notification_deliveries-identity)를 따른다. 최초 decision transaction에서 선정한 recipient set만 Delivery를 가지며, 나중 Device 등록이나 동일 Event 재제출로 set을 확대하지 않는다. 0개 recipient는 Event만 존재하는 정상 결정으로 Provider failure나 성공 Delivery가 아니다. Alarm 삭제 후 기록/Delivery 처리의 후속 제약은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#alarm-삭제에-대한-후속-결정-제약)을 따른다.
+
+Delivery recipient는 Device identity다. Worker는 전송 직전에 Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 확인하고 실제 attempt revision을 기록한다. Invalid/unregistered 결과는 attempt revision이 Device의 current registration과 일치할 때만 현재 registration을 disable한다. raw push target을 `NotificationDelivery`에 중복 저장하는 것은 필수가 아니다. delivery operational column/schema는 TASK-709 설계 후 TASK-707에서 정한다.
 
 ## Delivery Result Semantics
 

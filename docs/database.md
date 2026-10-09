@@ -152,6 +152,10 @@ Transit API 조회 실패, Notification 발송 결과, ARRIVED/PASSED Event는 A
 
 `activation_generation`은 서로 다른 activation cycle을 구분하는 persisted semantic generation이다. 새 Alarm은 0에서 시작하고 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하며 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset 없이 idempotent하다. Deactivate 뒤 reactivate, FOLLOW_UP 중 reactivate와 stale scheduler 결과를 구분한다. V11 Migration은 0 이상 CHECK를 함께 추가한다. lifecycle mutation과 Scheduler 결과 반영은 결과 적용 직전의 짧은 Alarm row `PESSIMISTIC_WRITE` transaction으로 보호하며 Provider I/O 중에는 lock을 잡지 않는다.
 
+TASK-708 설계에서 확정한 후속 runtime 확장은 `follow_up_tracking_cycle_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL` 하나다. 현재 Schema에는 없으며 TASK-707의 새 Flyway Migration에서 추가한다. ARRIVED candidate의 UUID를 소문자 canonical hyphenated 형식으로 저장하며 ACTIVE history나 Observation을 저장하지 않는다. 기존 `ck_alarms_lifecycle`은 FOLLOW_UP에서 기존 세 runtime 값과 cycle ID가 모두 non-null이고 expiry > start, INACTIVE/ACTIVE에서 네 값이 모두 NULL인 조건으로 교체한다. UUID 형식은 `ck_alarms_follow_up_tracking_cycle_id`에서 NULL 또는 아래 Event UUID와 같은 canonical 형식만 허용한다. `CHECK`의 UNKNOWN 통과를 막도록 status별 `IS NOT NULL`/`IS NULL` 조건을 명시한다. 복구는 기존 status index로 Alarm을 읽으므로 cycle ID index/FK는 추가하지 않는다.
+
+기존 FOLLOW_UP row의 원래 UUID는 차량 ID/시간이나 초기 NotificationHistory로 복원할 수 없다. TASK-707 migration 적용 전 기존 follow-up이 정상 완료/기존 5분 정책으로 만료되어 FOLLOW_UP row가 없음을 확인하고 monitoring을 멈춘 상태에서 적용한다. 남은 row가 있으면 migration 적용을 진행하지 않으며 임의 UUID backfill은 금지한다. V6/V11 등 기존 Migration은 수정하지 않고 적용 순번에 맞는 새 Migration을 작성한다. Domain과 ARRIVED producer 연결도 같은 TASK-707에서 수행해 새 CHECK를 만족하지 못하는 중간 구현을 남기지 않는다.
+
 ### bus_alarm_targets
 
 Bus-specific 장기 Alarm 설정을 공통 `alarms`의 nullable column으로 펼치지 않고 공유 PK Entity/table로 저장한다. 한 Alarm은 최대 하나의 BusAlarmTarget을 가지며 `alarm_id`는 PK이자 `alarms.id` FK다. FK는 `ON DELETE CASCADE`이므로 Alarm 삭제 시 orphan Target이 남지 않는다.
@@ -203,7 +207,7 @@ created_at DATETIME(6) NOT NULL
 
 ### Phase 7 Notification persistence contract
 
-Phase 7에서는 physical table 이름과 세부 column을 확정하기 전에 다음 두 책임을 분리한다.
+TASK-708 설계는 `notification_events`와 `notification_deliveries`의 identity column/UNIQUE를 다음과 같이 확정한다. 아직 구현된 table이 아니며 TASK-707에서 Entity와 새 Migration으로 적용한다. delivery operational field는 TASK-709 설계 후 TASK-707에서 구체화한다.
 
 ```text
 NotificationEvent
@@ -220,7 +224,41 @@ NotificationDelivery
 - current/final provider result
 ```
 
-`alarmId + eventType`만으로 logical dedup하지 않는다. ACTIVE tracking 전체나 raw TransitObservation은 저장하지 않아도 된다. Tracking cycle identity는 logical cycle 시작 시 한 번 생성하고 같은 cycle의 transaction retry에서 유지하며 TransitEvent 발생 시 NotificationEvent에 복사한다.
+`alarmId + eventType`만으로 logical dedup하지 않는다. ACTIVE tracking 전체나 raw TransitObservation은 저장하지 않아도 된다. Tracking cycle identity는 logical cycle 시작 시 한 번 생성하고 같은 cycle의 transaction retry에서 유지하며 TransitEvent 발생 시 NotificationEvent에 복사한다. FOLLOW_UP continuity의 결정 근거와 삭제 정책 제약은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-708-중복-방지-설계-2026-10-09)을 따른다.
+
+#### notification_events identity
+
+| Column | Type / NULL | 의미 |
+| --- | --- | --- |
+| `id` | `BIGINT AUTO_INCREMENT PRIMARY KEY` | 내부 Event PK, Java `Long` |
+| `alarm_id` | `BIGINT NOT NULL` | 불변 원본 Alarm ID. 삭제로 NULL 전환하지 않음 |
+| `activation_generation` | `BIGINT NOT NULL` | candidate 평가 시 Alarm generation, Java `long` |
+| `tracking_cycle_id` | `CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | Java `UUID`의 소문자 canonical 문자열 |
+| `event_type` | `VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL` | `TransitEventType`, JPA `EnumType.STRING` |
+
+- `uk_notification_events_logical_identity UNIQUE (alarm_id, activation_generation, tracking_cycle_id, event_type)`를 전체 column에 적용한다. prefix index나 nullable key, hash-only dedup은 사용하지 않는다.
+- `ck_notification_events_activation_generation`: `activation_generation >= 0`
+- `ck_notification_events_event_type`: 정확한 `ONE_STOP_BEFORE`, `ARRIVED`, `PASSED`, `ONE_STOP_AFTER`만 허용
+- `ck_notification_events_tracking_cycle_id`: `REGEXP_LIKE(tracking_cycle_id, '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', 'c')`로 빈 값·공백·대문자·비표준 형식 거부. UUID 입력은 Domain에서 검증하고 canonical 문자열로 저장
+
+네 identity 값은 생성 후 불변이며 JPA에서도 `nullable=false`, `updatable=false`로 매핑한다. UUID는 기존 CHAR(36) UUID 저장 방식처럼 명시적 문자 매핑을 사용해 Hibernate 기본 binary UUID 매핑과 어긋나지 않게 한다. `user_id BIGINT NOT NULL`로 Event 시점 owner를 보존하는 관계도 필요하며 TASK-707에서 User FK와 함께 구현한다. 삭제 후 pending 처리와 owner 재검증을 현재 Alarm의 존재만으로 해결하지 않는다.
+
+UNIQUE가 exact identity 조회와 `alarm_id` left prefix 조회를 지원하므로 별도 alarm_id/UUID/event_type index는 추가하지 않는다. Event의 Alarm FK 유무·delete action은 TASK-707의 삭제 정책에 종속되며 이 단계에서 기존 cascade를 복사하지 않는다. 보존안을 선택할 때 nullable live Alarm 관계가 필요하면 별도 관계로 분리하고 위 non-null `alarm_id` identity는 유지한다.
+
+#### notification_deliveries identity
+
+```text
+id BIGINT AUTO_INCREMENT PRIMARY KEY
+notification_event_id BIGINT NOT NULL
+device_id BIGINT NOT NULL
+CONSTRAINT uk_notification_deliveries_event_device UNIQUE (notification_event_id, device_id)
+```
+
+두 참조는 생성 후 불변이며 JPA는 non-null/updatable=false 관계로 매핑한다. TASK-707은 `fk_notification_deliveries_event_id`와 `fk_notification_deliveries_device_id`를 각각 Event/Device PK에 연결한다. delete action은 삭제/recovery 불변조건에 맞춰 TASK-707에서 확정한다. UNIQUE의 left prefix는 Event별 Delivery 조회와 Event FK index를 지원한다. `idx_notification_deliveries_device_id (device_id)`는 Device FK용으로 필요하며 별도 event_id index는 중복 생성하지 않는다. worker due-query index는 TASK-709 설계와 TASK-707 persistence에서 query가 정해진 뒤 추가한다.
+
+한 Event에는 0..N Device별 Delivery가 있을 수 있으며 Delivery retry는 같은 row의 operational state를 갱신한다. 중복 Event 재제출은 Delivery를 추가하거나 갱신하지 않는다. MySQL UNIQUE는 nullable column의 여러 NULL을 허용하므로 두 UNIQUE의 핵심 column은 모두 NOT NULL이다. [MySQL 8.4 UNIQUE 계약](https://dev.mysql.com/doc/refman/8.4/en/create-index.html)을 따른다.
+
+TASK-707에서 초기 NotificationHistory를 전환할 때 없는 generation/cycle/device를 만들어 legacy row를 새 logical Event로 승격하지 않는다. 구체 cleanup/전환 정책은 TASK-707 책임이며 V3/V9 파일은 수정하지 않는다.
 
 하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성을 함께 commit한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. 단일 Spring Backend의 fixed-delay, non-overlapping worker가 due PENDING Delivery를 제한 조회해 처리하고 recipient를 다시 선정하지 않는다. Worker는 전송 직전 Device owner/enabled/current target/revision을 재검증하고 실제 attempt revision을 기록한다. Invalid/unregistered 결과는 attempt revision이 current registration과 일치할 때만 disable한다. `NotificationDelivery`에 raw push target을 중복 저장하는 것은 필수가 아니며, retry와 conditional cleanup에는 attempt revision을 기록한다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
 
@@ -286,5 +324,7 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 ## 9. 트랜잭션 고려 사항
 
 동일 logical Notification의 중복은 lifecycle transaction 안의 generation 검증과 NotificationEvent atomic uniqueness로 막는다. TASK-510은 API lifecycle mutation과 Scheduler 결과 반영에 `PESSIMISTIC_WRITE` 하나를 사용한다. Provider I/O 뒤 결과 적용 직전에 짧은 row-lock transaction에서 current generation/status를 검증하며 `@Version`, CAS, optimistic locking을 병행하지 않는다.
+
+TASK-708의 exact identity duplicate 조회는 Alarm lock 뒤 current locking read를 사용해 MySQL 기본 REPEATABLE READ의 과거 snapshot에 의존하지 않는다. JPA UNIQUE 실패는 전체 결정 transaction rollback 후 새 persistence context/transaction으로 확인하며 실행 순서는 [Notification decision transaction](architecture.md#notification-decision-transaction-task-708)을 따른다. SELECT는 최적화·duplicate 분류이고 DB UNIQUE가 최종 원자적 경계다.
 
 MySQL은 durable pending dispatch/outbox의 Source of Truth다. V1은 하나의 non-overlapping fixed-delay worker가 due PENDING Delivery를 처리한다. Kafka, RabbitMQ, Redis queue, multi-instance distributed lock, claim/lease, `claimedAt`, `SENDING`, stale-claim recovery는 V1에 도입하지 않는다. FCM accepted 뒤 DB update 전 crash하면 PENDING Delivery가 restart 뒤 다시 처리될 수 있고 duplicate Device 표시는 exactly-once 비보장 계약으로 허용한다.

@@ -186,7 +186,7 @@ SDK/FCM 결함이나 APNs 연동·FID registration 실패로 확정된 문제는
 
 Alarm은 새 monitoring activation cycle마다 증가하는 `activationGeneration` persisted semantic generation을 가진다. 이는 `BIGINT NOT NULL DEFAULT 0`이며 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하고 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset이 없는 idempotent 동작이다. deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation Notification candidate를 현재 activation과 구분한다. TASK-510은 API lifecycle mutation과 Scheduler result 적용에 `PESSIMISTIC_WRITE` 하나를 사용하며 CAS와 JPA `@Version`을 병행하지 않는다.
 
-ACTIVE vehicle tracking은 기존 Phase 5 결정대로 V1에서 memory 기반일 수 있다. `trackingCycleId` 또는 동등한 값은 DB transaction ID가 아니라 logical vehicle tracking cycle identity로 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction이 deadlock/optimistic conflict로 retry되어도 identity를 다시 만들지 않으며 retry로 Notification dedup uniqueness를 우회해서는 안 된다. TransitEvent 발생 시 이 identity를 durable NotificationEvent에 복사할 수 있다. Restart 뒤에는 이전 tracking을 새 cycle과 임의로 연결하지 않고 safe recovery baseline을 사용한다. Notification correctness를 이유로 raw TransitObservation 또는 ACTIVE tracking 전체를 영속하지 않는다.
+ACTIVE vehicle tracking은 기존 Phase 5 결정대로 V1에서 memory 기반일 수 있다. `trackingCycleId`는 DB transaction ID가 아니라 logical vehicle tracking cycle identity로 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction이 deadlock 등으로 retry되어도 identity를 다시 만들지 않으며 retry로 Notification dedup uniqueness를 우회해서는 안 된다. TransitEvent 발생 시 이 identity를 durable NotificationEvent에 복사한다. ACTIVE restart 뒤에는 이전 tracking을 새 cycle과 임의로 연결하지 않고 safe recovery baseline을 사용한다. FOLLOW_UP은 아래의 원래 cycle identity 복원 계약을 따른다. Notification correctness를 이유로 raw TransitObservation 또는 ACTIVE tracking 전체를 영속하지 않는다.
 
 ### Duplicate identity
 
@@ -198,7 +198,71 @@ ACTIVE vehicle tracking은 기존 Phase 5 결정대로 V1에서 memory 기반일
 동일 logical Notification   → Phase 7 persistence
 ```
 
-Logical Notification의 기본 identity는 `(alarmId, activation generation, trackingCycleId, eventType)`이다. `alarmId + eventType`만 사용하지 않으며 TASK-707/708에서 DB Unique Constraint 또는 동등한 atomic uniqueness로 구현한다.
+Logical Notification의 identity는 `(alarmId, activationGeneration, trackingCycleId, eventType)`이다. `alarmId + eventType`만 사용하지 않는다. 확정된 [Schema/UNIQUE 계약](../database.md#phase-7-notification-persistence-contract)은 TASK-707에서 생성하고, 실제 적용은 TASK-708 implementation에서 수행한다.
+
+### TASK-708 중복 방지 설계 (2026-10-09)
+
+설계 완료, 구현 미완료다. 결정·대안·구현 분담은 이 절, Domain invariant는 [Domain Model](../domain-model.md#notificationevent), column/constraint/index는 [Database](../database.md#phase-7-notification-persistence-contract), transaction 실행 절차는 [Architecture](../architecture.md#notification-decision-transaction-task-708)가 소유한다.
+
+#### 현재 구현 조사와 보장 한계
+
+- `Alarm`/V11은 activation generation을 영속하고 기존 증가 규칙을 구현했다. `VehicleTrackingState.begin()`/`beginBeforeTarget()`은 UUID를 생성하며 `observe()`/`emit()`은 같은 ID를 유지한다. `TransitEvent`는 UUID와 event type을 전달한다.
+- `BusAlarmEvaluationState.forFollowUp()`은 정상 process 안에서 ARRIVED 차량의 cycle을 유지한다. 반면 `Alarm`/V6에는 차량 ID와 시작·만료 시각만 있고 cycle ID는 없다. `BusAlarmEvaluator.evaluateFollowUp()`은 memory tracking이 없으면 `begin()`으로 새 UUID를 만든다. 따라서 현재 FOLLOW_UP 복구는 차량 correlation은 가능하지만 ARRIVED와 ONE_STOP_AFTER의 cycle identity continuity는 보장하지 못한다.
+- `BusAlarmLifecycleService.applyIfCurrent()`는 row lock과 status/generation 검증 및 lifecycle 전이만 수행한다. Scheduler는 성공 반환 후 memory next state를 반영한다. NotificationEvent/Delivery, atomic fan-out, DB dedup과 dispatch worker는 아직 없다. 기존 `NotificationHistory`/V3/V9는 최종 SUCCESS/FAILURE와 Alarm 삭제 cascade만 표현한다.
+- ACTIVE restart는 memory를 잃고 새 baseline/cycle을 만든다. 현재 `evaluateBaseline()`은 predecessor에서 ONE_STOP_BEFORE 후보를 만들 수 있어 [Architecture의 restart 재발행 억제 방향](../architecture.md#alarm과-vehicle-tracking-lifecycle)과 구현 차이가 있다. 이번 설계는 이 기존 Phase 5 문제를 해결하거나 정책을 변경하지 않는다. UUID가 다른 ACTIVE cycle 사이의 동일한 물리 차량/Event 중복까지 DB UNIQUE로 막는다고 주장하지 않으며, 기존 recovery 방향의 정합성 검증은 TASK-811에서 다룬다.
+
+#### 상황별 정책
+
+| 상황 | identity와 처리 |
+| --- | --- |
+| 같은 차량·같은 cycle·같은 Event 반복 | Phase 5가 후보를 억제하고, 같은 네 값이 다시 제출돼도 DB에는 Event 하나와 최초 Delivery set만 존재 |
+| 같은 Alarm에서 다른 차량의 같은 Event | 다른 logical cycle UUID이므로 별도 identity. 단, current lifecycle 검증을 통과한 후보만 저장하며 ARRIVED 뒤 다른 차량의 ARRIVED를 추가 허용하지 않음 |
+| 비활성화 후 재활성화 | generation 증가, 새 baseline/cycle. 이전 generation 후보는 stale |
+| ACTIVE → ACTIVE 중복 활성화 | generation과 baseline/cycle 유지, 기존 identity를 바꾸지 않음 |
+| FOLLOW_UP 중 새 활성화 | generation 증가 및 이전 runtime 제거. old ONE_STOP_AFTER는 stale이며 새 activation과 합치지 않음 |
+| 같은 cycle의 서로 다른 Event Type | 다른 identity. before→arrival→after는 가능하고 lifecycle/precedence 규칙은 그대로 적용 |
+| 동일 logical Event의 DB transaction 재시도 | 원래 candidate와 UUID를 그대로 재사용. rollback이면 전체 결정 재시도, 이미 commit됐으면 무변경 duplicate 처리 |
+| 서버 재시작 | commit된 Event/Delivery는 DB에 남음. FOLLOW_UP은 persisted 원래 UUID로 복구. ACTIVE는 이전 history를 복원하지 않아 cycle 간 dedup 보장 범위 밖 |
+| stale Scheduler 결과 | 삭제·generation 불일치·새 후보의 expected status 불일치·FOLLOW_UP vehicle/cycle 불일치는 lifecycle/Event/Delivery/memory 모두 변경하지 않음 |
+| Alarm 삭제 | monitoring/follow-up 종료. 아래 삭제 불변조건을 충족하고, 삭제된 Alarm 후보로 Event/Delivery를 재생성하지 않음 |
+
+#### FOLLOW_UP cycle continuity 결정
+
+`alarms.follow_up_tracking_cycle_id` 하나에 ARRIVED candidate의 원래 UUID를 보존하는 최소안을 선택한다. 차량 ID는 관측 correlation, cycle UUID는 logical Notification identity이며 서로 대체하지 않는다. generation은 activation 경계를, UUID는 그 activation 안의 차량 cycle을 구분한다. ARRIVED → FOLLOW_UP → ONE_STOP_AFTER에서는 두 값 모두 유지한다.
+
+차량 ID/시간으로 UUID를 다시 계산하는 대안은 기존 random UUID와 일치하지 않고 같은 차량의 다른 운행을 합칠 위험이 있다. NotificationEvent에서 ARRIVED를 역조회하는 대안은 runtime 복구를 Event 조회·보존 정책과 결합한다. UUID column 하나는 ACTIVE history를 저장하지 않고 기존 short-lived runtime의 수명과 함께 정리할 수 있으므로 선택한다.
+
+TASK-707은 새 Migration과 Alarm mapping/invariant를 추가하고 기존 `startFollowUp(...)`/`clearFollowUpRuntime()` 및 `BusAlarmLifecycleService.applyArrival()`에서 원래 UUID를 저장·제거하도록 연결한다. TASK-708 implementation은 `VehicleTrackingState`의 기존 UUID를 받는 복원 경로와 `evaluateFollowUp()`을 연결한다. memory가 없으면 저장된 UUID로 state를 복원하고 새 UUID를 생성하지 않는다. memory가 있으면 그 UUID가 persisted 값과 같아야 한다. Observation freshness, successor 도달 판단, 5분 만료와 Phase 5 tracking 정책은 유지한다.
+
+복원은 과거 Observation을 만들거나 ARRIVED를 다시 내는 작업이 아니다. fresh한 현재 Observation으로 after 후보를 판단하고, 적용 직전 current Alarm의 generation·FOLLOW_UP status·vehicle ID·cycle UUID·미만료 runtime을 재검증한다. 값이 없거나 서로 다르면 새 UUID로 보정하지 않고 적용을 거부해 불변조건 오류로 관찰한다. TASK-707/708 구현·검증 전에는 restart-safe continuity가 완성된 것으로 취급하지 않는다.
+
+#### Atomic uniqueness와 중복 처리 선택
+
+Alarm row lock으로 같은 Alarm의 결정 transaction을 직렬화하고, exact logical identity의 current read로 이미 commit된 결정을 무변경 처리한다. INSERT의 DB UNIQUE를 최종 방어선으로 유지한다. 사전 SELECT만으로 보장하지 않고 Event/Delivery의 중복 insert를 허용하는 memory cache도 사용하지 않는다.
+
+JPA insert/flush의 UNIQUE 실패는 전체 lifecycle/Event/Delivery transaction을 rollback한 뒤 transaction 밖에서 분류한다. 실패한 persistence context를 재사용하지 않고 새 transaction에서 동일 identity와 current Alarm을 다시 확인한다. 기존 Event가 확인된 정상 duplicate는 Event, payload, recipient set, Delivery state, Alarm lifecycle을 변경하지 않는다. Delivery UNIQUE/FK/CHECK 등 다른 오류를 정상 Event duplicate로 숨기지 않는다. 구체 순서와 Scheduler memory 반영 조건은 Architecture가 소유한다.
+
+Blind upsert/REPLACE는 기존 decision을 변경·대체할 수 있고 INSERT IGNORE는 다른 데이터 오류도 숨길 수 있어 사용하지 않는다. Event만 독립 transaction으로 저장하는 방식도 lifecycle과 fan-out 원자성을 깨뜨려 제외한다. 이 선택은 기존 JPA와 짧은 transaction으로 구현하며 dependency나 generic retry framework를 추가하지 않는다.
+
+#### Alarm 삭제에 대한 후속 결정 제약
+
+현재 NotificationHistory의 cascade는 Phase 7 Event/Delivery 정책으로 자동 승계하지 않는다. 보존·명시적 취소·삭제의 최종 정책과 FK delete action은 TASK-707이 결정하며 이번에는 다음 불변조건만 확정한다.
+
+- 살아 있는 Alarm/current generation에서 재제출 가능한 identity의 기록을 삭제해 dedup을 재허용하지 않는다. Event를 보존하면 `alarmId` 등 네 identity 값과 Event owner를 그대로 보존하며, nullable Alarm association을 identity column으로 대신하지 않는다.
+- 삭제 transaction은 기존 Alarm row lock과 조율해 monitoring/follow-up 및 이미 생성된 pending Delivery의 처리 방침을 원자적으로 확정한다. Event/Delivery를 유지할 경우 worker가 삭제된 Alarm의 pending Delivery를 계속 보낼지 취소할지 명시해야 하고, 취소는 Provider 성공/실패로 꾸미지 않는다. worker와 deletion 사이의 진행 중 FCM request 회수는 보장하지 않는다.
+- pending retry/recovery가 의존하는 Event/Delivery와 identity는 해당 작업이 끝나거나 명시적으로 취소되기 전에 우연히 cascade로 사라지면 안 된다. 삭제안을 선택하면 pending 처리를 먼저 원자적으로 종료하고 deleted Alarm 후보를 영구 거부해야 한다. Alarm ID를 다른 Alarm에 재사용하거나 남은 candidate로 기록을 재생성하지 않는다.
+- Alarm 삭제·재활성화와 Provider delivery 결과가 Alarm lifecycle을 되살리지 않는다. 기존 Event의 재제출은 누락 Delivery 복구나 새 Device fan-out의 계기가 아니다. 보존기간·장기 Analytics 정책은 여기서 정하지 않는다.
+
+#### 후속 최소 구현과 검증 분담
+
+| Task | 구현 책임과 최소 correctness 검증 |
+| --- | --- |
+| TASK-707 | NotificationEvent/Delivery Entity·Schema·Repository와 두 UNIQUE, durable persistence; FOLLOW_UP UUID column·CHECK·Alarm operation·ARRIVED 저장 연결; 기존 History 전환 및 삭제 정책/FK 확정. NULL/invalid identity·동일 key 거부·다른 type/cycle 허용·Event×Device UNIQUE·runtime 완전성·선택한 삭제 정책의 persistence 검증 |
+| TASK-708 implementation | 선택한 TransitEvent + AlarmEvaluationKey를 durable Event로 연결; lifecycle/Event/최초 recipient Delivery transaction·무변경 duplicate·전체 rollback/retry; FOLLOW_UP UUID 복원과 Scheduler commit 이후 memory 반영. 동시 동일 candidate·중복 ARRIVED/after·generation 증가/유지·stale/deleted 결과·실패 rollback·동일 UUID retry·FOLLOW_UP restart continuity·multi-device/0-device/늦은 등록 검증 |
+| TASK-706 | 이미 commit된 pending Delivery의 단일 durable dispatch worker와 전송 직전 recipient 재검증. Event 결정/fan-out transaction을 다시 구현하지 않음 |
+| TASK-709 | 먼저 retry/failure/expiry 계약 설계, 이후 result 처리·bounded retry·freshness·conditional cleanup 구현. 횟수·간격·TTL은 이번에 확정하지 않음 |
+
+실행 순서는 [Phase 7 dependency](../task-list.md#phase-7---notification)를 유지한다. TASK-708 설계만 완료했고 전체 Task는 미완료다. 이번 단계에는 code/Entity/Repository/Migration/test를 추가하지 않으며 테스트 실행 없이 문서 논리·코드 대조·링크·diff만 검증한다.
 
 ### Durable dispatch와 persistence 역할
 

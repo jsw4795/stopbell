@@ -191,6 +191,27 @@ NotificationDelivery
 
 Delivery lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 하며 retry는 `PENDING + attemptCount + nextAttemptAt + freshness`로 표현한다. Push provider result는 `ACCEPTED`, `INVALID_TARGET`, `RETRYABLE`, `CONFIGURATION`, `PERMANENT_REQUEST`, `AMBIGUOUS_TIMEOUT`으로 Delivery lifecycle과 분리한다. `EXPIRED`는 local freshness 종료 의미다. Invalid target 응답은 attempt revision이 해당 Device의 current registration일 때만 조건부로 disable한다. Provider acceptance는 실제 Device 표시 성공이 아니며 ambiguous timeout 뒤 retry는 duplicate 표시 가능성이 있다.
 
+#### Notification decision transaction (TASK-708)
+
+아래는 TASK-708에서 확정한 후속 구현 계약이다. 현재 `BusAlarmLifecycleService`는 lifecycle 반영만 구현했으며 Event/Delivery transaction은 아직 없다. 선택한 `TransitEvent`와 평가 당시 `AlarmEvaluationKey`, expected status, 원래 evaluation result를 transaction 밖에서 고정한다. Provider HTTP I/O와 Evaluation을 끝낸 후 다음 짧은 DB transaction을 실행한다.
+
+1. 새 persistence context에서 current Alarm을 `PESSIMISTIC_WRITE`로 조회한다. 삭제됐거나 generation이 다르면 stale로 종료하며 변경하지 않는다.
+2. candidate가 있으면 동일한 네 identity 값의 Event를 current locking read로 조회한다. 이미 존재하면 무변경 duplicate로 종료한다. 이 확인은 expected status 비교보다 먼저 수행해 commit된 ARRIVED/ONE_STOP_AFTER의 재요청을 이미 바뀐 status 때문에 새 결정으로 처리하지 않는다. Event 없는 결과는 identity 조회를 생략한다.
+3. 새 Event 또는 Event 없는 결과이면 expected status와 current status를 비교하고 기존 precedence/option/evidence를 검증한다. ACTIVE는 ONE_STOP_BEFORE/ARRIVED/PASSED, FOLLOW_UP은 ONE_STOP_AFTER만 허용한다. FOLLOW_UP after는 current vehicle ID·persisted cycle UUID가 candidate와 같고 적용 시점에도 미만료여야 한다. 그 밖의 stale/무효 결과는 반영하지 않는다.
+4. 필요한 Alarm lifecycle 전이와 FOLLOW_UP UUID 저장/제거를 수행하고 불변 identity의 NotificationEvent를 INSERT한다. ONE_STOP_BEFORE/PASSED는 ACTIVE 유지, ARRIVED는 기존 after option에 따른 전이, ONE_STOP_AFTER는 FOLLOW_UP 완료다. Event 없는 follow-up expiry는 기존 lifecycle 완료만 수행한다.
+5. 이 결정 시점에 Alarm owner의 enabled Device를 current locking read로 한 번 조회해 recipient set을 고정한다. 해당 Device row를 ID 순서로 잠가 owner/enabled/target 변경과 조율하며, set의 각 Device에 `NotificationDelivery(PENDING)` 하나를 INSERT한다. 0개이면 Event만 저장하고 no-recipient 관찰을 남긴다.
+6. flush와 commit을 마친 뒤 결과를 반환한다. Event 또는 필요한 Delivery 하나라도 저장 실패하면 lifecycle/UUID/Event/모든 Delivery를 함께 rollback한다. Provider/FCM I/O는 포함하지 않는다.
+
+기존 Event 조회는 [MySQL current locking read](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html)로 수행해 오래된 REPEATABLE READ snapshot을 사용하지 않는다. Alarm → Event → Device ID 순서로 lock을 얻으며 Device 등록 transaction은 Alarm lock을 추가하지 않는다. 조회만을 dedup 보장으로 삼지 않고 [두 DB UNIQUE](database.md#phase-7-notification-persistence-contract)를 최종 경계로 유지한다.
+
+INSERT/flush/commit의 UNIQUE 실패는 transactional method 밖의 호출자가 전체 rollback 완료 후 처리한다. 실패 transaction 안에서 예외를 삼키고 SELECT/commit하지 않는다. [Hibernate Session 오류 계약](https://docs.hibernate.org/orm/7.4/javadocs/org/hibernate/Session.html)과 [Spring rollback-only 계약](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/tx-propagation.html)을 따른다. 기존 Service transaction 경계 또는 명시적 transaction callback을 사용하며 self-invocation으로 transaction이 누락되지 않게 한다. Event만 별도 `REQUIRES_NEW`로 commit하지 않는다.
+
+Event logical UNIQUE 충돌일 때만 새 transaction/persistence context에서 같은 Alarm lock과 exact identity 조회로 기존 Event를 확인해 duplicate로 분류한다. 동일 Event가 확인되지 않거나 Delivery UNIQUE/FK/CHECK 오류면 일반 duplicate로 숨기지 않는다. deadlock/DB 일시 실패 또는 commit 응답 유실의 재확인은 원래 candidate/UUID/result로 전체 절차를 다시 실행한다. 이미 commit됐으면 duplicate, rollback됐고 여전히 유효하면 새 결정, Alarm/generation/status/evidence가 달라졌으면 stale다. 재시도 횟수는 제한하고 무한 retry/framework를 도입하지 않는다. FCM retry/TTL 수치는 TASK-709 책임이다.
+
+TASK-708은 현재 boolean 반환 대신 새 결정/기존 결정/stale 및 current lifecycle 문맥을 구분할 결과를 연결한다. Scheduler는 commit 확인 전 nextState를 publish하지 않고, DB 실패/응답 유실 중에는 원래 candidate/result를 유지해 재평가로 UUID를 새로 만들지 않는다. duplicate 확인 후에는 current generation/status와 일치할 때만 원래 result의 consumed state를 반영한다. 이미 ARRIVED commit으로 FOLLOW_UP이면 persisted vehicle/cycle이 같은 원래 tracking을 유지·복원하고, 이미 after commit으로 INACTIVE이면 해당 memory를 종료한다. stale 결과나 새 activation에는 old nextState를 적용하지 않는다. 이 memory 반영은 Event/Delivery/lifecycle을 다시 변경하는 작업이 아니다.
+
+TASK-707은 persistence primitive와 제약, TASK-708 implementation은 위 결정 transaction과 retry 연결, TASK-706은 commit된 pending Delivery worker를 소유한다. 책임 분담·삭제 제약·현재 recovery 한계는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-708-중복-방지-설계-2026-10-09)을 따른다.
+
 ### common
 
 실제로 공유가 필요한 횡단 관심사를 둔다. `common`을 잡동사니 저장소로 만들지 않는다.
@@ -243,7 +264,9 @@ PASSED는 해당 Vehicle tracking만 종료하고 Alarm은 ACTIVE로 유지한�
 
 FOLLOW_UP 중 같은 Alarm의 새 activation은 persisted activation generation을 증가시켜 이전 cycle을 supersede한다. 기존 follow-up runtime을 지우고 ACTIVE 상태의 새 baseline과 monitoring cycle을 시작한다. 비활성화·follow-up 완료도 runtime을 지우며 Alarm 삭제는 runtime과 BusAlarmTarget을 함께 제거한다. FOLLOW_UP runtime은 서버 restart 뒤에도 저장된 vehicle tracking ID와 유효 기간으로 재사용한다. 반면 ACTIVE의 차량별 observation/event state는 V1에서 memory 기반일 수 있다. `trackingCycleId` 또는 동등한 값은 transaction ID가 아니라 logical vehicle tracking cycle identity로 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction이 deadlock/optimistic conflict로 retry되어도 identity를 다시 만들지 않으며 retry로 Notification dedup uniqueness를 우회해서는 안 된다. TransitEvent가 생기면 이를 durable NotificationEvent에 복사할 수 있다. restart 뒤에는 이전 memory tracking을 새 cycle과 연결하지 않고 안전한 recovery baseline을 만들며, restart 전 observation으로 PASSED를 추론하거나 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 일부 Event 누락보다 false-positive 방지를 우선하고 모든 raw Provider observation 저장이나 event sourcing은 도입하지 않으며, restart continuity 충족 여부는 TASK-811에서 검증한다.
 
-반복 `TransitObservation`과 중복 `TransitEvent` candidate의 억제는 Phase 5 tracking/Evaluation 책임이다. 동일 logical Notification의 중복은 Phase 7 persistence 책임이며 기본 identity는 `(alarmId, activation generation, trackingCycleId, eventType)`이다. DB Unique Constraint 또는 동등한 atomic uniqueness의 구체 Schema는 TASK-707/708에서 결정한다.
+반복 `TransitObservation`과 중복 `TransitEvent` candidate의 억제는 Phase 5 tracking/Evaluation 책임이다. 동일 logical Notification의 중복은 Phase 7 persistence 책임이며 identity는 `(alarmId, activationGeneration, trackingCycleId, eventType)`이다. TASK-708 설계에서 확정한 [DB UNIQUE Schema](database.md#phase-7-notification-persistence-contract)는 TASK-707에서 적용한다.
+
+TASK-708 설계는 FOLLOW_UP에 원래 cycle UUID를 추가 보존·복원하도록 확장한다. 이는 위 현재 TASK-510의 memory continuity를 보완하는 후속 계약이며 [Alarm Domain](domain-model.md#alarm-lifecycle)과 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#follow_up-cycle-continuity-결정)을 따른다. ACTIVE baseline 정책은 변경하지 않으며 기존 restart 재발행 억제 방향과 현재 evaluator의 차이는 ADR-010 조사 결과에 기록한다. logical DB uniqueness가 ACTIVE restart 전후의 서로 다른 UUID cycle까지 합치지는 않는다.
 
 구체적인 Observation과 Event 의미는 `adr/ADR-007-bus-alarm-transit-observation-and-event-semantics.md`를 따른다.
 
