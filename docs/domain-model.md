@@ -582,7 +582,9 @@ alarmId
 
 이미 존재하는 동일 logical Event의 재제출은 무변경 duplicate다. 기존 Event, payload, recipient set, Delivery 상태와 Alarm lifecycle을 변경하지 않으며 새 Device Delivery를 추가하지 않는다. 서로 다른 cycle/type은 별도 identity지만 current lifecycle/evidence를 통과한 candidate만 새 결정이 될 수 있다. 상황별 정책은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#상황별-정책), transaction/retry는 [Architecture](architecture.md#notification-decision-transaction-task-708)가 소유한다.
 
-Current Alarm lifecycle/activation generation 검증, lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성은 같은 Database transaction에서 수행한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient operational log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. Commit 뒤 단일 Backend의 fixed-delay, non-overlapping worker는 due PENDING Delivery만 전달하며 recipient를 새로 결정하지 않는다. FCM network I/O는 이 transaction 안에서 실행하지 않는다.
+Current Alarm lifecycle/activation generation 검증, lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 Delivery 생성(유효 기한이면 PENDING, 이미 만료면 EXPIRED)은 같은 Database transaction에서 수행한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient operational log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. Commit 뒤 단일 Backend의 fixed-delay, non-overlapping worker는 due PENDING Delivery만 전달하며 recipient를 새로 결정하지 않는다. FCM network I/O는 이 transaction 안에서 실행하지 않는다.
+
+`observedAt`은 candidate의 근거가 된 Provider 성공 응답의 StopBell 수신 시각이고, `eventDetectedAt`은 Evaluation에서 candidate를 처음 선택한 실제 서버 시각, `createdAt`은 durable Event row 생성 시각이다. 어느 것도 물리적인 버스 도착 시각이나 DB commit 완료 시각을 뜻하지 않는다. 같은 candidate의 DB retry에서는 observed/detected 시각을 유지한다. optional `providerDataTime`은 별도 upstream 시각이며 없는 값을 추정해 채우지 않는다. TASK-709 freshness는 observedAt을 기준으로 하며 [시각 컬럼](database.md#notificationevent-freshness-time-task-709)과 [TTL 결정 근거](adr/ADR-010-notification-device-and-durable-delivery.md#freshness와-local-expiry)를 따른다.
 
 ------------------------------------------------------------------------
 
@@ -601,11 +603,22 @@ Current Alarm lifecycle/activation generation 검증, lifecycle transition, Noti
 
 Event와 recipient Device identity는 필수·불변이며 [Delivery UNIQUE](database.md#notification_deliveries-identity)를 따른다. 최초 decision transaction에서 선정한 recipient set만 Delivery를 가지며, 나중 Device 등록이나 동일 Event 재제출로 set을 확대하지 않는다. 0개 recipient는 Event만 존재하는 정상 결정으로 Provider failure나 성공 Delivery가 아니다. Alarm 삭제 후 기록/Delivery 처리의 후속 제약은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#alarm-삭제에-대한-후속-결정-제약)을 따른다.
 
-Delivery recipient는 Device identity다. Worker는 전송 직전에 Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 확인하고 실제 attempt revision을 기록한다. Invalid/unregistered 결과는 attempt revision이 Device의 current registration과 일치할 때만 현재 registration을 disable한다. raw push target을 `NotificationDelivery`에 중복 저장하는 것은 필수가 아니다. delivery operational column/schema는 TASK-709 설계 후 TASK-707에서 정한다.
+Delivery recipient는 Device identity다. Event 시점의 `recipientOwnershipGeneration`도 불변으로 보존한다. Worker는 current owner=Event owner, current generation=recipient generation, enabled 및 non-null current FID를 전송 직전에 확인한다. 같은 owner/generation의 FID rotation·높은 revision 재등록은 current FID로 전송할 수 있으나 A→B→A를 포함한 다른 ownership 세대에는 과거 Delivery를 보내지 않는다. attempt의 owner/generation/revision/FID snapshot과 현재 등록이 모두 같을 때만 invalid-target cleanup을 허용한다. raw FID와 owner/generation의 attempt snapshot은 메모리 값이며 raw target을 Delivery에 복제하지 않는다. [Operational Schema](database.md#notificationdelivery-operational-schema-task-709)는 확정된 후속 계약이고 적용은 TASK-707 책임이다.
 
 ## Delivery Result Semantics
 
-Delivery lifecycle status와 Provider result를 분리한다. lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 하며, retry 가능한 실패는 별도 `RETRYING` 상태 없이 `PENDING + attemptCount + nextAttemptAt + freshness`로 표현한다. Provider result는 최소한 다음 의미를 구분한다.
+Delivery lifecycle status와 Provider result는 서로 다른 enum이다. `RETRYING`을 추가하지 않는다.
+
+| Lifecycle | 의미 / invariant |
+| --- | --- |
+| `PENDING` | 최초 미전송 또는 bounded retry/recovery 대기. `nextAttemptAt`은 필수이며 시각이 도래해도 freshness·budget·recipient 검증을 통과해야 호출 가능 |
+| `ACCEPTED` | FCM이 요청을 접수한 terminal 상태. `providerAcceptedAt` 필수, 실제 iPhone 표시 성공을 뜻하지 않음 |
+| `FAILED` | 더 이상 진행할 수 없는 Provider/local 실패 또는 attempt budget 소진. terminal이며 자동 재시도 없음 |
+| `EXPIRED` | `now >= expiresAt`인 접수 확인이 없는 Delivery의 local freshness 종료. terminal이며 Provider 오류나 이미 접수된 전송 취소를 뜻하지 않음 |
+
+최초 유효 Delivery는 `PENDING`, `attemptCount=0`이고 attempt/result/accepted 값이 없다. Event 생성 때 이미 만료됐다면 동일 recipient row를 `EXPIRED`, count=0으로 생성한다. 모든 terminal 상태는 `nextAttemptAt=null`이며 restart·Device 재등록·Event 재제출로 PENDING으로 되돌리지 않는다. Retry는 동일 row만 갱신하고 한 Device의 실패/만료가 다른 Delivery나 Alarm lifecycle을 바꾸지 않는다.
+
+Provider result는 다음 여섯 가지다.
 
 ```text
 ACCEPTED
@@ -616,7 +629,7 @@ PERMANENT_REQUEST
 AMBIGUOUS_TIMEOUT
 ```
 
-`ACCEPTED`는 Provider가 요청을 접수했다는 뜻이며 실제 사용자 표시 성공이 아니다. `AMBIGUOUS_TIMEOUT`은 실제 접수 여부가 불명확하므로 retry가 duplicate 표시를 만들 수 있다. `EXPIRED`는 Provider result가 아니라 local freshness 종료 의미다. 정확한 field 이름, 최대 retry 횟수·간격·freshness TTL은 TASK-709에서 결정한다.
+`lastProviderResult`는 마지막으로 시작한 attempt에서 확정·정규화한 결과이며 아직 결과가 없으면 null이다. local 종료만으로 Provider result를 만들지 않는다. `AMBIGUOUS_TIMEOUT`은 접수 여부가 불명확하여 retry가 duplicate 표시를 만들 수 있다. count는 최초 호출을 포함한 durable attempt 시작 횟수로 호출 전 commit하므로 crash 때 실제 호출보다 크게 셀 수 있다. expiry는 identity가 아니라 불변 전달 기한이며 네 Event Type 모두 원래 Observation의 `observedAt`을 기준으로 계산한다. 최종 횟수·간격·Type별 TTL은 smoke/latency 검증까지 보류한다. [ADR-010 결정표와 안전성 계약](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-failureretryexpiry-설계-2026-10-09)을 따른다.
 
 기존 `NotificationHistory`는 이 logical event와 per-Device delivery 책임을 충분히 표현하지 못한다. 확장·대체·migration 방식은 TASK-707에서 결정하며 Phase 8 Analytics와 operational delivery data는 별도 책임으로 유지한다.
 

@@ -207,7 +207,7 @@ created_at DATETIME(6) NOT NULL
 
 ### Phase 7 Notification persistence contract
 
-TASK-708 설계는 `notification_events`와 `notification_deliveries`의 identity column/UNIQUE를 다음과 같이 확정한다. 아직 구현된 table이 아니며 TASK-707에서 Entity와 새 Migration으로 적용한다. delivery operational field는 TASK-709 설계 후 TASK-707에서 구체화한다.
+TASK-708 설계는 `notification_events`와 `notification_deliveries`의 identity column/UNIQUE를 다음과 같이 확정한다. 아직 구현된 table이 아니며 TASK-707에서 Entity와 새 Migration으로 적용한다. delivery operational field/query는 아래 TASK-709 설계에서 확정했으며 적용은 TASK-707 책임이다.
 
 ```text
 NotificationEvent
@@ -254,15 +254,78 @@ device_id BIGINT NOT NULL
 CONSTRAINT uk_notification_deliveries_event_device UNIQUE (notification_event_id, device_id)
 ```
 
-두 참조는 생성 후 불변이며 JPA는 non-null/updatable=false 관계로 매핑한다. TASK-707은 `fk_notification_deliveries_event_id`와 `fk_notification_deliveries_device_id`를 각각 Event/Device PK에 연결한다. delete action은 삭제/recovery 불변조건에 맞춰 TASK-707에서 확정한다. UNIQUE의 left prefix는 Event별 Delivery 조회와 Event FK index를 지원한다. `idx_notification_deliveries_device_id (device_id)`는 Device FK용으로 필요하며 별도 event_id index는 중복 생성하지 않는다. worker due-query index는 TASK-709 설계와 TASK-707 persistence에서 query가 정해진 뒤 추가한다.
+두 참조는 생성 후 불변이며 JPA는 non-null/updatable=false 관계로 매핑한다. TASK-707은 `fk_notification_deliveries_event_id`와 `fk_notification_deliveries_device_id`를 각각 Event/Device PK에 연결한다. delete action은 삭제/recovery 불변조건에 맞춰 TASK-707에서 확정한다. UNIQUE의 left prefix는 Event별 Delivery 조회와 Event FK index를 지원한다. `idx_notification_deliveries_device_id (device_id)`는 Device FK용으로 필요하며 별도 event_id index는 중복 생성하지 않는다. Worker index는 아래 TASK-709 계약을 따른다.
 
 한 Event에는 0..N Device별 Delivery가 있을 수 있으며 Delivery retry는 같은 row의 operational state를 갱신한다. 중복 Event 재제출은 Delivery를 추가하거나 갱신하지 않는다. MySQL UNIQUE는 nullable column의 여러 NULL을 허용하므로 두 UNIQUE의 핵심 column은 모두 NOT NULL이다. [MySQL 8.4 UNIQUE 계약](https://dev.mysql.com/doc/refman/8.4/en/create-index.html)을 따른다.
 
 TASK-707에서 초기 NotificationHistory를 전환할 때 없는 generation/cycle/device를 만들어 legacy row를 새 logical Event로 승격하지 않는다. 구체 cleanup/전환 정책은 TASK-707 책임이며 V3/V9 파일은 수정하지 않는다.
 
-하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 `NotificationDelivery(PENDING)` 생성을 함께 commit한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient log/metric으로 관찰한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. 단일 Spring Backend의 fixed-delay, non-overlapping worker가 due PENDING Delivery를 제한 조회해 처리하고 recipient를 다시 선정하지 않는다. Worker는 전송 직전 Device owner/enabled/current target/revision을 재검증하고 실제 attempt revision을 기록한다. Invalid/unregistered 결과는 attempt revision이 current registration과 일치할 때만 disable한다. `NotificationDelivery`에 raw push target을 중복 저장하는 것은 필수가 아니며, retry와 conditional cleanup에는 attempt revision을 기록한다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
+하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 Delivery 생성을 함께 commit한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient log/metric으로 관찰한다. 이미 freshness가 끝난 recipient row는 아래 계약대로 EXPIRED로 생성한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. 단일 Spring Backend의 fixed-delay, non-overlapping worker가 기존 Delivery를 제한 조회하고 recipient를 다시 선정하지 않는다. 전송 전 재검증/attempt commit 및 결과 반영은 [Architecture](architecture.md#notification-dispatch와-result-transaction-task-709)를 따른다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
 
-Delivery lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 한다. retry 가능한 실패는 별도 lifecycle state 없이 `PENDING + attemptCount + nextAttemptAt + freshness`로 표현할 수 있다. Push provider result는 `ACCEPTED`, `INVALID_TARGET`, `RETRYABLE`, `CONFIGURATION`, `PERMANENT_REQUEST`, `AMBIGUOUS_TIMEOUT`으로 lifecycle status와 분리한다. `EXPIRED`는 Provider result가 아니라 local freshness 종료 의미다. 모든 retry attempt를 append-only row로 저장할 필요는 없다. 정확한 field, retry count·interval·freshness TTL과 polling query/index는 TASK-707/709에서 정한다. 이 operational data는 Analytics와 별도 책임이며, Analytics persistence는 실제 제품 질문과 보존 근거가 있을 때만 TASK-812에서 결정한다.
+Lifecycle/Provider result는 [Domain invariant](domain-model.md#delivery-result-semantics), failure/retry 결정은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-failureretryexpiry-설계-2026-10-09)가 소유한다. 아래는 TASK-709 설계 완료 / TASK-707 미구현 계약이다. append-only attempt table, raw FID 복제, claim/lease column은 추가하지 않는다. Operational data는 장기 Analytics와 별도 책임이며 Analytics persistence는 TASK-812에서 필요성을 결정한다.
+
+#### NotificationEvent freshness time (TASK-709)
+
+기존 identity와 `user_id`에 다음 시각을 추가한다. 모두 `DATETIME(6)`의 UTC 의미이고 host-local now()를 사용하지 않는다. Java `Instant`를 쓰는 evaluation과 경계에서 UTC로 명시 변환하며 JPA 저장은 기존 Device처럼 UTC `LocalDateTime`으로 매핑한다. DB retry/rounding에도 동일한 microsecond 값과 기한을 재사용한다.
+
+| Column | Type / NULL | 의미 |
+| --- | --- | --- |
+| `observed_at` | `DATETIME(6) NOT NULL` | candidate의 실제 StopBell receive time, 불변 |
+| `event_detected_at` | `DATETIME(6) NOT NULL` | candidate 최초 선택 시 서버 Clock 값, 불변 |
+| `created_at` | `DATETIME(6) NOT NULL` | Event row 생성 시 서버 Clock 값, 불변 |
+
+`notificationEventCreatedAt`은 Event의 createdAt 별칭이며 별도 중복 column이 아니다. Provider data time은 이번 freshness용 필수 column으로 추가하지 않고, TASK-707 payload/evidence 저장에서 필요하면 실제 존재하는 값만 optional로 보존한다. 물리 Event time을 추정하지 않는다. 시간 역행은 application에서 거부/관찰하며 cross-row CHECK로 가짜 순서를 강제하지 않는다.
+
+#### NotificationDelivery operational Schema (TASK-709)
+
+앞 절의 `id`, `notification_event_id`, `device_id`와 UNIQUE를 그대로 유지하고 다음 field를 확정한다. 문자열 enum/code는 `CHARACTER SET ascii COLLATE ascii_bin`, 시각은 UTC `DATETIME(6)`이다.
+
+| Column / Domain field | Type / NULL / 초기값 | 의미 |
+| --- | --- | --- |
+| `recipient_ownership_generation` / recipientOwnershipGeneration | `BIGINT NOT NULL` | Event transaction에서 읽은 Device generation, 불변. A→B→A 뒤 과거 Event dispatch 차단 |
+| `status` / status | `VARCHAR(16) NOT NULL` | 유효 기한이면 PENDING, 생성 시 이미 만료면 EXPIRED |
+| `attempt_count` / attemptCount | `INT NOT NULL DEFAULT 0` | 최초 포함 durable attempt 시작 횟수. SDK 호출 수의 보수적 상한용 count이며 HTTP wire count가 아님 |
+| `next_attempt_at` / nextAttemptAt | `DATETIME(6) NULL` | PENDING에서만 필수. 최초 Delivery createdAt, retry/recovery 예약 또는 expiry sweep 시각 |
+| `expires_at` / expiresAt | `DATETIME(6) NOT NULL` | 원래 Event observedAt + Type별 TTL, 생성 후 불변. 같은 Event 최초 Delivery들은 같은 기한 |
+| `last_attempt_at` / lastAttemptAt | `DATETIME(6) NULL` | 마지막 attempt 시작 transaction의 서버 시각. latency의 deliveryAttemptAt 기준 |
+| `last_attempt_registration_revision` / lastAttemptRegistrationRevision | `BIGINT NULL` | 마지막 attempt에서 읽은 등록 revision. count>0이면 필수 |
+| `last_provider_result` / lastProviderResult | `VARCHAR(24) NULL` | 마지막 시작 attempt의 정규화 결과. 시작 직후/crash/미전송이면 null |
+| `last_failure_code` / lastFailureCode | `VARCHAR(64) NULL` | allowlist의 안전한 Provider/local 진단 code. raw body/message/FID 저장 금지 |
+| `provider_accepted_at` / providerAcceptedAt | `DATETIME(6) NULL` | 성공 응답을 StopBell이 받은 실제 시각. FCM 내부 접수/표시 timestamp를 추정한 값이 아님 |
+| `created_at` / createdAt | `DATETIME(6) NOT NULL` | Delivery 생성 시각, 불변 |
+| `updated_at` / updatedAt | `DATETIME(6) NOT NULL` | operational 갱신 서버 시각 |
+
+owner는 Event의 불변 user_id, identity는 Device FK, recipient generation은 위 column으로 영속한다. Attempt의 `{deliveryId, deviceId, eventOwnerId, ownershipGeneration, registrationRevision, currentPushTargetId, attemptCount, lastAttemptAt}`는 FCM 호출부터 결과 transaction까지 메모리 snapshot으로 보관한다. lastAttemptAt은 저장할 UTC microsecond 값으로 맞춘다. 마지막 revision/count/시각은 Delivery에 기록하지만 raw FID, attempt owner/generation column은 복제하지 않는다. Crash 뒤 snapshot을 복원해 Device cleanup을 실행하지 않으며 다음 attempt는 새 current registration을 읽는다. `lastRegisteredAt`과 Client revision을 Provider cleanup에서 변경하지 않는다.
+
+TASK-707의 CHECK 이름과 표현 계약:
+
+- `ck_notification_deliveries_status`: status IN ('PENDING', 'ACCEPTED', 'FAILED', 'EXPIRED')
+- `ck_notification_deliveries_counts`: attempt_count >= 0 AND recipient_ownership_generation >= 0
+- `ck_notification_deliveries_schedule`: `(status = 'PENDING' AND next_attempt_at IS NOT NULL AND next_attempt_at <= expires_at) OR (status <> 'PENDING' AND next_attempt_at IS NULL)`
+- `ck_notification_deliveries_attempt`: `(attempt_count = 0 AND last_attempt_at IS NULL AND last_attempt_registration_revision IS NULL AND last_provider_result IS NULL) OR (attempt_count > 0 AND last_attempt_at IS NOT NULL AND last_attempt_registration_revision IS NOT NULL AND last_attempt_registration_revision >= 0)`
+- `ck_notification_deliveries_provider_result`: last_provider_result IS NULL OR last_provider_result IN ('ACCEPTED', 'INVALID_TARGET', 'RETRYABLE', 'CONFIGURATION', 'PERMANENT_REQUEST', 'AMBIGUOUS_TIMEOUT')
+- `ck_notification_deliveries_acceptance`: `(status = 'ACCEPTED' AND attempt_count > 0 AND last_provider_result IS NOT NULL AND last_provider_result = 'ACCEPTED' AND provider_accepted_at IS NOT NULL AND last_failure_code IS NULL) OR (status <> 'ACCEPTED' AND provider_accepted_at IS NULL AND (last_provider_result IS NULL OR last_provider_result <> 'ACCEPTED'))`
+- `ck_notification_deliveries_failure_code`: `(status IN ('FAILED', 'EXPIRED') AND last_failure_code IS NOT NULL AND CHAR_LENGTH(last_failure_code) > 0) OR (status NOT IN ('FAILED', 'EXPIRED') AND (last_failure_code IS NULL OR CHAR_LENGTH(last_failure_code) > 0))`
+
+Nullable enum/acceptance 조건은 MySQL CHECK의 UNKNOWN 통과를 피하도록 IS NULL/IS NOT NULL을 명시한다. `FAILED`는 미전송 recipient 탈락으로 count=0일 수 있고 `EXPIRED`도 count=0 또는 양수일 수 있다. 결과 미저장 crash의 양수 count + null result도 유효하다. 모든 retry count 상한/TTL 수치는 runtime policy이므로 숫자 CHECK에 고정하지 않는다. expiresAt과 Event observedAt의 관계, 과거 terminal 전이 금지, lastFailureCode allowlist는 cross-row/time-dependent CHECK가 아닌 application invariant다.
+
+#### Worker due query와 Index (TASK-709)
+
+V1의 제한 조회는 expired/capped PENDING도 빠짐없이 종료해야 한다. 다음은 SQL 계약 예시이며 Migration/Repository 구현은 아니다.
+
+```sql
+SELECT id
+FROM notification_deliveries
+WHERE status = 'PENDING' AND next_attempt_at <= :now
+ORDER BY next_attempt_at, id
+LIMIT :batchSize;
+```
+
+JPA도 동일 predicate/정렬과 bounded Pageable을 사용한다. 조회 결과는 dispatch 후보이며 재검증 transaction에서 먼저 `now >= expiresAt`이면 EXPIRED, 그 다음 count>=maxAttempts면 FAILED, 그 다음 recipient/local lifecycle 조건을 적용한다. 실제 전송 자격은 `status=PENDING AND nextAttemptAt<=now AND expiresAt>now AND attemptCount<maxAttempts` 및 current Device 검증이다. SELECT/후속 검증만으로 multi-worker exclusion을 보장하지 않으며 단일 worker 계약에 의존한다.
+
+`idx_notification_deliveries_pending_due (status, next_attempt_at, id)` 하나를 추가한다. equality status → due range/정렬 next_attempt_at → tie-break PK 순서다. expiresAt은 row recheck/filter로 처리한다. 두 range column을 앞에 나란히 넣어 모두 range scan된다고 가정하지 않고 별도 expiry/status/attemptCount index를 추가하지 않는다. InnoDB의 PK suffix가 id를 이미 포함하더라도 별도 id index를 만들지 않는다. 기존 Event×Device UNIQUE와 device_id FK index도 유지한다. [MySQL multiple-column index](https://dev.mysql.com/doc/refman/8.4/en/multiple-column-indexes.html)를 기준으로 TASK-707에서 실제 SQL/EXPLAIN을 확인한다.
+
+모든 PENDING 예약은 nextAttemptAt<=expiresAt이다. retry/recovery 가능 시각이 기한 이상이면 nextAttemptAt=expiresAt으로 저장하여 기한 도래 때 위 조회로 local 종료하고 그 예약으로 FCM을 호출하지 않는다. 이미 만료된 초기 row는 EXPIRED로 생성하므로 조회되지 않는다. 이 규칙은 미래 Retry-After와 오랜 restart 때문에 expired row가 due query에서 영구 누락되는 것을 막는다.
 
 ### bus_routes, bus_stops, bus_route_stop_occurrences
 

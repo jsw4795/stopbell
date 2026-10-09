@@ -260,7 +260,7 @@ Blind upsert/REPLACE는 기존 decision을 변경·대체할 수 있고 INSERT I
 | TASK-707 | NotificationEvent/Delivery Entity·Schema·Repository와 두 UNIQUE, durable persistence; FOLLOW_UP UUID column·CHECK·Alarm operation·ARRIVED 저장 연결; 기존 History 전환 및 삭제 정책/FK 확정. NULL/invalid identity·동일 key 거부·다른 type/cycle 허용·Event×Device UNIQUE·runtime 완전성·선택한 삭제 정책의 persistence 검증 |
 | TASK-708 implementation | 선택한 TransitEvent + AlarmEvaluationKey를 durable Event로 연결; lifecycle/Event/최초 recipient Delivery transaction·무변경 duplicate·전체 rollback/retry; FOLLOW_UP UUID 복원과 Scheduler commit 이후 memory 반영. 동시 동일 candidate·중복 ARRIVED/after·generation 증가/유지·stale/deleted 결과·실패 rollback·동일 UUID retry·FOLLOW_UP restart continuity·multi-device/0-device/늦은 등록 검증 |
 | TASK-706 | 이미 commit된 pending Delivery의 단일 durable dispatch worker와 전송 직전 recipient 재검증. Event 결정/fan-out transaction을 다시 구현하지 않음 |
-| TASK-709 | 먼저 retry/failure/expiry 계약 설계, 이후 result 처리·bounded retry·freshness·conditional cleanup 구현. 횟수·간격·TTL은 이번에 확정하지 않음 |
+| TASK-709 | 아래 failure/retry/expiry 설계 계약 적용, 이후 result 처리·bounded retry·freshness·conditional cleanup 구현. 최종 횟수·간격·TTL은 smoke/latency 검증 후 확정 |
 
 실행 순서는 [Phase 7 dependency](../task-list.md#phase-7---notification)를 유지한다. TASK-708 설계만 완료했고 전체 Task는 미완료다. 이번 단계에는 code/Entity/Repository/Migration/test를 추가하지 않으며 테스트 실행 없이 문서 논리·코드 대조·링크·diff만 검증한다.
 
@@ -274,7 +274,7 @@ Provider I/O / Evaluation
      - current Alarm lifecycle/generation 검증
      - lifecycle transition
      - durable logical NotificationEvent insert
-     - 현재 eligible Device별 NotificationDelivery(PENDING) 생성
+     - 현재 eligible Device별 Delivery 생성 (유효 PENDING / 이미 만료 EXPIRED)
   → commit
   → single fixed-delay worker가 기존 due PENDING Delivery 처리
   → FCM I/O
@@ -298,9 +298,166 @@ FCM request                       → retry로 여러 번 가능
 실제 Device 표시                  → exactly once 보장하지 않음
 ```
 
-Provider acceptance는 실제 사용자 표시 성공이 아니다. Delivery lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 하고 retry는 `PENDING + attemptCount + nextAttemptAt + freshness`로 표현한다. Provider result는 `ACCEPTED`, `INVALID_TARGET`, `RETRYABLE`, `CONFIGURATION`, `PERMANENT_REQUEST`, `AMBIGUOUS_TIMEOUT`으로 lifecycle status와 분리한다. `EXPIRED`는 Provider result가 아니라 local freshness 종료 의미다.
+Provider acceptance는 실제 사용자 표시 성공이 아니다. Delivery lifecycle status는 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 하고 retry는 `PENDING + attemptCount + nextAttemptAt + expiresAt`으로 표현한다. Provider result는 `ACCEPTED`, `INVALID_TARGET`, `RETRYABLE`, `CONFIGURATION`, `PERMANENT_REQUEST`, `AMBIGUOUS_TIMEOUT`으로 lifecycle status와 분리한다. `EXPIRED`는 Provider result가 아니라 local freshness 종료 의미다.
 
-Invalid/unregistered 결과는 attempt revision이 Device의 current registration과 일치할 때만 조건부 disable한다. Old attempt 실패가 새 registration을 disable해서는 안 된다. `AMBIGUOUS_TIMEOUT`은 Provider가 실제 접수했는지 알 수 없는 상태다. FCM accepted 뒤 DB update 전 crash하면 Delivery가 PENDING으로 남아 restart 뒤 retry될 수 있으며, 실제 Device duplicate는 exactly-once 비보장 계약으로 허용한다. 최대 retry 횟수·간격·freshness TTL과 구체 field 이름은 TASK-709에서 smoke 결과와 함께 정한다. Generic retry framework는 미리 도입하지 않는다.
+Invalid/unregistered 결과는 attempt의 identity/owner/generation/revision/FID가 current registration과 모두 일치할 때만 조건부 disable한다. Old attempt 실패가 새 registration을 disable해서는 안 된다. `AMBIGUOUS_TIMEOUT`은 Provider가 실제 접수했는지 알 수 없는 상태다. FCM accepted 뒤 DB update 전 crash하면 Delivery가 PENDING으로 남아 restart 뒤 retry될 수 있으며, 실제 Device duplicate는 exactly-once 비보장 계약으로 허용한다. TASK-709의 구체 계약은 다음 절이 소유하며 최종 retry 수치는 smoke/latency 검증까지 보류한다. Generic retry framework는 도입하지 않는다.
+
+### TASK-709 failure/retry/expiry 설계 (2026-10-09)
+
+**설계 완료, 구현 미완료**다. TASK-701/702 완료 및 TASK-708 설계를 유지하고 두 UNIQUE, 실행 dependency와 V1 single fixed-delay/non-overlapping worker를 변경하지 않는다. 이번 단계는 문서만 변경하며 Backend/Flutter test·build, Docker, Firebase 실전송, SDK 설치와 Migration 실행을 하지 않는다. [Domain](../domain-model.md#notificationdelivery)은 invariant, [Database](../database.md#notificationdelivery-operational-schema-task-709)는 column/NULL/CHECK/query/index, [Architecture](../architecture.md#notification-dispatch와-result-transaction-task-709)는 실행 경계를 소유한다.
+
+#### 조사한 실제 구현과 SDK 경계
+
+현재 `notification.entity.Device`와 V13에는 owner, nullable current FID, revision, ownership generation, enabled가 있다. 등록/disable mutation과 API는 아직 없다. `NotificationHistory`/Repository/V3/V9는 Alarm별 SUCCESS/FAILURE와 삭제 cascade만 제공한다. Event/Delivery Entity·Migration·Worker·Firebase Admin dependency와 production 전송은 없다. `BusAlarmLifecycleService`는 Alarm row lock/generation/status와 lifecycle만 갱신하고 Event/Delivery 원자 저장은 TASK-708 implementation의 후속 작업이다. TASK-708에서 발견한 FOLLOW_UP UUID/ACTIVE restart의 기존 한계도 그대로 남으며 이번 설계가 이를 해결했다고 주장하지 않는다.
+
+조사 기준은 기존 선택 후보 **Firebase Admin Java 9.11.0**, FCM HTTP v1 `message.fid`다. 성공한 단일 `FirebaseMessaging.send(Message)`는 message ID를 반환한다. 실패는 `FirebaseMessagingException.getMessagingErrorCode()`(nullable), inherited `getErrorCode()`, `getHttpResponse()`(nullable), `getCause()`로 조사한다. HTTP response가 있으면 `getStatusCode()`, `getHeaders()`, `getContent()`가 있지만 structured `getFieldViolations()`, `isRetryable()`, 요청 전송 완료 여부 field는 없다. Node의 `messaging/*` 문자열 오류를 Java enum으로 만들지 않는다. FcmError 외 BadRequest/QuotaFailure detail은 SDK typed accessor가 아니며 필요할 때 TASK-705에서 bounded parsing으로 검사하고 원문을 저장/출력하지 않는다.
+
+#### FCM failure mapping 계약
+
+아래는 StopBell의 보수적 분류 결정이다. HTTP code와 FCM-specific code가 모순되거나 응답이 불완전하면 INVALID_TARGET cleanup 근거로 사용하지 않는다. 우선 정상 성공 반환, 신뢰 가능한 FCM error detail, generic SDK code/HTTP status, 실제 cause/context 순서로 평가하되 성공 응답 decoding 실패를 명확한 rejection으로 꾸미지 않는다.
+
+| HTTP v1 / 응답 근거 | Admin Java 9.11.0에서 실제 얻는 정보 | StopBell result / 자동 retry |
+| --- | --- | --- |
+| 성공 response의 message name | `send()`의 정상 message ID 반환 | ACCEPTED / 없음 |
+| 404 + FcmError `UNREGISTERED` | MessagingErrorCode.UNREGISTERED, generic NOT_FOUND 및 HTTP response | INVALID_TARGET / 없음. 해당 전송 target의 등록 해제 근거 |
+| 400 + INVALID_ARGUMENT, BadRequest payload/field 위반; local Message validation 오류 | MessagingErrorCode.INVALID_ARGUMENT 또는 generic INVALID_ARGUMENT; local validation은 IllegalArgumentException일 수 있음 | PERMANENT_REQUEST / 없음 |
+| 400 + FcmError INVALID_ARGUMENT만 있거나 target/payload 원인이 불명확 | INVALID_ARGUMENT만으로 target 오류 위치는 알 수 없음 | PERMANENT_REQUEST / 없음, `INVALID_ARGUMENT_UNCLASSIFIED`. Device disable 금지 |
+| 429 + QUOTA_EXCEEDED, rate limit | MessagingErrorCode.QUOTA_EXCEEDED 또는 generic RESOURCE_EXHAUSTED + HTTP 429 | RETRYABLE / budget·expiry·Provider delay 만족 시만 |
+| 500 INTERNAL, 503 UNAVAILABLE 또는 명확한 일시 service failure | MessagingErrorCode.INTERNAL/UNAVAILABLE, generic INTERNAL/UNAVAILABLE, HTTP response | RETRYABLE / 동일 제한 |
+| 401 UNAUTHENTICATED, 403 PERMISSION_DENIED/SENDER_ID_MISMATCH, APNs auth 오류 | generic UNAUTHENTICATED/PERMISSION_DENIED 또는 MessagingErrorCode.SENDER_ID_MISMATCH/THIRD_PARTY_AUTH_ERROR | CONFIGURATION / 없음. 프로젝트·권한·APNs 설정 조사, Device disable 금지 |
+| APNS_AUTH_ERROR detail | SDK parser는 THIRD_PARTY_AUTH_ERROR로 정규화 | CONFIGURATION / 없음 |
+| bare 404 NOT_FOUND, project/endpoint를 찾을 수 없음 | generic NOT_FOUND, MessagingErrorCode가 null일 수 있음 | CONFIGURATION / 없음, `NOT_FOUND_UNCLASSIFIED`. UNREGISTERED로 추정하지 않음 |
+| credential/project 초기화 실패로 send 불가 | 초기화 exception이며 반드시 FirebaseMessagingException인 것은 아님 | CONFIGURATION / 없음. global 초기화 불가일 때 worker는 FCM을 호출하지 않고 미만료 PENDING을 보존하되 expiry sweep은 계속 가능해야 함 |
+| DNS/NoRouteToHost 등 **요청 미전송이 확인된** 연결 실패 | cause와 generic UNAVAILABLE. code만으로 phase는 확정 불가 | RETRYABLE / 제한 적용 |
+| request 시작 후 socket timeout, 응답 전 connection reset/EOF, 성공 응답 parsing 실패 또는 전송 여부 불명인 I/O | SocketTimeout cause는 generic DEADLINE_EXCEEDED; 다른 IOException은 UNKNOWN일 수 있음. cause/nullable response 조사 | AMBIGUOUS_TIMEOUT / duplicate 가능성을 인정한 제한적 retry |
+| 그 외 거절 응답/미분류 protocol 오류 | generic UNKNOWN 또는 null FCM code, 제한된 HTTP 정보 | 명확한 rejection은 PERMANENT_REQUEST(`UNCLASSIFIED_REJECTION`), 접수 여부 불명은 AMBIGUOUS_TIMEOUT(`UNKNOWN_ACCEPTANCE`). 임의 INVALID_TARGET 금지 |
+
+특히 generic DEADLINE_EXCEEDED가 connect/read timeout을 구분한다고 가정하지 않는다. 검증 가능한 미전송 근거가 없으면 ambiguous다. 400의 `FcmError.INVALID_ARGUMENT` 자체도 payload와 target을 안전하게 구분하는 충분조건이 아니다. V1 cleanup allowlist는 현재 공식 근거로 확인 가능한 UNREGISTERED로 제한한다. 추후 FID-specific detail로 확대하려면 공식 근거와 redacted correctness fixture가 먼저 필요하다. legacy token troubleshooting 설명을 FID의 모든 400/404에 일반화하지 않는다.
+
+공식 조사 근거(2026-10-09, runtime 미검증):
+
+- [FCM HTTP v1 error 계약](https://firebase.google.com/docs/cloud-messaging/error-codes): HTTP와 details의 차이 및 FCM error 의미
+- [선택 SDK Message](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/messaging/Message.java), [Client](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/messaging/FirebaseMessagingClientImpl.java), [Exception](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/messaging/FirebaseMessagingException.java): FID/send/exception 계약
+- [MessagingErrorCode](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/messaging/MessagingErrorCode.java), [error DTO parser](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/messaging/internal/MessagingServiceErrorResponse.java): 7개 SDK enum, nullable FcmError mapping과 APNS alias
+- [HTTP/I/O handler](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/internal/AbstractHttpErrorHandler.java), [IncomingHttpResponse](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/IncomingHttpResponse.java): 실제 generic code/cause/headers, typed error detail의 한계
+
+#### Provider result → Delivery 결정표
+
+결과는 원래 Event×Device row에만 적용한다. terminal은 무변경이고 ACCEPTED 응답을 받았으면 기한이 지났더라도 확인한 접수를 ACCEPTED로 기록한다. 비접수 결과 및 새 호출 전에는 **실제 expiry → attempt limit → 비재시도 실패/recipient 조건 → retry 예약** 순서로 판단한다. `FAILED`는 확인된 미접수만 의미하지 않으며 crash/ambiguous 뒤 budget 소진도 포함한다.
+
+| Provider result / local decision | Retryable | next status | nextAttemptAt | Device cleanup | terminal |
+| --- | --- | --- | --- | --- | --- |
+| ACCEPTED | 아니오 | ACCEPTED | null | 없음 | 예 |
+| INVALID_TARGET | 아니오 | 미만료 FAILED; 이미 기한 종료면 EXPIRED | null | 아래 current-registration 조건부 disable만 | 예 |
+| RETRYABLE | 조건부 | 기한 종료 EXPIRED; budget 소진 FAILED; 그 외 PENDING | 아래 계산값 또는 expiresAt | 없음 | FAILED/EXPIRED일 때 |
+| CONFIGURATION | 아니오 | 미만료 FAILED; 기한 종료 EXPIRED | null | 없음, 설정 진단만 | 예 |
+| PERMANENT_REQUEST | 아니오 | 미만료 FAILED; 기한 종료 EXPIRED | null | 없음 | 예 |
+| AMBIGUOUS_TIMEOUT | 조건부 | 기한 종료 EXPIRED; budget 소진 FAILED; 그 외 PENDING | 중복 위험을 수용한 지연값 또는 expiresAt | 없음 | FAILED/EXPIRED일 때 |
+| local EXPIRED | 아니오 | EXPIRED | null | 없음 | 예 |
+| local recipient/dispatch 불가 | 아니오 | 미만료 FAILED; 기한 종료 EXPIRED | null | 없음 | 예 |
+| local ATTEMPT_LIMIT_REACHED | 아니오 | 미만료 FAILED; 기한 종료 EXPIRED | null | 없음 | 예 |
+
+local 종료 시 Provider 결과가 없으면 null을 유지한다. 이전 attempt의 결과가 있으면 보존하면서 안전한 local code(`FRESHNESS_EXPIRED`, `ATTEMPT_LIMIT_REACHED`, `RECIPIENT_OWNER_CHANGED`, `RECIPIENT_GENERATION_CHANGED`, `RECIPIENT_DISABLED`, `RECIPIENT_TARGET_MISSING`, `DISPATCH_NOT_ALLOWED`)로 종료 이유를 구분한다. result가 실제로 없는 recovery에 가짜 Provider 응답을 만들지 않는다. INVALID_TARGET response가 기한 뒤 도착해 EXPIRED로 종료돼도 명확한 등록 해제 근거의 조건부 cleanup은 가능하다.
+
+CONFIGURATION으로 실제 attempt가 실패한 개별 Delivery는 terminal이며 운영자가 설정을 고쳐도 자동 PENDING 복귀하지 않는다. 운영자는 redacted 설정 오류 log/metric으로 Firebase credential/project/권한/APNs를 점검한다. Provider 초기화 자체가 불가능하면 아직 시작하지 않은 row들을 가짜 attempt/실패로 대량 갱신하지 않는다. 새로운 미만료 Delivery는 설정 복구 뒤 처리할 수 있고 오래된 row는 expiry로 종료한다. global circuit breaker나 별도 운영 상태 subsystem은 만들지 않는다.
+
+#### Bounded retry와 attempt accounting
+
+- `maxAttempts`는 **최초 포함 총 durable attempt 시작 한도**이며 양수·유한 값이다. 추가 retry 최대치는 maxAttempts-1이다. 최초 외부 호출 직전의 짧은 transaction에서 count를 1 증가시키고 lastAttemptAt/revision 및 recovery 예약을 commit한다. commit을 확인하지 못하면 FCM을 호출하지 않는다. 호출 완료/timeout 후에는 다시 count를 증가시키지 않는다. commit 전 crash는 증가 없음, commit 후 호출 전 crash는 호출하지 않았어도 한 번 소비된다. 이 보수적 손실을 감수해 process crash 반복으로 budget을 우회하지 못하게 한다.
+- 결과 미저장 crash에 대비해 시작 commit 시 `nextAttemptAt=min(expiresAt, attemptStartedAt + requestBudget + recoveryDelay)`를 저장한다. requestBudget은 한 SDK 호출 전체의 유한 wall-time budget, recoveryDelay는 최소 retry delay 이상이다. 이는 lease나 실행 중 상태가 아니라 같은 PENDING row의 재조회 예약이다. 네트워크 시각과 DB 시각 사이 작은 간격은 관측 한계로 남고 결과가 정상 도착하면 확정 retry 시각으로 교체한다.
+- 반환된 retryable 결과의 `candidateNextAt = resultReceivedAt + max(localBoundedDelay(attemptCount), providerMinimumDelay, retryAfterDelay)`로 계산한다. local delay는 작은 유한 설정으로 capped exponential 증가와 음수가 아닌 bounded jitter를 적용하고 범용 framework를 만들지 않는다. jitter가 Provider 최소 지연을 줄이지 않아야 한다. count/기한을 먼저 확인하며 candidateNextAt>=expiresAt이면 지금 EXPIRED라고 꾸미지 않고 PENDING + nextAttemptAt=expiresAt으로 예약해 실제 만료 시 local 종료한다. 기한을 연장하거나 Retry-After를 잘라 더 일찍 보내지 않는다.
+- `Retry-After`는 존재하는 HTTP response headers에서만 읽는다. delta seconds와 HTTP-date를 UTC로 해석하고 result receive time 기준 non-negative delay로 정규화한다. 과거 날짜/0도 local minimum을 우회하지 못하며 malformed/누락은 Provider 최소와 local delay를 사용한다. overflow/지나치게 먼 값은 기한 안 retry 불가로 처리하고 즉시 retry하지 않는다. raw header/body는 persistence하지 않고 계산된 nextAttemptAt만 commit한다.
+- RETRYABLE은 일시적 거절/확인된 미전송이고 AMBIGUOUS_TIMEOUT은 접수 불명이다. 둘 다 유한 budget/expiry를 쓰지만 ambiguous를 즉시 resend하지 않으며 설정 delay는 일반 retry 이상이다. 전송 dedup key가 있다고 exactly-once로 간주하지 않는다. 마지막 attempt가 ambiguous이고 budget을 소진하면 FAILED로 종료하되 불명확한 접수 결과를 보존한다.
+- 정상 지연 재시도는 worker를 sleep시키지 않고 DB nextAttemptAt으로 예약한다. 앱 재시작은 Backend budget/기한을 reset하지 않는다. Backend restart도 같은 row의 count/next/expiry를 읽으며 terminal은 복구 대상이 아니다. 각 Device는 독립 budget/result를 사용하고 성공 Device를 실패 Device와 함께 재전송하지 않는다.
+
+최종 maxAttempts, local base/cap/jitter, recoveryDelay, requestBudget/timeout, Type별 freshness TTL 및 polling/batch 값은 **TASK-705 Backend→iPhone smoke, TASK-709 implementation 및 latency 검증까지 보류**한다. Schema는 수치와 독립적으로 구현 가능하다. smoke 없이 개발 후보값을 운영 기본값으로 기재하지 않는다.
+
+FCM 공식 [retry 권고](https://firebase.google.com/docs/cloud-messaging/scale-fcm#handling_retries)는 timeout/재시도 최소 대기를 제시하고, [error 문서](https://firebase.google.com/docs/cloud-messaging/error-codes)는 quota의 최소 초기 1분 및 UNAVAILABLE의 Retry-After 존중을 설명한다. V1 설계는 일반 실패/ambiguous에 적어도 10초 대기, quota에 적어도 60초 대기를 하한으로 삼고 더 큰 header를 존중한다. 이는 StopBell 운영 최종 interval/TTL을 정한 것이 아니다. 버스 freshness 안에 그 지연을 수용할 수 없으면 retry를 포기하고 기한에 종료한다. latency를 낮추려고 Provider 제한을 어기지 않는다.
+
+#### SDK 내부 retry와 후속 검증 gate
+
+선택 SDK의 [ApiClientUtils](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/internal/ApiClientUtils.java)는 기본 503 retry 최대 4회·최대 간격 60초를 구성한다. [RetryConfig](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/internal/RetryConfig.java), [RetryInitializer](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/internal/RetryInitializer.java), [Retry-After handler](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/internal/RetryUnsuccessfulResponseHandler.java)는 SDK 내부 대기/재전송을 수행한다. 따라서 `attemptCount` 한 번이 HTTP 한 번이라고 말할 수 없다. 인증 계층의 재전송도 별도 확인 대상이다.
+
+기본 내부 retry를 그대로 겹치면 freshness 이후 **새 HTTP 요청**이나 이중 backoff가 발생할 수 있어 위 single-attempt 지연 계약을 충족한다고 주장하지 않는다. TASK-705는 내부 재전송을 억제하거나 각 실제 FCM 요청 직전 deadline/budget을 적용할 수 있는 지원된 방법을 확인해야 한다. FirebaseOptions에 존재하지 않는 retry setter나 exception field를 가정하지 않고 internal class/reflection 의존을 미리 결정하지 않는다. 안전한 방법이 확인되기 전 production dispatch를 활성화하지 않는다. 별도 retry layer를 덧붙여 성공 처리하는 것은 대안이 아니다.
+
+지원된 제어가 불가능하면 안전한 최소 대안은 현재 google-api-client/credential 경계를 이용한 단일 HTTP v1 전송 adapter이며, **Admin SDK client 선택 변경은 TASK-705에서 개발자 판단 후** 문서 동기화한다. 이번에 adapter를 교체·구현하지 않는다. TASK-707의 Schema와 retry 결정표는 이 전송 제어 검증과 독립적으로 진행할 수 있다. 기본 SDK와 엄격한 expiry의 충돌은 명시된 구현 gate이지 이미 해결된 기능이 아니다.
+
+#### Freshness와 local expiry
+
+네 Type 모두 freshness가 필요하다. ONE_STOP_BEFORE는 도착 전 안내, ARRIVED는 목표 도착, PASSED는 최근 통과 위치, ONE_STOP_AFTER는 후속 위치 안내이므로 늦게 보내면 사용자를 오도한다. Type→양수 TTL의 작은 policy를 사용하되 값이 서로 달라야 한다고 미리 확정하지 않는다. FOLLOW_UP의 기존 5분 tracking timeout과 Notification TTL은 다른 책임이며 그대로 재사용하지 않는다.
+
+계산 기준은 `TransitEvent.observedAt`(StopBell response receive time)이다. providerDataTime은 optional upstream freshness 근거, eventDetectedAt은 실제 evaluation candidate 선택 시각, notificationEventCreatedAt은 DB row 생성 시각, deliveryAttemptAt은 attempt 시작 시각이다. DB insert/retry/restart 때 observedAt을 now로 바꾸지 않고 `expiresAt = originalObservedAt + TTL(eventType)`를 최초 결정에서 고정한다. DB 생성 시각 기준이면 queue/evaluation 지연을 숨기고 늦은 알림의 유효기간을 늘리므로 제외한다. 물리 Event 시각이 제공되지 않으면 추정해서 저장하지 않는다. Phase 5 stale/UNKNOWN 판단도 변경하지 않는다.
+
+fresh candidate가 늦게 durable commit되어 만료됐다면 lifecycle/logical Event와 원래 recipient set은 보존하고 각 Delivery를 count=0 EXPIRED로 생성한다. 만료를 이유로 ARRIVED lifecycle을 되돌리거나 Event를 없애 dedup을 재허용하지 않는다. 기존 PENDING은 조회 시와 실제 Provider 호출 직전에 UTC Clock으로 `now >= expiresAt`을 재확인한다. 재시작 후 오래된 pending도 동일하게 종료한다.
+
+전송 시작 뒤 기한이 지나도 이미 FCM에 접수/처리 중인 요청을 local expiry로 취소하지 못한다. 명확한 성공 응답은 ACCEPTED와 실제 response receive timestamp를 기록한다. 실패/ambiguous 후 기한이 끝났다면 EXPIRED이며 추가 호출은 금지한다. 단일 worker는 자기 진행 중 요청과 별도 expiry mutation을 경쟁시키지 않는다. TASK-707의 명시적 삭제가 먼저 종료한 row에는 late result로 상태를 되살리지 않는다. 여러 Device가 ACCEPTED/FAILED/EXPIRED로 갈리는 것은 정상이다.
+
+Local expiry는 FCM/APNs queue나 OS 표시 deadline을 보장하지 않는다. 기본 Provider 보존기간에 의존하면 오래된 표시가 가능하므로 TASK-705에서 [APNs expiration/FCM lifespan](https://firebase.google.com/docs/cloud-messaging/customize-messages/setting-message-lifespan)을 expiresAt에 맞추는 전송 옵션도 확인해야 한다. 실제 iPhone의 지연/표시는 TASK-710/latency에서 검증하며 Provider 옵션이 취소 API인 것처럼 취급하지 않는다.
+
+#### Recipient 재검증과 invalid-target cleanup
+
+Event owner와 Event 시점 `recipientOwnershipGeneration`을 저장한다. revision/FID를 Event 시점에 고정하지 않는 대안은 같은 installation의 정상 rotation에서 불필요한 실패를 줄인다. 대신 owner/generation을 고정해 재로그인·소유권 회귀가 과거 Event를 다른 ownership 세대에 보내는 것을 막는다.
+
+| 전송 직전 상황 | 처리 |
+| --- | --- |
+| current owner != Event owner | local FAILED, OWNER_CHANGED, 호출/Device 변경 없음 |
+| owner가 다시 같아도 generation != recipient generation | local FAILED, GENERATION_CHANGED. A→B→A의 과거 Event도 전송 금지 |
+| disabled | local FAILED, DISABLED. 재활성화를 기다리며 기한을 늘리거나 terminal을 복귀시키지 않음 |
+| current FID null/invalid row | local FAILED, TARGET_MISSING 및 invariant 진단. fake Provider result 없음 |
+| 같은 owner/generation의 FID rotation·높은 revision 재등록 | 현재 enabled 등록의 current FID/revision으로 attempt snapshot. 원래 Device identity/Delivery 그대로 유지 |
+| 이전 등록이 INVALID_TARGET 처리됨 | 해당 Delivery terminal 유지. 아직 PENDING인 다른 Event row는 현재 Device 조건으로 재검증 |
+| Event 후 새 Device 등록 | 새 Delivery/fan-out 없음 |
+| Event/Delivery 삭제·명시적 dispatch 종료 | 호출 중단/무변경. terminal 또는 삭제 row를 재생성하지 않음 |
+| Alarm/User 삭제 관련 결정 대기 | TASK-707이 확정할 lifecycle 정책으로 dispatch 허용 여부 판단. 우연한 FK cascade나 현재 Alarm INACTIVE만으로 판단하지 않음 |
+
+모든 local 탈락에는 먼저 실제 expiry를 적용한다. ARRIVED의 정상 Alarm 비활성화는 그 Event 전달 실패 근거가 아니며 deletion 정책과 혼동하지 않는다. 보존·취소·삭제와 FK 최종 선택은 TASK-707에 남긴다. 보존해서 계속 보내는 정책이면 불변 Event owner/evidence를 쓰고, dispatch 종료 정책이면 pending을 원자적으로 종료/삭제하며 `DISPATCH_NOT_ALLOWED` local 진단으로 Provider 실패와 구분한다. explicit 취소를 시간 EXPIRED로 꾸미거나 CANCELLED lifecycle을 이번에 추가하지 않는다. 삭제 정책이 결정되지 않은 상태로 TASK-707 구현을 완료 처리하지 않는다.
+
+UNREGISTERED 결과의 cleanup은 **짧은 Device PESSIMISTIC_WRITE transaction 안의 current locking read + 검증 + disable**로 수행한다. `{deviceId, eventOwnerId, attemptOwnershipGeneration, attemptRegistrationRevision, attemptCurrentPushTargetId}`와 현재 row의 identity/owner/generation/revision/FID 및 enabled=true를 모두 비교한다. FID 비교는 case-sensitive exact 값이다. lock을 유지한 상태에서만 enabled=false, currentPushTargetId=null 및 updatedAt을 갱신한다. TASK-703 등록/ownership transaction도 같은 Device write lock을 사용하므로 사전 SELECT 뒤 별도 UPDATE와 다르다. CAS/@Version framework나 새 DB lock scheme은 추가하지 않는다.
+
+AAA/r5 요청 중 BBB/r6가 등록됐으면 불일치로 cleanup no-op이고 원래 Delivery는 INVALID_TARGET terminal 처리된다. ownership 이전도 불일치로 no-op이며 다른 Device/FID row를 찾아 disable하지 않는다. revision/generation/lastRegisteredAt/owner/credential은 Provider가 변경하지 않는다. 결과 transaction rollback이면 Delivery 종료와 cleanup도 함께 rollback한다. 삭제로 Delivery가 이미 없어지거나 terminal이면 late result cleanup까지 생략한다.
+
+Provider cleanup은 Client revision을 증가시키지 않으므로 같은 revision의 이전 enabled 등록 재제출은 [기존 API](../api.md#기기-등록해제-계약-task-702)의 동일 결과 상태를 충족하지 못해 conflict다. TASK-703/704는 authenticated state 조회와 local counter max 동기화 뒤 **더 높은 revision**으로 현재 readiness/FID를 재등록한다. generation/credential은 유지하고 stale 요청을 자동 재활성화로 해석하지 않는다. 높은 revision으로 동일 FID 재등록도 허용하지만 원래 terminal Delivery는 재전송하지 않는다.
+
+사전 검증 직후 logout/rotation/takeover와 실제 I/O 사이 경쟁은 남는다. 새 호출의 snapshot은 검증 시 current owner의 값이지만 전송 중 owner가 바뀔 수 있으며 네트워크 내내 DB lock을 잡지 않는다. 이전 owner의 전송이 이미 시작/접수됐다면 회수할 수 없다. 최소 payload와 tap의 현재 Auth/ownership 재검증으로 노출 범위를 줄이며 절대적인 전송 순간 ownership 동기화를 보장했다고 주장하지 않는다.
+
+#### Crash/restart와 safety 경계
+
+아래에서 E는 불변 expiresAt, S는 마지막 preflight의 메모리 registration snapshot이다. 시작 commit 후에는 status=PENDING, count 증가, lastAttemptAt/revision 기록, nextAttemptAt은 recovery 예약이고 마지막 결과는 null이다. restart에는 S가 없으므로 과거 결과 cleanup을 추정 수행하지 않는다.
+
+| 장애 | 저장 상태 / 다음 처리 | cleanup / 한계 |
+| --- | --- | --- |
+| A. 호출 전 crash | 시작 commit 전이면 count/예약 그대로; 직후면 count 1회 소비, PENDING과 recovery 예약/E 유지. due 때 expiry→budget→새 preflight | 호출하지 않았어도 budget 손실 가능, cleanup 없음 |
+| B. 호출 중 crash | 결과 미저장 PENDING/count/예약/E/revision 유지, S 유실. due recovery에서 새 snapshot | 이전 접수 여부 불명, 기한/budget 내 duplicate 가능 |
+| C. accepted 뒤 DB 반영 전 crash | B와 같은 DB 상태. 성공했다는 사실을 추정해 ACCEPTED로 만들지 않음 | duplicate 가능; DB update rollback도 동일. count 한도로 무한 반복 차단 |
+| D. retry commit 뒤 restart | PENDING/count/last result와 확정 nextAttemptAt/E 유지. due 전 호출 없음 | terminal reset 없음, 기존 S 재사용 없음 |
+| E. 요청 중 FID rotation | 원래 attempt의 count/S로 결과 기록; retry 가능하면 다음 attempt는 새 current 등록 | old INVALID_TARGET은 revision/FID 불일치로 cleanup no-op |
+| F. 요청 중 ownership 이전 | 원래 Event Delivery 결과만 처리; 다음 preflight는 generation/owner 불일치로 종료 | old cleanup no-op. 이미 시작한 전송 회수 불가 |
+| G. expired 후보 재조회 | PENDING이면 EXPIRED + null next, count/E 유지; terminal EXPIRED는 query 제외 | Provider 호출/cleanup 없음 |
+| H. retry 중 Event/Alarm 삭제 | TASK-707의 원자 dispatch 종료/보존 정책 적용. 삭제/terminal row는 no-op, 보존·허용 row만 기한 내 재검증 | late 결과로 lifecycle/row 재생성 금지, FK 정책 미결정 유지 |
+| I. 오래 중단 뒤 restart | next<=E invariant로 오래된 pending도 due sweep 대상. expired 우선 종료, 미만료 row만 남은 budget 사용 | now/TTL/count를 reset하지 않음 |
+| J. 일부 Device만 성공 | ACCEPTED는 유지, 나머지 row만 독립 retry/FAILED/EXPIRED | recipient set 재선정/성공 Device 재전송 없음 |
+
+Result commit 응답 유실 때는 FCM을 다시 보내지 않고 새 DB transaction에서 동일 row/count/status를 읽어 같은 메모리 결과만 재적용한다. 이미 기록됐으면 no-op이고 Device cleanup/timestamp를 반복 갱신하지 않는다. DB 장애 동안 worker는 다음 FCM 호출을 시작하지 않는다. 제한된 DB 재반영도 실패하면 dispatch cycle을 종료하고 durable PENDING recovery에 맡긴다. 결과를 영속하기 전 process가 죽으면 response/Retry-After/S가 유실되므로 받은 header의 완전한 crash-safe 복원이나 정확한 외부 attempt 이력은 보장하지 못한다. 알려진 header는 정상 결과 commit에서 예약으로 보존하고 유실 결과는 recovery 지연과 expiry/budget으로 제한한다.
+
+SENDING/claim/lease 없이 보장하는 것은 DB identity uniqueness, terminal 자동 복귀 금지, durable 시작 count와 expiry로 제한된 SDK 호출, 단일 worker 안의 non-overlap, current-registration 조건부 cleanup이다. process crash의 외부 접수 확인, exactly-once 요청/표시, 여러 Backend 동시 dispatch, 검증 이후 변경의 완전 차단은 보장하지 않는다. SDK 내부 재전송 제어 gate를 통과하기 전 실제 HTTP 요청별 freshness/budget 보장도 미검증이다.
+
+#### Logging, metric과 구현 분담
+
+운영 로그는 eventId/deliveryId, 정규화 result/code, attemptCount, elapsedMs, retryScheduled, expired 정도의 필요한 문맥만 기록한다. 원문 exception message/stack을 무조건 출력하지 않는다. SDK message가 raw response를 포함할 수 있어 allowlist code로 변환한다. Firebase credential, Access/Refresh Token, raw FID/APNs token/installationId, installation credential/hash, raw HTTP error body/민감 response, 불필요한 GPS는 출력·저장하지 않는다. 미분류 detail도 bounded in-memory 진단 후 안전한 code만 남긴다.
+
+최소 metric 후보는 accepted 수, result category별 실패 수, retry 예약 수, final FAILED 수, EXPIRED 수, pending backlog, oldest pending age 및 FCM invocation latency다. backlog는 모든 PENDING을 포함하고 oldest age는 Delivery createdAt 기준 queue age이며 Event observedAt 기반 end-to-end age와 구분한다. category/status/eventType 정도만 bounded label로 쓰고 eventId/deliveryId/deviceId/userId/FID 등의 high-cardinality identifier는 label에 넣지 않는다. Micrometer/Actuator 설정이나 수집 구현을 이번 단계에 추가하지 않는다.
+
+| Task | 후속 책임 / 필요한 검증 |
+| --- | --- |
+| TASK-705 | Admin/FID Provider Client와 위 mapping, 안전한 error/header 추출, timeout/내부 retry 제어 gate, APNs expiration 확인, credential/target redaction 및 Backend→실제 iPhone smoke |
+| TASK-707 | Event/Delivery Entity·Migration·Repository, 기존 두 UNIQUE와 이번 operational fields/CHECK/due index, immutable Event owner/시각·recipient generation, History 전환 및 Alarm/User/Device 삭제 정책/FK. 실제 MySQL 제약과 query/EXPLAIN 검증 |
+| TASK-708 implementation | 기존 atomic lifecycle/Event/최초 recipient transaction에서 원래 observed/detected 시각·generation·기한 연결, 0/N recipient 및 이미 만료된 row 생성, logical dedup/UUID continuity. 재시도해도 payload/recipient/TTL 변경 금지 |
+| TASK-706 | 단일 due worker lifecycle/제한 query, preflight owner/generation/enabled/target/revision과 호출 직전 expiry 확인, attempt 시작 transaction 및 transaction 밖 I/O 연결. result policy를 새로 정의하지 않고 TASK-709 handler에 위임 |
+| TASK-709 implementation | Provider/local 결과 전이와 attempt/retry/recovery policy, conditional cleanup, 시작/결과 snapshot 일치 및 DB 재반영 안전성. expiry-vs-limit, crash 소비, unknown acceptance, stale FID, A→B→A, partial-device 실패의 핵심 correctness test |
+| TASK-703/704 | 기존 Device locking/API 및 높은 Client revision 재동기화 적용, 이미 terminal인 Delivery 복귀 없음 |
+| TASK-710/711 | 실제 iPhone 수신/tap 및 최종 E2E/regression. 선행 correctness 검증을 대체하지 않음 |
+
+Schema 적용과 삭제 정책은 TASK-707, Provider 제어 gate/smoke는 TASK-705에서 검증하고, 최종 운영 수치는 TASK-709 구현/latency에서 확정한다. Phase 8 latency/restart 검증은 이 failure 계약의 최초 correctness 구현을 미루는 이유가 아니다. TASK-708/709 checkbox와 모든 후속 Task 완료 상태·dependency는 변경하지 않는다.
 
 ### Permission, payload와 tap
 
