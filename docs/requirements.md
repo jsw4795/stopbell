@@ -109,7 +109,7 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 
 ### V1 Push Notification 계약
 
-- StopBell Device identity는 Client가 앱 installation마다 생성한 `installationId`를 기준으로 하며 User-scoped identity가 아니다. 하나의 `installationId`에는 동시에 current owner가 최대 한 명이어야 하고, 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference로 분리하고 APNs device token은 StopBell Device identity로 사용하지 않는다. Firebase targeting identifier 자체의 global uniqueness는 TASK-701 확인 뒤 결정한다.
+- StopBell Device identity는 Client가 앱 installation마다 생성한 `installationId`를 기준으로 하며 User-scoped identity가 아니다. 하나의 `installationId`에는 동시에 current owner가 최대 한 명이어야 하고, 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference로 분리하고 APNs device token은 StopBell Device identity로 사용하지 않는다. TASK-702에서 확정한 단일 Firebase Project의 현재 FID uniqueness 정책은 `database.md`의 devices Schema를 따른다.
 - TASK-701의 SDK/API 조사에서 delivery target으로 Firebase Installation ID(FID)를 선택했다. 사용자 확인에 근거한 실제 iPhone FID targeting 수신 smoke는 통과했으며 상세 SDK/readiness/lifecycle 계약은 ADR-010을 따른다.
 - 동일 installation의 registration update는 monotonic revision 또는 동등한 계약으로 순서 역전된 stale update가 최신 push target을 덮어쓰지 못하게 한다. 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
 - 현재 installation logout은 해당 Device의 Push subscription disable/unregister를 시도하지만 Alarm lifecycle과 다른 Device는 변경하지 않는다. Auth logout은 Refresh Session 종료 책임을 유지하며 Device lifecycle은 별도 authenticated API 또는 동등한 명시적 흐름으로 처리한다. Offline logout에서 Backend Device disable을 즉시 보장하지 않는다.

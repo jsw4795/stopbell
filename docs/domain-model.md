@@ -132,39 +132,41 @@ RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refr
 
 ## Purpose
 
-StopBell이 앱 installation 자체의 identity, 현재 owner와 Push delivery reference를 구분해 관리하는 Domain이다.
+앱 installation의 identity, 현재 owner와 회전 가능한 FID delivery reference를 구분한다.
 
-## Conceptual Attributes
+## Attributes
 
-    id
+| Field | 의미 |
+| --- | --- |
+| `id` | Backend 내부 PK |
+| `user` | 현재 owner, 필수 User 관계 |
+| `installationId` | User-scoped가 아닌 StopBell 앱 설치본 UUID v4 |
+| `installationCredentialHash` | 설치본 보유 권한을 확인하는 별도 자격증명의 SHA-256 hash |
+| `platform` | `DevicePlatform.IOS` / `ANDROID`, 설치본 동안 불변 |
+| `currentPushTargetId` | 현재 FCM 등록 callback의 FID, disabled에서는 null |
+| `registrationRevision` | 설치본 전체에서 증가하는 Client 요청 순서, 0 이상 |
+| `ownershipGeneration` | 최초 0, owner 이전 시 서버가 정확히 1 증가시키는 세대 |
+| `enabled` | 현재 StopBell Push 수신 대상 여부 |
+| `lastRegisteredAt` | 마지막으로 적용한 등록의 서버 UTC 시각, disable/멱등 재요청에서 유지 |
+| `createdAt`, `updatedAt` | JPA callback의 UTC 생성·수정 시각 |
 
-    user
+Flutter는 설치 시 표준 hyphenated UUID v4를 생성하고 소문자로 정규화한다. Backend도 정확한 36자 UUID v4 형식과 variant를 검증한 뒤 `Locale.ROOT` 소문자로 저장한다. 공백 trim, 축약 UUID 또는 다른 UUID version은 허용하지 않는다. 재시작·업데이트·logout·계정 변경에는 유지하고 삭제 후 재설치에는 새로 생성한다. iOS Keychain/backup에 남은 값만으로 새 설치를 이전 설치로 복원하지 않도록 설치 범위 marker와 함께 관리한다. 실제 Flutter 저장 구현은 TASK-704 책임이다.
 
-    installationId
+`installationId`는 공개 식별자이며 인증 수단이 아니다. 설치본 자격증명은 독립적인 CSPRNG 256-bit 비밀값으로 생성해 OS Secure Storage에 보관하고 logout에도 유지한다. Backend에는 hash만 보관하며 JWT와 함께 검증한다. UUID/FID/revision을 안다는 이유로 자격증명을 재발급·교체하거나 owner를 이전하지 않는다. 자격증명 유실은 fail closed이며 UUID만으로 복구하지 않는다. counter/generation metadata는 JWT와 해당 자격증명으로 보호하는 상태 조회로 복구할 수 있다.
 
-    platform
-
-    currentPushTargetId
-
-    registrationRevision
-
-    enabled
-
-    createdAt
-
-    updatedAt
-
-`installationId`는 Client가 앱 installation마다 생성하는 StopBell Device identity이며 User-scoped identity가 아니다. Firebase targeting identifier는 rotation/re-registration될 수 있는 현재 delivery reference이며 Device identity가 아니다. APNs device token도 StopBell Device identity로 사용하지 않는다. SDK/API 기준 delivery reference는 Firebase Installation ID(FID)를 선택했으며 사용자 확인에 근거한 실제 iPhone FID targeting smoke는 통과했다. FID/readiness/rotation 계약은 ADR-010을 따르고 field 이름·길이·constraint는 TASK-702에서 정한다.
+FID는 대소문자를 구분하는 opaque delivery reference다. 22자 관측값에 길이를 고정하지 않고 Firebase rotation에 따라 갱신한다. APNs token, legacy FCM token, raw FIS `getId()`만의 결과를 Device identity 또는 등록 완료 target으로 사용하지 않는다. FCM HTTP v1 `message.fid`와 readiness 계약은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md)을 따른다.
 
 ## Relationship and Lifecycle
 
     User 1 : N Device
 
-한 User는 여러 Device를 가질 수 있지만 하나의 `installationId`에는 동시에 current owner가 최대 한 명이다. 같은 installation에서 다른 User가 로그인하면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. 구체 DB constraint와 API transaction은 TASK-702/703에서 정한다. RefreshToken Session과 Device는 직접 FK로 연결하지 않는다.
+`installationId`마다 row 하나와 current owner 한 명만 존재한다. 계정 변경은 기존 row의 owner·generation·revision·FID·enabled를 한 transaction에서 이전한다. 설치본 자격증명, 명시적 이전 의도, current generation 일치가 모두 필요하다. RefreshToken과 Device FK는 없다.
 
-동일 installation의 registration update는 monotonic revision 또는 동등한 stale-write 방지 계약을 사용한다. 더 오래된 update가 최신 push target을 덮어쓸 수 없고, 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
+권한과 generation 검증을 통과한 요청에서 revision이 더 높으면 적용, 같고 요청의 결과 상태가 같으면 멱등 성공, 같고 다르면 conflict, 낮으면 stale 거부다. revision은 logout/owner 이전에도 reset하지 않는다. generation은 revision과 독립적이며 이전 owner의 지연된 요청은 큰 revision이라도 현재 상태를 변경하지 못한다. 상세 비교 순서와 이전 성공 재요청은 [Device API 계약](api.md#기기-등록해제-계약-task-702)을 따른다.
 
-현재 installation logout 또는 Push 해제는 해당 Device만 disable/unregister하며 Alarm lifecycle과 다른 Device를 변경하지 않는다. Auth logout request에 Device field를 추가하지 않고 별도 authenticated Device lifecycle로 처리한다. Invalid/unregistered provider 결과도 실패한 target/revision이 여전히 current registration일 때만 조건부로 disable하며 Device row를 무조건 삭제하지 않는다.
+등록은 enabled 상태로 생성/갱신/재활성화한다. disable은 row와 owner를 보존하고 enabled=false 및 FID=null로 해제한다. 다른 Device와 Alarm은 바꾸지 않는다. Provider invalid/unregistered cleanup은 실패 attempt의 owner/generation/target/revision이 current registration과 일치할 때만 조건부 disable하며 Client revision을 임의 증가시키지 않는다. 실제 cleanup은 TASK-709 책임이다.
+
+TASK-702는 `notification.entity.Device`, `DevicePlatform`과 V13 매핑만 구현한다. 상태 변경 method, Repository, Service, Controller, DTO와 동시성/멱등 처리 실행은 TASK-703 책임이다.
 
 ------------------------------------------------------------------------
 

@@ -213,7 +213,7 @@ Push notification 검증은 실제 Device에서 수행해야 한다. emulator/si
 
 ## Firebase iOS early smoke (TASK-701)
 
-SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-701-firebase-ios-기술-계약-2026-10-06)이다. 사용자의 실기기 검증 보고로 실제 Firebase config/APNs 준비, HTTP v1 `message.fid` 전송·서버 접수와 실제 iPhone notification 수신 성공을 확인했다. TASK-701의 hardware smoke gate는 통과했으며 다음 단계는 TASK-702다. 완료 결과와 미검증 항목은 ADR-010에 기록한다.
+SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-701-firebase-ios-기술-계약-2026-10-06)이다. 사용자의 실기기 검증 보고로 실제 Firebase config/APNs 준비, HTTP v1 `message.fid` 전송·서버 접수와 실제 iPhone notification 수신 성공을 확인했다. TASK-701의 hardware smoke gate와 TASK-702의 Domain/Schema 정의는 완료됐으며 실제 Device API는 TASK-703에서 구현한다. 완료 결과와 미검증 항목은 ADR-010에 기록한다.
 
 ### Firebase Console / Apple Developer 설정 순서
 

@@ -104,11 +104,23 @@ Device internal PK
 
 `installationId`는 StopBell이 한 앱 installation을 구분하는 identity이며 User-scoped identity가 아니다. 하나의 installation에는 동시에 current owner가 최대 한 명이어야 한다. 같은 installation에서 다른 User가 로그인하면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase targeting identifier는 rotation/re-registration 가능한 delivery reference이며 Device identity가 아니다. APNs device token은 Apple/Firebase bridge와 readiness에만 사용하며 StopBell Device identity, Backend Push target, Domain identifier로 저장·노출하지 않는다.
 
-TASK-701의 공식 SDK/API 조사 기준 V1 delivery target은 FID를 선택했으며, 사용자 확인에 근거해 HTTP v1 `message.fid` 전송과 실제 iPhone notification 수신의 hardware smoke gate를 통과했다. TASK-701은 완료이며 TASK-702에서 이 계약을 사용해 Device Domain/Schema를 구체화한다. FID를 Firebase project/app 문맥과 무관한 영구적·전역 Device identity로 가정하지 않는다. 구체 field 이름, column 길이와 constraint는 TASK-702에서 정한다.
+TASK-701의 공식 SDK/API 조사 기준 V1 delivery target은 FID를 선택했으며, 사용자 확인에 근거해 HTTP v1 `message.fid` 전송과 실제 iPhone notification 수신의 hardware smoke gate를 통과했다. TASK-701은 완료이며 TASK-702는 이 계약으로 Device Domain/Schema를 구체화했다. FID를 Firebase project/app 문맥과 무관한 영구적·전역 Device identity로 가정하지 않는다. 확정된 field/constraint는 [Device Domain](../domain-model.md#device)과 [devices Schema](../database.md#devices)를 따른다.
 
-한 User는 여러 Device를 가질 수 있다. 단일 Device 제한을 두지 않고 RefreshToken Session과 Device를 FK로 직접 연결하지 않는다. Installation ownership takeover의 구체 DB constraint와 API transaction은 TASK-702/703에서 정한다. 동일 installation의 update에는 monotonic revision 또는 동등한 stale-write 보호가 필요하다. 오래된 update는 최신 target을 덮어쓸 수 없고 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
+한 User는 여러 Device를 가질 수 있다. 단일 Device 제한을 두지 않고 RefreshToken Session과 Device를 FK로 직접 연결하지 않는다. Installation ownership 이전의 계약은 TASK-702에서 정의했으며 실제 API transaction은 TASK-703에서 구현한다. 동일 installation의 update에는 monotonic revision 또는 동등한 stale-write 보호가 필요하다. 오래된 update는 최신 target을 덮어쓸 수 없고 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
 
 현재 installation logout은 해당 Push subscription만 disable/unregister하고 Alarm lifecycle과 다른 Device는 변경하지 않는다. `/auth/logout`은 Refresh Session 종료 책임을 유지하며 Device field를 받지 않는다. Device disable은 별도 authenticated API 또는 동등한 명시적 lifecycle로 처리한다. Flutter는 Phase 6 logout hook에서 Device disable을 시도한 뒤 Auth logout과 local session 종료를 수행하며, offline에서는 Backend disable을 즉시 보장하지 않는다.
+
+### TASK-702 설치본 권한과 소유권 이전 결정 (2026-10-09)
+
+UUID v4는 식별자이고 Client revision은 순서값이므로 둘만으로 다른 User의 설치본 takeover를 허용할 수 없다. 현재 owner의 JWT만으로 이전을 허용하면 새 User 로그인이나 offline logout 뒤 이전에 사용할 권한이 없어지고, FID/APNs를 비밀키처럼 사용하면 identity/delivery 분리 원칙을 깨뜨린다.
+
+최소 대안은 설치 시 별도의 CSPRNG 256-bit installation credential을 생성·Secure Storage에 보관하고 Backend에는 hash만 저장하는 것이다. JWT는 User를, 자격증명은 설치본 보유 권한을 확인한다. Credential은 installation 동안 불변이며 logout/계정 전환에도 유지한다. UUID/FID만으로 재발급하거나 다른 자격증명의 기존 row를 덮어쓰지 않는다. 자격증명 유실 시 자동 복구를 제공하지 않는 fail-closed trade-off를 선택한다. 응답 유실 뒤 계정 변경과 counter/generation 복구에는 JWT와 자격증명으로 보호한 최소 상태 조회를 사용한다. UUID만으로는 조회·복구하지 않는다. 이 자격증명은 Firebase registration 소유권 attestation이 아니며 V1에서 Firebase proof/별도 기기 attestation 체계를 추가하지 않는다.
+
+추가로 서버가 owner 이전 시만 증가시키는 `ownershipGeneration`을 둔다. 새 owner의 인증, 설치본 자격증명, 명시적 이전 의도와 current generation 일치 후 높은 revision의 이전을 원자적으로 적용한다. generation은 Client가 임의로 큰 값을 보내 설정할 수 없다. A→B→A 뒤 이전 A 요청도 old generation으로 거부하며, 큰 revision이 권한/generation을 대체하지 못한다. 이전 성공 응답 유실의 동일 상태 재요청만 무변경 멱등 성공으로 처리한다. 세부 순서와 validation/error/response는 [Device API 계약](../api.md#기기-등록해제-계약-task-702)이 소유한다.
+
+단일 Firebase Project V1에서는 현재 FID의 중복 활성 등록을 허용하지 않는다. disable 시 FID를 NULL로 해제하고 case-sensitive nullable UNIQUE를 적용해 비활성 row의 과거 target 점유를 없앤다. 충돌 FID 제출로 기존 Device를 자동 탈취·disable하지 않는다. Schema/index는 [database.md](../database.md#devices)가 소유한다.
+
+TASK-702는 Device/Platform과 V13만 구현한다. 기존 row의 write lock과 최초 생성 UNIQUE 충돌 처리, revision·generation 비교, ownership/disable Service/API 및 correctness test는 TASK-703 책임이다. Event 시점 recipient 확정, worker의 전송 직전 owner/enabled/target/revision 재검증과 TASK-707 persistence 책임은 유지한다. 이미 접수된 전송의 회수나 offline 즉시 해제는 보장하지 않는다.
 
 ### TASK-701 Firebase iOS 기술 계약 (2026-10-06)
 
@@ -159,7 +171,7 @@ TASK-701 완료 기록은 사용자의 실제 iPhone 검증 보고에 근거한�
 
 SDK/FCM 결함이나 APNs 연동·FID registration 실패로 확정된 문제는 없다. 과거 `message.token` 시도는 입력 FID의 정확성이 보장되지 않아 token targeting 실패를 입증한 실험으로 기록하지 않는다. V1 전송 계약은 `message.fid`를 유지한다.
 
-위 native `unregister()` 의미는 공식 SDK 계약 확인이며 실기기 동작 검증은 아직 수행하지 않았다. Foreground/terminated 수신과 tap navigation, Backend Firebase Admin SDK 연동도 미검증이다. StopBell `installationId`와 Firebase FID의 분리 및 rotation 계약을 유지하며 다음 단계는 TASK-702다. 재현 절차는 [Local early smoke 절차](../local-development.md#firebase-ios-early-smoke-task-701)를 따른다. Provider accepted 응답, unsigned build 성공, 화면의 등록 성공만으로 실제 수신 성공을 대신하지 않는다.
+위 native `unregister()` 의미는 공식 SDK 계약 확인이며 실기기 동작 검증은 아직 수행하지 않았다. Foreground/terminated 수신과 tap navigation, Backend Firebase Admin SDK 연동도 미검증이다. StopBell `installationId`와 Firebase FID의 분리 및 rotation 계약을 유지한다. TASK-702의 Domain/Schema와 lifecycle 계약은 정의됐으며 실제 Device API는 TASK-703 책임이다. 재현 절차는 [Local early smoke 절차](../local-development.md#firebase-ios-early-smoke-task-701)를 따른다. Provider accepted 응답, unsigned build 성공, 화면의 등록 성공만으로 실제 수신 성공을 대신하지 않는다.
 
 공식 근거:
 

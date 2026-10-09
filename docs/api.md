@@ -217,30 +217,131 @@ Alarm 생성, 목록, 상세, 활성화, 비활성화 response는 다음 필드�
 
 Alarm response에는 `provider`, `externalRouteId`, `externalStopId`, `targetStopOrder`, target GPS, `cityCode`, predecessor/successor external ID 또는 order, `followUpVehicleTrackingId`, `followUpStartedAt`, `followUpExpiresAt`을 포함하지 않는다. 이 값들은 Backend의 provider metadata, target snapshot, evaluation 또는 follow-up runtime implementation detail이다.
 
-### 기기 등록
+### 기기 등록/해제 계약 (TASK-702)
 
-Phase 7에서 인증된 User의 현재 앱 installation과 Push delivery reference를 등록·갱신한다.
+아래 계약은 확정됐지만 Endpoint/DTO/ErrorCode/Service/Repository와 동시성 처리는 **TASK-703에서 구현한다**. TASK-702는 Domain/JPA/Schema만 구현한다.
 
-Endpoint 후보:
+등록·조회·해제 Endpoint 모두 StopBell JWT Access Token이 필수다. User는 Spring Security Principal에서 가져오며 body의 `userId`를 받지 않는다. 별도로 `X-Installation-Credential` header가 필수다. 이 값은 Flutter가 최초 요청 전에 CSPRNG로 생성·안전하게 저장한 32-byte 비밀값의 canonical unpadded Base64URL(43자)이다. Backend는 정확히 32 bytes로 decode하고 SHA-256 lowercase hex hash를 저장/constant-time 비교한다. UUID·FID·revision은 자격증명을 대체하지 않는다. 자격증명, hash, FID는 로그·오류·응답에 노출하지 않는다. installationId는 로그·오류에서 제외하고 응답에서는 해당 요청의 정규화한 값만 반환한다. 상태 조회의 access log도 원문 경로 대신 route template을 사용해 installationId를 노출하지 않는다. 운영 API는 HTTPS를 사용한다.
+
+#### 등록
 
 ```http
 POST /api/v1/devices
+Authorization: Bearer <Access Token>
+X-Installation-Credential: <installation credential>
+Content-Type: application/json
 ```
-
-Conceptual request:
 
 ```json
 {
-  "installationId": "<client-generated installation identity>",
+  "installationId": "a1234567-1234-4123-8123-123456789abc",
   "platform": "IOS",
-  "pushRegistrationId": "<current provider targeting identifier>",
-  "registrationRevision": 1
+  "pushRegistrationId": "<current registered FID>",
+  "registrationRevision": 1,
+  "expectedOwnershipGeneration": 0,
+  "transferOwnership": false
 }
 ```
 
-`installationId`는 User-scoped가 아닌 StopBell 앱 installation identity이며 하나의 installation에는 동시에 current owner가 최대 한 명이어야 한다. 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase targeting identifier는 변경 가능한 delivery reference이며 global uniqueness는 TASK-701 확인 전에는 가정하지 않는다. SDK/API 기준 delivery reference로 FID를 선택했으며 사용자 확인에 근거한 실제 iPhone FID targeting smoke는 통과했다(ADR-010). 실제 request field 이름, 길이와 revision 표현은 TASK-702에서 확정한다. 동일 installation의 오래된 update가 최신 target을 덮어쓰지 못해야 하며 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
+모든 필드는 필수다. `installationId`는 정확한 hyphenated UUID v4/variant 형식(36자)만 허용하고 소문자로 정규화하며 trim하지 않는다. `platform`은 정확한 `IOS` / `ANDROID`이고 기존 row의 platform을 변경하지 않는다. Android enum은 허용하지만 이번 Task에서 Android Firebase 연동은 구현하지 않는다. `pushRegistrationId`는 FCM 등록 callback에서 얻은 현재 FID로 1~255자이며 blank/공백 포함 값은 거부한다. 대소문자와 내용을 그대로 보존하며 22자나 특정 FID prefix에 고정하지 않는다. `registrationRevision`과 `expectedOwnershipGeneration`은 0~`Long.MAX_VALUE`의 JSON 정수이며 boolean/string/소수 coercion을 허용하지 않는다. `transferOwnership`은 JSON boolean이다.
 
-현재 installation의 Push subscription을 disable/unregister하는 별도 authenticated Endpoint 또는 동등한 명시적 lifecycle도 TASK-702/703에서 정의한다. 이 동작은 해당 Device만 변경하며 Alarm lifecycle과 다른 Device는 변경하지 않는다. `/auth/logout` request에 Device field를 추가하지 않는다.
+신규 설치는 `expectedOwnershipGeneration=0`, `transferOwnership=false`로 최초 등록한다. row가 없을 때 자격증명을 처음 바인딩하고 generation=0, enabled=true로 생성한다. 기존 row가 있다면 같은 자격증명만 허용하며 다른 자격증명의 UUID 충돌을 신규 설치나 takeover로 처리하지 않는다.
+
+기존 owner의 재등록/FID rotation/재활성화는 `transferOwnership=false`와 current generation을 제출한다. 다른 User로의 이전은 **새 User의 JWT + 동일 설치본 자격증명 + transferOwnership=true + current generation**이 모두 필요하다. 이전 owner의 disable 성공 여부와 무관하게 안전한 이전을 허용하며 DB의 동일 row에 새 owner/FID/revision/enabled를 적용하고 서버가 generation을 정확히 1 증가시킨다. owner가 같다면 true는 이전 요청으로 적용하지 않는다. revision/generation overflow는 거부한다.
+
+처리 순서와 멱등 규칙:
+
+1. JWT·요청 validation 후 installation row를 찾고 자격증명 및 불변 platform을 검증한다. 기존 row는 write lock 안에서 다음 검증을 수행한다.
+2. **같은 revision + 동일 결과 상태**이면 멱등 성공한다. 등록의 동일 상태는 Principal=current owner, platform/FID 일치, enabled=true다. 일반 요청은 expected generation=current가 필요하다. 이전 요청의 응답 유실 재전송만 true와 expected generation=current-1을 허용한다. 이 예외도 동일 owner/revision/target/enabled를 모두 만족해야 하며 아무 mutation이나 timestamp 갱신을 하지 않는다.
+3. 그 외에는 expected generation=current가 필수다. 다른 owner의 요청은 명시적 이전 true인 등록만 허용한다. UUID/FID나 큰 revision만으로 이 조건을 우회하지 않는다.
+4. 권한 있는 요청에서 request revision > stored면 적용, 같고 상태가 다르면 revision conflict, 작으면 stale로 거부한다. 모든 검증과 UNIQUE 충돌 확인이 끝난 뒤 전체 상태를 한 transaction에서 commit한다.
+
+다른 installation이 같은 FID를 점유하면 충돌로 전체 rollback한다. 기존 Device의 owner/FID/상태를 바꾸거나 자동 disable하지 않는다. 등록 결과는 enabled=true다. 더 높은 revision으로 동일 FID를 재등록하면 `lastRegisteredAt`/`updatedAt`을 서버 UTC 시각으로 갱신한다. 멱등 요청은 갱신하지 않는다.
+
+최초 생성은 `201 Created`, 기존 row 적용·멱등 재요청은 `200 OK`다. 응답 형식은 다음과 같으며 owner나 credential/FID는 반환하지 않는다. `installationId`는 정규화한 요청 식별자를 반환한다.
+
+```json
+{
+  "id": 1,
+  "installationId": "a1234567-1234-4123-8123-123456789abc",
+  "enabled": true,
+  "registrationRevision": 1,
+  "ownershipGeneration": 0
+}
+```
+
+#### 설치본 상태 조회
+
+```http
+GET /api/v1/devices/{installationId}
+Authorization: Bearer <Access Token>
+X-Installation-Credential: <installation credential>
+```
+
+UUID/header validation은 등록과 같다. JWT와 **해당 설치본 자격증명**을 모두 검증한다. 현재 owner가 다른 User여도 설치본 보유자는 계정 이전에 필요한 서버 상태를 조회할 수 있다. `200 OK`로 등록 응답의 id/정규화 installationId/enabled/revision/generation과 `ownedByCurrentUser` boolean을 반환한다. owner ID/FID/credential은 반환하지 않는다. row가 없으면 `404 DEVICE_NOT_FOUND`, 자격증명 불일치는 `403 DEVICE_CREDENTIAL_INVALID`다. 상태나 시각을 변경하지 않는다.
+
+이 조회는 응답 유실 후 계정 변경, 앱 재시작의 pending 요청 결과 불명확, counter/generation metadata 복구에 필요한 최소 동기화다. 현재 Auth Session의 **새 사용자 의도**에 대해서만 조회 상태를 반영해 local revision을 max(local, server)로 맞춘 뒤 증가시키고, current generation과 필요한 이전 intent를 새 요청에 snapshot한다. 조회와 mutation 사이 경쟁은 mutation transaction의 재검증으로 거부한다. 과거 pending 요청의 JWT/generation/revision을 교체하거나 자동 takeover하기 위한 조회로 사용하지 않는다. credential을 잃은 경우 조회·복구를 허용하지 않는다. 실제 구현은 TASK-703 책임이다.
+
+#### 비활성화
+
+```http
+POST /api/v1/devices/disable
+Authorization: Bearer <Access Token>
+X-Installation-Credential: <installation credential>
+Content-Type: application/json
+```
+
+```json
+{
+  "installationId": "a1234567-1234-4123-8123-123456789abc",
+  "registrationRevision": 2,
+  "expectedOwnershipGeneration": 0
+}
+```
+
+모든 필드와 header는 필수이며 등록과 같은 validation을 사용한다. 기존 row의 자격증명과 **Principal=current owner** 및 current generation이 필요하다. 이전 권한은 없으며 row가 없거나 다른 owner이면 `DEVICE_NOT_FOUND`다. 같은 revision에 이미 enabled=false/FID=null이면 멱등 성공, 그 외 revision 비교는 등록과 같다. 적용 시 enabled=false, FID=null, revision 갱신이며 row/owner/generation/lastRegisteredAt을 보존한다. 다른 Device나 Alarm을 삭제·비활성화하지 않는다. `200 OK`로 등록과 같은 응답 형식(enabled=false)을 반환한다.
+
+#### 오류와 Client 순서 계약
+
+API use-case 오류는 기존 `code`, `message` 두 필드 형식을 따른다. 다음 코드는 TASK-703에서 추가한다. JWT 누락/실패는 기존 Spring Security의 `401 Unauthorized` 처리를 유지한다.
+
+| Code | HTTP | message / 의미 |
+| --- | --- | --- |
+| `INVALID_REQUEST` | 400 | `Request is invalid.` / 필수값·UUID·범위·header 형식 오류, counter overflow |
+| `DEVICE_CREDENTIAL_INVALID` | 403 | `Installation credential is invalid.` / 기존 설치본 자격증명 불일치, 상세 상태 미노출 |
+| `DEVICE_NOT_FOUND` | 404 | `Device was not found.` / 조회·disable 대상 없음 또는 disable의 다른 owner |
+| `DEVICE_OWNERSHIP_CONFLICT` | 409 | `Device ownership has changed.` / generation 불일치 또는 허용되지 않은 이전 |
+| `DEVICE_PLATFORM_CONFLICT` | 409 | `Device platform cannot change.` / 불변 platform 변경 |
+| `DEVICE_REGISTRATION_STALE` | 409 | `Device registration revision is stale.` / 낮은 revision |
+| `DEVICE_REVISION_CONFLICT` | 409 | `Device registration revision conflicts.` / 동일 revision의 다른 결과 상태 |
+| `DEVICE_PUSH_TARGET_CONFLICT` | 409 | `Push target is already registered.` / 다른 installation의 현재 FID 점유 |
+
+오류에 current owner, credential, FID 또는 다른 설치본 상태를 넣지 않는다. 권한/generation 오류는 revision보다 우선하며 표의 세부 상태는 해당 권한을 통과한 요청에만 적용된다.
+
+Flutter는 설치본 전체 revision을 logout/계정 변경에도 유지한다. 요청을 보내기 **전에** 증가한 counter와 pending 요청 payload, 당시 Auth Session/User 및 expected generation을 내구적으로 저장하고 설치본 mutation을 직렬화한다. response의 generation은 해당 요청/session이 현재인 경우에만 반영한다. timeout은 저장한 동일 payload로 재전송하며 새 revision/현재 JWT/generation을 붙여 과거 작업을 새 요청으로 바꾸지 않는다. Auth interceptor도 계정 변경 뒤 이전 요청을 새 User JWT로 재시도하지 않는다. ownership conflict에는 generation을 추측 증가하거나 자동 takeover 재시도를 하지 않는다. 필요한 경우 현재 session의 명시적 사용자 동작에서 상태를 조회해 새 의도로 처리한다.
+
+앱 재시작은 저장한 counter/generation/pending 요청을 복원하며 counter는 응답 revision보다 낮아지지 않는다. 정상 응답 유실은 동일 요청 재전송으로 복구한다. counter/generation metadata가 유실되거나 backup과 불일치하면 위 인증된 상태 조회로 동기화한 후 새 의도를 처리한다. credential 자체의 유실에는 등록을 중단하며 UUID만으로 reset/복구하지 않는다. 재설치 때는 새로운 설치본 identity/credential/counter를 생성한다. 범용 동시성 framework를 선행 추가하지 않는다.
+
+| 검토 상황 | 계약 결과 (실행 검증은 TASK-703) |
+| --- | --- |
+| AAA r1 → BBB r2 | 동일 owner/generation에서 BBB 적용 |
+| BBB r2 뒤 AAA r1 지연 | stale 거부, BBB 유지 |
+| 같은 r2/BBB 재전송 | 동일 상태 멱등 성공 |
+| 같은 r2/다른 FID | revision conflict |
+| disable r3 뒤 등록 r2 지연 | stale 거부, disabled 유지 |
+| logout 뒤 같은 User 재로그인 | identity/credential/generation 유지, 높은 r로 재활성화 |
+| A → B | credential + 명시적 이전 + expected generation 일치, generation g→g+1 |
+| B 등록 뒤 A 지연 register/disable | 이전 intent/generation 또는 owner 불일치로 거부, 큰 revision도 변경 불가 |
+| A → B → A 뒤 첫 A의 지연 요청 | User가 다시 같아도 old generation 거부 |
+| 이전 성공 응답 유실 후 동일 B 요청 | 같은 owner/r/FID/enabled와 이전 g의 재전송은 mutation 없이 성공 |
+| 앱 재시작 | durable counter/generation 복원, 필요 시 credential로 상태 조회, reset 금지 |
+| 신규 설치 UUID 충돌 | 다른 credential이면 403, 기존 row 유지 |
+
+#### Logout과 offline 한계
+
+Flutter는 현재 session으로 bounded Device disable 시도 → 기존 `POST /auth/logout` → 로컬 session 정리 순서로 처리한다. disable의 network/timeout 실패로 Auth logout을 영구 차단하지 않는다. installation identity/credential/counter는 유지하며 Firebase FID deletion과 native unregister를 일반 logout 필수 단계로 사용하지 않는다. Backend recipient disable과 Firebase registration lifecycle은 분리한다.
+
+Offline disable 실패 시 Backend에 enabled Device가 남아 이전 User의 notification이 계속 도착할 수 있다. Auth logout은 Access Token을 즉시 revoke하지 않으며 Push 권한 해제의 대체 수단도 아니다. 재연결 때 원래 User/session과 generation이 유효할 경우에만 pending disable을 처리한다. 다른 User 로그인은 안전한 ownership 이전을 완료해 이전 owner의 향후 recipient eligibility를 제거한다. 이전 요청을 새 User의 자격으로 재작성하지 않는다. Flutter는 logout 때 로컬 민감 상태/navigation을 지우고 Push는 최소 hint만 사용하며 tap 시 현재 인증/ownership을 다시 확인한다. 이미 Provider에 접수되거나 OS에 표시된 알림의 회수와 offline 즉시 해제는 보장하지 않는다.
 
 ### Push payload와 Notification tap
 
@@ -369,6 +470,6 @@ Access Token blacklist는 사용하지 않으므로 Logout 뒤에도 이미 발�
 
 Flutter logout은 같은 Auth Session 안에서 refresh와 직렬화하며 local 인증 상태가 late refresh/API response로 되살아나지 않게 보호한다. 이는 서버에 이미 도착한 요청을 취소하거나 기존 Access Token을 즉시 무효화한다는 계약이 아니다. `/auth/google`과 `/auth/logout`도 refresh interceptor나 자동 재시도 대상이 아니다.
 
-Phase 7 Flutter logout은 이 기존 lifecycle/hook을 사용해 현재 Device unsubscribe/disable을 시도한 뒤 Auth logout과 local session 종료를 수행한다. Device 처리는 별도 authenticated API를 사용하며 이 request body에 Device field를 추가하지 않는다. Offline logout에서는 Backend Device disable을 즉시 보장할 수 없으므로 local session 종료를 영구 차단하지 않는다. 구체 순서와 SDK local unregister 동작은 TASK-701/704에서 검증한다.
+Phase 7 Flutter logout은 이 기존 lifecycle/hook을 사용해 현재 Device unsubscribe/disable을 시도한 뒤 Auth logout과 local session 종료를 수행한다. Device 처리는 별도 authenticated API를 사용하며 이 request body에 Device field를 추가하지 않는다. Offline logout에서는 Backend Device disable을 즉시 보장할 수 없으므로 local session 종료를 영구 차단하지 않는다. Device 순서와 offline 한계는 [TASK-702 계약](#기기-등록해제-계약-task-702)을 따른다. Flutter 실행은 TASK-704에서 구현·검증한다.
 
 Alarm을 포함한 사용자 소유 Application API는 Client Request Body 또는 Query Parameter의 `userId`를 받지 않는다. Spring Security가 검증한 Access Token의 Principal에서 StopBell User를 식별한다.

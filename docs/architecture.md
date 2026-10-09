@@ -167,7 +167,11 @@ Provider mapper는 request Route context, raw Provider response, StopBell이 성
 
 Device registration lifecycle, durable logical Notification 결정, Event 시점의 per-Device recipient 확정, Push provider 요청과 결과 처리를 담당한다.
 
-StopBell Device identity는 내부 PK와 Client가 생성한 installation ID로 구성한다. `installationId`는 User-scoped가 아닌 앱 installation 자체의 identity이며 하나의 installation에는 동시에 current owner가 최대 한 명이어야 한다. 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference이며 Device identity가 아니다. 한 User는 여러 Device를 가질 수 있다. 동일 installation의 registration update는 monotonic revision 또는 동등한 stale-write 보호를 사용한다. SDK/API 기준 FID targeting을 선택했으며 사용자 확인에 근거한 실제 iPhone FID targeting smoke는 통과했다. 상세 Firebase 계약은 ADR-010을 따르고 구체 field 이름·길이·constraint는 TASK-702에서 정한다.
+Device는 내부 PK + StopBell installation UUID v4 + 현재 FID를 분리한다. User 1:N Device이며 installation당 current owner는 한 명이다. TASK-702는 Device/Platform JPA와 V13 Schema를 구현했으며 API는 TASK-703에서 구현한다. [Domain](domain-model.md#device), [Schema](database.md#devices), [등록/해제 API 계약](api.md#기기-등록해제-계약-task-702)을 따른다. Firebase readiness와 FID targeting smoke 결과는 ADR-010을 유지한다.
+
+Device mutation은 JWT Principal과 별도 installation credential을 검증한다. TASK-703에서 기존 row의 `PESSIMISTIC_WRITE` transaction으로 ownership generation/revision 검증과 owner/FID/enabled 갱신을 함께 처리한다. 계정 변경은 credential과 명시적 이전 intent 및 expected generation이 일치할 때만 서버 generation을 증가시킨다. Client의 높은 revision만으로 이전하지 않으며 다른 User의 지연된 disable은 현재 Device를 변경하지 못한다. RefreshToken과 Device는 FK로 연결하지 않는다. 신규 row의 경쟁은 installation/FID UNIQUE로 차단하고 rollback 뒤 권한을 재검증한다.
+
+Flutter는 설치본 counter/credential/generation을 logout에도 보존하고 요청을 session과 함께 snapshot해 계정 변경 뒤 이전 작업이 새 Principal로 재시도되지 않게 한다. Device disable 시도 → Auth logout → local session 종료의 경계를 유지하며 network 실패로 logout을 영구 차단하지 않는다. Offline 즉시 Push 해제와 이미 FCM에 접수된 알림 회수는 보장하지 않는다. 구체 계약/한계는 API 문서가 소유하며 Flutter 실행은 TASK-704 책임이다.
 
 Notification persistence는 다음 책임으로 분리한다.
 

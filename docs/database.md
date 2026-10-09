@@ -47,7 +47,7 @@ JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `
 
 ## 6. 핵심 테이블
 
-`users`, `refresh_tokens`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 physical Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`, `NotificationEvent`/`NotificationDelivery` physical Schema는 각각 TASK-702, TASK-707에서 별도 Migration으로 추가하거나 기존 Schema를 대체한다. Alarm activation generation은 TASK-510의 V11 Migration으로 `alarms`에 추가됐다.
+`users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 physical Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 TASK-702의 V13으로 추가됐다. `NotificationEvent`/`NotificationDelivery` physical Schema는 TASK-707에서 별도 Migration으로 추가하거나 기존 Schema를 대체한다. Alarm activation generation은 TASK-510의 V11 Migration으로 `alarms`에 추가됐다.
 
 ### users
 
@@ -91,24 +91,38 @@ UNIQUE(token_hash)
 
 ### devices
 
-모바일 앱 installation을 User 및 현재 Push delivery reference에 연결한다.
-
-확정된 conceptual contract:
+현재 Schema (`V13__create_devices.sql`):
 
 ```text
-Device internal PK
-+ user
-+ client-generated installationId
-+ current Firebase push targeting identifier
-+ stale registration update를 막는 monotonic revision 또는 동등한 값
-+ enabled/disabled lifecycle
+id BIGINT AUTO_INCREMENT PRIMARY KEY
+user_id BIGINT NOT NULL REFERENCES users(id)
+installation_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL
+installation_credential_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL
+platform VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL
+current_push_target_id VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin NULL
+registration_revision BIGINT NOT NULL
+ownership_generation BIGINT NOT NULL DEFAULT 0
+enabled BOOLEAN NOT NULL
+last_registered_at DATETIME(6) NOT NULL
+created_at DATETIME(6) NOT NULL
+updated_at DATETIME(6) NOT NULL
 ```
 
-한 User는 여러 Device를 가질 수 있다. `installationId`는 User-scoped가 아닌 StopBell 앱 installation identity이며 하나의 installation에는 동시에 current owner가 최대 한 명이어야 한다. 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. 구체 constraint/API transaction은 TASK-702/703에서 정한다. Push targeting identifier는 변경 가능한 delivery reference다. APNs device token을 Device identity로 사용하지 않으며 RefreshToken과 Device를 FK로 직접 연결하지 않는다.
+제약조건과 index:
 
-동일 installation의 더 오래된 registration update가 최신 target을 덮어쓰지 못해야 하고 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다. Invalid/unregistered provider 결과는 실패한 target/revision이 current registration과 일치할 때만 조건부 disable한다.
+- `fk_devices_user_id`: `users(id)` FK, cascade delete 없음. `user_id` UNIQUE와 RefreshToken FK 없음
+- `uk_devices_installation_id`: 설치본당 row/owner 하나. Client/Domain에서 검증·소문자 정규화한 UUID v4 저장
+- `uk_devices_current_push_target_id`: 단일 Firebase Project V1의 현재 FID UNIQUE. FID가 같다는 이유로 기존 row를 이전·disable하지 않음
+- `ck_devices_registration_revision`, `ck_devices_ownership_generation`: 각각 0 이상
+- `ck_devices_platform`: 정확한 `IOS` / `ANDROID`
+- `ck_devices_enabled_target`: enabled는 true 또는 false이며 true면 non-null/non-empty FID, false면 반드시 NULL
+- `idx_devices_user_enabled (user_id, enabled)`: User별 활성 recipient 조회와 FK의 left prefix를 함께 지원. 별도 user_id index나 미사용 index 없음
 
-SDK/API 기준 targeting identifier로 FID를 선택했으며 사용자 확인에 근거한 실제 iPhone FID targeting smoke는 통과했다(ADR-010). Field/column 이름과 길이, uniqueness와 index는 TASK-702에서 정한다.
+FID column은 case-sensitive, NO PAD `utf8mb4_0900_bin`으로 비교하므로 대소문자와 trailing space를 같은 값으로 합치지 않는다. API는 공백을 포함한 FID를 거부하며 문자열을 trim/소문자화하지 않는다. MySQL nullable UNIQUE는 여러 NULL을 허용하므로 disable 시 NULL로 해제하면 과거 Device가 target을 계속 점유하지 않는다. [MySQL UNIQUE](https://dev.mysql.com/doc/refman/8.4/en/create-index.html), [binary collation/NO PAD](https://dev.mysql.com/doc/refman/8.4/en/charset-binary-collations.html)를 따른다. FID의 다른 Firebase project까지 포함한 전역 유일성을 주장하지 않는다.
+
+자격증명 hash는 decoded 32-byte 비밀값의 SHA-256 lowercase hex다. 원문을 저장하지 않고 installation ID/platform/hash는 row 동안 불변이다. JPA는 기존 Entity처럼 `LocalDateTime`과 callback을 사용하며 Device의 시각은 UTC 의미의 `DATETIME(6)`로 저장한다. `last_registered_at`은 적용된 등록 시 서버에서 설정하며 최초 등록 row만 생성하므로 NOT NULL이다.
+
+TASK-703은 기존 row에 `PESSIMISTIC_WRITE`를 사용해 자격증명/Principal/expected generation/revision 검증과 owner·generation·target·revision·enabled 갱신을 원자적으로 구현한다. 아직 없는 row의 동시 최초 등록은 UNIQUE를 최종 경계로 삼고 충돌 transaction을 rollback한 뒤 기존 row의 권한을 다시 검증한다. Blind upsert 또는 충돌 target의 자동 탈취는 금지한다. JPA `@Version`과 별도 CAS framework를 병행하지 않는다. HTTP 계약은 [api.md](api.md#기기-등록해제-계약-task-702), Domain 의미는 [domain-model.md](domain-model.md#device)를 따른다.
 
 ### alarms
 
