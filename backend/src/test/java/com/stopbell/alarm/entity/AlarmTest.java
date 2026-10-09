@@ -5,12 +5,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 import com.stopbell.transit.domain.TransitProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class AlarmTest {
+
+    private static final UUID TRACKING_CYCLE_ID = UUID.fromString("a1234567-1234-4123-8123-123456789abc");
 
     @Test
     @DisplayName("새 버스 알람은 비활성 상태로 생성된다")
@@ -52,10 +55,11 @@ class AlarmTest {
         LocalDateTime expiresAt = startedAt.plusMinutes(10);
         alarm.activate();
 
-        alarm.startFollowUp("vehicle-123", startedAt, expiresAt);
+        alarm.startFollowUp("vehicle-123", TRACKING_CYCLE_ID, startedAt, expiresAt);
 
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.FOLLOW_UP);
         assertThat(alarm.getFollowUpVehicleTrackingId()).isEqualTo("vehicle-123");
+        assertThat(alarm.getFollowUpTrackingCycleId()).isEqualTo(TRACKING_CYCLE_ID);
         assertThat(alarm.getFollowUpStartedAt()).isEqualTo(startedAt);
         assertThat(alarm.getFollowUpExpiresAt()).isEqualTo(expiresAt);
     }
@@ -124,7 +128,7 @@ class AlarmTest {
         alarm.activate();
 
         assertThatThrownBy(() -> alarm.startFollowUp(
-                "vehicle-123",
+                "vehicle-123", TRACKING_CYCLE_ID,
                 LocalDateTime.of(2026, 9, 10, 12, 0),
                 LocalDateTime.of(2026, 9, 10, 12, 10)
         )).isInstanceOf(IllegalStateException.class);
@@ -136,7 +140,7 @@ class AlarmTest {
         Alarm alarm = createBusAlarm(null, new AdjacentStopSnapshot("successor-stop", 13));
 
         assertThatThrownBy(() -> alarm.startFollowUp(
-                "vehicle-123",
+                "vehicle-123", TRACKING_CYCLE_ID,
                 LocalDateTime.of(2026, 9, 10, 12, 0),
                 LocalDateTime.of(2026, 9, 10, 12, 10)
         )).isInstanceOf(IllegalStateException.class);
@@ -149,9 +153,11 @@ class AlarmTest {
         alarm.activate();
         LocalDateTime startedAt = LocalDateTime.of(2026, 9, 10, 12, 0);
 
-        assertThatThrownBy(() -> alarm.startFollowUp(null, startedAt, startedAt.plusMinutes(10)))
+        assertThatThrownBy(() -> alarm.startFollowUp("vehicle-123", null, startedAt, startedAt.plusMinutes(10)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> alarm.startFollowUp("vehicle-123", startedAt, null))
+        assertThatThrownBy(() -> alarm.startFollowUp(null, TRACKING_CYCLE_ID, startedAt, startedAt.plusMinutes(10)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> alarm.startFollowUp("vehicle-123", TRACKING_CYCLE_ID, startedAt, null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -162,7 +168,7 @@ class AlarmTest {
         alarm.activate();
         LocalDateTime startedAt = LocalDateTime.of(2026, 9, 10, 12, 0);
 
-        assertThatThrownBy(() -> alarm.startFollowUp("vehicle-123", startedAt, startedAt))
+        assertThatThrownBy(() -> alarm.startFollowUp("vehicle-123", TRACKING_CYCLE_ID, startedAt, startedAt))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -231,7 +237,7 @@ class AlarmTest {
         Alarm alarm = createBusAlarm(null, new AdjacentStopSnapshot("successor-stop", 13));
         LocalDateTime startedAt = LocalDateTime.of(2026, 9, 10, 12, 0);
         alarm.activate();
-        alarm.startFollowUp("vehicle-123", startedAt, startedAt.plusMinutes(10));
+        alarm.startFollowUp("vehicle-123", TRACKING_CYCLE_ID, startedAt, startedAt.plusMinutes(10));
         return alarm;
     }
 
@@ -254,6 +260,7 @@ class AlarmTest {
 
     private void assertFollowUpRuntimeIsCleared(Alarm alarm) {
         assertThat(alarm.getFollowUpVehicleTrackingId()).isNull();
+        assertThat(alarm.getFollowUpTrackingCycleId()).isNull();
         assertThat(alarm.getFollowUpStartedAt()).isNull();
         assertThat(alarm.getFollowUpExpiresAt()).isNull();
     }

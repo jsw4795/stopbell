@@ -73,6 +73,8 @@ Alarm 상태는 `INACTIVE`, `ACTIVE`, `FOLLOW_UP`을 그대로 표시하며 bool
 
 사용자는 더 이상 필요 없는 알림을 제거할 수 있다.
 
+Alarm 삭제 후에도 기존 NotificationEvent/Delivery와 원본 Alarm ID를 보존한다. PENDING 전달만 FAILED/DISPATCH_NOT_ALLOWED로 종료하고 기존 terminal 결과는 유지한다. 향후 Provider 호출을 중단하는 의미이며 이미 진행 중이거나 접수된 알림 회수는 보장하지 않는다.
+
 ### V1 초기 Transit 지원 범위
 
 V1의 초기 버스 지원 대상 지역은 다음과 같다.

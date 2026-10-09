@@ -24,9 +24,6 @@ import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
-import com.stopbell.notification.entity.NotificationHistory;
-import com.stopbell.notification.entity.NotificationStatus;
-import com.stopbell.notification.repository.NotificationHistoryRepository;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
@@ -64,6 +61,8 @@ import org.testcontainers.mysql.MySQLContainer;
 @Transactional
 class AlarmServiceIntegrationTest {
 
+    private static final UUID TRACKING_CYCLE_ID = UUID.fromString("a1234567-1234-4123-8123-123456789abc");
+
     @Container
     @ServiceConnection
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
@@ -76,9 +75,6 @@ class AlarmServiceIntegrationTest {
 
     @Autowired
     private AlarmRepository alarmRepository;
-
-    @Autowired
-    private NotificationHistoryRepository notificationHistoryRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -391,7 +387,7 @@ class AlarmServiceIntegrationTest {
         alarmRepository.findById(newestId).orElseThrow().activate();
         LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
         alarmRepository.findById(newestId).orElseThrow()
-                .startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+                .startFollowUp("vehicle-1", TRACKING_CYCLE_ID, startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
         entityManager.flush();
         setCreatedAt(oldestId, LocalDateTime.of(2025, 1, 1, 0, 0));
         setCreatedAt(middleId, LocalDateTime.of(2025, 1, 2, 0, 0));
@@ -436,7 +432,7 @@ class AlarmServiceIntegrationTest {
         Alarm alarm = alarmRepository.findById(alarmId).orElseThrow();
         LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
         alarm.activate();
-        alarm.startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        alarm.startFollowUp("vehicle-1", TRACKING_CYCLE_ID, startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
         entityManager.flush();
         entityManager.clear();
 
@@ -533,7 +529,7 @@ class AlarmServiceIntegrationTest {
         Alarm alarm = alarmRepository.findById(alarmId).orElseThrow();
         LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
         alarm.activate();
-        alarm.startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        alarm.startFollowUp("vehicle-1", TRACKING_CYCLE_ID, startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
         entityManager.flush();
         entityManager.clear();
 
@@ -641,7 +637,7 @@ class AlarmServiceIntegrationTest {
         Alarm alarm = alarmRepository.findById(alarmId).orElseThrow();
         LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
         alarm.activate();
-        alarm.startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        alarm.startFollowUp("vehicle-1", TRACKING_CYCLE_ID, startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
         entityManager.flush();
         entityManager.clear();
 
@@ -695,7 +691,7 @@ class AlarmServiceIntegrationTest {
         Alarm alarm = alarmRepository.findById(alarmId).orElseThrow();
         LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
         alarm.activate();
-        alarm.startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        alarm.startFollowUp("vehicle-1", TRACKING_CYCLE_ID, startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
         entityManager.flush();
         entityManager.clear();
 
@@ -728,12 +724,6 @@ class AlarmServiceIntegrationTest {
         User owner = user();
         RouteFixture route = route();
         Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
-        notificationHistoryRepository.saveAndFlush(new NotificationHistory(
-                alarmRepository.findById(alarmId).orElseThrow(), NotificationStatus.SUCCESS, null
-        ));
-        notificationHistoryRepository.saveAndFlush(new NotificationHistory(
-                alarmRepository.findById(alarmId).orElseThrow(), NotificationStatus.FAILURE, "provider error"
-        ));
         long routeCount = routeRepository.count();
         long stopCount = stopRepository.count();
         long occurrenceCount = occurrenceRepository.count();
@@ -748,7 +738,6 @@ class AlarmServiceIntegrationTest {
 
         assertThat(alarmRepository.existsById(alarmId)).isFalse();
         assertThat(entityManager.find(BusAlarmTarget.class, alarmId)).isNull();
-        assertThat(notificationHistoryRepository.count()).isZero();
         assertThat(routeRepository.count()).isEqualTo(routeCount);
         assertThat(stopRepository.count()).isEqualTo(stopCount);
         assertThat(occurrenceRepository.count()).isEqualTo(occurrenceCount);
@@ -765,9 +754,6 @@ class AlarmServiceIntegrationTest {
         User other = user();
         RouteFixture route = route();
         Long alarmId = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false)).id();
-        Long historyId = notificationHistoryRepository.saveAndFlush(new NotificationHistory(
-                alarmRepository.findById(alarmId).orElseThrow(), NotificationStatus.SUCCESS, null
-        )).getId();
 
         mockMvc.perform(delete("/api/v1/alarms/{alarmId}", alarmId)
                         .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(other.getId())))
@@ -777,7 +763,6 @@ class AlarmServiceIntegrationTest {
 
         assertThat(alarmRepository.existsById(alarmId)).isTrue();
         assertThat(entityManager.find(BusAlarmTarget.class, alarmId)).isNotNull();
-        assertThat(notificationHistoryRepository.existsById(historyId)).isTrue();
     }
 
     @Test
@@ -819,7 +804,7 @@ class AlarmServiceIntegrationTest {
         Alarm alarm = alarmRepository.findById(alarmId).orElseThrow();
         LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
         alarm.activate();
-        alarm.startFollowUp("vehicle-1", startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        alarm.startFollowUp("vehicle-1", TRACKING_CYCLE_ID, startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
         entityManager.flush();
         entityManager.clear();
 
@@ -872,7 +857,7 @@ class AlarmServiceIntegrationTest {
         Alarm followUpAlarm = alarmRepository.findById(followUpAlarmId).orElseThrow();
         followUpAlarm.activate();
         LocalDateTime startedAt = LocalDateTime.of(2026, 9, 23, 12, 0);
-        followUpAlarm.startFollowUp("vehicle-1", startedAt, startedAt.plusMinutes(10));
+        followUpAlarm.startFollowUp("vehicle-1", TRACKING_CYCLE_ID, startedAt, startedAt.plusMinutes(10));
         entityManager.flush();
         entityManager.clear();
 

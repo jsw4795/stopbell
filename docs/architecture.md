@@ -210,7 +210,13 @@ Event logical UNIQUE 충돌일 때만 새 transaction/persistence context에서 
 
 TASK-708은 현재 boolean 반환 대신 새 결정/기존 결정/stale 및 current lifecycle 문맥을 구분할 결과를 연결한다. Scheduler는 commit 확인 전 nextState를 publish하지 않고, DB 실패/응답 유실 중에는 원래 candidate/result를 유지해 재평가로 UUID를 새로 만들지 않는다. duplicate 확인 후에는 current generation/status와 일치할 때만 원래 result의 consumed state를 반영한다. 이미 ARRIVED commit으로 FOLLOW_UP이면 persisted vehicle/cycle이 같은 원래 tracking을 유지·복원하고, 이미 after commit으로 INACTIVE이면 해당 memory를 종료한다. stale 결과나 새 activation에는 old nextState를 적용하지 않는다. 이 memory 반영은 Event/Delivery/lifecycle을 다시 변경하는 작업이 아니다.
 
-TASK-707은 persistence primitive와 제약, TASK-708 implementation은 위 결정 transaction과 retry 연결, TASK-706은 commit된 pending Delivery worker를 소유한다. 책임 분담·삭제 제약·현재 recovery 한계는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-708-중복-방지-설계-2026-10-09)을 따른다.
+TASK-707은 persistence primitive와 제약을 구현했으며, TASK-708 implementation은 위 결정 transaction과 retry 연결, TASK-706은 commit된 pending Delivery worker를 소유한다. 책임 분담·삭제 제약·현재 recovery 한계는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-708-중복-방지-설계-2026-10-09)을 따른다.
+
+#### Alarm 삭제 transaction (TASK-707)
+
+AlarmService.delete는 기존 인증/소유권 검증과 Alarm PESSIMISTIC_WRITE 조회를 유지한다. 같은 transaction에서 해당 원본 alarmId의 PENDING Delivery를 ID 순서로 PESSIMISTIC_WRITE 조회하고 FAILED/DISPATCH_NOT_ALLOWED, nextAttemptAt=null로 종료한 뒤 Alarm/BusAlarmTarget을 hard delete한다. Event/Delivery는 보존하고 기존 attempt/result 및 terminal row는 변경하지 않는다. flush/commit 실패는 모두 rollback한다.
+
+삭제는 Alarm → Event join/Delivery ID 순서로 lock을 얻고 Device lock을 추가하지 않는다. 신규 결정은 같은 Alarm lock 뒤 Event → Device 순서이므로 삭제와 직렬화하며, 삭제 후 Scheduler/Event candidate는 Alarm 부재로 거부한다(TASK-708 연결은 후속). Worker는 Delivery → Device만 잠그고 뒤에 Alarm/Event write lock을 추가하지 않으므로 역순 lock cycle을 만들지 않는다. Worker preflight가 먼저 commit됐다면 I/O 직전 삭제 경쟁과 진행 중 FCM 요청의 회수는 보장하지 않는다. 삭제가 종료한 terminal row에는 후속 Worker가 새 호출을 시작하거나 late result로 PENDING을 복구하지 않는다. 실제 Worker/result 처리는 TASK-706/709에 남는다.
 
 #### Notification dispatch와 result transaction (TASK-709)
 
@@ -222,7 +228,7 @@ TASK-707은 persistence primitive와 제약, TASK-708 implementation은 위 결�
 4. **결과 transaction:** Delivery PESSIMISTIC_WRITE current read로 동일 row가 PENDING이고 attemptCount/last revision/lastAttemptAt이 해당 snapshot과 같은지 확인한다. 삭제/terminal/다른 attempt면 late result를 무변경 종료한다. 같은 attempt의 결과가 이미 저장됐으면 no-op한다. Provider 결과를 [결정표](adr/ADR-010-notification-device-and-durable-delivery.md#provider-result--delivery-결정표)에 따라 기록하고 nextAttemptAt/accepted time/local code를 갱신한다. INVALID_TARGET만 Device write lock 안에서 identity/owner/generation/revision/FID/enabled를 모두 재검증한 뒤 조건부 disable한다. Delivery result와 cleanup은 함께 commit/rollback하며 다른 Device/Alarm은 변경하지 않는다.
 5. **다음 cycle / restart:** terminal은 재조회하지 않고 PENDING은 확정 retry 또는 recovery 예약이 due일 때 다시 현재 상태를 검증한다. result DB commit 실패 시 같은 memory result를 제한 재반영하며 새로운 FCM 요청을 시작하지 않는다. 상태 확인에서도 DB 실패가 계속되면 현재 dispatch cycle을 종료한다. process가 죽으면 결과/snapshot은 잃지만 precommitted count/기한/예약은 유지된다.
 
-Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Event write lock을 나중에 추가해 TASK-708의 Alarm → Event → Device와 반대 순서를 만들지 않는다. Event는 불변 owner/evidence source로 읽으며 TASK-707의 dispatch 종료/삭제는 Delivery lock과 조율하고 일관된 lock 순서를 검증해야 한다. 신규 fan-out의 아직 commit되지 않은 Delivery는 worker에 보이지 않는다. Device mutation은 Device lock만 사용한다. 삭제 정책과 필요한 관계/FK는 TASK-707에서 확정하며 이번에 cancellation system을 추가하지 않는다.
+Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Event write lock을 나중에 추가해 TASK-708의 Alarm → Event → Device와 반대 순서를 만들지 않는다. Event는 불변 owner/evidence source로 읽으며 TASK-707의 dispatch 종료/삭제는 Delivery lock과 조율하고 일관된 lock 순서를 검증해야 한다. 신규 fan-out의 아직 commit되지 않은 Delivery는 worker에 보이지 않는다. Device mutation은 Device lock만 사용한다. 삭제 transaction/FK는 위 TASK-707 계약을 따르며 범용 cancellation system은 추가하지 않는다.
 
 단일 worker는 진행 중 request와 별도 expiry sweep을 겹치게 하지 않는다. 후보 조회가 exclusion/lease는 아니므로 multiple worker 안전성을 보장하지 않는다. 전송 직전 검증 이후 registration 변경 경쟁, accepted 뒤 result commit 전 crash의 duplicate, 내부 retry의 wire count와 외부 접수 복원 한계는 [ADR crash/restart 계약](adr/ADR-010-notification-device-and-durable-delivery.md#crashrestart와-safety-경계)을 따른다. 다음 cycle/restart도 terminal을 PENDING으로 reset하거나 과거 recipient를 확장하지 않는다.
 
@@ -280,7 +286,7 @@ FOLLOW_UP 중 같은 Alarm의 새 activation은 persisted activation generation�
 
 반복 `TransitObservation`과 중복 `TransitEvent` candidate의 억제는 Phase 5 tracking/Evaluation 책임이다. 동일 logical Notification의 중복은 Phase 7 persistence 책임이며 identity는 `(alarmId, activationGeneration, trackingCycleId, eventType)`이다. TASK-708 설계에서 확정한 [DB UNIQUE Schema](database.md#phase-7-notification-persistence-contract)는 TASK-707에서 적용한다.
 
-TASK-708 설계는 FOLLOW_UP에 원래 cycle UUID를 추가 보존·복원하도록 확장한다. 이는 위 현재 TASK-510의 memory continuity를 보완하는 후속 계약이며 [Alarm Domain](domain-model.md#alarm-lifecycle)과 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#follow_up-cycle-continuity-결정)을 따른다. ACTIVE baseline 정책은 변경하지 않으며 기존 restart 재발행 억제 방향과 현재 evaluator의 차이는 ADR-010 조사 결과에 기록한다. logical DB uniqueness가 ACTIVE restart 전후의 서로 다른 UUID cycle까지 합치지는 않는다.
+TASK-707은 FOLLOW_UP에 원래 cycle UUID 저장/제거와 ARRIVED 연결을 구현했다. 원래 UUID를 사용하는 평가기 재시작 복원은 TASK-708 implementation에 남는다. 이는 위 현재 TASK-510의 memory continuity를 보완하는 후속 계약이며 [Alarm Domain](domain-model.md#alarm-lifecycle)과 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#follow_up-cycle-continuity-결정)을 따른다. ACTIVE baseline 정책은 변경하지 않으며 기존 restart 재발행 억제 방향과 현재 evaluator의 차이는 ADR-010 조사 결과에 기록한다. logical DB uniqueness가 ACTIVE restart 전후의 서로 다른 UUID cycle까지 합치지는 않는다.
 
 구체적인 Observation과 Event 의미는 `adr/ADR-007-bus-alarm-transit-observation-and-event-semantics.md`를 따른다.
 

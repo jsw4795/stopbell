@@ -1,6 +1,7 @@
 package com.stopbell.alarm.entity;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 import com.stopbell.user.entity.User;
 import jakarta.persistence.CascadeType;
@@ -44,6 +45,9 @@ public class Alarm {
 
     @Column(name = "follow_up_vehicle_tracking_id", length = 255)
     private String followUpVehicleTrackingId;
+
+    @Column(name = "follow_up_tracking_cycle_id", length = 36)
+    private String followUpTrackingCycleId;
 
     @Column(name = "follow_up_started_at")
     private LocalDateTime followUpStartedAt;
@@ -133,6 +137,7 @@ public class Alarm {
 
     public void startFollowUp(
             String vehicleTrackingId,
+            UUID trackingCycleId,
             LocalDateTime startedAt,
             LocalDateTime expiresAt
     ) {
@@ -148,6 +153,9 @@ public class Alarm {
         if (vehicleTrackingId.length() > 255) {
             throw new IllegalArgumentException("Follow-up vehicle tracking ID exceeds maximum length 255");
         }
+        if (trackingCycleId == null) {
+            throw new IllegalArgumentException("Follow-up tracking cycle ID must not be null");
+        }
         if (startedAt == null || expiresAt == null) {
             throw new IllegalArgumentException("Follow-up start and expiry timestamps must not be null");
         }
@@ -157,6 +165,7 @@ public class Alarm {
 
         status = AlarmStatus.FOLLOW_UP;
         followUpVehicleTrackingId = vehicleTrackingId;
+        followUpTrackingCycleId = trackingCycleId.toString();
         followUpStartedAt = startedAt;
         followUpExpiresAt = expiresAt;
     }
@@ -175,10 +184,12 @@ public class Alarm {
         }
         boolean hasCompleteRuntime = followUpVehicleTrackingId != null
                 && !followUpVehicleTrackingId.isBlank()
+                && followUpTrackingCycleId != null
                 && followUpStartedAt != null
                 && followUpExpiresAt != null
                 && followUpExpiresAt.isAfter(followUpStartedAt);
         boolean hasAnyRuntime = followUpVehicleTrackingId != null
+                || followUpTrackingCycleId != null
                 || followUpStartedAt != null
                 || followUpExpiresAt != null;
 
@@ -193,6 +204,7 @@ public class Alarm {
 
     private void clearFollowUpRuntime() {
         followUpVehicleTrackingId = null;
+        followUpTrackingCycleId = null;
         followUpStartedAt = null;
         followUpExpiresAt = null;
     }
@@ -211,6 +223,10 @@ public class Alarm {
 
     public String getFollowUpVehicleTrackingId() {
         return followUpVehicleTrackingId;
+    }
+
+    public UUID getFollowUpTrackingCycleId() {
+        return followUpTrackingCycleId == null ? null : UUID.fromString(followUpTrackingCycleId);
     }
 
     public LocalDateTime getFollowUpStartedAt() {

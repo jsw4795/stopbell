@@ -34,13 +34,14 @@ class BusAlarmLifecycleServiceTest {
         AlarmEvaluationKey key = new AlarmEvaluationKey(1L, alarm.getActivationGeneration());
         when(alarmRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(alarm));
 
-        boolean applied = lifecycleService.applyIfCurrent(
-                key, AlarmStatus.ACTIVE, result(TransitEventType.ARRIVED)
-        );
+        BusAlarmEvaluationResult evaluationResult = result(TransitEventType.ARRIVED);
+        boolean applied = lifecycleService.applyIfCurrent(key, AlarmStatus.ACTIVE, evaluationResult);
 
         assertThat(applied).isTrue();
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.FOLLOW_UP);
         assertThat(alarm.getFollowUpVehicleTrackingId()).isEqualTo("vehicle-1");
+        assertThat(alarm.getFollowUpTrackingCycleId())
+                .isEqualTo(evaluationResult.eventCandidates().getFirst().trackingCycleId());
         assertThat(alarm.getFollowUpExpiresAt()).isEqualTo(alarm.getFollowUpStartedAt().plusMinutes(5));
     }
 

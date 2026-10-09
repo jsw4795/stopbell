@@ -151,7 +151,7 @@ Device registration lifecycle, durable logical Notification, per-Device delivery
 - `entity`: Device, NotificationEvent, NotificationDelivery JPA Entity
 - `dto`: Device registration, Push 요청/응답, 최소 payload와 Notification DTO
 
-구체 Package/Class 이름은 구현 시 필요한 책임에 맞게 정하며 generic multi-provider framework, generic retry framework, Device subtype hierarchy, 별도 Notification microservice를 만들지 않는다. 기존 `NotificationHistory`의 확장·대체 방식은 TASK-707에서 결정한다.
+구체 Package/Class 이름은 구현 시 필요한 책임에 맞게 정하며 generic multi-provider framework, generic retry framework, Device subtype hierarchy, 별도 Notification microservice를 만들지 않는다. 기존 `NotificationHistory` 코드는 TASK-707에서 Event/Delivery로 대체했고 legacy table의 조건부 보존은 database.md를 따른다.
 
 ## Persistence Location
 
@@ -162,13 +162,14 @@ JPA Repository는 Entity를 소유한 Domain 안에 둔다.
 ```text
 user/repository/UserRepository
 alarm/repository/AlarmRepository
-notification/repository/NotificationHistoryRepository
+notification/repository/NotificationEventRepository
+notification/repository/NotificationDeliveryRepository
 transit/repository/BusRouteRepository
 transit/repository/BusStopRepository
 transit/repository/BusRouteStopOccurrenceRepository
 ```
 
-현재 `NotificationHistoryRepository`는 초기 Schema의 Repository다. Phase 7에서는 `Device`, `NotificationEvent`, `NotificationDelivery` Repository로 책임을 분리하되 구체 경로와 기존 Repository migration은 TASK-702/707에서 결정한다.
+TASK-707은 `notification.entity.NotificationEvent`/`NotificationDelivery`와 각각의 JPA Repository를 추가하고 구형 NotificationHistory 관련 미사용 코드를 제거했다. Device Entity/Platform은 TASK-702 구현을 유지한다.
 
 JPA는 `User`, `Alarm`, `BusAlarmTarget`, Device/Notification persistence, Bus metadata의 단순 CRUD와 Entity 상태 관리에 사용한다. `BusAlarmTarget`은 별도 Repository로 독립 관리하지 않고 Alarm aggregate의 cascade lifecycle을 따른다.
 

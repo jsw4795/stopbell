@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.UUID;
 import java.util.List;
 
 import com.stopbell.alarm.entity.AdjacentStopSnapshot;
@@ -23,6 +24,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class BusAlarmPollingServiceTest {
+
+    private static final UUID TRACKING_CYCLE_ID = UUID.fromString("a1234567-1234-4123-8123-123456789abc");
 
     private final AlarmRepository alarmRepository = mock(AlarmRepository.class);
     private final BusAlarmPollingService pollingService = new BusAlarmPollingService(alarmRepository);
@@ -179,7 +182,7 @@ class BusAlarmPollingServiceTest {
         ));
         alarm.activate();
         LocalDateTime startedAt = LocalDateTime.of(2026, 9, 23, 12, 0);
-        alarm.startFollowUp("vehicle-" + externalStopId, startedAt, startedAt.plusMinutes(10));
+        alarm.startFollowUp("vehicle-" + externalStopId, TRACKING_CYCLE_ID, startedAt, startedAt.plusMinutes(10));
         return alarm;
     }
 

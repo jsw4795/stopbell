@@ -11,6 +11,7 @@ import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.HexFormat;
+import java.util.UUID;
 import javax.sql.DataSource;
 
 import com.stopbell.alarm.entity.Alarm;
@@ -19,9 +20,6 @@ import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
-import com.stopbell.notification.entity.NotificationHistory;
-import com.stopbell.notification.entity.NotificationStatus;
-import com.stopbell.notification.repository.NotificationHistoryRepository;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.dto.TokenResponse;
@@ -50,6 +48,8 @@ import org.testcontainers.mysql.MySQLContainer;
 @Transactional
 class RepositoryIntegrationTest {
 
+    private static final UUID TRACKING_CYCLE_ID = UUID.fromString("a1234567-1234-4123-8123-123456789abc");
+
     @Container
     @ServiceConnection
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
@@ -68,9 +68,6 @@ class RepositoryIntegrationTest {
 
     @Autowired
     private AlarmRepository alarmRepository;
-
-    @Autowired
-    private NotificationHistoryRepository notificationHistoryRepository;
 
     @Autowired
     private EntityManager entityManager;
@@ -236,40 +233,6 @@ class RepositoryIntegrationTest {
     }
 
     @Test
-    @DisplayName("SUCCESS NotificationHistory는 실패 사유 없이 저장하고 조회할 수 있다")
-    void save_success_notification_history() {
-        Alarm alarm = saveAlarm();
-        NotificationHistory savedHistory = notificationHistoryRepository.saveAndFlush(
-                new NotificationHistory(alarm, NotificationStatus.SUCCESS, null)
-        );
-        entityManager.clear();
-
-        NotificationHistory foundHistory = notificationHistoryRepository.findById(savedHistory.getId()).orElseThrow();
-
-        assertThat(foundHistory.getAlarm().getId()).isEqualTo(alarm.getId());
-        assertThat(foundHistory.getStatus()).isEqualTo(NotificationStatus.SUCCESS);
-        assertThat(foundHistory.getFailureReason()).isNull();
-        assertThat(foundHistory.getCreatedAt()).isNotNull();
-    }
-
-    @Test
-    @DisplayName("FAILURE NotificationHistory는 실패 사유와 함께 저장하고 조회할 수 있다")
-    void save_failure_notification_history() {
-        Alarm alarm = saveAlarm();
-        NotificationHistory savedHistory = notificationHistoryRepository.saveAndFlush(
-                new NotificationHistory(alarm, NotificationStatus.FAILURE, "push provider rejected the request")
-        );
-        entityManager.clear();
-
-        NotificationHistory foundHistory = notificationHistoryRepository.findById(savedHistory.getId()).orElseThrow();
-
-        assertThat(foundHistory.getAlarm().getId()).isEqualTo(alarm.getId());
-        assertThat(foundHistory.getStatus()).isEqualTo(NotificationStatus.FAILURE);
-        assertThat(foundHistory.getFailureReason()).isEqualTo("push provider rejected the request");
-        assertThat(foundHistory.getCreatedAt()).isNotNull();
-    }
-
-    @Test
     @DisplayName("관리 중인 Alarm을 변경하면 save 없이 Dirty Checking으로 반영되고 수정 시간이 갱신된다")
     void update_alarm_by_dirty_checking_without_save() {
         Alarm savedAlarm = saveAlarm();
@@ -406,7 +369,7 @@ class RepositoryIntegrationTest {
         ));
         LocalDateTime startedAt = LocalDateTime.of(2026, 9, 10, 12, 0);
         alarm.activate();
-        alarm.startFollowUp("vehicle-123", startedAt, startedAt.plusMinutes(10));
+        alarm.startFollowUp("vehicle-123", TRACKING_CYCLE_ID, startedAt, startedAt.plusMinutes(10));
         Alarm savedAlarm = alarmRepository.saveAndFlush(alarm);
         entityManager.clear();
 

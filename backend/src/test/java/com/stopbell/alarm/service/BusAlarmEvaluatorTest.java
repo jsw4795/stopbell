@@ -26,6 +26,8 @@ import org.junit.jupiter.api.Test;
 
 class BusAlarmEvaluatorTest {
 
+    private static final UUID TRACKING_CYCLE_ID = UUID.fromString("a1234567-1234-4123-8123-123456789abc");
+
     private static final Instant NOW = Instant.parse("2026-09-23T03:00:00Z");
 
     private final BusRouteTraversalService routeTraversalService = mock(BusRouteTraversalService.class);
@@ -448,7 +450,7 @@ class BusAlarmEvaluatorTest {
     private static Alarm followUpAlarm() {
         Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
         LocalDateTime start = LocalDateTime.of(2026, 9, 23, 3, 0);
-        alarm.startFollowUp("follow-up-vehicle", start, start.plusMinutes(5));
+        alarm.startFollowUp("follow-up-vehicle", TRACKING_CYCLE_ID, start, start.plusMinutes(5));
         return alarm;
     }
 

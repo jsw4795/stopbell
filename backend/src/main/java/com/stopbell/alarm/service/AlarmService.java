@@ -1,5 +1,7 @@
 package com.stopbell.alarm.service;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 
@@ -12,6 +14,7 @@ import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
+import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
 import com.stopbell.transit.entity.BusStop;
@@ -27,15 +30,18 @@ import org.springframework.web.server.ResponseStatusException;
 public class AlarmService {
 
     private final AlarmRepository alarmRepository;
+    private final NotificationDeliveryRepository deliveryRepository;
     private final UserRepository userRepository;
     private final BusRouteStopOccurrenceRepository occurrenceRepository;
 
     public AlarmService(
             AlarmRepository alarmRepository,
             UserRepository userRepository,
-            BusRouteStopOccurrenceRepository occurrenceRepository
+            BusRouteStopOccurrenceRepository occurrenceRepository,
+            NotificationDeliveryRepository deliveryRepository
     ) {
         this.alarmRepository = alarmRepository;
+        this.deliveryRepository = deliveryRepository;
         this.userRepository = userRepository;
         this.occurrenceRepository = occurrenceRepository;
     }
@@ -128,6 +134,9 @@ public class AlarmService {
     public void delete(Long userId, Long alarmId) {
         Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
+        var pendingDeliveries = deliveryRepository.findPendingByAlarmIdForUpdate(alarmId);
+        LocalDateTime terminatedAt = LocalDateTime.now(ZoneOffset.UTC);
+        pendingDeliveries.forEach(delivery -> delivery.terminateDispatch(terminatedAt));
         alarmRepository.delete(alarm);
     }
 

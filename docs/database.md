@@ -47,7 +47,7 @@ JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `
 
 ## 6. 핵심 테이블
 
-`users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `notification_history`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 physical Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 TASK-702의 V13으로 추가됐다. `NotificationEvent`/`NotificationDelivery` physical Schema는 TASK-707에서 별도 Migration으로 추가하거나 기존 Schema를 대체한다. Alarm activation generation은 TASK-510의 V11 Migration으로 `alarms`에 추가됐다.
+`users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `notification_events`, `notification_deliveries`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 physical Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 TASK-702의 V13, NotificationEvent/Delivery와 FOLLOW_UP UUID는 TASK-707의 `V14__create_notification_outbox.sql`로 추가됐다. 구형 notification_history의 조건부 보존은 아래 legacy 정책을 따른다. Alarm activation generation은 TASK-510의 V11 Migration으로 `alarms`에 추가됐다.
 
 ### users
 
@@ -137,6 +137,7 @@ transit_type VARCHAR(20) NOT NULL
 status VARCHAR(20) NOT NULL
 activation_generation BIGINT NOT NULL DEFAULT 0 CHECK (activation_generation >= 0)
 follow_up_vehicle_tracking_id VARCHAR(255) NULL
+follow_up_tracking_cycle_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL
 follow_up_started_at DATETIME(6) NULL
 follow_up_expires_at DATETIME(6) NULL
 created_at DATETIME(6) NOT NULL
@@ -144,7 +145,7 @@ updated_at DATETIME(6) NOT NULL
 INDEX(status)
 ```
 
-`status=FOLLOW_UP`이면 follow-up runtime 세 값이 모두 존재하고 `expires_at > started_at`이어야 한다. 다른 상태이면 세 값은 모두 `NULL`이어야 한다. 이 조합은 `ck_alarms_lifecycle` CHECK로 강제한다. `follow_up_vehicle_tracking_id`는 Target identity가 아니라 ARRIVED 차량의 관측을 재시작 뒤 연결하기 위한 short-lived correlation 값이다. `status` index는 TASK-510에서 FOLLOW_UP 복구 대상과 ACTIVE monitoring 대상을 조회할 수 있게 한다.
+`status=FOLLOW_UP`이면 follow-up runtime 네 값이 모두 존재하고 `expires_at > started_at`이어야 한다. 다른 상태이면 네 값은 모두 `NULL`이어야 한다. 이 조합은 `ck_alarms_lifecycle` CHECK로 강제한다. `follow_up_vehicle_tracking_id`는 Target identity가 아니라 ARRIVED 차량의 관측을 재시작 뒤 연결하기 위한 short-lived correlation 값이다. `status` index는 TASK-510에서 FOLLOW_UP 복구 대상과 ACTIVE monitoring 대상을 조회할 수 있게 한다.
 
 V6 Migration은 nullable `status`를 먼저 추가하고 기존 `active=true`를 `ACTIVE`, `false`를 `INACTIVE`로 backfill한 뒤 `NOT NULL`을 적용하고 `active`를 제거한다. 당시 기존 BUS Alarm row에는 가짜 Target을 생성하지 않아 targetless row가 Migration을 통과할 수 있었다. 그러나 이는 pre-production migration 상태일 뿐 public V1 지원 계약이 아니며, production 전 개발 DB reset/cleanup 또는 migration 검증으로 모든 BUS Alarm에 BusAlarmTarget이 있음을 보장한다. V7 Migration은 BusAlarmTarget의 nullable column CHECK를 MySQL의 `UNKNOWN` 통과 특성에 맞게 보완하며 기존 Schema나 row를 변경하지 않는다.
 
@@ -152,7 +153,7 @@ Transit API 조회 실패, Notification 발송 결과, ARRIVED/PASSED Event는 A
 
 `activation_generation`은 서로 다른 activation cycle을 구분하는 persisted semantic generation이다. 새 Alarm은 0에서 시작하고 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하며 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset 없이 idempotent하다. Deactivate 뒤 reactivate, FOLLOW_UP 중 reactivate와 stale scheduler 결과를 구분한다. V11 Migration은 0 이상 CHECK를 함께 추가한다. lifecycle mutation과 Scheduler 결과 반영은 결과 적용 직전의 짧은 Alarm row `PESSIMISTIC_WRITE` transaction으로 보호하며 Provider I/O 중에는 lock을 잡지 않는다.
 
-TASK-708 설계에서 확정한 후속 runtime 확장은 `follow_up_tracking_cycle_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL` 하나다. 현재 Schema에는 없으며 TASK-707의 새 Flyway Migration에서 추가한다. ARRIVED candidate의 UUID를 소문자 canonical hyphenated 형식으로 저장하며 ACTIVE history나 Observation을 저장하지 않는다. 기존 `ck_alarms_lifecycle`은 FOLLOW_UP에서 기존 세 runtime 값과 cycle ID가 모두 non-null이고 expiry > start, INACTIVE/ACTIVE에서 네 값이 모두 NULL인 조건으로 교체한다. UUID 형식은 `ck_alarms_follow_up_tracking_cycle_id`에서 NULL 또는 아래 Event UUID와 같은 canonical 형식만 허용한다. `CHECK`의 UNKNOWN 통과를 막도록 status별 `IS NOT NULL`/`IS NULL` 조건을 명시한다. 복구는 기존 status index로 Alarm을 읽으므로 cycle ID index/FK는 추가하지 않는다.
+TASK-708 설계에 따라 V14에서 적용한 runtime 확장은 `follow_up_tracking_cycle_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL` 하나다. Alarm은 UUID를 명시적으로 받아 저장하며 종료 시 함께 제거한다. 평가기의 재시작 복원은 TASK-708 implementation에 남는다. ARRIVED candidate의 UUID를 소문자 canonical hyphenated 형식으로 저장하며 ACTIVE history나 Observation을 저장하지 않는다. V14는 기존 `ck_alarms_lifecycle`을 FOLLOW_UP에서 기존 세 runtime 값과 cycle ID가 모두 non-null이고 expiry > start, INACTIVE/ACTIVE에서 네 값이 모두 NULL인 조건으로 교체했다. UUID 형식은 `ck_alarms_follow_up_tracking_cycle_id`에서 NULL 또는 아래 Event UUID와 같은 canonical 형식만 허용한다. `CHECK`의 UNKNOWN 통과를 막도록 status별 `IS NOT NULL`/`IS NULL` 조건을 명시한다. 복구는 기존 status index로 Alarm을 읽으므로 cycle ID index/FK는 추가하지 않는다.
 
 기존 FOLLOW_UP row의 원래 UUID는 차량 ID/시간이나 초기 NotificationHistory로 복원할 수 없다. TASK-707 migration 적용 전 기존 follow-up이 정상 완료/기존 5분 정책으로 만료되어 FOLLOW_UP row가 없음을 확인하고 monitoring을 멈춘 상태에서 적용한다. 남은 row가 있으면 migration 적용을 진행하지 않으며 임의 UUID backfill은 금지한다. V6/V11 등 기존 Migration은 수정하지 않고 적용 순번에 맞는 새 Migration을 작성한다. Domain과 ARRIVED producer 연결도 같은 TASK-707에서 수행해 새 CHECK를 만족하지 못하는 중간 구현을 남기지 않는다.
 
@@ -187,27 +188,15 @@ before 옵션이 켜지면 predecessor external Stop ID/order, after 옵션이 �
 
 Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, external_stop_id)`다. Target은 Route traversal 안의 occurrence이므로 `target_stop_order`를 별도로 저장한다. `(provider, external_route_id, external_stop_id)` Unique Constraint는 두지 않으며 이 세 값만으로 같은 Stop 재방문 occurrence를 합치지 않는다.
 
-### notification_history (초기 physical Schema)
+### notification_history (legacy 보존 정책)
 
-특정 Alarm에서 발생한 Notification 발송 결과를 기록하는 현재 초기 Schema다. Alarm의 활성 상태나 Transit API 조회 실패 상태를 표현하지 않는다.
+V3/V9의 구형 table과 미사용 NotificationHistory/NotificationStatus/Repository 코드는 Event/Delivery로 대체한다. V14 적용 시 table이 비어 있으면 DROP한다. row가 있으면 table과 모든 column/row를 보존하고 `fk_notification_history_alarm_id`만 제거하여 이후 Alarm hard delete가 legacy 기록을 cascade 삭제하거나 삭제를 차단하지 않게 한다. 원본 non-null alarm_id는 유지한다. 없는 generation/cycle/device를 생성하거나 자동 변환하지 않는다. 별도 compatibility layer와 보존기간 정책은 추가하지 않는다.
 
-현재 확정 Schema:
-
-```text
-id BIGINT AUTO_INCREMENT PRIMARY KEY
-alarm_id BIGINT NOT NULL REFERENCES alarms(id) ON DELETE CASCADE
-status VARCHAR(20) NOT NULL
-failure_reason VARCHAR(255) NULL
-created_at DATETIME(6) NOT NULL
-```
-
-`status`는 `SUCCESS`, `FAILURE` 문자열만 저장한다. `failure_reason`은 실패 시 간단한 원인을 기록할 수 있고 `null`을 허용한다. `created_at`은 생성 후 변경하지 않으며 `updated_at`은 추가하지 않는다. NotificationHistory는 현재 Alarm lifecycle에 종속되어 Alarm hard delete 시 함께 삭제된다.
-
-이 Schema는 durable logical decision, dedup identity, per-Device delivery와 retry state를 충분히 표현하지 못하므로 Phase 7 최종 모델이 아니다. 기존 table을 확장·대체·migration하는 방식은 TASK-707에서 결정하며 production legacy compatibility를 과도하게 만들지 않는다.
+Migration 전에 monitoring과 구형 History writer를 중단하고 FOLLOW_UP/History count를 확인한다. V14의 첫 temporary guard CHECK는 FOLLOW_UP row가 있으면 persistent DDL 전에 실패한다. 정상 완료/기존 timeout으로 FOLLOW_UP이 없어질 때까지 기다리고 다시 확인한다. MySQL DDL은 transactional rollback을 보장하지 않으므로 다른 DDL 실패의 운영 복구는 원인·실제 Schema 확인 후 수행하며 개발 DB reset이나 무조건 Flyway repair를 하지 않는다. V1~V13은 변경하지 않는다.
 
 ### Phase 7 Notification persistence contract
 
-TASK-708 설계는 `notification_events`와 `notification_deliveries`의 identity column/UNIQUE를 다음과 같이 확정한다. 아직 구현된 table이 아니며 TASK-707에서 Entity와 새 Migration으로 적용한다. delivery operational field/query는 아래 TASK-709 설계에서 확정했으며 적용은 TASK-707 책임이다.
+TASK-708 설계는 `notification_events`와 `notification_deliveries`의 identity column/UNIQUE를 다음과 같이 확정한다. TASK-707의 V14와 JPA Entity/Repository에 적용됐다. delivery operational field/query도 아래 TASK-709 설계에 따라 적용했으며 orchestration/Worker는 미구현이다.
 
 ```text
 NotificationEvent
@@ -241,9 +230,13 @@ NotificationDelivery
 - `ck_notification_events_event_type`: 정확한 `ONE_STOP_BEFORE`, `ARRIVED`, `PASSED`, `ONE_STOP_AFTER`만 허용
 - `ck_notification_events_tracking_cycle_id`: `REGEXP_LIKE(tracking_cycle_id, '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', 'c')`로 빈 값·공백·대문자·비표준 형식 거부. UUID 입력은 Domain에서 검증하고 canonical 문자열로 저장
 
-네 identity 값은 생성 후 불변이며 JPA에서도 `nullable=false`, `updatable=false`로 매핑한다. UUID는 기존 CHAR(36) UUID 저장 방식처럼 명시적 문자 매핑을 사용해 Hibernate 기본 binary UUID 매핑과 어긋나지 않게 한다. `user_id BIGINT NOT NULL`로 Event 시점 owner를 보존하는 관계도 필요하며 TASK-707에서 User FK와 함께 구현한다. 삭제 후 pending 처리와 owner 재검증을 현재 Alarm의 존재만으로 해결하지 않는다.
+네 identity 값은 생성 후 불변이며 JPA에서도 `nullable=false`, `updatable=false`로 매핑한다. UUID는 String column으로 매핑하고 Domain 경계에서 UUID.toString()/fromString()을 사용하여 binary UUID 매핑을 피한다. `user_id BIGINT NOT NULL`은 Event 시점 owner를 보존하고 `fk_notification_events_user_id`로 구현했으며 cascade delete 없이 User 삭제를 제한한다. Event user_id의 FK용 index는 InnoDB가 생성한다. 삭제 후 pending 처리와 owner 재검증을 현재 Alarm의 존재만으로 해결하지 않는다.
 
-UNIQUE가 exact identity 조회와 `alarm_id` left prefix 조회를 지원하므로 별도 alarm_id/UUID/event_type index는 추가하지 않는다. Event의 Alarm FK 유무·delete action은 TASK-707의 삭제 정책에 종속되며 이 단계에서 기존 cascade를 복사하지 않는다. 보존안을 선택할 때 nullable live Alarm 관계가 필요하면 별도 관계로 분리하고 위 non-null `alarm_id` identity는 유지한다.
+UNIQUE가 exact identity 조회와 `alarm_id` left prefix 조회를 지원하므로 별도 alarm_id/UUID/event_type index는 추가하지 않는다. alarm_id는 불변 원본 값이며 Alarm FK와 별도 live Alarm 관계를 두지 않는다. Alarm hard delete 후에도 identity/owner/Event/Delivery는 보존된다.
+
+#### NotificationEvent evidence와 삭제 FK
+
+V14는 PASSED의 최신 위치 안내에 필요한 TransitEvent의 실제 optional 근거를 불변으로 보존한다. `current_stop_external_id VARCHAR(255)`, `current_stop_name VARCHAR(255)`, `current_stop_order INT`, `latitude/longitude DECIMAL(10,7)`, `provider_data_time DATETIME(6)`, `stops_past_target INT`는 모두 NULL 허용이다. `ck_notification_events_position`은 좌표의 동시 존재/부재, `ck_notification_events_stops_past_target`은 NULL 또는 양수를 강제한다. raw Observation/Provider response는 저장하지 않는다. 시각은 아래 UTC 계약을 따른다.
 
 #### notification_deliveries identity
 
@@ -254,15 +247,15 @@ device_id BIGINT NOT NULL
 CONSTRAINT uk_notification_deliveries_event_device UNIQUE (notification_event_id, device_id)
 ```
 
-두 참조는 생성 후 불변이며 JPA는 non-null/updatable=false 관계로 매핑한다. TASK-707은 `fk_notification_deliveries_event_id`와 `fk_notification_deliveries_device_id`를 각각 Event/Device PK에 연결한다. delete action은 삭제/recovery 불변조건에 맞춰 TASK-707에서 확정한다. UNIQUE의 left prefix는 Event별 Delivery 조회와 Event FK index를 지원한다. `idx_notification_deliveries_device_id (device_id)`는 Device FK용으로 필요하며 별도 event_id index는 중복 생성하지 않는다. Worker index는 아래 TASK-709 계약을 따른다.
+두 참조는 생성 후 불변이며 JPA는 non-null/updatable=false 관계로 매핑한다. `fk_notification_deliveries_event_id`와 `fk_notification_deliveries_device_id`는 각각 Event/Device PK에 연결하며 cascade delete 없이 참조 중 Event/Device hard delete를 제한한다. 계정/Device hard delete 기능은 이번에 추가하지 않는다. UNIQUE의 left prefix는 Event별 Delivery 조회와 Event FK index를 지원한다. `idx_notification_deliveries_device_id (device_id)`는 Device FK용으로 필요하며 별도 event_id index는 중복 생성하지 않는다. Worker index는 아래 TASK-709 계약을 따른다.
 
 한 Event에는 0..N Device별 Delivery가 있을 수 있으며 Delivery retry는 같은 row의 operational state를 갱신한다. 중복 Event 재제출은 Delivery를 추가하거나 갱신하지 않는다. MySQL UNIQUE는 nullable column의 여러 NULL을 허용하므로 두 UNIQUE의 핵심 column은 모두 NOT NULL이다. [MySQL 8.4 UNIQUE 계약](https://dev.mysql.com/doc/refman/8.4/en/create-index.html)을 따른다.
 
-TASK-707에서 초기 NotificationHistory를 전환할 때 없는 generation/cycle/device를 만들어 legacy row를 새 logical Event로 승격하지 않는다. 구체 cleanup/전환 정책은 TASK-707 책임이며 V3/V9 파일은 수정하지 않는다.
+TASK-707에서 초기 NotificationHistory를 전환할 때 없는 generation/cycle/device를 만들어 legacy row를 새 logical Event로 승격하지 않는다. V14의 조건부 legacy 보존 정책을 따르며 V3/V9 파일은 수정하지 않았다.
 
 하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 Delivery 생성을 함께 commit한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient log/metric으로 관찰한다. 이미 freshness가 끝난 recipient row는 아래 계약대로 EXPIRED로 생성한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. 단일 Spring Backend의 fixed-delay, non-overlapping worker가 기존 Delivery를 제한 조회하고 recipient를 다시 선정하지 않는다. 전송 전 재검증/attempt commit 및 결과 반영은 [Architecture](architecture.md#notification-dispatch와-result-transaction-task-709)를 따른다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
 
-Lifecycle/Provider result는 [Domain invariant](domain-model.md#delivery-result-semantics), failure/retry 결정은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-failureretryexpiry-설계-2026-10-09)가 소유한다. 아래는 TASK-709 설계 완료 / TASK-707 미구현 계약이다. append-only attempt table, raw FID 복제, claim/lease column은 추가하지 않는다. Operational data는 장기 Analytics와 별도 책임이며 Analytics persistence는 TASK-812에서 필요성을 결정한다.
+Lifecycle/Provider result는 [Domain invariant](domain-model.md#delivery-result-semantics), failure/retry 결정은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-failureretryexpiry-설계-2026-10-09)가 소유한다. 아래 Schema와 due Repository는 TASK-707에서 적용했다. Provider 결과 처리/attempt 시작/retry/expiry 운영 실행은 TASK-709 implementation에 남는다. append-only attempt table, raw FID 복제, claim/lease column은 추가하지 않는다. Operational data는 장기 Analytics와 별도 책임이며 Analytics persistence는 TASK-812에서 필요성을 결정한다.
 
 #### NotificationEvent freshness time (TASK-709)
 
@@ -311,7 +304,7 @@ Nullable enum/acceptance 조건은 MySQL CHECK의 UNKNOWN 통과를 피하도록
 
 #### Worker due query와 Index (TASK-709)
 
-V1의 제한 조회는 expired/capped PENDING도 빠짐없이 종료해야 한다. 다음은 SQL 계약 예시이며 Migration/Repository 구현은 아니다.
+V1의 제한 조회는 expired/capped PENDING도 빠짐없이 종료해야 한다. NotificationDeliveryRepository.findDuePendingIds(now, Pageable)는 다음 SQL과 같은 predicate/정렬의 bounded ID 조회를 구현한다.
 
 ```sql
 SELECT id
@@ -323,7 +316,7 @@ LIMIT :batchSize;
 
 JPA도 동일 predicate/정렬과 bounded Pageable을 사용한다. 조회 결과는 dispatch 후보이며 재검증 transaction에서 먼저 `now >= expiresAt`이면 EXPIRED, 그 다음 count>=maxAttempts면 FAILED, 그 다음 recipient/local lifecycle 조건을 적용한다. 실제 전송 자격은 `status=PENDING AND nextAttemptAt<=now AND expiresAt>now AND attemptCount<maxAttempts` 및 current Device 검증이다. SELECT/후속 검증만으로 multi-worker exclusion을 보장하지 않으며 단일 worker 계약에 의존한다.
 
-`idx_notification_deliveries_pending_due (status, next_attempt_at, id)` 하나를 추가한다. equality status → due range/정렬 next_attempt_at → tie-break PK 순서다. expiresAt은 row recheck/filter로 처리한다. 두 range column을 앞에 나란히 넣어 모두 range scan된다고 가정하지 않고 별도 expiry/status/attemptCount index를 추가하지 않는다. InnoDB의 PK suffix가 id를 이미 포함하더라도 별도 id index를 만들지 않는다. 기존 Event×Device UNIQUE와 device_id FK index도 유지한다. [MySQL multiple-column index](https://dev.mysql.com/doc/refman/8.4/en/multiple-column-indexes.html)를 기준으로 TASK-707에서 실제 SQL/EXPLAIN을 확인한다.
+`idx_notification_deliveries_pending_due (status, next_attempt_at, id)` 하나를 추가한다. equality status → due range/정렬 next_attempt_at → tie-break PK 순서다. expiresAt은 row recheck/filter로 처리한다. 두 range column을 앞에 나란히 넣어 모두 range scan된다고 가정하지 않고 별도 expiry/status/attemptCount index를 추가하지 않는다. InnoDB의 PK suffix가 id를 이미 포함하더라도 별도 id index를 만들지 않는다. 기존 Event×Device UNIQUE와 device_id FK index도 유지한다. [MySQL multiple-column index](https://dev.mysql.com/doc/refman/8.4/en/multiple-column-indexes.html)를 기준으로 TASK-707 MySQL 테스트에서 실제 due SQL/EXPLAIN과 index 목록을 검증한다.
 
 모든 PENDING 예약은 nextAttemptAt<=expiresAt이다. retry/recovery 가능 시각이 기한 이상이면 nextAttemptAt=expiresAt으로 저장하여 기한 도래 때 위 조회로 local 종료하고 그 예약으로 FCM을 호출하지 않는다. 이미 만료된 초기 row는 EXPIRED로 생성하므로 조회되지 않는다. 이 규칙은 미래 Retry-After와 오랜 restart 때문에 expired row가 due query에서 영구 누락되는 것을 막는다.
 

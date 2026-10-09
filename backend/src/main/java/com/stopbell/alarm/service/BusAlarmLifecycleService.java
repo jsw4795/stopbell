@@ -88,6 +88,6 @@ public class BusAlarmLifecycleService {
         LocalDateTime expiresAt = LocalDateTime.ofInstant(
                 observedAt.plus(BusAlarmEvaluationPolicy.FOLLOW_UP_TIMEOUT), ZoneOffset.UTC
         );
-        alarm.startFollowUp(event.vehicleTrackingId(), startedAt, expiresAt);
+        alarm.startFollowUp(event.vehicleTrackingId(), event.trackingCycleId(), startedAt, expiresAt);
     }
 }

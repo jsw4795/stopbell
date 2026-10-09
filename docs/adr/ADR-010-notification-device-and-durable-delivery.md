@@ -198,13 +198,15 @@ ACTIVE vehicle tracking은 기존 Phase 5 결정대로 V1에서 memory 기반일
 동일 logical Notification   → Phase 7 persistence
 ```
 
-Logical Notification의 identity는 `(alarmId, activationGeneration, trackingCycleId, eventType)`이다. `alarmId + eventType`만 사용하지 않는다. 확정된 [Schema/UNIQUE 계약](../database.md#phase-7-notification-persistence-contract)은 TASK-707에서 생성하고, 실제 적용은 TASK-708 implementation에서 수행한다.
+Logical Notification의 identity는 `(alarmId, activationGeneration, trackingCycleId, eventType)`이다. `alarmId + eventType`만 사용하지 않는다. 확정된 [Schema/UNIQUE 계약](../database.md#phase-7-notification-persistence-contract)은 TASK-707의 V14에서 생성했고, 실제 decision 연결은 TASK-708 implementation에서 수행한다.
 
 ### TASK-708 중복 방지 설계 (2026-10-09)
 
 설계 완료, 구현 미완료다. 결정·대안·구현 분담은 이 절, Domain invariant는 [Domain Model](../domain-model.md#notificationevent), column/constraint/index는 [Database](../database.md#phase-7-notification-persistence-contract), transaction 실행 절차는 [Architecture](../architecture.md#notification-decision-transaction-task-708)가 소유한다.
 
 #### 현재 구현 조사와 보장 한계
+
+아래는 TASK-708 설계 당시 조사다. 이후 Schema/Entity/FOLLOW_UP 저장은 TASK-707에서 구현했으며 원래 UUID를 사용하는 평가기 복원과 atomic decision은 아직 후속 작업이다.
 
 - `Alarm`/V11은 activation generation을 영속하고 기존 증가 규칙을 구현했다. `VehicleTrackingState.begin()`/`beginBeforeTarget()`은 UUID를 생성하며 `observe()`/`emit()`은 같은 ID를 유지한다. `TransitEvent`는 UUID와 event type을 전달한다.
 - `BusAlarmEvaluationState.forFollowUp()`은 정상 process 안에서 ARRIVED 차량의 cycle을 유지한다. 반면 `Alarm`/V6에는 차량 ID와 시작·만료 시각만 있고 cycle ID는 없다. `BusAlarmEvaluator.evaluateFollowUp()`은 memory tracking이 없으면 `begin()`으로 새 UUID를 만든다. 따라서 현재 FOLLOW_UP 복구는 차량 correlation은 가능하지만 ARRIVED와 ONE_STOP_AFTER의 cycle identity continuity는 보장하지 못한다.
@@ -246,12 +248,19 @@ Blind upsert/REPLACE는 기존 decision을 변경·대체할 수 있고 INSERT I
 
 #### Alarm 삭제에 대한 후속 결정 제약
 
-현재 NotificationHistory의 cascade는 Phase 7 Event/Delivery 정책으로 자동 승계하지 않는다. 보존·명시적 취소·삭제의 최종 정책과 FK delete action은 TASK-707이 결정하며 이번에는 다음 불변조건만 확정한다.
+현재 NotificationHistory의 cascade는 Phase 7 Event/Delivery 정책으로 자동 승계하지 않는다. TASK-708 설계 당시에는 다음 불변조건을 확정했으며 최종 정책은 아래 TASK-707 결정으로 확정했다.
 
 - 살아 있는 Alarm/current generation에서 재제출 가능한 identity의 기록을 삭제해 dedup을 재허용하지 않는다. Event를 보존하면 `alarmId` 등 네 identity 값과 Event owner를 그대로 보존하며, nullable Alarm association을 identity column으로 대신하지 않는다.
 - 삭제 transaction은 기존 Alarm row lock과 조율해 monitoring/follow-up 및 이미 생성된 pending Delivery의 처리 방침을 원자적으로 확정한다. Event/Delivery를 유지할 경우 worker가 삭제된 Alarm의 pending Delivery를 계속 보낼지 취소할지 명시해야 하고, 취소는 Provider 성공/실패로 꾸미지 않는다. worker와 deletion 사이의 진행 중 FCM request 회수는 보장하지 않는다.
 - pending retry/recovery가 의존하는 Event/Delivery와 identity는 해당 작업이 끝나거나 명시적으로 취소되기 전에 우연히 cascade로 사라지면 안 된다. 삭제안을 선택하면 pending 처리를 먼저 원자적으로 종료하고 deleted Alarm 후보를 영구 거부해야 한다. Alarm ID를 다른 Alarm에 재사용하거나 남은 candidate로 기록을 재생성하지 않는다.
 - Alarm 삭제·재활성화와 Provider delivery 결과가 Alarm lifecycle을 되살리지 않는다. 기존 Event의 재제출은 누락 Delivery 복구나 새 Device fan-out의 계기가 아니다. 보존기간·장기 Analytics 정책은 여기서 정하지 않는다.
+
+#### TASK-707 persistence와 삭제 정책 결정 (2026-10-09)
+
+- NotificationHistory의 Entity/Enum/Repository를 NotificationEvent/Delivery로 대체한다. V14는 빈 legacy table만 제거하고 데이터가 있으면 table/row를 보존하며 Alarm cascade FK만 제거한다. 없는 identity를 만들어 변환하지 않는다. Schema/적용 전제는 [database.md](../database.md#notification_history-legacy-보존-정책)가 소유한다.
+- Alarm hard delete 후 Event/Delivery의 identity와 결과를 보존한다. 원본 alarm_id에는 Alarm FK를 두지 않는다. Event owner와 Delivery Event/Device FK는 cascade 없이 참조 중 hard delete를 제한한다. 계정/Device hard delete 기능과 보존기간 정책을 추가하지 않는다.
+- 삭제는 Alarm lock 뒤 PENDING Delivery를 잠가 FAILED/DISPATCH_NOT_ALLOWED로 명시 종료하고 terminal/실제 attempt/result를 보존한다. 전체 rollback과 Worker lock 조율은 [Architecture](../architecture.md#alarm-삭제-transaction-task-707)가 소유한다. 진행 중/접수된 FCM 회수는 보장하지 않는다.
+- V14와 JPA/Repository는 두 UNIQUE, TASK-709 operational fields/CHECK/due index, UTC microsecond 시각, 실제 optional PASSED 근거, FOLLOW_UP 원래 UUID 저장/제거를 구현한다. UUID 복원 평가, atomic decision/dedup/fan-out, Worker/실제 전송/retry는 후속 Task 책임을 유지한다.
 
 #### 후속 최소 구현과 검증 분담
 
@@ -285,7 +294,7 @@ Recipient set은 Event 결정 transaction에서 Device identity로 확정한다.
 
 V1은 하나의 Spring Backend와 하나의 fixed-delay, non-overlapping worker를 기본으로 한다. Worker는 전송 직전에 recipient Device가 여전히 Event owner의 올바른 installation인지, enabled인지와 current push target/revision을 재검증하고 실제 attempt revision을 기록한다. raw push target persistence는 필수가 아니다. FCM I/O를 Alarm lifecycle transaction 안에서 수행하지 않고 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다. 외부 Kafka, RabbitMQ, Redis queue와 Notification microservice는 도입하지 않는다. claim/lease, `claimedAt`, `SENDING`, stale-claim recovery, multi-worker coordination은 V1에서 구현하지 않는다.
 
-`NotificationEvent`는 durable logical decision과 dedup identity를 소유하고 Event 시점에 생성된 recipient Delivery들의 logical source가 된다. `NotificationDelivery`는 Event×Device, Provider delivery/retry/expiry state와 current/final result를 소유한다. 기존 `NotificationHistory` Entity/table을 확장·대체·migration하는 방식은 TASK-707에서 정하며 production legacy compatibility를 과도하게 만들지 않는다. 모든 retry attempt를 append-only row로 저장하지 않는다. Analytics는 실제 제품 질문과 보존 근거가 있을 때만 별도 책임으로 최소 구현하며, Event/Delivery를 장기 Analytics Source of Truth로 사용하지 않는다.
+`NotificationEvent`는 durable logical decision과 dedup identity를 소유하고 Event 시점에 생성된 recipient Delivery들의 logical source가 된다. `NotificationDelivery`는 Event×Device, Provider delivery/retry/expiry state와 current/final result를 소유한다. 기존 `NotificationHistory` 코드 대체와 table의 조건부 보존은 위 TASK-707 결정을 따르며 production legacy compatibility를 과도하게 만들지 않는다. 모든 retry attempt를 append-only row로 저장하지 않는다. Analytics는 실제 제품 질문과 보존 근거가 있을 때만 별도 책임으로 최소 구현하며, Event/Delivery를 장기 Analytics Source of Truth로 사용하지 않는다.
 
 ### Delivery semantics와 failure taxonomy
 
@@ -308,7 +317,7 @@ Invalid/unregistered 결과는 attempt의 identity/owner/generation/revision/FID
 
 #### 조사한 실제 구현과 SDK 경계
 
-현재 `notification.entity.Device`와 V13에는 owner, nullable current FID, revision, ownership generation, enabled가 있다. 등록/disable mutation과 API는 아직 없다. `NotificationHistory`/Repository/V3/V9는 Alarm별 SUCCESS/FAILURE와 삭제 cascade만 제공한다. Event/Delivery Entity·Migration·Worker·Firebase Admin dependency와 production 전송은 없다. `BusAlarmLifecycleService`는 Alarm row lock/generation/status와 lifecycle만 갱신하고 Event/Delivery 원자 저장은 TASK-708 implementation의 후속 작업이다. TASK-708에서 발견한 FOLLOW_UP UUID/ACTIVE restart의 기존 한계도 그대로 남으며 이번 설계가 이를 해결했다고 주장하지 않는다.
+TASK-709 설계 시점(TASK-707 구현 전)의 `notification.entity.Device`와 V13에는 owner, nullable current FID, revision, ownership generation, enabled가 있다. 등록/disable mutation과 API는 아직 없다. `NotificationHistory`/Repository/V3/V9는 Alarm별 SUCCESS/FAILURE와 삭제 cascade만 제공한다. Event/Delivery Entity·Migration·Worker·Firebase Admin dependency와 production 전송은 없다. `BusAlarmLifecycleService`는 Alarm row lock/generation/status와 lifecycle만 갱신하고 Event/Delivery 원자 저장은 TASK-708 implementation의 후속 작업이다. TASK-708에서 발견한 FOLLOW_UP UUID/ACTIVE restart의 기존 한계도 그대로 남으며 이번 설계가 이를 해결했다고 주장하지 않는다.
 
 조사 기준은 기존 선택 후보 **Firebase Admin Java 9.11.0**, FCM HTTP v1 `message.fid`다. 성공한 단일 `FirebaseMessaging.send(Message)`는 message ID를 반환한다. 실패는 `FirebaseMessagingException.getMessagingErrorCode()`(nullable), inherited `getErrorCode()`, `getHttpResponse()`(nullable), `getCause()`로 조사한다. HTTP response가 있으면 `getStatusCode()`, `getHeaders()`, `getContent()`가 있지만 structured `getFieldViolations()`, `isRetryable()`, 요청 전송 완료 여부 field는 없다. Node의 `messaging/*` 문자열 오류를 Java enum으로 만들지 않는다. FcmError 외 BadRequest/QuotaFailure detail은 SDK typed accessor가 아니며 필요할 때 TASK-705에서 bounded parsing으로 검사하고 원문을 저장/출력하지 않는다.
 
@@ -408,9 +417,9 @@ Event owner와 Event 시점 `recipientOwnershipGeneration`을 저장한다. revi
 | 이전 등록이 INVALID_TARGET 처리됨 | 해당 Delivery terminal 유지. 아직 PENDING인 다른 Event row는 현재 Device 조건으로 재검증 |
 | Event 후 새 Device 등록 | 새 Delivery/fan-out 없음 |
 | Event/Delivery 삭제·명시적 dispatch 종료 | 호출 중단/무변경. terminal 또는 삭제 row를 재생성하지 않음 |
-| Alarm/User 삭제 관련 결정 대기 | TASK-707이 확정할 lifecycle 정책으로 dispatch 허용 여부 판단. 우연한 FK cascade나 현재 Alarm INACTIVE만으로 판단하지 않음 |
+| Alarm 삭제 / 참조 중 User hard delete | TASK-707은 Alarm 삭제 시 PENDING을 명시 종료하고 기록 보존, 참조 중 User hard delete는 FK로 제한. 현재 Alarm INACTIVE만으로 정상 ARRIVED 전달을 거부하지 않음 |
 
-모든 local 탈락에는 먼저 실제 expiry를 적용한다. ARRIVED의 정상 Alarm 비활성화는 그 Event 전달 실패 근거가 아니며 deletion 정책과 혼동하지 않는다. 보존·취소·삭제와 FK 최종 선택은 TASK-707에 남긴다. 보존해서 계속 보내는 정책이면 불변 Event owner/evidence를 쓰고, dispatch 종료 정책이면 pending을 원자적으로 종료/삭제하며 `DISPATCH_NOT_ALLOWED` local 진단으로 Provider 실패와 구분한다. explicit 취소를 시간 EXPIRED로 꾸미거나 CANCELLED lifecycle을 이번에 추가하지 않는다. 삭제 정책이 결정되지 않은 상태로 TASK-707 구현을 완료 처리하지 않는다.
+모든 local 탈락에는 먼저 실제 expiry를 적용한다. ARRIVED의 정상 Alarm 비활성화는 그 Event 전달 실패 근거가 아니며 deletion 정책과 혼동하지 않는다. TASK-707은 기록 보존과 PENDING의 원자 FAILED/DISPATCH_NOT_ALLOWED 종료를 선택했다. 이 명시적 삭제 종료는 local expiry와 구분하고 기존 attempt/result를 보존한다. explicit 취소를 시간 EXPIRED로 꾸미거나 CANCELLED lifecycle을 이번에 추가하지 않는다. 삭제 정책이 결정되지 않은 상태로 TASK-707 구현을 완료 처리하지 않는다.
 
 UNREGISTERED 결과의 cleanup은 **짧은 Device PESSIMISTIC_WRITE transaction 안의 current locking read + 검증 + disable**로 수행한다. `{deviceId, eventOwnerId, attemptOwnershipGeneration, attemptRegistrationRevision, attemptCurrentPushTargetId}`와 현재 row의 identity/owner/generation/revision/FID 및 enabled=true를 모두 비교한다. FID 비교는 case-sensitive exact 값이다. lock을 유지한 상태에서만 enabled=false, currentPushTargetId=null 및 updatedAt을 갱신한다. TASK-703 등록/ownership transaction도 같은 Device write lock을 사용하므로 사전 SELECT 뒤 별도 UPDATE와 다르다. CAS/@Version framework나 새 DB lock scheme은 추가하지 않는다.
 
@@ -433,7 +442,7 @@ Provider cleanup은 Client revision을 증가시키지 않으므로 같은 revis
 | E. 요청 중 FID rotation | 원래 attempt의 count/S로 결과 기록; retry 가능하면 다음 attempt는 새 current 등록 | old INVALID_TARGET은 revision/FID 불일치로 cleanup no-op |
 | F. 요청 중 ownership 이전 | 원래 Event Delivery 결과만 처리; 다음 preflight는 generation/owner 불일치로 종료 | old cleanup no-op. 이미 시작한 전송 회수 불가 |
 | G. expired 후보 재조회 | PENDING이면 EXPIRED + null next, count/E 유지; terminal EXPIRED는 query 제외 | Provider 호출/cleanup 없음 |
-| H. retry 중 Event/Alarm 삭제 | TASK-707의 원자 dispatch 종료/보존 정책 적용. 삭제/terminal row는 no-op, 보존·허용 row만 기한 내 재검증 | late 결과로 lifecycle/row 재생성 금지, FK 정책 미결정 유지 |
+| H. retry 중 Event/Alarm 삭제 | TASK-707의 원자 dispatch 종료/보존 정책 적용. 삭제/terminal row는 no-op, 보존·허용 row만 기한 내 재검증 | late 결과로 lifecycle/row 재생성 금지, non-cascade FK와 원본 Alarm ID 보존 |
 | I. 오래 중단 뒤 restart | next<=E invariant로 오래된 pending도 due sweep 대상. expired 우선 종료, 미만료 row만 남은 budget 사용 | now/TTL/count를 reset하지 않음 |
 | J. 일부 Device만 성공 | ACCEPTED는 유지, 나머지 row만 독립 retry/FAILED/EXPIRED | recipient set 재선정/성공 Device 재전송 없음 |
 
@@ -477,7 +486,7 @@ MySQL outbox는 이미 사용하는 infrastructure 안에서 lifecycle transitio
 - TASK-702/703은 installation identity, multi-device, stale registration ordering과 별도 disable API를 정의·구현한다.
 - TASK-510은 persisted activation generation의 정확한 증가와 `PESSIMISTIC_WRITE` stale-result 검증을 구현했다.
 - TASK-707/708은 NotificationEvent/Delivery persistence와 logical DB uniqueness를 구현한다.
-- TASK-707은 Alarm 삭제 시 이미 생성된 Event/Delivery를 유지·취소·cascade 삭제할지 lifecycle과 outbox recovery 의미로 결정하며 FK cascade에 우연히 맡기지 않는다.
+- TASK-707은 Alarm 삭제 시 이미 생성된 Event/Delivery를 보존하고 PENDING만 명시 종료하며 FK cascade에 우연히 맡기지 않는다.
 - TASK-705/709는 명시적인 Provider result/failure와 bounded retry를 구현한다.
 - TASK-704/710은 permission, registration, foreground/background/terminated/tap을 실제 iPhone에서 검증한다.
 - Kafka, RabbitMQ, Redis queue, event sourcing, generic multi-provider/retry framework, Device subtype hierarchy, APNs direct client, multi-instance distributed lock은 V1에서 제외한다.
