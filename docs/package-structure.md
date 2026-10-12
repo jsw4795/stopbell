@@ -144,8 +144,8 @@ Provider별 raw DTO를 Alarm Evaluation에 직접 전달하지 않는다. `trans
 
 Device registration lifecycle, durable logical Notification, per-Device delivery, Push provider 요청과 결과 처리 책임을 둔다.
 
-- `controller`: authenticated Device registration/disable API
-- `service`: NotificationEvent와 Event 시점 recipient Delivery 생성 orchestration, 기존 pending Delivery worker와 전달 결과 처리
+- `controller`: authenticated Device registration/state lookup/disable API
+- `service`: Device 권한·revision·ownership/transaction 처리, NotificationEvent와 Event 시점 recipient Delivery 생성 orchestration, 기존 pending Delivery worker와 전달 결과 처리
 - `client`: FCM Push provider client와 명시적인 provider result/failure mapping
 - `repository`: Device, NotificationEvent, NotificationDelivery JPA Repository
 - `entity`: Device, NotificationEvent, NotificationDelivery JPA Entity
@@ -164,12 +164,13 @@ user/repository/UserRepository
 alarm/repository/AlarmRepository
 notification/repository/NotificationEventRepository
 notification/repository/NotificationDeliveryRepository
+notification/repository/DeviceRepository
 transit/repository/BusRouteRepository
 transit/repository/BusStopRepository
 transit/repository/BusRouteStopOccurrenceRepository
 ```
 
-TASK-707은 `notification.entity.NotificationEvent`/`NotificationDelivery`와 각각의 JPA Repository를 추가하고 구형 NotificationHistory 관련 미사용 코드를 제거했다. Device Entity/Platform은 TASK-702 구현을 유지한다.
+TASK-707은 `notification.entity.NotificationEvent`/`NotificationDelivery`와 각각의 JPA Repository를 추가하고 구형 NotificationHistory 관련 미사용 코드를 제거했다. Device Entity/Platform은 TASK-702 구현을 유지하며 TASK-703은 DeviceController/DeviceService/DeviceRepository와 Device 요청·응답 DTO를 추가했다.
 
 JPA는 `User`, `Alarm`, `BusAlarmTarget`, Device/Notification persistence, Bus metadata의 단순 CRUD와 Entity 상태 관리에 사용한다. `BusAlarmTarget`은 별도 Repository로 독립 관리하지 않고 Alarm aggregate의 cascade lifecycle을 따른다.
 

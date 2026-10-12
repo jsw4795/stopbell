@@ -82,28 +82,70 @@ public class Device {
         if (user == null || platform == null || lastRegisteredAt == null) {
             throw new IllegalArgumentException("Device owner, platform and registration time must not be null");
         }
-        if (installationId == null || !INSTALLATION_ID.matcher(installationId).matches()) {
-            throw new IllegalArgumentException("Installation ID must be a canonical UUID v4");
-        }
         if (installationCredentialHash == null || !installationCredentialHash.matches("[0-9a-f]{64}")) {
             throw new IllegalArgumentException("Installation credential hash must be lowercase SHA-256 hex");
         }
-        if (currentPushTargetId == null || currentPushTargetId.isBlank()
-                || currentPushTargetId.length() > 255
-                || currentPushTargetId.codePoints().anyMatch(c -> Character.isWhitespace(c) || Character.isSpaceChar(c))) {
-            throw new IllegalArgumentException("Push target must contain 1 to 255 characters without whitespace");
-        }
+        validatePushTarget(currentPushTargetId);
         if (registrationRevision < 0) {
             throw new IllegalArgumentException("Registration revision must not be negative");
         }
         this.user = user;
-        this.installationId = installationId.toLowerCase(Locale.ROOT);
+        this.installationId = normalizeInstallationId(installationId);
         this.installationCredentialHash = installationCredentialHash;
         this.platform = platform;
         this.currentPushTargetId = currentPushTargetId;
         this.registrationRevision = registrationRevision;
         this.enabled = true;
         this.lastRegisteredAt = lastRegisteredAt;
+    }
+
+    public static String normalizeInstallationId(String installationId) {
+        if (installationId == null || !INSTALLATION_ID.matcher(installationId).matches()) {
+            throw new IllegalArgumentException("Installation ID must be a canonical UUID v4");
+        }
+        return installationId.toLowerCase(Locale.ROOT);
+    }
+
+    public static void validatePushTarget(String pushTarget) {
+        if (pushTarget == null || pushTarget.isBlank() || pushTarget.length() > 255
+                || pushTarget.codePoints().anyMatch(c -> Character.isWhitespace(c) || Character.isSpaceChar(c))) {
+            throw new IllegalArgumentException("Push target must contain 1 to 255 characters without whitespace");
+        }
+    }
+
+    public void register(String pushTarget, long revision, LocalDateTime registeredAt) {
+        validatePushTarget(pushTarget);
+        validateNextRevision(revision);
+        if (registeredAt == null) {
+            throw new IllegalArgumentException("Registration time must not be null");
+        }
+        currentPushTargetId = pushTarget;
+        registrationRevision = revision;
+        enabled = true;
+        lastRegisteredAt = registeredAt;
+    }
+
+    public void transferOwnership(User newOwner, String pushTarget, long revision, LocalDateTime registeredAt) {
+        if (newOwner == null || newOwner.getId() == null || newOwner.getId().equals(user.getId())) {
+            throw new IllegalArgumentException("Ownership transfer requires a different persisted owner");
+        }
+        long nextGeneration = Math.incrementExact(ownershipGeneration);
+        register(pushTarget, revision, registeredAt);
+        user = newOwner;
+        ownershipGeneration = nextGeneration;
+    }
+
+    public void disable(long revision) {
+        validateNextRevision(revision);
+        currentPushTargetId = null;
+        registrationRevision = revision;
+        enabled = false;
+    }
+
+    private void validateNextRevision(long revision) {
+        if (revision < 0 || revision <= registrationRevision) {
+            throw new IllegalArgumentException("Device mutation requires a higher registration revision");
+        }
     }
 
     @PrePersist

@@ -213,7 +213,7 @@ Push notification 검증은 실제 Device에서 수행해야 한다. emulator/si
 
 ## Firebase iOS early smoke (TASK-701)
 
-SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-701-firebase-ios-기술-계약-2026-10-06)이다. 사용자의 실기기 검증 보고로 실제 Firebase config/APNs 준비, HTTP v1 `message.fid` 전송·서버 접수와 실제 iPhone notification 수신 성공을 확인했다. TASK-701의 hardware smoke gate와 TASK-702의 Domain/Schema 정의는 완료됐으며 실제 Device API는 TASK-703에서 구현한다. 완료 결과와 미검증 항목은 ADR-010에 기록한다.
+SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-701-firebase-ios-기술-계약-2026-10-06)이다. 사용자의 실기기 검증 보고로 실제 Firebase config/APNs 준비, HTTP v1 `message.fid` 전송·서버 접수와 실제 iPhone notification 수신 성공을 확인했다. TASK-701의 hardware smoke gate와 TASK-702의 Domain/Schema 정의는 완료됐으며 Backend Device API는 TASK-703에서 구현했다. 완료 결과와 미검증 항목은 ADR-010에 기록한다.
 
 ### Firebase Console / Apple Developer 설정 순서
 
@@ -251,7 +251,7 @@ SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-devic
 
 실패 시 `401/403`은 로그인·IAM·API/project 설정, `404`는 FID 복사·입력의 정확성과 올바른 project의 현재 FCM 등록 FID인지, APNs 미준비는 entitlement/profile/signing/network, 접수 후 미수신은 APNs key 환경·permission·알림 표시 설정을 확인한다. Smoke 도구는 raw error body를 출력하지 않고 알려진 top-level status와 FCM errorCode만 출력한다(예: `FCM HTTP 404: status=NOT_FOUND, fcmErrorCode=UNREGISTERED`). JSON 파싱 실패나 예상 밖의 schema에서는 확인 가능한 항목만 출력하며, 확인할 항목이 없으면 HTTP status만 출력한다.
 
-사용자가 확인한 이전 404의 최종 원인은 수동 FID 입력 오류(`I`/`l` 혼동)이며 SDK/FCM 결함으로 확정된 문제는 없다. Native unregister, foreground/terminated 수신과 tap navigation, Backend Admin SDK 연동은 아직 미검증이다. 실제 제품의 Device 등록과 Backend Provider Client는 아직 구현되지 않았다.
+사용자가 확인한 이전 404의 최종 원인은 수동 FID 입력 오류(`I`/`l` 혼동)이며 SDK/FCM 결함으로 확정된 문제는 없다. Native unregister, foreground/terminated 수신과 tap navigation, Backend Admin SDK 연동은 아직 미검증이다. Backend Device API는 TASK-703에서 구현했으며 Flutter 제품의 Device 등록과 Backend Provider Client는 후속 작업이다.
 
 Smoke 앱은 명시적 FCM 등록을 남기지만 auto-init을 켜지 않으며 StopBell Backend Device에는 등록하지 않는다. 반복하려면 현재 FID를 다시 준비한다. 일반 product entrypoint로 돌아오려면 기존 `flutter run --dart-define-from-file=config/local.json`을 사용한다. 이번 smoke에서 Firebase installation deletion을 logout/정리 수단으로 호출하지 않는다.
 

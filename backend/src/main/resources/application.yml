@@ -41,3 +41,9 @@ management:
     web:
       exposure:
         include: health
+
+# MySQL duplicate-key messages contain the raw installation ID or FID.
+# DeviceController reports unexpected persistence failures without the JDBC cause.
+logging:
+  level:
+    org.hibernate.orm.jdbc.error: "OFF"

@@ -166,7 +166,7 @@ FID는 대소문자를 구분하는 opaque delivery reference다. 22자 관측�
 
 등록은 enabled 상태로 생성/갱신/재활성화한다. disable은 row와 owner를 보존하고 enabled=false 및 FID=null로 해제한다. 다른 Device와 Alarm은 바꾸지 않는다. Provider invalid/unregistered cleanup은 실패 attempt의 owner/generation/target/revision이 current registration과 일치할 때만 조건부 disable하며 Client revision을 임의 증가시키지 않는다. 실제 cleanup은 TASK-709 책임이다.
 
-TASK-702는 `notification.entity.Device`, `DevicePlatform`과 V13 매핑만 구현한다. 상태 변경 method, Repository, Service, Controller, DTO와 동시성/멱등 처리 실행은 TASK-703 책임이다.
+TASK-702의 `notification.entity.Device`, `DevicePlatform`과 V13 매핑을 유지한다. TASK-703은 `register`, `transferOwnership`, `disable` 상태 변경 method와 Repository/Service/Controller/DTO를 구현하고 권한·동시성·멱등 처리를 실제 MySQL에서 검증했다. Provider cleanup과 Flutter lifecycle은 각각 TASK-709와 TASK-704에 남는다.
 
 ------------------------------------------------------------------------
 

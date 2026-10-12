@@ -122,7 +122,7 @@ FID column은 case-sensitive, NO PAD `utf8mb4_0900_bin`으로 비교하므로 �
 
 자격증명 hash는 decoded 32-byte 비밀값의 SHA-256 lowercase hex다. 원문을 저장하지 않고 installation ID/platform/hash는 row 동안 불변이다. JPA는 기존 Entity처럼 `LocalDateTime`과 callback을 사용하며 Device의 시각은 UTC 의미의 `DATETIME(6)`로 저장한다. `last_registered_at`은 적용된 등록 시 서버에서 설정하며 최초 등록 row만 생성하므로 NOT NULL이다.
 
-TASK-703은 기존 row에 `PESSIMISTIC_WRITE`를 사용해 자격증명/Principal/expected generation/revision 검증과 owner·generation·target·revision·enabled 갱신을 원자적으로 구현한다. 아직 없는 row의 동시 최초 등록은 UNIQUE를 최종 경계로 삼고 충돌 transaction을 rollback한 뒤 기존 row의 권한을 다시 검증한다. Blind upsert 또는 충돌 target의 자동 탈취는 금지한다. JPA `@Version`과 별도 CAS framework를 병행하지 않는다. HTTP 계약은 [api.md](api.md#기기-등록해제-계약-task-702), Domain 의미는 [domain-model.md](domain-model.md#device)를 따른다.
+TASK-703은 기존 row에 `PESSIMISTIC_WRITE`를 사용해 자격증명/Principal/expected generation/revision 검증과 owner·generation·target·revision·enabled 갱신을 원자적으로 구현했다. 아직 없는 row의 동시 최초 등록은 UNIQUE를 최종 경계로 삼고 충돌 transaction을 rollback한 뒤 기존 row의 권한을 다시 검증한다. 실제 MySQL UNIQUE/locking과 rollback을 검증했으며 V13 변경이나 새 Migration은 없다. Blind upsert 또는 충돌 target의 자동 탈취는 금지한다. JPA `@Version`과 별도 CAS framework를 병행하지 않는다. HTTP 계약은 [api.md](api.md#기기-등록해제-계약-task-702), Domain 의미는 [domain-model.md](domain-model.md#device)를 따른다.
 
 ### alarms
 

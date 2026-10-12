@@ -167,9 +167,11 @@ Provider mapper는 request Route context, raw Provider response, StopBell이 성
 
 Device registration lifecycle, durable logical Notification 결정, Event 시점의 per-Device recipient 확정, Push provider 요청과 결과 처리를 담당한다.
 
-Device는 내부 PK + StopBell installation UUID v4 + 현재 FID를 분리한다. User 1:N Device이며 installation당 current owner는 한 명이다. TASK-702는 Device/Platform JPA와 V13 Schema를 구현했으며 API는 TASK-703에서 구현한다. [Domain](domain-model.md#device), [Schema](database.md#devices), [등록/해제 API 계약](api.md#기기-등록해제-계약-task-702)을 따른다. Firebase readiness와 FID targeting smoke 결과는 ADR-010을 유지한다.
+Device는 내부 PK + StopBell installation UUID v4 + 현재 FID를 분리한다. User 1:N Device이며 installation당 current owner는 한 명이다. TASK-702는 Device/Platform JPA와 V13 Schema를 구현했으며 등록·상태 조회·disable API는 TASK-703에서 구현했다. [Domain](domain-model.md#device), [Schema](database.md#devices), [등록/해제 API 계약](api.md#기기-등록해제-계약-task-702)을 따른다. Firebase readiness와 FID targeting smoke 결과는 ADR-010을 유지한다.
 
 Device mutation은 JWT Principal과 별도 installation credential을 검증한다. TASK-703에서 기존 row의 `PESSIMISTIC_WRITE` transaction으로 ownership generation/revision 검증과 owner/FID/enabled 갱신을 함께 처리한다. 계정 변경은 credential과 명시적 이전 intent 및 expected generation이 일치할 때만 서버 generation을 증가시킨다. Client의 높은 revision만으로 이전하지 않으며 다른 User의 지연된 disable은 현재 Device를 변경하지 못한다. RefreshToken과 Device는 FK로 연결하지 않는다. 신규 row의 경쟁은 installation/FID UNIQUE로 차단하고 rollback 뒤 권한을 재검증한다.
+
+`DeviceService`는 `REQUIRES_NEW` TransactionTemplate으로 mutation과 read-only 상태 조회의 경계를 관리한다. 최초 등록은 Entity를 로드하지 않는 existence query 후 기존 row에만 current write lock을 얻어 없는 UUID의 gap lock 경쟁을 피한다. 알려진 Device UNIQUE 충돌만 전체 rollback/실패 persistence context 폐기 후 새 transaction에서 원래 요청을 한 번 재확인한다. 원인을 확인하지 못한 DB 오류는 정상 conflict로 분류하지 않는다. Device API의 예상 밖 persistence 오류는 상세 없는 500과 예외 종류만 남기는 log로 처리한다. MySQL 중복키 메시지의 원문 UUID/FID 노출을 막기 위해 `org.hibernate.orm.jdbc.error` 로그를 끈다. 현재 HTTP access log와 request/SQL parameter 상세 log는 활성화하지 않으며 상태 조회의 원문 URL을 추가 기록하지 않는다.
 
 Flutter는 설치본 counter/credential/generation을 logout에도 보존하고 요청을 session과 함께 snapshot해 계정 변경 뒤 이전 작업이 새 Principal로 재시도되지 않게 한다. Device disable 시도 → Auth logout → local session 종료의 경계를 유지하며 network 실패로 logout을 영구 차단하지 않는다. Offline 즉시 Push 해제와 이미 FCM에 접수된 알림 회수는 보장하지 않는다. 구체 계약/한계는 API 문서가 소유하며 Flutter 실행은 TASK-704 책임이다.
 

@@ -219,7 +219,7 @@ Alarm response에는 `provider`, `externalRouteId`, `externalStopId`, `targetSto
 
 ### 기기 등록/해제 계약 (TASK-702)
 
-아래 계약은 확정됐지만 Endpoint/DTO/ErrorCode/Service/Repository와 동시성 처리는 **TASK-703에서 구현한다**. TASK-702는 Domain/JPA/Schema만 구현한다.
+아래 TASK-702 계약의 Endpoint/DTO/ErrorCode/Service/Repository와 동시성 처리는 **TASK-703에서 구현했다**. TASK-702의 Domain/JPA/V13 Schema를 유지한다.
 
 등록·조회·해제 Endpoint 모두 StopBell JWT Access Token이 필수다. User는 Spring Security Principal에서 가져오며 body의 `userId`를 받지 않는다. 별도로 `X-Installation-Credential` header가 필수다. 이 값은 Flutter가 최초 요청 전에 CSPRNG로 생성·안전하게 저장한 32-byte 비밀값의 canonical unpadded Base64URL(43자)이다. Backend는 정확히 32 bytes로 decode하고 SHA-256 lowercase hex hash를 저장/constant-time 비교한다. UUID·FID·revision은 자격증명을 대체하지 않는다. 자격증명, hash, FID는 로그·오류·응답에 노출하지 않는다. installationId는 로그·오류에서 제외하고 응답에서는 해당 요청의 정규화한 값만 반환한다. 상태 조회의 access log도 원문 경로 대신 route template을 사용해 installationId를 노출하지 않는다. 운영 API는 HTTPS를 사용한다.
 
@@ -280,7 +280,7 @@ X-Installation-Credential: <installation credential>
 
 UUID/header validation은 등록과 같다. JWT와 **해당 설치본 자격증명**을 모두 검증한다. 현재 owner가 다른 User여도 설치본 보유자는 계정 이전에 필요한 서버 상태를 조회할 수 있다. `200 OK`로 등록 응답의 id/정규화 installationId/enabled/revision/generation과 `ownedByCurrentUser` boolean을 반환한다. owner ID/FID/credential은 반환하지 않는다. row가 없으면 `404 DEVICE_NOT_FOUND`, 자격증명 불일치는 `403 DEVICE_CREDENTIAL_INVALID`다. 상태나 시각을 변경하지 않는다.
 
-이 조회는 응답 유실 후 계정 변경, 앱 재시작의 pending 요청 결과 불명확, counter/generation metadata 복구에 필요한 최소 동기화다. 현재 Auth Session의 **새 사용자 의도**에 대해서만 조회 상태를 반영해 local revision을 max(local, server)로 맞춘 뒤 증가시키고, current generation과 필요한 이전 intent를 새 요청에 snapshot한다. 조회와 mutation 사이 경쟁은 mutation transaction의 재검증으로 거부한다. 과거 pending 요청의 JWT/generation/revision을 교체하거나 자동 takeover하기 위한 조회로 사용하지 않는다. credential을 잃은 경우 조회·복구를 허용하지 않는다. 실제 구현은 TASK-703 책임이다.
+이 조회는 응답 유실 후 계정 변경, 앱 재시작의 pending 요청 결과 불명확, counter/generation metadata 복구에 필요한 최소 동기화다. 현재 Auth Session의 **새 사용자 의도**에 대해서만 조회 상태를 반영해 local revision을 max(local, server)로 맞춘 뒤 증가시키고, current generation과 필요한 이전 intent를 새 요청에 snapshot한다. 조회와 mutation 사이 경쟁은 mutation transaction의 재검증으로 거부한다. 과거 pending 요청의 JWT/generation/revision을 교체하거나 자동 takeover하기 위한 조회로 사용하지 않는다. credential을 잃은 경우 조회·복구를 허용하지 않는다. Backend 조회는 TASK-703에서 구현했으며 Flutter 동기화는 TASK-704 책임이다.
 
 #### 비활성화
 
@@ -303,7 +303,7 @@ Content-Type: application/json
 
 #### 오류와 Client 순서 계약
 
-API use-case 오류는 기존 `code`, `message` 두 필드 형식을 따른다. 다음 코드는 TASK-703에서 추가한다. JWT 누락/실패는 기존 Spring Security의 `401 Unauthorized` 처리를 유지한다.
+API use-case 오류는 기존 `code`, `message` 두 필드 형식을 따른다. 다음 Device 코드는 TASK-703에서 추가했으며 `INVALID_REQUEST`는 기존 코드를 재사용한다. JWT 누락/실패는 기존 Spring Security의 `401 Unauthorized` 처리를 유지한다.
 
 | Code | HTTP | message / 의미 |
 | --- | --- | --- |
@@ -322,7 +322,7 @@ Flutter는 설치본 전체 revision을 logout/계정 변경에도 유지한다.
 
 앱 재시작은 저장한 counter/generation/pending 요청을 복원하며 counter는 응답 revision보다 낮아지지 않는다. 정상 응답 유실은 동일 요청 재전송으로 복구한다. counter/generation metadata가 유실되거나 backup과 불일치하면 위 인증된 상태 조회로 동기화한 후 새 의도를 처리한다. credential 자체의 유실에는 등록을 중단하며 UUID만으로 reset/복구하지 않는다. 재설치 때는 새로운 설치본 identity/credential/counter를 생성한다. 범용 동시성 framework를 선행 추가하지 않는다.
 
-| 검토 상황 | 계약 결과 (실행 검증은 TASK-703) |
+| 검토 상황 | 계약 결과 (Backend correctness는 TASK-703 검증 완료, Flutter 실행은 TASK-704) |
 | --- | --- |
 | AAA r1 → BBB r2 | 동일 owner/generation에서 BBB 적용 |
 | BBB r2 뒤 AAA r1 지연 | stale 거부, BBB 유지 |
