@@ -286,7 +286,7 @@ DEBUG 상태 로그는 `StopBell push stage`의 APNs/FID readiness·Device regis
 
 ## TASK-705 Backend Provider 수동 Smoke
 
-상태: **코드 및 집중 자동 테스트 완료 / 사용자 실제 Firebase 접수·iPhone 수신 검증 대기**. Codex는 이 절의 실전송을 실행하지 않았다. TASK-701의 Python 도구와 달리 아래 실행은 구현한 Java Provider와 같은 경로를 사용한다.
+상태: **코드·집중 자동 테스트 및 사용자 실제 Firebase 접수·iPhone 수신 검증 완료** (2026-10-12). Codex는 이 절의 실전송을 실행하지 않았다. TASK-701의 Python 도구와 달리 아래 실행은 구현한 Java Provider와 같은 경로를 사용한다.
 
 선행조건:
 
@@ -311,7 +311,11 @@ Smoke payload는 `ALARM_EVENT`, 선택 `alarmId`, `ARRIVED`, **합성 navigation
 1. 안전한 `FCM smoke result=ACCEPTED code=null` 로그는 Firebase 접수만 뜻한다. 메시지 ID/FID/token/raw response는 출력하지 않는다. 재시도·sleep은 없고 실패 시 사용자가 원인 확인 뒤 새 실행을 선택한다.
 2. iPhone을 background로 두고 허용된 알림/Focus 설정에서 **실제 alert 수신**을 별도로 확인한다. Foreground/terminated/tap 전체 E2E는 TASK-710에 남는다.
 3. `CONFIGURATION`이면 파일 형식/접근·project/IAM/APNs, `INVALID_TARGET`이면 현재 FCM 등록 상태를 확인한다. 실패로 Device를 자동 disable하지 않는다. timeout/AMBIGUOUS_TIMEOUT은 이미 접수됐을 수 있어 재실행에 중복 표시 위험이 있다.
-4. 사용자 확인 후 Firebase 접수와 iPhone 실제 수신 여부, 확인한 앱 상태만 민감정보 없이 기록하고 TASK-705를 최종 완료 처리한다. 현재 checkbox는 미완료를 유지한다.
+4. 사용자 확인 후 Firebase 접수와 iPhone 실제 수신 여부, 확인한 앱 상태만 민감정보 없이 기록하고 TASK-705를 최종 완료 처리한다. 2026-10-12 사용자 검증으로 TASK-705 checkbox를 완료 처리했다.
+
+사용자 검증 기록 (2026-10-12): Firebase Project `stopbell`, 기존 Backend Device ID `1`과 동일 owner의 Alarm ID `7`, 실제 iPhone 13 Pro Max에서 로컬 one-shot Backend FCM Smoke를 실행했다. Firebase `ACCEPTED` 로그와 실제 iPhone의 `StopBell 알림 / 버스가 목표 정류장에 도착했어요.` 수신을 사용자가 직접 확인했다. Backend → FCM → 실제 iPhone Smoke가 성공했다.
+
+실제 NotificationEvent 기반 자동 발송, Worker dispatch, foreground/background/terminated 전체 수신 E2E, notification tap navigation 전체 E2E 및 retry/expiry 운영 정책은 검증하지 않았다. TASK-706/709/710/711의 후속 책임이며 Codex는 실기기 검증이나 실전송을 반복하지 않았다.
 
 개발 후보 timeout은 connect `PT2S`, read `PT5S`, 인증 포함 전체 budget `PT15S`다. 이 값은 운영 retry/TTL 확정이 아니며 실제 latency 측정은 아직 없다. 세부 단일 요청·abort 보장과 ADC 지원 범위는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-705-provider-구현과-제어-gate-2026-10-12)을 따른다.
 

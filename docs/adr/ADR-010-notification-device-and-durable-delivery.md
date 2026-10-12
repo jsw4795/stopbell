@@ -408,7 +408,7 @@ FCM 공식 [retry 권고](https://firebase.google.com/docs/cloud-messaging/scale
 
 #### TASK-705 Provider 구현과 제어 gate (2026-10-12)
 
-**코드/집중 자동 검증 완료, 사용자 Backend→iPhone Smoke 대기**다. 사용자가 허용한 최소 HTTP adapter 대안을 채택했다. 위 Admin 9.11.0 조사는 후보 SDK에 대한 기록으로 유지하며 실제 runtime에는 firebase-admin을 추가하지 않는다. SDK의 공개 `FirebaseOptions`에는 retry setter가 없고 `FirebaseMessagingClientImpl.fromApp()`은 기본 retry request factory를 고정한다. 내부 builder/reflection·전용 transport 우회로 SDK와 별도 제어 layer를 함께 유지하는 대신 기존 dependency에서 직접 단일 전송한다.
+**코드/집중 자동 검증 및 사용자 Backend→FCM→실제 iPhone Smoke 완료** (2026-10-12)다. 사용자가 허용한 최소 HTTP adapter 대안을 채택했다. 위 Admin 9.11.0 조사는 후보 SDK에 대한 기록으로 유지하며 실제 runtime에는 firebase-admin을 추가하지 않는다. SDK의 공개 `FirebaseOptions`에는 retry setter가 없고 `FirebaseMessagingClientImpl.fromApp()`은 기본 retry request factory를 고정한다. 내부 builder/reflection·전용 transport 우회로 SDK와 별도 제어 layer를 함께 유지하는 대신 기존 dependency에서 직접 단일 전송한다.
 
 - 실제 resolution은 `google-api-client 2.9.0`, `google-auth-library-oauth2-http 1.30.0`, `google-http-client[-apache-v2] 2.0.0`, Apache `httpclient 4.5.14`, Gson `2.13.2`이며 Spring Boot `4.1.1` 관리 값과 compile/집중 test가 호환된다. 새 dependency/version override는 없다.
 - `FcmProviderClient.send(NotificationSendRequest)`는 `POST https://fcm.googleapis.com/v1/projects/{projectId}/messages:send`의 **`message.fid`**만 사용한다. 성공 name은 반환 객체/로그에 보존하지 않고 ACCEPTED로 정규화한다. 기존 `NotificationProviderResult`와 위 failure mapping을 사용하며 모순·불완전 404는 cleanup 근거가 아니다. 결과는 allowlist failure code, 최소 retry delay, UTC receivedAt, elapsedMs 및 FCM transport 진입 여부만 담고 자체 재시도·DB mutation은 없다.
@@ -418,7 +418,7 @@ FCM 공식 [retry 권고](https://firebase.google.com/docs/cloud-messaging/scale
 - FCM/인증 response body는 16 KiB로 제한하고 원문을 반환/로그/DB에 남기지 않는다. HTTP wire와 Google HTTP debug log를 끄며 원문 exception/cause/stack, target/token/credential은 로그하지 않는다. Retry-After delta/HTTP-date는 수신 UTC 기준 non-negative 최소 delay로 정규화하고, 중복 header는 최대값을 사용한다. 양수 overflow는 유한 표현의 최대 delay로 보존해 더 이른 retry를 유도하지 않는다. 후속 TASK-709는 먼 delay를 expiry와 비교하며 덧셈 overflow도 retry 불가로 처리해야 한다.
 - Data는 `type=ALARM_EVENT`, 문자열 `alarmId/eventType/notificationEventId`만 담는다. 네 type의 짧은 한국어 notification 및 APNs alert/push-type/priority/sound를 설정하고 caller의 고정 expiresAt epoch-second를 `apns-expiration`에 전달한다. local expiry/Type TTL/최종 운영 timeout은 TASK-709 책임이다. APNs expiration은 초 단위 hint이고 실제 표시 deadline/접수된 전송 취소를 보장하지 않는다.
 
-집중 loopback HTTP 검증에서 429/500/503/401/403, redirect 및 연결 종료가 재전송되지 않고, 인증 transport의 숨겨진 두 번째 요청도 실제 wire 전에 거부됨을 확인했다. 지연된 응답 body와 인증 HTTP를 전체 budget으로 중단하고 지연된 인증 완료 후 FCM 요청 0회를 검증했다. 이 단일 adapter의 **재전송/transport budget gate는 통과**했지만 실제 Firebase IAM/APNs/FID 접수·iPhone 수신, 운영 latency/timeout 수치 및 worker preflight/attempt accounting은 미검증/후속 범위다. production 자동 dispatch는 구현하거나 활성화하지 않았다.
+집중 loopback HTTP 검증에서 429/500/503/401/403, redirect 및 연결 종료가 재전송되지 않고, 인증 transport의 숨겨진 두 번째 요청도 실제 wire 전에 거부됨을 확인했다. 지연된 응답 body와 인증 HTTP를 전체 budget으로 중단하고 지연된 인증 완료 후 FCM 요청 0회를 검증했다. 이 단일 adapter의 **재전송/transport budget gate는 통과**했고, 2026-10-12 사용자가 Firebase ACCEPTED와 실제 iPhone 13 Pro Max 알림 수신을 확인했다. 검증 환경·범위는 [Local Development](../local-development.md#task-705-backend-provider-수동-smoke)에 기록한다. 실제 Event 기반 자동 발송·worker dispatch, 전체 앱 상태 수신/tap E2E, retry/expiry 운영 정책과 latency/timeout 수치 및 worker preflight/attempt accounting은 미검증/후속 범위다. production 자동 dispatch는 구현하거나 활성화하지 않았다.
 
 공식 source/API 근거:
 
