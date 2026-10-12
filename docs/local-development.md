@@ -319,6 +319,10 @@ Smoke payload는 `ALARM_EVENT`, 선택 `alarmId`, `ARRIVED`, **합성 navigation
 
 개발 후보 timeout은 connect `PT2S`, read `PT5S`, 인증 포함 전체 budget `PT15S`다. 이 값은 운영 retry/TTL 확정이 아니며 실제 latency 측정은 아직 없다. 세부 단일 요청·abort 보장과 ADC 지원 범위는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-705-provider-구현과-제어-gate-2026-10-12)을 따른다.
 
+### TASK-706 자동 dispatch 구성 경계
+
+TASK-706 Worker 구조와 집중 Fake Provider/MySQL Testcontainers 검증을 추가했다. `notification.dispatch.enabled=false`가 기본이며 TASK-705 FCM enabled/local Smoke와 독립적이다. TASK-709의 실제 handler가 없으므로 dispatch만 true로 설정하면 startup 구성 오류로 차단된다. **현재 자동 FCM 전송을 활성화하면 안 된다.** 설정과 구현/후속 recovery 경계는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. Codex는 실제 Firebase 전송, local DB dispatch/bootRun, iPhone/Flutter/Xcode 작업을 수행하지 않았다.
+
 ## Backend Connection
 
 Mac에서 Backend를 실행하는 iPhone Simulator의 Local `API_BASE_URL`은 `http://localhost:8080`이다. 실제 iPhone의 `localhost`는 Mac을 가리키지 않으므로, 실제 기기 검증 시에는 Mac의 접근 가능한 Local 주소 또는 개발 서버 주소를 사용한다.

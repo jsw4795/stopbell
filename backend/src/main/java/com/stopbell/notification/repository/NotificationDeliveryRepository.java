@@ -2,6 +2,7 @@ package com.stopbell.notification.repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import com.stopbell.notification.entity.NotificationDelivery;
 import jakarta.persistence.LockModeType;
@@ -11,6 +12,10 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
 public interface NotificationDeliveryRepository extends JpaRepository<NotificationDelivery, Long> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select delivery from NotificationDelivery delivery where delivery.id = :id")
+    Optional<NotificationDelivery> findByIdForUpdate(Long id);
 
     List<NotificationDelivery> findAllByNotificationEventIdOrderByIdAsc(Long notificationEventId);
 

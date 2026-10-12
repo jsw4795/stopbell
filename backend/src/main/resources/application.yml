@@ -17,6 +17,11 @@ google:
   server-client-id: ${GOOGLE_SERVER_CLIENT_ID}
 
 notification:
+  dispatch:
+    enabled: false
+    # Provisional development values, not final operational policy.
+    batch-size: 50
+    fixed-delay: PT1S
   fcm:
     enabled: ${FCM_ENABLED:false}
     project-id: ${FCM_PROJECT_ID:}

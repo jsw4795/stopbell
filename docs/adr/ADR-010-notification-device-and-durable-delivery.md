@@ -311,6 +311,10 @@ V1은 하나의 Spring Backend와 하나의 fixed-delay, non-overlapping worker�
 
 `NotificationEvent`는 durable logical decision과 dedup identity를 소유하고 Event 시점에 생성된 recipient Delivery들의 logical source가 된다. `NotificationDelivery`는 Event×Device, Provider delivery/retry/expiry state와 current/final result를 소유한다. 기존 `NotificationHistory` 코드 대체와 table의 조건부 보존은 위 TASK-707 결정을 따르며 production legacy compatibility를 과도하게 만들지 않는다. 모든 retry attempt를 append-only row로 저장하지 않는다. Analytics는 실제 제품 질문과 보존 근거가 있을 때만 별도 책임으로 최소 구현하며, Event/Delivery를 장기 Analytics Source of Truth로 사용하지 않는다.
 
+### TASK-706 Worker 구현 경계
+
+TASK-706은 단일 fixed-delay Worker, bounded due 조회, current recipient preflight, immutable attempt snapshot, 짧은 시작/결과 transaction과 transaction 밖 TASK-705 Provider 호출 경로를 구현했다. 실제 accounting/result 정책은 `NotificationAttemptHandler` 계약으로 TASK-709에 남긴다. 자동 dispatch는 기본 비활성화이며 enabled=true도 handler가 없으면 startup 구성 오류로 fail-closed 차단한다. 구현 상세·설정·검증 경계는 [TASK-706 Architecture](../architecture.md#notification-dispatch-worker-구현-task-706)가 소유한다. 운영 dispatch/recovery 완성이나 실제 iPhone E2E를 의미하지 않는다.
+
 ### Delivery semantics와 failure taxonomy
 
 보장 경계는 다음과 같다.
@@ -497,7 +501,7 @@ SENDING/claim/lease 없이 보장하는 것은 DB identity uniqueness, terminal 
 | TASK-705 | FID Provider Client (위 단일 HTTP adapter)와 위 mapping, 안전한 error/header 추출, timeout/내부 retry 제어 gate, APNs expiration 확인, credential/target redaction 및 Backend→실제 iPhone smoke |
 | TASK-707 | Event/Delivery Entity·Migration·Repository, 기존 두 UNIQUE와 이번 operational fields/CHECK/due index, immutable Event owner/시각·recipient generation, History 전환 및 Alarm/User/Device 삭제 정책/FK. 실제 MySQL 제약과 query/EXPLAIN 검증 |
 | TASK-708 implementation | 기존 atomic lifecycle/Event/최초 recipient transaction에서 원래 observed/detected 시각·generation·기한 연결, 0/N recipient 및 이미 만료된 row 생성, logical dedup/UUID continuity. 재시도해도 payload/recipient/TTL 변경 금지 |
-| TASK-706 | 단일 due worker lifecycle/제한 query, preflight owner/generation/enabled/target/revision과 호출 직전 expiry 확인, attempt 시작 transaction 및 transaction 밖 I/O 연결. result policy를 새로 정의하지 않고 TASK-709 handler에 위임 |
+| TASK-706 | 단일 due worker lifecycle/제한 query, preflight owner/generation/enabled/target/revision과 호출 직전 expiry 확인, attempt 시작 transaction 및 transaction 밖 I/O 연결 구현. result policy는 TASK-709 handler에 위임하며 handler 미구현 상태의 실전송은 fail-closed 차단 |
 | TASK-709 implementation | Provider/local 결과 전이와 attempt/retry/recovery policy, conditional cleanup, 시작/결과 snapshot 일치 및 DB 재반영 안전성. expiry-vs-limit, crash 소비, unknown acceptance, stale FID, A→B→A, partial-device 실패의 핵심 correctness test |
 | TASK-703/704 | 기존 Device locking/API 및 높은 Client revision 재동기화 적용, 이미 terminal인 Delivery 복귀 없음 |
 | TASK-710/711 | 실제 iPhone 수신/tap 및 최종 E2E/regression. 선행 correctness 검증을 대체하지 않음 |

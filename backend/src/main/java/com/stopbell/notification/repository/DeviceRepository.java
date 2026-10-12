@@ -11,6 +11,10 @@ import org.springframework.data.jpa.repository.Query;
 
 public interface DeviceRepository extends JpaRepository<Device, Long> {
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select device from Device device where device.id = :id")
+    Optional<Device> findByIdForUpdate(Long id);
+
     Optional<Device> findByInstallationId(String installationId);
 
     boolean existsByInstallationId(String installationId);
