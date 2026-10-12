@@ -404,7 +404,28 @@ FCM 공식 [retry 권고](https://firebase.google.com/docs/cloud-messaging/scale
 
 기본 내부 retry를 그대로 겹치면 freshness 이후 **새 HTTP 요청**이나 이중 backoff가 발생할 수 있어 위 single-attempt 지연 계약을 충족한다고 주장하지 않는다. TASK-705는 내부 재전송을 억제하거나 각 실제 FCM 요청 직전 deadline/budget을 적용할 수 있는 지원된 방법을 확인해야 한다. FirebaseOptions에 존재하지 않는 retry setter나 exception field를 가정하지 않고 internal class/reflection 의존을 미리 결정하지 않는다. 안전한 방법이 확인되기 전 production dispatch를 활성화하지 않는다. 별도 retry layer를 덧붙여 성공 처리하는 것은 대안이 아니다.
 
-지원된 제어가 불가능하면 안전한 최소 대안은 현재 google-api-client/credential 경계를 이용한 단일 HTTP v1 전송 adapter이며, **Admin SDK client 선택 변경은 TASK-705에서 개발자 판단 후** 문서 동기화한다. 이번에 adapter를 교체·구현하지 않는다. TASK-707의 Schema와 retry 결정표는 이 전송 제어 검증과 독립적으로 진행할 수 있다. 기본 SDK와 엄격한 expiry의 충돌은 명시된 구현 gate이지 이미 해결된 기능이 아니다.
+지원된 제어가 불가능하면 안전한 최소 대안은 현재 google-api-client/credential 경계를 이용한 단일 HTTP v1 전송 adapter이며, **Admin SDK client 선택 변경은 TASK-705에서 개발자 판단 후** 문서 동기화한다. TASK-709 설계 당시에는 adapter를 구현하지 않았으며 후속 TASK-705의 선택은 다음 절을 따른다. TASK-707의 Schema와 retry 결정표는 이 전송 제어 검증과 독립적으로 진행할 수 있다. 기본 SDK와 엄격한 expiry의 충돌은 명시된 구현 gate이지 이미 해결된 기능이 아니다.
+
+#### TASK-705 Provider 구현과 제어 gate (2026-10-12)
+
+**코드/집중 자동 검증 완료, 사용자 Backend→iPhone Smoke 대기**다. 사용자가 허용한 최소 HTTP adapter 대안을 채택했다. 위 Admin 9.11.0 조사는 후보 SDK에 대한 기록으로 유지하며 실제 runtime에는 firebase-admin을 추가하지 않는다. SDK의 공개 `FirebaseOptions`에는 retry setter가 없고 `FirebaseMessagingClientImpl.fromApp()`은 기본 retry request factory를 고정한다. 내부 builder/reflection·전용 transport 우회로 SDK와 별도 제어 layer를 함께 유지하는 대신 기존 dependency에서 직접 단일 전송한다.
+
+- 실제 resolution은 `google-api-client 2.9.0`, `google-auth-library-oauth2-http 1.30.0`, `google-http-client[-apache-v2] 2.0.0`, Apache `httpclient 4.5.14`, Gson `2.13.2`이며 Spring Boot `4.1.1` 관리 값과 compile/집중 test가 호환된다. 새 dependency/version override는 없다.
+- `FcmProviderClient.send(NotificationSendRequest)`는 `POST https://fcm.googleapis.com/v1/projects/{projectId}/messages:send`의 **`message.fid`**만 사용한다. 성공 name은 반환 객체/로그에 보존하지 않고 ACCEPTED로 정규화한다. 기존 `NotificationProviderResult`와 위 failure mapping을 사용하며 모순·불완전 404는 cleanup 근거가 아니다. 결과는 allowlist failure code, 최소 retry delay, UTC receivedAt, elapsedMs 및 FCM transport 진입 여부만 담고 자체 재시도·DB mutation은 없다.
+- 인증은 **저장소 밖의 신뢰하는 기존 Service Account JSON 경로**를 `GOOGLE_APPLICATION_CREDENTIALS`로 주입하는 안전한 경로를 선택했다. `ServiceAccountCredentials.fromStream()`에 invocation 전용 transport를 제공하고 `firebase.messaging` scope로 `refreshAccessToken()`을 동기 호출한다. 파일 생성/수정과 Firebase Auth 도입은 없다. 범용 ADC discovery, 사용자 ADC, metadata/WIF/impersonation은 이 구현에서 지원하지 않는다. 각 invocation마다 인증을 준비하며 별도 token cache/자동 background refresh를 두지 않는다. 운영 managed ADC가 필요하면 해당 인증 transport의 gate 검증 후 확장해야 한다.
+- Service Account의 공식 `createWithCustomRetryStrategy(false)`로 OAuth HTTP retry를 끄고 invocation transport도 인증 요청을 최대 한 번만 허용한다. Apache `disableAutomaticRetries`, redirect/auth/cookie 비활성화와 명시적 bearer header로 FCM을 최대 한 번 요청한다. 401 뒤 자동 token refresh/resend, 503/Retry-After sleep, redirect follow와 I/O recovery는 없다. 인증 실패는 FCM을 호출하지 않는 CONFIGURATION이며 초기화 전용 code와 `fcmRequestStarted=false`로 개별 전송 오류와 구분한다. `fcmRequestStarted`는 transport 호출 경계이며 실제 wire 전송/접수 증거가 아니다. 후속 worker는 전송 시작 전 초기화 가능 여부와 global 초기화 실패 보존 계약을 적용해야 하며 Provider가 fake attempt/DB 전이를 수행하지 않는다.
+- 개발 후보 connect/read timeout `PT2S`/`PT5S`, 전체 request budget `PT15S`를 설정으로 제공한다. 인증 파일 준비·token 요청·FCM 요청·body 수신을 시작 시 monotonic budget 안에 포함하고 각 transport timeout은 남은 budget 이하로 제한한다. 가상 thread 결과 기다림만 timeout시키는 방식이 아니라, timeout/interruption 때 **활성 HttpUriRequest.abort() + 전용 HTTP client/connection pool close + invocation 폐쇄**를 실행한다. 폐쇄/기한 경과 후 새 HTTP 요청은 guard로 거부한다. DNS/credential parsing 등 즉시 중단 불가능한 로컬 작업이 늦게 끝나도 FCM을 새로 보낼 수 없다. JVM scheduling/cancellation 정리의 작은 초과 시간은 hard real-time 보장 대상이 아니다. 이미 wire로 전송된 요청의 Provider 접수/표시 취소는 보장하지 않고 AMBIGUOUS_TIMEOUT으로 반환한다.
+- FCM/인증 response body는 16 KiB로 제한하고 원문을 반환/로그/DB에 남기지 않는다. HTTP wire와 Google HTTP debug log를 끄며 원문 exception/cause/stack, target/token/credential은 로그하지 않는다. Retry-After delta/HTTP-date는 수신 UTC 기준 non-negative 최소 delay로 정규화하고, 중복 header는 최대값을 사용한다. 양수 overflow는 유한 표현의 최대 delay로 보존해 더 이른 retry를 유도하지 않는다. 후속 TASK-709는 먼 delay를 expiry와 비교하며 덧셈 overflow도 retry 불가로 처리해야 한다.
+- Data는 `type=ALARM_EVENT`, 문자열 `alarmId/eventType/notificationEventId`만 담는다. 네 type의 짧은 한국어 notification 및 APNs alert/push-type/priority/sound를 설정하고 caller의 고정 expiresAt epoch-second를 `apns-expiration`에 전달한다. local expiry/Type TTL/최종 운영 timeout은 TASK-709 책임이다. APNs expiration은 초 단위 hint이고 실제 표시 deadline/접수된 전송 취소를 보장하지 않는다.
+
+집중 loopback HTTP 검증에서 429/500/503/401/403, redirect 및 연결 종료가 재전송되지 않고, 인증 transport의 숨겨진 두 번째 요청도 실제 wire 전에 거부됨을 확인했다. 지연된 응답 body와 인증 HTTP를 전체 budget으로 중단하고 지연된 인증 완료 후 FCM 요청 0회를 검증했다. 이 단일 adapter의 **재전송/transport budget gate는 통과**했지만 실제 Firebase IAM/APNs/FID 접수·iPhone 수신, 운영 latency/timeout 수치 및 worker preflight/attempt accounting은 미검증/후속 범위다. production 자동 dispatch는 구현하거나 활성화하지 않았다.
+
+공식 source/API 근거:
+
+- [Admin 공개 options](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/FirebaseOptions.java), [Messaging factory](https://github.com/firebase/firebase-admin-java/blob/v9.11.0/src/main/java/com/google/firebase/messaging/FirebaseMessagingClientImpl.java): 후보 SDK 기본 retry 경로
+- [Google ServiceAccountCredentials 1.30.0](https://github.com/googleapis/google-auth-library-java/blob/v1.30.0/oauth2_http/java/com/google/auth/oauth2/ServiceAccountCredentials.java): transport factory와 지원된 retry 비활성화
+- [ApacheHttpTransport 2.0.0](https://github.com/googleapis/google-http-java-client/blob/v2.0.0/google-http-client-apache-v2/src/main/java/com/google/api/client/http/apache/v2/ApacheHttpTransport.java), [Apache MainClientExec 4.5.14](https://github.com/apache/httpcomponents-client/blob/4.5.14/httpclient/src/main/java/org/apache/http/impl/execchain/MainClientExec.java): no-retry client와 abort 전송 검사
+- [FCM HTTP v1 인증](https://firebase.google.com/docs/cloud-messaging/auth-server), [APNs lifespan](https://firebase.google.com/docs/cloud-messaging/customize-messages/setting-message-lifespan)
 
 #### Freshness와 local expiry
 
@@ -463,7 +484,7 @@ Provider cleanup은 Client revision을 증가시키지 않으므로 같은 revis
 
 Result commit 응답 유실 때는 FCM을 다시 보내지 않고 새 DB transaction에서 동일 row/count/status를 읽어 같은 메모리 결과만 재적용한다. 이미 기록됐으면 no-op이고 Device cleanup/timestamp를 반복 갱신하지 않는다. DB 장애 동안 worker는 다음 FCM 호출을 시작하지 않는다. 제한된 DB 재반영도 실패하면 dispatch cycle을 종료하고 durable PENDING recovery에 맡긴다. 결과를 영속하기 전 process가 죽으면 response/Retry-After/S가 유실되므로 받은 header의 완전한 crash-safe 복원이나 정확한 외부 attempt 이력은 보장하지 못한다. 알려진 header는 정상 결과 commit에서 예약으로 보존하고 유실 결과는 recovery 지연과 expiry/budget으로 제한한다.
 
-SENDING/claim/lease 없이 보장하는 것은 DB identity uniqueness, terminal 자동 복귀 금지, durable 시작 count와 expiry로 제한된 SDK 호출, 단일 worker 안의 non-overlap, current-registration 조건부 cleanup이다. process crash의 외부 접수 확인, exactly-once 요청/표시, 여러 Backend 동시 dispatch, 검증 이후 변경의 완전 차단은 보장하지 않는다. SDK 내부 재전송 제어 gate를 통과하기 전 실제 HTTP 요청별 freshness/budget 보장도 미검증이다.
+SENDING/claim/lease 없이 보장하는 것은 DB identity uniqueness, terminal 자동 복귀 금지, durable 시작 count와 expiry로 제한된 SDK 호출, 단일 worker 안의 non-overlap, current-registration 조건부 cleanup이다. process crash의 외부 접수 확인, exactly-once 요청/표시, 여러 Backend 동시 dispatch, 검증 이후 변경의 완전 차단은 보장하지 않는다. TASK-705의 단일 adapter 재전송/transport budget gate는 통과했으며 실제 HTTP 직전 worker freshness와 durable attempt budget은 TASK-706/709에서 검증한다.
 
 #### Logging, metric과 구현 분담
 
@@ -473,7 +494,7 @@ SENDING/claim/lease 없이 보장하는 것은 DB identity uniqueness, terminal 
 
 | Task | 후속 책임 / 필요한 검증 |
 | --- | --- |
-| TASK-705 | Admin/FID Provider Client와 위 mapping, 안전한 error/header 추출, timeout/내부 retry 제어 gate, APNs expiration 확인, credential/target redaction 및 Backend→실제 iPhone smoke |
+| TASK-705 | FID Provider Client (위 단일 HTTP adapter)와 위 mapping, 안전한 error/header 추출, timeout/내부 retry 제어 gate, APNs expiration 확인, credential/target redaction 및 Backend→실제 iPhone smoke |
 | TASK-707 | Event/Delivery Entity·Migration·Repository, 기존 두 UNIQUE와 이번 operational fields/CHECK/due index, immutable Event owner/시각·recipient generation, History 전환 및 Alarm/User/Device 삭제 정책/FK. 실제 MySQL 제약과 query/EXPLAIN 검증 |
 | TASK-708 implementation | 기존 atomic lifecycle/Event/최초 recipient transaction에서 원래 observed/detected 시각·generation·기한 연결, 0/N recipient 및 이미 만료된 row 생성, logical dedup/UUID continuity. 재시도해도 payload/recipient/TTL 변경 금지 |
 | TASK-706 | 단일 due worker lifecycle/제한 query, preflight owner/generation/enabled/target/revision과 호출 직전 expiry 확인, attempt 시작 transaction 및 transaction 밖 I/O 연결. result policy를 새로 정의하지 않고 TASK-709 handler에 위임 |

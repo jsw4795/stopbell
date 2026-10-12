@@ -284,6 +284,37 @@ DEBUG 상태 로그는 `StopBell push stage`의 APNs/FID readiness·Device regis
 - 집중 Flutter 테스트 4개 파일 35개는 저장·응답 유실/pending·FID rotation·계정 전환·permission/tap을 검증한다. 변경된 Auth/API/bootstrap의 직접 관련 회귀 테스트까지 총 98개가 통과했고 변경 Flutter 파일 analyze는 No issues다. Backend suite/Testcontainers는 재실행하지 않았다. Apple SDK 12.19.0과 unsigned **release** 빌드 및 signed debug 실기기 빌드가 성공했고 native request의 callback/completion 양쪽 순서·중복 completion·nil FID·실패 처리를 좁은 Swift 검사로 확인했다.
 - **미검증:** 실기기 재설치, 강제 FID rotation, 실제 offline logout, permission 최초/거부 전환, full OS process restart, 실제 Provider 전송 및 foreground/background/terminated notification tap/수신 E2E. 앞선 correctness는 집중 테스트로, 실제 Provider smoke는 TASK-705, 최종 수신/tap E2E는 TASK-710으로 구분한다.
 
+## TASK-705 Backend Provider 수동 Smoke
+
+상태: **코드 및 집중 자동 테스트 완료 / 사용자 실제 Firebase 접수·iPhone 수신 검증 대기**. Codex는 이 절의 실전송을 실행하지 않았다. TASK-701의 Python 도구와 달리 아래 실행은 구현한 Java Provider와 같은 경로를 사용한다.
+
+선행조건:
+
+- 기존 Firebase project `stopbell`의 FCM HTTP v1 API와 APNs key/environment가 준비돼 있어야 한다. 선택 Service Account에는 해당 project의 FCM 전송 권한이 필요하다. 설정/IAM/APNs를 이 Task에서 자동 변경하지 않는다.
+- **저장소 밖의 기존 Service Account JSON 파일**이 필요하다. credential이 아직 없다면 사용자가 안전하게 준비한 후 실행한다. `gcloud auth login`만으로는 이 Provider 인증이 준비되지 않는다. 현재 구현은 사용자 ADC/metadata/WIF discovery가 아닌 명시적 Service Account 파일 경로를 지원한다. 파일 내용/private key/token을 명령·로그·보고에 붙이지 않는다.
+- 기본 local DB/JWT/Google/Transit 환경 설정을 갖추고 기존 MySQL을 사용한다. 정상 제품 앱에서 Push 준비/Device 등록을 마친 enabled IOS Device ID와 **같은 owner의 기존 Alarm ID**를 선택한다. 등록 API 응답의 Device `id`를 사용하거나 DB에서 `id/user_id/platform/enabled`만 조회하며 FID/설치본 credential을 출력하지 않는다. DB 초기화/새 seed는 필요 없다.
+
+Backend 디렉터리에서 사용자가 다음을 실행한다. `10`/`20`은 선택한 Device/Alarm ID로 바꾸고 credential 경로는 기존 파일의 절대 경로로 바꾼다.
+
+```sh
+export GOOGLE_APPLICATION_CREDENTIALS='/absolute/path/outside-repository/service-account.json'
+export FCM_PROJECT_ID='stopbell'
+./gradlew bootRun --args='--spring.profiles.active=local --spring.main.web-application-type=none --transit.monitoring.enabled=false --notification.fcm.enabled=true --notification.fcm.smoke=true --notification.fcm.smoke-device-id=10 --notification.fcm.smoke-alarm-id=20'
+```
+
+`local` + 명시적 command-line Smoke opt-in + non-web + monitoring disabled 조건에서만 실행한다. Device/FID는 read-only transaction 안에서 메모리로 읽고 같은 owner/IOS/enabled를 확인한 뒤 transaction 종료 후 **한 번만** 전송한다. 완료/실패 뒤 context를 닫으며 자동 startup 전송·공개 테스트 endpoint·worker·scheduler를 추가하지 않는다. Event/Delivery/Alarm/Device row를 INSERT/UPDATE하지 않고 Delivery를 ACCEPTED로 꾸미지 않는다. 일반 startup은 `notification.fcm.enabled=false`이고 설정 없이도 정상 초기화된다.
+
+Smoke payload는 `ALARM_EVENT`, 선택 `alarmId`, `ARRIVED`, **합성 navigation hint `notificationEventId=1`**이며 Event row를 생성하거나 존재를 주장하지 않는다. notification은 `StopBell 알림 / 버스가 목표 정류장에 도착했어요.`다. 이 테스트에서만 APNs expiration을 현재 UTC + 60초로 주고, 후속 운영 Event Type TTL을 확정하지 않는다. 실제 Alarm ownership/current detail 확인은 기존 Flutter tap contract를 따른다.
+
+확인할 결과:
+
+1. 안전한 `FCM smoke result=ACCEPTED code=null` 로그는 Firebase 접수만 뜻한다. 메시지 ID/FID/token/raw response는 출력하지 않는다. 재시도·sleep은 없고 실패 시 사용자가 원인 확인 뒤 새 실행을 선택한다.
+2. iPhone을 background로 두고 허용된 알림/Focus 설정에서 **실제 alert 수신**을 별도로 확인한다. Foreground/terminated/tap 전체 E2E는 TASK-710에 남는다.
+3. `CONFIGURATION`이면 파일 형식/접근·project/IAM/APNs, `INVALID_TARGET`이면 현재 FCM 등록 상태를 확인한다. 실패로 Device를 자동 disable하지 않는다. timeout/AMBIGUOUS_TIMEOUT은 이미 접수됐을 수 있어 재실행에 중복 표시 위험이 있다.
+4. 사용자 확인 후 Firebase 접수와 iPhone 실제 수신 여부, 확인한 앱 상태만 민감정보 없이 기록하고 TASK-705를 최종 완료 처리한다. 현재 checkbox는 미완료를 유지한다.
+
+개발 후보 timeout은 connect `PT2S`, read `PT5S`, 인증 포함 전체 budget `PT15S`다. 이 값은 운영 retry/TTL 확정이 아니며 실제 latency 측정은 아직 없다. 세부 단일 요청·abort 보장과 ADC 지원 범위는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-705-provider-구현과-제어-gate-2026-10-12)을 따른다.
+
 ## Backend Connection
 
 Mac에서 Backend를 실행하는 iPhone Simulator의 Local `API_BASE_URL`은 `http://localhost:8080`이다. 실제 iPhone의 `localhost`는 Mac을 가리키지 않으므로, 실제 기기 검증 시에는 Mac의 접근 가능한 Local 주소 또는 개발 서버 주소를 사용한다.

@@ -16,6 +16,16 @@ jwt:
 google:
   server-client-id: ${GOOGLE_SERVER_CLIENT_ID}
 
+notification:
+  fcm:
+    enabled: ${FCM_ENABLED:false}
+    project-id: ${FCM_PROJECT_ID:}
+    credential-path: ${GOOGLE_APPLICATION_CREDENTIALS:}
+    # Development transport candidates; final dispatch/retry policy belongs to TASK-709.
+    connect-timeout: PT2S
+    read-timeout: PT5S
+    request-budget: PT15S
+
 transit:
   monitoring:
     enabled: false
@@ -47,3 +57,6 @@ management:
 logging:
   level:
     org.hibernate.orm.jdbc.error: "OFF"
+    # HTTP debug/wire logs can include bearer tokens, FIDs and credential assertions.
+    com.google.api.client.http: "OFF"
+    org.apache.http: "OFF"

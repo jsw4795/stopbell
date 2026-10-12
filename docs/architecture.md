@@ -175,6 +175,10 @@ Device mutation은 JWT Principal과 별도 installation credential을 검증한�
 
 Flutter는 설치본 counter/credential/generation을 logout에도 보존하고 요청을 session과 함께 snapshot해 계정 변경 뒤 이전 작업이 새 Principal로 재시도되지 않게 한다. Device disable 시도 → Auth logout → local session 종료의 경계를 유지하며 network 실패로 logout을 영구 차단하지 않는다. Offline 즉시 Push 해제와 이미 FCM에 접수된 알림 회수는 보장하지 않는다. 구체 계약/한계는 API 문서가 소유하며 TASK-704는 설치본 전용 serial mutation, durable pending/session snapshot, permission/readiness 및 startup/resume/FID rotation 동기화를 구현했다. Native production bridge는 기존 FlutterFire delegate를 전달·복원하며 smoke와 분리한다. 저장·재설치/복구의 상세 정책은 [ADR-010 Client 구현](adr/ADR-010-notification-device-and-durable-delivery.md#task-704-flutter-설치본등록-lifecycle-구현-2026-10-12)을 따른다.
 
+TASK-705의 `notification.client.FcmProviderClient`는 기존 Google 인증/HTTP dependency로 단일 FID HTTP v1 전송과 정규화 결과만 반환한다. Firebase Admin SDK는 추가하지 않는다. 설정·인증은 호출 시 준비하므로 FCM 설정 누락이 Backend startup/readiness를 실패시키지 않는다. Provider I/O는 DB transaction 내부 호출을 거부하며 Event/Delivery/Device/Alarm을 변경하지 않는다. TASK-706/708/709의 Event 연결·worker·상태 전이·cleanup은 미구현이다.
+
+전송마다 별도 HTTP client를 소유하고 인증·전송을 포함하는 유한 wall-time budget, 요청 abort 및 종료된 invocation의 후속 HTTP 차단을 적용한다. local opt-in one-shot Smoke는 read-only transaction을 끝낸 뒤 같은 Provider를 한 번 호출하며 공개 API를 만들지 않는다. 구체 인증 지원 범위·재전송 제어·보장 한계는 [ADR-010 TASK-705](adr/ADR-010-notification-device-and-durable-delivery.md#task-705-provider-구현과-제어-gate-2026-10-12), 실행 방법과 실기기 미검증 상태는 [Local Development](local-development.md#task-705-backend-provider-수동-smoke)를 따른다.
+
 Notification persistence는 다음 책임으로 분리한다.
 
 ```text

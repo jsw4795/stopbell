@@ -146,7 +146,7 @@ Device registration lifecycle, durable logical Notification, per-Device delivery
 
 - `controller`: authenticated Device registration/state lookup/disable API
 - `service`: Device 권한·revision·ownership/transaction 처리, NotificationEvent와 Event 시점 recipient Delivery 생성 orchestration, 기존 pending Delivery worker와 전달 결과 처리
-- `client`: FCM Push provider client와 명시적인 provider result/failure mapping
+- `client`: TASK-705의 `FcmProviderClient`, 전송 입력/정규화 결과, `FcmFailureMapper`, invocation transport/budget, FCM 설정 및 local CLI `FcmSmokeRunner`. HTTP v1 선택·인증/제어 gate는 ADR-010, 실행은 local-development.md를 참조한다
 - `repository`: Device, NotificationEvent, NotificationDelivery JPA Repository
 - `entity`: Device, NotificationEvent, NotificationDelivery JPA Entity
 - `dto`: Device registration, Push 요청/응답, 최소 payload와 Notification DTO
