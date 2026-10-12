@@ -321,7 +321,7 @@ Smoke payload는 `ALARM_EVENT`, 선택 `alarmId`, `ARRIVED`, **합성 navigation
 
 ### TASK-706 자동 dispatch 구성 경계
 
-TASK-706 Worker 구조와 집중 Fake Provider/MySQL Testcontainers 검증을 추가했다. `notification.dispatch.enabled=false`가 기본이며 TASK-705 FCM enabled/local Smoke와 독립적이다. TASK-709의 실제 handler가 없으므로 dispatch만 true로 설정하면 startup 구성 오류로 차단된다. **현재 자동 FCM 전송을 활성화하면 안 된다.** 설정과 구현/후속 recovery 경계는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. Codex는 실제 Firebase 전송, local DB dispatch/bootRun, iPhone/Flutter/Xcode 작업을 수행하지 않았다.
+TASK-706 Worker 구조와 집중 Fake Provider/MySQL Testcontainers 검증을 추가했다. `notification.dispatch.enabled=false`가 기본이며 TASK-705 FCM enabled/local Smoke와 독립적이다. TASK-706 당시 handler 부재 gate는 TASK-709에서 production Handler와 FCM 정적 설정 gate로 대체했다. 코드와 Mock Provider/MySQL 자동 테스트 기준의 opt-in 연결은 가능하지만 실제 자동 Firebase/iPhone E2E 및 운영 latency tuning은 미검증이다. **TASK-710 검증 전 운영 자동 활성화하지 않는다.** 설정과 구현/후속 recovery 경계는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. Codex는 실제 Firebase 전송, local DB dispatch/bootRun, iPhone/Flutter/Xcode 작업을 수행하지 않았다.
 
 ## Backend Connection
 
@@ -352,6 +352,14 @@ Compose file은 저장소 루트에 있으며, 서비스 이름은 `mysql`이다
 8. 하나의 목적에 집중한 Commit을 만든다.
 
 권장 Commit 형식은 `development-guidelines.md`를 따른다.
+
+### TASK-709 retry/expiry 실행 경계
+
+기본 `notification.dispatch.enabled=false`를 유지한다. 자동 dispatch를 직접 검증할 때만 별도 true 설정과 기존 FCM enabled/project/신뢰하는 credential path/timeout 설정을 함께 제공한다. 정적 설정 누락은 startup을 차단하지만 Backend 기본 실행 및 TASK-705 명시적 one-shot Smoke는 영향을 받지 않는다. 실제 credential 내용은 로그하거나 저장소에 추가하지 않는다.
+
+런타임 인증/프로젝트/APNs 등 CONFIGURATION 결과가 나오면 Worker는 미시작 Delivery를 보존하고 expiry만 처리한다. 설정·인증을 고친 뒤 Backend 재시작으로 차단을 해제한다. 이미 FAILED인 Delivery는 자동 복구하지 않는다. retry/recovery/count/TTL을 운영자가 초기화하거나 오래된 알림의 기한을 연장하는 흐름은 없다. 개발 후보값·안전 상한은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-구현-설정과-검증-2026-10-13), transaction/Worker 경계는 [Architecture](architecture.md#notification-dispatch와-result-transaction-task-709)를 따른다.
+
+2026-10-13 Codex 검증은 집중 unit/configuration 및 격리 MySQL Testcontainers·Mock Provider에 한정했다. 실제 FCM/iPhone, Service Account 파일, 개발 DB, Flutter/Xcode 및 전체 Backend suite는 사용하지 않았다. TASK-710/711에서 자동 Event 전송의 foreground/background/terminated 수신·tap, 오래된 notification 처리, 실제 crash/restart와 multi-device 및 재등록 경쟁, latency 분포와 timeout/TTL/retry 후보값 tuning을 검증한다.
 
 ## Future Consideration
 

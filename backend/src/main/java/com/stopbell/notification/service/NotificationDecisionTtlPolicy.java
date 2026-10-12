@@ -8,7 +8,7 @@ import com.stopbell.transit.domain.TransitEventType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
-/** Provisional development freshness windows; final operational values belong to TASK-709. */
+/** Provisional development freshness windows; final operational tuning follows TASK-710 latency checks. */
 @Component
 public class NotificationDecisionTtlPolicy {
     private final Map<TransitEventType, Duration> ttl;
@@ -30,7 +30,8 @@ public class NotificationDecisionTtlPolicy {
     private static Duration valid(Duration duration) {
         // Reject overflow and sub-microsecond windows that disappear in DATETIME(6).
         if (duration == null || duration.isNegative() || duration.isZero()
-                || duration.toNanos() < 1_000) {
+                || duration.compareTo(Duration.ofNanos(1_000)) < 0
+                || duration.compareTo(Duration.ofMinutes(5)) > 0 || duration.getNano() % 1_000 != 0) {
             throw new IllegalArgumentException("Notification TTL must be positive and finite at microsecond precision");
         }
         return duration;

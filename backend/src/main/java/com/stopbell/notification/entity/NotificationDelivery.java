@@ -112,6 +112,107 @@ public class NotificationDelivery {
         updatedAt = terminatedAt.truncatedTo(ChronoUnit.MICROS);
     }
 
+    public void beginAttempt(long revision, LocalDateTime startedAt, LocalDateTime recoveryAt) {
+        requirePending();
+        LocalDateTime start = time(startedAt);
+        LocalDateTime recovery = time(recoveryAt);
+        if (revision < 0 || start.isBefore(nextAttemptAt) || !start.isBefore(expiresAt)
+                || !recovery.isAfter(start) || recovery.isAfter(expiresAt)) {
+            throw new IllegalArgumentException("Invalid durable attempt schedule");
+        }
+        attemptCount = Math.incrementExact(attemptCount);
+        lastAttemptAt = start;
+        lastAttemptRegistrationRevision = revision;
+        lastProviderResult = null;
+        lastFailureCode = null;
+        nextAttemptAt = recovery;
+        updatedAt = start;
+    }
+
+    public void markAccepted(LocalDateTime receivedAt, LocalDateTime now) {
+        requirePendingAttempt();
+        providerAcceptedAt = time(receivedAt);
+        lastProviderResult = NotificationProviderResult.ACCEPTED;
+        lastFailureCode = null;
+        status = NotificationDeliveryStatus.ACCEPTED;
+        nextAttemptAt = null;
+        updatedAt = time(now);
+    }
+
+    public void recordFailure(NotificationProviderResult result, String code) {
+        requirePendingAttempt();
+        if (result == null || result == NotificationProviderResult.ACCEPTED) {
+            throw new IllegalArgumentException("Expected a non-accepted Provider result");
+        }
+        lastFailureCode = failureCode(code);
+        lastProviderResult = result;
+    }
+
+    public void markFailed(String code, LocalDateTime now) {
+        terminate(NotificationDeliveryStatus.FAILED, code, now);
+    }
+
+    public void expire(LocalDateTime now) {
+        if (status != NotificationDeliveryStatus.PENDING) {
+            return;
+        }
+        if (time(now).isBefore(expiresAt)) {
+            throw new IllegalArgumentException("Delivery has not expired");
+        }
+        terminate(NotificationDeliveryStatus.EXPIRED, "FRESHNESS_EXPIRED", now);
+    }
+
+    public void scheduleRetry(LocalDateTime nextAt, LocalDateTime now) {
+        requirePending();
+        if (lastProviderResult != NotificationProviderResult.RETRYABLE
+                && lastProviderResult != NotificationProviderResult.AMBIGUOUS_TIMEOUT) {
+            throw new IllegalStateException("Expected a retryable Provider result");
+        }
+        LocalDateTime next = time(nextAt);
+        if (next.isAfter(expiresAt) || !next.isAfter(lastAttemptAt)) {
+            throw new IllegalArgumentException("Invalid retry schedule");
+        }
+        nextAttemptAt = next;
+        updatedAt = time(now);
+    }
+
+    private void terminate(NotificationDeliveryStatus terminal, String code, LocalDateTime now) {
+        if (status != NotificationDeliveryStatus.PENDING) {
+            return;
+        }
+        lastFailureCode = failureCode(code);
+        updatedAt = time(now);
+        status = terminal;
+        nextAttemptAt = null;
+    }
+
+    private void requirePending() {
+        if (status != NotificationDeliveryStatus.PENDING) {
+            throw new IllegalStateException("Terminal Delivery cannot be mutated");
+        }
+    }
+
+    private void requirePendingAttempt() {
+        requirePending();
+        if (attemptCount == 0 || lastProviderResult != null) {
+            throw new IllegalStateException("Expected an uncompleted durable attempt");
+        }
+    }
+
+    private static String failureCode(String code) {
+        if (code == null || !code.matches("[A-Z][A-Z0-9_]{0,63}")) {
+            throw new IllegalArgumentException("Expected a safe failure code");
+        }
+        return code;
+    }
+
+    private static LocalDateTime time(LocalDateTime value) {
+        if (value == null) {
+            throw new IllegalArgumentException("Operational timestamp is required");
+        }
+        return value.truncatedTo(ChronoUnit.MICROS);
+    }
+
     public Long getId() {
         return id;
     }

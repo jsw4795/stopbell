@@ -320,6 +320,8 @@ JPA도 동일 predicate/정렬과 bounded Pageable을 사용한다. 조회 결�
 
 모든 PENDING 예약은 nextAttemptAt<=expiresAt이다. retry/recovery 가능 시각이 기한 이상이면 nextAttemptAt=expiresAt으로 저장하여 기한 도래 때 위 조회로 local 종료하고 그 예약으로 FCM을 호출하지 않는다. 이미 만료된 초기 row는 EXPIRED로 생성하므로 조회되지 않는다. 이 규칙은 미래 Retry-After와 오랜 restart 때문에 expired row가 due query에서 영구 누락되는 것을 막는다.
 
+TASK-709의 runtime CONFIGURATION 차단 중에는 `findExpiredPendingIds(now, Pageable)`가 위 due predicate/정렬에 `expires_at <= :now`를 추가해 만료 PENDING만 제한 조회한다. 미만료 row를 보존해도 그 row 뒤의 만료 후보가 batch에서 누락되지 않게 하며 기존 due index를 사용한다. V14 column/CHECK/UNIQUE/index와 Migration은 변경하지 않는다.
+
 ### bus_routes, bus_stops, bus_route_stop_occurrences
 
 서울/경기 Bus static metadata의 현재 상태를 저장한다. `BusAlarmTarget`은 이 테이블을 FK로 참조하지 않고 Alarm 생성 당시 필요한 값을 snapshot으로 복사한다. 따라서 metadata sync가 기존 Alarm target을 변경하지 않는다.

@@ -10,7 +10,7 @@ public record FcmClientProperties(
         Duration connectTimeout, Duration readTimeout, Duration requestBudget
 ) {
     // Missing/invalid FCM configuration is handled lazily, without failing Backend startup.
-    boolean configured() {
+    public boolean configured() {
         return enabled && projectId != null && projectId.matches("[a-z][a-z0-9-]{4,61}[a-z0-9]")
                 && credentialPath != null && !credentialPath.isBlank()
                 && finite(connectTimeout) && finite(readTimeout) && finite(requestBudget);

@@ -142,6 +142,12 @@ public class Device {
         enabled = false;
     }
 
+    /** Caller must hold the current Device write lock and match every attempt registration field. */
+    public void disableUnregisteredTarget() {
+        currentPushTargetId = null;
+        enabled = false;
+    }
+
     private void validateNextRevision(long revision) {
         if (revision < 0 || revision <= registrationRevision) {
             throw new IllegalArgumentException("Device mutation requires a higher registration revision");

@@ -33,4 +33,12 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
             order by delivery.nextAttemptAt, delivery.id
             """)
     List<Long> findDuePendingIds(LocalDateTime now, Pageable pageable);
+
+    /** Avoid starvation behind preserved fresh rows while configuration blocks new attempts. */
+    @Query("""
+            select delivery.id from NotificationDelivery delivery
+            where delivery.status = 'PENDING' and delivery.nextAttemptAt <= :now and delivery.expiresAt <= :now
+            order by delivery.nextAttemptAt, delivery.id
+            """)
+    List<Long> findExpiredPendingIds(LocalDateTime now, Pageable pageable);
 }

@@ -166,7 +166,7 @@ FID는 대소문자를 구분하는 opaque delivery reference다. 22자 관측�
 
 등록은 enabled 상태로 생성/갱신/재활성화한다. disable은 row와 owner를 보존하고 enabled=false 및 FID=null로 해제한다. 다른 Device와 Alarm은 바꾸지 않는다. Provider invalid/unregistered cleanup은 실패 attempt의 owner/generation/target/revision이 current registration과 일치할 때만 조건부 disable하며 Client revision을 임의 증가시키지 않는다. 실제 cleanup은 TASK-709 책임이다.
 
-TASK-702의 `notification.entity.Device`, `DevicePlatform`과 V13 매핑을 유지한다. TASK-703은 `register`, `transferOwnership`, `disable` 상태 변경 method와 Repository/Service/Controller/DTO를 구현하고 권한·동시성·멱등 처리를 실제 MySQL에서 검증했다. Flutter 등록·ownership 이전·logout lifecycle은 TASK-704에서 구현했으며 Provider cleanup은 TASK-709에 남는다.
+TASK-702의 `notification.entity.Device`, `DevicePlatform`과 V13 매핑을 유지한다. TASK-703은 `register`, `transferOwnership`, `disable` 상태 변경 method와 Repository/Service/Controller/DTO를 구현하고 권한·동시성·멱등 처리를 실제 MySQL에서 검증했다. Flutter 등록·ownership 이전·logout lifecycle은 TASK-704에서 구현했으며 TASK-709는 `disableUnregisteredTarget`을 추가해 current registration 조건부 Provider cleanup을 구현했다.
 
 ------------------------------------------------------------------------
 
@@ -605,7 +605,7 @@ Current Alarm lifecycle/activation generation 검증, lifecycle transition, Noti
 
 Event와 recipient Device identity는 필수·불변이며 [Delivery UNIQUE](database.md#notification_deliveries-identity)를 따른다. 최초 decision transaction에서 선정한 recipient set만 Delivery를 가지며, 나중 Device 등록이나 동일 Event 재제출로 set을 확대하지 않는다. 0개 recipient는 Event만 존재하는 정상 결정으로 Provider failure나 성공 Delivery가 아니다. Alarm 삭제 후 기록/Delivery 처리의 후속 제약은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#alarm-삭제에-대한-후속-결정-제약)을 따른다.
 
-Delivery recipient는 Device identity다. Event 시점의 `recipientOwnershipGeneration`도 불변으로 보존한다. Worker는 current owner=Event owner, current generation=recipient generation, enabled 및 non-null current FID를 전송 직전에 확인한다. 같은 owner/generation의 FID rotation·높은 revision 재등록은 current FID로 전송할 수 있으나 A→B→A를 포함한 다른 ownership 세대에는 과거 Delivery를 보내지 않는다. attempt의 owner/generation/revision/FID snapshot과 현재 등록이 모두 같을 때만 invalid-target cleanup을 허용한다. raw FID와 owner/generation의 attempt snapshot은 메모리 값이며 raw target을 Delivery에 복제하지 않는다. [Operational Schema](database.md#notificationdelivery-operational-schema-task-709)는 확정된 후속 계약이고 TASK-707에서 매핑했으며 실제 attempt/result/retry 처리는 후속 구현이다.
+Delivery recipient는 Device identity다. Event 시점의 `recipientOwnershipGeneration`도 불변으로 보존한다. Worker는 current owner=Event owner, current generation=recipient generation, enabled 및 non-null current FID를 전송 직전에 확인한다. 같은 owner/generation의 FID rotation·높은 revision 재등록은 current FID로 전송할 수 있으나 A→B→A를 포함한 다른 ownership 세대에는 과거 Delivery를 보내지 않는다. attempt의 owner/generation/revision/FID snapshot과 현재 등록이 모두 같을 때만 invalid-target cleanup을 허용한다. raw FID와 owner/generation의 attempt snapshot은 메모리 값이며 raw target을 Delivery에 복제하지 않는다. [Operational Schema](database.md#notificationdelivery-operational-schema-task-709)는 확정된 후속 계약이고 TASK-707에서 매핑했으며 실제 attempt/result/retry/expiry는 TASK-709의 production Handler와 Entity mutation으로 구현했다.
 
 ## Delivery Result Semantics
 
@@ -631,9 +631,11 @@ PERMANENT_REQUEST
 AMBIGUOUS_TIMEOUT
 ```
 
-`lastProviderResult`는 마지막으로 시작한 attempt에서 확정·정규화한 결과이며 아직 결과가 없으면 null이다. local 종료만으로 Provider result를 만들지 않는다. `AMBIGUOUS_TIMEOUT`은 접수 여부가 불명확하여 retry가 duplicate 표시를 만들 수 있다. count는 최초 호출을 포함한 durable attempt 시작 횟수로 호출 전 commit하므로 crash 때 실제 호출보다 크게 셀 수 있다. expiry는 identity가 아니라 불변 전달 기한이며 네 Event Type 모두 원래 Observation의 `observedAt`을 기준으로 계산한다. 최종 횟수·간격·Type별 TTL은 smoke/latency 검증까지 보류한다. [ADR-010 결정표와 안전성 계약](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-failureretryexpiry-설계-2026-10-09)을 따른다.
+`lastProviderResult`는 마지막으로 시작한 attempt에서 확정·정규화한 결과이며 아직 결과가 없으면 null이다. local 종료만으로 Provider result를 만들지 않는다. `AMBIGUOUS_TIMEOUT`은 접수 여부가 불명확하여 retry가 duplicate 표시를 만들 수 있다. count는 최초 호출을 포함한 durable attempt 시작 횟수로 호출 전 commit하므로 crash 때 실제 호출보다 크게 셀 수 있다. expiry는 identity가 아니라 불변 전달 기한이며 네 Event Type 모두 원래 Observation의 `observedAt`을 기준으로 계산한다. 유한 개발 후보값과 안전 상한은 [TASK-709 구현 설정](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-구현-설정과-검증-2026-10-13)을 따르며 최종 운영 tuning은 자동 dispatch 실측 latency 검증 뒤로 남긴다. [ADR-010 결정표와 안전성 계약](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-failureretryexpiry-설계-2026-10-09)을 따른다.
 
 TASK-707의 NotificationDelivery 생성자는 전달받은 expiresAt/createdAt으로 PENDING 또는 이미 만료된 EXPIRED(count=0, FRESHNESS_EXPIRED)를 만든다. TTL 수치는 정하지 않으며 expiresAt은 observedAt보다 뒤이고 createdAt은 Event createdAt보다 이르지 않아야 한다. `terminateDispatch(terminatedAt)`는 PENDING만 FAILED/DISPATCH_NOT_ALLOWED로 종료하고 nextAttemptAt을 지우며 실제 attempt/result는 보존한다. terminal은 무변경이며 시각 역행은 거부한다.
+
+TASK-709의 `beginAttempt`는 PENDING/due/fresh row의 count/start/revision과 recovery 예약을 기록하고 이전 result/code를 지운다. `markAccepted`는 기한 이후 도착한 접수 응답도 terminal ACCEPTED로 기록한다. `recordFailure`와 `scheduleRetry`는 실제 결과 및 기한 이하 예약을 보존하고 `markFailed`/`expire`는 terminal 예약을 제거한다. local 종료는 이전 실제 result를 보존하며 가짜 result를 만들지 않는다. 모든 operational 시각은 UTC microsecond 값이다. Terminal row는 Service current-read gate로 제외하고 Entity도 attempt/결과/retry mutation을 거부한다.
 
 Alarm hard delete는 NotificationEvent/Delivery와 원본 alarmId/owner를 보존하고 PENDING만 명시적으로 종료한다. ACCEPTED/FAILED/EXPIRED는 보존한다. 진행/접수 중 FCM 회수는 보장하지 않는다. Event의 User, Delivery의 Event/Device는 non-cascade FK이며 참조 중 hard delete를 제한한다. 계정 삭제 정책/기능은 후속 release readiness에 남긴다. 기존 NotificationHistory 코드는 제거했고 legacy 데이터의 조건부 보존은 [database.md](database.md#notification_history-legacy-보존-정책)가 소유한다. Phase 8 Analytics와 operational delivery data는 별도 책임으로 유지한다.
 

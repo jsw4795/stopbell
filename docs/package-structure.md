@@ -153,7 +153,7 @@ Device registration lifecycle, durable logical Notification, per-Device delivery
 
 `NotificationDecisionTtlPolicy`는 notification.service에 두고 최초 Delivery freshness 설정을 소유한다. Lifecycle/Event/fan-out의 단일 결정 경계는 기존 alarm.service의 `BusAlarmLifecycleService`가 조율한다. 구체 Package/Class 이름은 구현 시 필요한 책임에 맞게 정하며 generic multi-provider framework, generic retry framework, Device subtype hierarchy, 별도 Notification microservice를 만들지 않는다. 기존 `NotificationHistory` 코드는 TASK-707에서 Event/Delivery로 대체했고 legacy table의 조건부 보존은 database.md를 따른다.
 
-TASK-706의 `NotificationDispatchConfiguration`/`NotificationDispatchProperties`, `NotificationDispatchWorker`, `NotificationDispatchAttemptService`, `NotificationRecipientPreflight`, `NotificationDispatchTarget`/`NotificationAttemptSnapshot`과 후속 `NotificationAttemptHandler` 계약은 notification.service에 둔다. 실행 경계와 기본 비활성화/handler 활성화 gate는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. 실제 TASK-709 handler 구현은 아직 없다.
+TASK-706의 `NotificationDispatchConfiguration`/`NotificationDispatchProperties`, `NotificationDispatchWorker`, `NotificationDispatchAttemptService`, `NotificationRecipientPreflight`, `NotificationDispatchTarget`/`NotificationAttemptSnapshot`과 후속 `NotificationAttemptHandler` 계약은 notification.service에 둔다. 실행 경계와 기본 비활성화/handler 활성화 gate는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. `DurableNotificationAttemptHandler`는 실제 caller-owned attempt/result/expiry/cleanup 정책을, `NotificationRetryPolicy`/`NotificationRetryProperties`는 bounded DB 예약과 설정 검증을 같은 package에서 소유한다. 새 retry framework/package는 없다.
 
 ## Persistence Location
 

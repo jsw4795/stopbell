@@ -313,7 +313,7 @@ V1은 하나의 Spring Backend와 하나의 fixed-delay, non-overlapping worker�
 
 ### TASK-706 Worker 구현 경계
 
-TASK-706은 단일 fixed-delay Worker, bounded due 조회, current recipient preflight, immutable attempt snapshot, 짧은 시작/결과 transaction과 transaction 밖 TASK-705 Provider 호출 경로를 구현했다. 실제 accounting/result 정책은 `NotificationAttemptHandler` 계약으로 TASK-709에 남긴다. 자동 dispatch는 기본 비활성화이며 enabled=true도 handler가 없으면 startup 구성 오류로 fail-closed 차단한다. 구현 상세·설정·검증 경계는 [TASK-706 Architecture](../architecture.md#notification-dispatch-worker-구현-task-706)가 소유한다. 운영 dispatch/recovery 완성이나 실제 iPhone E2E를 의미하지 않는다.
+TASK-706은 단일 fixed-delay Worker, bounded due 조회, current recipient preflight, immutable attempt snapshot, 짧은 시작/결과 transaction과 transaction 밖 TASK-705 Provider 호출 경로를 구현했다. TASK-706 당시 실제 accounting/result 정책은 `NotificationAttemptHandler` 계약으로 TASK-709에 남겼다. TASK-709는 production handler를 연결하고 handler 부재 gate를 필수 FCM 정적 설정 gate로 대체했다. 자동 dispatch는 계속 기본 비활성화다. 구현 상세·설정·검증 경계는 [TASK-706 Architecture](../architecture.md#notification-dispatch-worker-구현-task-706)가 소유한다. 운영 dispatch/recovery 완성이나 실제 iPhone E2E를 의미하지 않는다.
 
 ### Delivery semantics와 failure taxonomy
 
@@ -332,7 +332,7 @@ Invalid/unregistered 결과는 attempt의 identity/owner/generation/revision/FID
 
 ### TASK-709 failure/retry/expiry 설계 (2026-10-09)
 
-**설계 완료, 구현 미완료**다. TASK-701/702 완료 및 TASK-708 설계를 유지하고 두 UNIQUE, 실행 dependency와 V1 single fixed-delay/non-overlapping worker를 변경하지 않는다. 이번 단계는 문서만 변경하며 Backend/Flutter test·build, Docker, Firebase 실전송, SDK 설치와 Migration 실행을 하지 않는다. [Domain](../domain-model.md#notificationdelivery)은 invariant, [Database](../database.md#notificationdelivery-operational-schema-task-709)는 column/NULL/CHECK/query/index, [Architecture](../architecture.md#notification-dispatch와-result-transaction-task-709)는 실행 경계를 소유한다.
+**설계 완료(2026-10-09), TASK-709 코드 구현 및 집중 자동 검증 완료(2026-10-13)**다. TASK-701/702 완료 및 TASK-708 설계를 유지하고 두 UNIQUE, 실행 dependency와 V1 single fixed-delay/non-overlapping worker를 변경하지 않는다. 아래 최초 설계의 SDK 조사는 당시 기록이며 실제 runtime은 TASK-705 단일 HTTP adapter다. 이번 구현은 격리 MySQL Testcontainers와 Mock Provider만 검증하고 실제 Firebase/iPhone E2E는 수행하지 않았다. [Domain](../domain-model.md#notificationdelivery)은 invariant, [Database](../database.md#notificationdelivery-operational-schema-task-709)는 column/NULL/CHECK/query/index, [Architecture](../architecture.md#notification-dispatch와-result-transaction-task-709)는 실행 경계를 소유한다.
 
 #### 조사한 실제 구현과 SDK 경계
 
@@ -398,7 +398,7 @@ CONFIGURATION으로 실제 attempt가 실패한 개별 Delivery는 terminal이�
 - RETRYABLE은 일시적 거절/확인된 미전송이고 AMBIGUOUS_TIMEOUT은 접수 불명이다. 둘 다 유한 budget/expiry를 쓰지만 ambiguous를 즉시 resend하지 않으며 설정 delay는 일반 retry 이상이다. 전송 dedup key가 있다고 exactly-once로 간주하지 않는다. 마지막 attempt가 ambiguous이고 budget을 소진하면 FAILED로 종료하되 불명확한 접수 결과를 보존한다.
 - 정상 지연 재시도는 worker를 sleep시키지 않고 DB nextAttemptAt으로 예약한다. 앱 재시작은 Backend budget/기한을 reset하지 않는다. Backend restart도 같은 row의 count/next/expiry를 읽으며 terminal은 복구 대상이 아니다. 각 Device는 독립 budget/result를 사용하고 성공 Device를 실패 Device와 함께 재전송하지 않는다.
 
-최종 maxAttempts, local base/cap/jitter, recoveryDelay, requestBudget/timeout, Type별 freshness TTL 및 polling/batch 값은 **TASK-705 Backend→iPhone smoke, TASK-709 implementation 및 latency 검증까지 보류**한다. Schema는 수치와 독립적으로 구현 가능하다. smoke 없이 개발 후보값을 운영 기본값으로 기재하지 않는다.
+TASK-705 Backend→iPhone smoke는 2026-10-12 사용자 검증을 완료했으나 자동 dispatch의 end-to-end latency 분포는 없다. TASK-709는 아래 유한 개발 후보값으로 correctness를 검증했으며 최종 운영 횟수/간격/TTL/budget/polling/batch tuning은 TASK-710 latency 검증 이후로 남긴다. 개발 후보값을 운영 확정값으로 취급하지 않는다.
 
 FCM 공식 [retry 권고](https://firebase.google.com/docs/cloud-messaging/scale-fcm#handling_retries)는 timeout/재시도 최소 대기를 제시하고, [error 문서](https://firebase.google.com/docs/cloud-messaging/error-codes)는 quota의 최소 초기 1분 및 UNAVAILABLE의 Retry-After 존중을 설명한다. V1 설계는 일반 실패/ambiguous에 적어도 10초 대기, quota에 적어도 60초 대기를 하한으로 삼고 더 큰 header를 존중한다. 이는 StopBell 운영 최종 interval/TTL을 정한 것이 아니다. 버스 freshness 안에 그 지연을 수용할 수 없으면 retry를 포기하고 기한에 종료한다. latency를 낮추려고 Provider 제한을 어기지 않는다.
 
@@ -419,7 +419,7 @@ FCM 공식 [retry 권고](https://firebase.google.com/docs/cloud-messaging/scale
 - 인증은 **저장소 밖의 신뢰하는 기존 Service Account JSON 경로**를 `GOOGLE_APPLICATION_CREDENTIALS`로 주입하는 안전한 경로를 선택했다. `ServiceAccountCredentials.fromStream()`에 invocation 전용 transport를 제공하고 `firebase.messaging` scope로 `refreshAccessToken()`을 동기 호출한다. 파일 생성/수정과 Firebase Auth 도입은 없다. 범용 ADC discovery, 사용자 ADC, metadata/WIF/impersonation은 이 구현에서 지원하지 않는다. 각 invocation마다 인증을 준비하며 별도 token cache/자동 background refresh를 두지 않는다. 운영 managed ADC가 필요하면 해당 인증 transport의 gate 검증 후 확장해야 한다.
 - Service Account의 공식 `createWithCustomRetryStrategy(false)`로 OAuth HTTP retry를 끄고 invocation transport도 인증 요청을 최대 한 번만 허용한다. Apache `disableAutomaticRetries`, redirect/auth/cookie 비활성화와 명시적 bearer header로 FCM을 최대 한 번 요청한다. 401 뒤 자동 token refresh/resend, 503/Retry-After sleep, redirect follow와 I/O recovery는 없다. 인증 실패는 FCM을 호출하지 않는 CONFIGURATION이며 초기화 전용 code와 `fcmRequestStarted=false`로 개별 전송 오류와 구분한다. `fcmRequestStarted`는 transport 호출 경계이며 실제 wire 전송/접수 증거가 아니다. 후속 worker는 전송 시작 전 초기화 가능 여부와 global 초기화 실패 보존 계약을 적용해야 하며 Provider가 fake attempt/DB 전이를 수행하지 않는다.
 - 개발 후보 connect/read timeout `PT2S`/`PT5S`, 전체 request budget `PT15S`를 설정으로 제공한다. 인증 파일 준비·token 요청·FCM 요청·body 수신을 시작 시 monotonic budget 안에 포함하고 각 transport timeout은 남은 budget 이하로 제한한다. 가상 thread 결과 기다림만 timeout시키는 방식이 아니라, timeout/interruption 때 **활성 HttpUriRequest.abort() + 전용 HTTP client/connection pool close + invocation 폐쇄**를 실행한다. 폐쇄/기한 경과 후 새 HTTP 요청은 guard로 거부한다. DNS/credential parsing 등 즉시 중단 불가능한 로컬 작업이 늦게 끝나도 FCM을 새로 보낼 수 없다. JVM scheduling/cancellation 정리의 작은 초과 시간은 hard real-time 보장 대상이 아니다. 이미 wire로 전송된 요청의 Provider 접수/표시 취소는 보장하지 않고 AMBIGUOUS_TIMEOUT으로 반환한다.
-- FCM/인증 response body는 16 KiB로 제한하고 원문을 반환/로그/DB에 남기지 않는다. HTTP wire와 Google HTTP debug log를 끄며 원문 exception/cause/stack, target/token/credential은 로그하지 않는다. Retry-After delta/HTTP-date는 수신 UTC 기준 non-negative 최소 delay로 정규화하고, 중복 header는 최대값을 사용한다. 양수 overflow는 유한 표현의 최대 delay로 보존해 더 이른 retry를 유도하지 않는다. 후속 TASK-709는 먼 delay를 expiry와 비교하며 덧셈 overflow도 retry 불가로 처리해야 한다.
+- FCM/인증 response body는 16 KiB로 제한하고 원문을 반환/로그/DB에 남기지 않는다. HTTP wire와 Google HTTP debug log를 끄며 원문 exception/cause/stack, target/token/credential은 로그하지 않는다. Retry-After delta/HTTP-date는 수신 UTC 기준 non-negative 최소 delay로 정규화하고, 중복 header는 최대값을 사용한다. 양수 overflow는 유한 표현의 최대 delay로 보존해 더 이른 retry를 유도하지 않는다. TASK-709는 먼 delay를 덧셈 전에 남은 freshness와 비교해 overflow 없이 기한 시각에 예약한다.
 - Data는 `type=ALARM_EVENT`, 문자열 `alarmId/eventType/notificationEventId`만 담는다. 네 type의 짧은 한국어 notification 및 APNs alert/push-type/priority/sound를 설정하고 caller의 고정 expiresAt epoch-second를 `apns-expiration`에 전달한다. local expiry/Type TTL/최종 운영 timeout은 TASK-709 책임이다. APNs expiration은 초 단위 hint이고 실제 표시 deadline/접수된 전송 취소를 보장하지 않는다.
 
 집중 loopback HTTP 검증에서 429/500/503/401/403, redirect 및 연결 종료가 재전송되지 않고, 인증 transport의 숨겨진 두 번째 요청도 실제 wire 전에 거부됨을 확인했다. 지연된 응답 body와 인증 HTTP를 전체 budget으로 중단하고 지연된 인증 완료 후 FCM 요청 0회를 검증했다. 이 단일 adapter의 **재전송/transport budget gate는 통과**했고, 2026-10-12 사용자가 Firebase ACCEPTED와 실제 iPhone 13 Pro Max 알림 수신을 확인했다. 검증 환경·범위는 [Local Development](../local-development.md#task-705-backend-provider-수동-smoke)에 기록한다. 실제 Event 기반 자동 발송·worker dispatch, 전체 앱 상태 수신/tap E2E, retry/expiry 운영 정책과 latency/timeout 수치 및 worker preflight/attempt accounting은 미검증/후속 범위다. production 자동 dispatch는 구현하거나 활성화하지 않았다.
@@ -501,12 +501,35 @@ SENDING/claim/lease 없이 보장하는 것은 DB identity uniqueness, terminal 
 | TASK-705 | FID Provider Client (위 단일 HTTP adapter)와 위 mapping, 안전한 error/header 추출, timeout/내부 retry 제어 gate, APNs expiration 확인, credential/target redaction 및 Backend→실제 iPhone smoke |
 | TASK-707 | Event/Delivery Entity·Migration·Repository, 기존 두 UNIQUE와 이번 operational fields/CHECK/due index, immutable Event owner/시각·recipient generation, History 전환 및 Alarm/User/Device 삭제 정책/FK. 실제 MySQL 제약과 query/EXPLAIN 검증 |
 | TASK-708 implementation | 기존 atomic lifecycle/Event/최초 recipient transaction에서 원래 observed/detected 시각·generation·기한 연결, 0/N recipient 및 이미 만료된 row 생성, logical dedup/UUID continuity. 재시도해도 payload/recipient/TTL 변경 금지 |
-| TASK-706 | 단일 due worker lifecycle/제한 query, preflight owner/generation/enabled/target/revision과 호출 직전 expiry 확인, attempt 시작 transaction 및 transaction 밖 I/O 연결 구현. result policy는 TASK-709 handler에 위임하며 handler 미구현 상태의 실전송은 fail-closed 차단 |
+| TASK-706 | 단일 due worker lifecycle/제한 query, preflight owner/generation/enabled/target/revision과 호출 직전 expiry 확인, attempt 시작 transaction 및 transaction 밖 I/O 연결 구현. result policy는 TASK-709 handler에 위임하며 최초 handler 부재 gate를 TASK-709 FCM 정적 설정 gate로 대체 |
 | TASK-709 implementation | Provider/local 결과 전이와 attempt/retry/recovery policy, conditional cleanup, 시작/결과 snapshot 일치 및 DB 재반영 안전성. expiry-vs-limit, crash 소비, unknown acceptance, stale FID, A→B→A, partial-device 실패의 핵심 correctness test |
 | TASK-703/704 | 기존 Device locking/API 및 높은 Client revision 재동기화 적용, 이미 terminal인 Delivery 복귀 없음 |
 | TASK-710/711 | 실제 iPhone 수신/tap 및 최종 E2E/regression. 선행 correctness 검증을 대체하지 않음 |
 
-Schema 적용과 삭제 정책은 TASK-707, Provider 제어 gate/smoke는 TASK-705에서 검증하고, 최종 운영 수치는 TASK-709 구현/latency에서 확정한다. Phase 8 latency/restart 검증은 이 failure 계약의 최초 correctness 구현을 미루는 이유가 아니다. TASK-708/709 checkbox와 모든 후속 Task 완료 상태·dependency는 변경하지 않는다.
+Schema 적용과 삭제 정책은 TASK-707, Provider 제어 gate/smoke는 TASK-705, failure/retry/expiry correctness는 TASK-709에서 검증한다. 최종 운영 수치는 TASK-710 실제 latency 이후 조정한다. TASK-710/711의 수신/tap E2E와 전체 regression 및 실제 process restart 검증은 미완료이며 선행 correctness 검증을 대체하지 않는다.
+
+#### TASK-709 구현 설정과 검증 (2026-10-13)
+
+`DurableNotificationAttemptHandler`는 caller-owned transaction에서 `NotificationDelivery.beginAttempt/markAccepted/recordFailure/markFailed/scheduleRetry/expire`를 사용한다. 시작 count/revision/UTC microsecond 시각/결과 초기화/recovery 예약이 flush·commit된 뒤만 snapshot을 반환하며, 시작 commit 응답 유실은 전송 권한을 만들지 않는다. 결과 commit 실패/응답 유실에는 동일 메모리 결과를 새 current locking read transaction에서 한 번 재반영한다. 이미 반영·terminal·다른 attempt이면 no-op, 두 번 실패하면 Worker cycle을 종료한다. 새 FCM 호출은 없다.
+
+UNREGISTERED cleanup은 Delivery → Device lock 안에서 원래 Device ID/Event owner/generation/revision/FID/enabled를 모두 비교한다. case-sensitive 일치 때만 `Device.disableUnregisteredTarget()`으로 enabled=false/FID=null을 함께 반영한다. Client revision, generation, owner, credential 및 lastRegisteredAt은 보존한다. Delivery 결과와 cleanup은 동일 transaction에서 rollback되고 stale result나 삭제로 terminal인 row는 cleanup하지 않는다.
+
+| 설정 | Provisional 개발값 | 검증 범위 |
+| --- | --- | --- |
+| `notification.dispatch.enabled` | false | 명시적 opt-in, single Backend만 지원 |
+| `notification.dispatch.batch-size` / `fixed-delay` | 50 / PT1S | 1~1,000 / 1ms~1분 |
+| `notification.dispatch.retry.max-attempts` | 3 | 최초 포함 1~10 |
+| `base-retry-delay` / `max-retry-delay` | PT10S / PT60S | 10초≤base≤cap≤5분 |
+| `bounded-jitter` | PT2S | 0≤jitter≤cap, 음수가 아닌 microsecond 값, 합계 local delay도 cap 이하 |
+| `recovery-delay` | PT10S | base≤recovery≤5분 |
+| `notification.fcm.request-budget` | 기존 PT15S | 자동 dispatch에서 1ms~5분, 별도 복제 설정 없음 |
+| `notification.decision.ttl.*` | 기존 네 Type 모두 PT60S | 양수 microsecond 단위~5분, 최초 observedAt 기준만 계산 |
+
+Retry 설정의 표 생략 prefix는 `notification.dispatch.retry.`다. 안전 상한은 실수로 사실상 무한 retry/TTL/batch를 구성하지 않게 하는 구현 경계이며 운영 권장값이 아니다. 일반/ambiguous는 같은 bounded delay(최소 10초), quota는 최소 60초이며 Provider minimumRetryDelay가 더 크면 local cap보다 우선한다. Date arithmetic overflow나 기한 이상 delay는 기한 시각으로 예약해 실제 expiry 전이를 기다린다. 재시작은 count/예약/기한을 reset하지 않는다.
+
+자동 dispatch opt-in 시 enabled/project/credential path/connect/read/request budget 정적 검증 실패는 startup을 차단한다. 파일 내용을 startup에서 읽지 않는다. 실행 중 CONFIGURATION이면 해당 실제 attempt는 결정표대로 terminal 처리하되 후속 attempt는 보수적으로 차단하고 expiry sweep만 계속한다. 미만료 PENDING을 소모하지 않으며 설정·인증 복구 후 Backend 재시작을 요구한다. 아직 미시작 row가 만료됐으면 `findExpiredPendingIds`의 bounded 조회로 local 종료한다. 글로벌 circuit breaker나 새로운 durable 운영 상태를 만들지 않는다.
+
+집중 테스트 총 95개(Handler 30, Retry/TTL 6, Worker 10, configuration 6, MySQL production Handler 31 및 기존 dispatch 8, Mock one-shot Smoke 4)와 Java compile 및 diff 검증을 통과했다. 최초 통합 fixture/예외 타입 실패 4건은 수정 후 영향받은 클래스만 재검증했으며 테스트 skip은 없다. 실제 MySQL CHECK·rollback·current Device locking read와 시작/결과 commit 응답 유실을 검증한다. 응답 유실은 실제 DB commit 또는 rollback을 수행하는 transaction manager fault injection으로 재현하며 실제 네트워크 DB 연결 절단이나 process kill을 주장하지 않는다. 모든 Worker 전송은 Mock Provider다. 전체 Backend/Flutter suite, Firebase 전송, Service Account 접근, 개발 DB 작업 및 iPhone/Xcode는 수행하지 않는다. TASK-710은 자동 Event→FCM→iPhone 수신/tap, latency 분포와 후보값 tuning, 실제 process restart 및 앱 상태/재등록 시나리오를 추가 검증한다. Exactly-once 표시 및 이미 접수된 전송 회수는 보장하지 않는다.
 
 ### Permission, payload와 tap
 

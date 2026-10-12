@@ -7,7 +7,6 @@ import com.stopbell.notification.entity.NotificationDelivery;
 
 /**
  * TASK-709 policy boundary. All methods run inside short caller-owned transactions.
- * No production implementation exists yet; enabling dispatch requires this bean.
  * Implementations must never invoke the provider or start independent transactions.
  */
 public interface NotificationAttemptHandler {

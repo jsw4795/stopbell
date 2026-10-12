@@ -22,6 +22,12 @@ notification:
     # Provisional development values, not final operational policy.
     batch-size: 50
     fixed-delay: PT1S
+    retry:
+      max-attempts: 3
+      base-retry-delay: PT10S
+      max-retry-delay: PT60S
+      bounded-jitter: PT2S
+      recovery-delay: PT10S
   fcm:
     enabled: ${FCM_ENABLED:false}
     project-id: ${FCM_PROJECT_ID:}

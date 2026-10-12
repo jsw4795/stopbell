@@ -45,23 +45,28 @@ class NotificationDispatchConfigurationTest {
     }
 
     @Test
-    @DisplayName("dispatch만 켜고 TASK-709 handler가 없으면 명시적인 구성 오류로 startup을 차단한다")
-    void missing_handler_fails_closed() {
+    @DisplayName("dispatch를 켜도 FCM 정적 설정이 없으면 startup을 차단한다")
+    void missing_fcm_settings_fail_closed() {
         context.withPropertyValues("notification.dispatch.enabled=true").run(app -> {
             assertThat(app).hasFailed();
             assertThat(app.getStartupFailure()).hasRootCauseMessage(
-                    "notification.dispatch.enabled requires the TASK-709 durable attempt/result handler");
+                    "notification.dispatch.enabled requires valid static FCM settings");
         });
     }
 
     @Test
-    @DisplayName("명시적 활성화와 handler를 함께 제공해야 Worker가 생성되고 fixed-delay 설정을 사용한다")
+    @DisplayName("안전한 정적 FCM 설정이면 production handler와 fixed-delay Worker를 연결한다")
     void enabled_requires_handler_and_binds_settings() throws Exception {
-        context.withBean(NotificationAttemptHandler.class, () -> mock(NotificationAttemptHandler.class))
+        context.withPropertyValues("notification.fcm.enabled=true", "notification.fcm.project-id=test-project",
+                        "notification.fcm.credential-path=/synthetic/never-read.json",
+                        "notification.fcm.connect-timeout=PT2S", "notification.fcm.read-timeout=PT5S",
+                        "notification.fcm.request-budget=PT15S")
                 .withUserConfiguration(SchedulingConfiguration.class)
                 .withPropertyValues("notification.dispatch.enabled=true", "notification.dispatch.batch-size=3",
                         "notification.dispatch.fixed-delay=PT2S").run(app -> {
                     assertThat(app).hasNotFailed().hasSingleBean(NotificationDispatchWorker.class);
+                    assertThat(app.getBean(NotificationAttemptHandler.class))
+                            .isInstanceOf(DurableNotificationAttemptHandler.class);
                     assertThat(app.getBean(NotificationDispatchProperties.class).batchSize()).isEqualTo(3);
                     assertThat(app.getBean(NotificationDispatchProperties.class).fixedDelay()).isEqualTo(Duration.ofSeconds(2));
                     var tasks = app.getBean(ScheduledAnnotationBeanPostProcessor.class).getScheduledTasks();
@@ -79,9 +84,33 @@ class NotificationDispatchConfigurationTest {
     @Test
     @DisplayName("0과 음수 batch 및 millisecond 미만이나 overflow delay를 구성 단계에서 거부한다")
     void invalid_bounds_fail_configuration() {
-        for (String property : List.of("batch-size=0", "batch-size=-1", "fixed-delay=PT0S",
+        for (String property : List.of("batch-size=0", "batch-size=-1", "batch-size=1001", "fixed-delay=PT61S", "fixed-delay=PT0S",
                 "fixed-delay=-PT1S", "fixed-delay=PT0.000001S", "fixed-delay=PT9223372036854775807S")) {
             context.withPropertyValues("notification.dispatch." + property).run(app -> assertThat(app).hasFailed());
+        }
+    }
+
+    @Test
+    @DisplayName("누락 또는 잘못된 FCM project와 credential 및 timeout은 실전송 전에 fail-closed 차단한다")
+    void unsafe_fcm_settings_fail_closed() {
+        for (String invalid : List.of("enabled=false", "project-id=", "project-id=INVALID PROJECT",
+                "credential-path=", "connect-timeout=PT0S", "read-timeout=-PT1S", "request-budget=PT6M")) {
+            context.withPropertyValues("notification.dispatch.enabled=true", "notification.fcm.enabled=true",
+                    "notification.fcm.project-id=test-project", "notification.fcm.credential-path=/synthetic/never-read.json",
+                    "notification.fcm.connect-timeout=PT2S", "notification.fcm.read-timeout=PT5S",
+                    "notification.fcm.request-budget=PT15S", "notification.fcm." + invalid)
+                    .run(app -> assertThat(app).hasFailed());
+        }
+    }
+
+    @Test
+    @DisplayName("retry budget과 delay 및 jitter의 잘못된 설정은 기본 비활성 상태에서도 거부한다")
+    void invalid_retry_settings_fail_configuration() {
+        for (String invalid : List.of("max-attempts=0", "max-attempts=11", "base-retry-delay=PT9S",
+                "max-retry-delay=PT9S", "bounded-jitter=-PT1S", "bounded-jitter=PT61S",
+                "recovery-delay=PT9S", "recovery-delay=PT6M")) {
+            context.withPropertyValues("notification.dispatch.retry." + invalid)
+                    .run(app -> assertThat(app).hasFailed());
         }
     }
 }

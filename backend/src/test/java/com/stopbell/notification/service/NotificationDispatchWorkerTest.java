@@ -137,6 +137,7 @@ class NotificationDispatchWorkerTest {
         for (NotificationProviderResult kind : NotificationProviderResult.values()) {
             NotificationSendResult result = result(kind);
             when(provider.send(any())).thenReturn(result);
+            worker = worker(true);
             worker.dispatchPending();
             verify(attempts).completeAttempt(snapshot(11L, NOW.plusSeconds(60)), result);
         }

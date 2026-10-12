@@ -8,6 +8,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.stopbell.notification.client.FcmProviderClient;
 import com.stopbell.notification.client.NotificationSendResult;
+import com.stopbell.notification.entity.NotificationProviderResult;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +30,7 @@ public class NotificationDispatchWorker {
     private final Clock clock;
     private final AtomicBoolean running = new AtomicBoolean();
     private volatile boolean stopping;
+    private boolean configurationBlocked;
 
     public NotificationDispatchWorker(NotificationDispatchProperties properties,
             NotificationDeliveryRepository deliveries, NotificationDispatchAttemptService attempts,
@@ -51,14 +53,20 @@ public class NotificationDispatchWorker {
         log.debug("Notification dispatch cycle started");
         try {
             requireNoTransaction();
-            List<Long> ids = deliveries.findDuePendingIds(LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC),
-                    PageRequest.of(0, properties.batchSize()));
+            LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+            PageRequest page = PageRequest.of(0, properties.batchSize());
+            List<Long> ids = configurationBlocked ? deliveries.findExpiredPendingIds(now, page)
+                    : deliveries.findDuePendingIds(now, page);
             candidates = ids.size();
             for (Long id : ids) {
                 if (stopping || Thread.currentThread().isInterrupted()) {
                     break;
                 }
                 try {
+                    if (configurationBlocked) {
+                        attempts.expireDuePending(id);
+                        continue;
+                    }
                     dispatch(id);
                     processed++;
                 } catch (DataAccessException | TransactionException exception) {
@@ -91,6 +99,11 @@ public class NotificationDispatchWorker {
             return;
         }
         NotificationSendResult result = provider.send(snapshot.target().request());
+        if (result.result() == NotificationProviderResult.CONFIGURATION) {
+            // Fail closed until configuration repair + Backend restart. Expiry sweeps remain enabled.
+            configurationBlocked = true;
+            log.warn("Notification dispatch blocked: reason=PROVIDER_CONFIGURATION, recovery=RESTART_AFTER_REPAIR");
+        }
         log.debug("Notification dispatch provider result: deliveryId={}, result={}", id, result.result());
         attempts.completeAttempt(snapshot, result);
     }

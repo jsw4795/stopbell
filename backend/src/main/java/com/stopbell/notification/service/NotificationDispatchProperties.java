@@ -12,8 +12,8 @@ public record NotificationDispatchProperties(
         @DefaultValue("PT1S") Duration fixedDelay
 ) {
     public NotificationDispatchProperties {
-        if (batchSize <= 0 || fixedDelay == null || fixedDelay.compareTo(Duration.ofMillis(1)) < 0
-                || fixedDelay.compareTo(Duration.ofMillis(Long.MAX_VALUE)) > 0) {
+        if (batchSize <= 0 || batchSize > 1_000 || fixedDelay == null || fixedDelay.compareTo(Duration.ofMillis(1)) < 0
+                || fixedDelay.compareTo(Duration.ofMinutes(1)) > 0) {
             throw new IllegalArgumentException("Dispatch batch size and millisecond delay must be positive and finite");
         }
     }

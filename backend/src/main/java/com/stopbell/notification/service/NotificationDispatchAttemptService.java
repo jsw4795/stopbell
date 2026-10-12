@@ -13,11 +13,13 @@ import com.stopbell.notification.entity.NotificationDeliveryStatus;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/** Owns transaction/lock boundaries, not TASK-709 accounting or result policy. */
+/** Owns transaction/lock boundaries and bounded result reapplication. */
 public class NotificationDispatchAttemptService {
     private static final Logger log = LoggerFactory.getLogger(NotificationDispatchAttemptService.class);
     private final NotificationDeliveryRepository deliveries;
@@ -76,10 +78,35 @@ public class NotificationDispatchAttemptService {
     }
 
     public void completeAttempt(NotificationAttemptSnapshot snapshot, NotificationSendResult result) {
+        try {
+            applyResult(snapshot, result);
+        } catch (DataAccessException | TransactionException exception) {
+            // Fresh current locking read reconciles both rollback and a lost successful commit response.
+            // Keep the exact in-memory result; never invoke the Provider here.
+            log.warn("Notification result transaction retry: deliveryId={}, exceptionType={}",
+                    snapshot.target().deliveryId(), exception.getClass().getSimpleName());
+            applyResult(snapshot, result);
+        }
+    }
+
+    private void applyResult(NotificationAttemptSnapshot snapshot, NotificationSendResult result) {
         transaction.executeWithoutResult(status -> {
             NotificationDelivery delivery = deliveries.findByIdForUpdate(snapshot.target().deliveryId()).orElse(null);
             if (sameAttempt(delivery, snapshot) && delivery.getLastProviderResult() == null) {
                 handler.completeAttempt(delivery, snapshot, result);
+                deliveries.flush();
+            }
+        });
+    }
+
+    /** A configuration-blocked worker may sweep expiry without spending any new attempt. */
+    public void expireDuePending(long id) {
+        transaction.executeWithoutResult(status -> {
+            NotificationDelivery delivery = deliveries.findByIdForUpdate(id).orElse(null);
+            LocalDateTime now = now();
+            if (delivery != null && delivery.getStatus() == NotificationDeliveryStatus.PENDING
+                    && !now.isBefore(delivery.getExpiresAt())) {
+                delivery.expire(now);
                 deliveries.flush();
             }
         });
