@@ -217,11 +217,11 @@ Logical Notification의 identity는 `(alarmId, activationGeneration, trackingCyc
 
 ### TASK-708 중복 방지 설계 (2026-10-09)
 
-설계 완료, 구현 미완료다. 결정·대안·구현 분담은 이 절, Domain invariant는 [Domain Model](../domain-model.md#notificationevent), column/constraint/index는 [Database](../database.md#phase-7-notification-persistence-contract), transaction 실행 절차는 [Architecture](../architecture.md#notification-decision-transaction-task-708)가 소유한다.
+2026-10-12 TASK-708에서 atomic decision/dedup/fan-out·UUID 복원을 구현했다. 결정·대안·구현 분담은 이 절, Domain invariant는 [Domain Model](../domain-model.md#notificationevent), column/constraint/index는 [Database](../database.md#phase-7-notification-persistence-contract), transaction 실행 절차는 [Architecture](../architecture.md#notification-decision-transaction-task-708)가 소유한다.
 
 #### 현재 구현 조사와 보장 한계
 
-아래는 TASK-708 설계 당시 조사다. 이후 Schema/Entity/FOLLOW_UP 저장은 TASK-707에서 구현했으며 원래 UUID를 사용하는 평가기 복원과 atomic decision은 아직 후속 작업이다.
+아래는 TASK-708 설계 당시 조사다. 이후 Schema/Entity/FOLLOW_UP 저장은 TASK-707, 원래 UUID를 사용하는 평가기 복원과 atomic decision은 TASK-708에서 구현했다. 아래 당시 한계 중 ACTIVE restart 항목은 유지한다.
 
 - `Alarm`/V11은 activation generation을 영속하고 기존 증가 규칙을 구현했다. `VehicleTrackingState.begin()`/`beginBeforeTarget()`은 UUID를 생성하며 `observe()`/`emit()`은 같은 ID를 유지한다. `TransitEvent`는 UUID와 event type을 전달한다.
 - `BusAlarmEvaluationState.forFollowUp()`은 정상 process 안에서 ARRIVED 차량의 cycle을 유지한다. 반면 `Alarm`/V6에는 차량 ID와 시작·만료 시각만 있고 cycle ID는 없다. `BusAlarmEvaluator.evaluateFollowUp()`은 memory tracking이 없으면 `begin()`으로 새 UUID를 만든다. 따라서 현재 FOLLOW_UP 복구는 차량 correlation은 가능하지만 ARRIVED와 ONE_STOP_AFTER의 cycle identity continuity는 보장하지 못한다.
@@ -249,9 +249,9 @@ Logical Notification의 identity는 `(alarmId, activationGeneration, trackingCyc
 
 차량 ID/시간으로 UUID를 다시 계산하는 대안은 기존 random UUID와 일치하지 않고 같은 차량의 다른 운행을 합칠 위험이 있다. NotificationEvent에서 ARRIVED를 역조회하는 대안은 runtime 복구를 Event 조회·보존 정책과 결합한다. UUID column 하나는 ACTIVE history를 저장하지 않고 기존 short-lived runtime의 수명과 함께 정리할 수 있으므로 선택한다.
 
-TASK-707은 새 Migration과 Alarm mapping/invariant를 추가하고 기존 `startFollowUp(...)`/`clearFollowUpRuntime()` 및 `BusAlarmLifecycleService.applyArrival()`에서 원래 UUID를 저장·제거하도록 연결한다. TASK-708 implementation은 `VehicleTrackingState`의 기존 UUID를 받는 복원 경로와 `evaluateFollowUp()`을 연결한다. memory가 없으면 저장된 UUID로 state를 복원하고 새 UUID를 생성하지 않는다. memory가 있으면 그 UUID가 persisted 값과 같아야 한다. Observation freshness, successor 도달 판단, 5분 만료와 Phase 5 tracking 정책은 유지한다.
+TASK-707은 새 Migration과 Alarm mapping/invariant를 추가하고 기존 `startFollowUp(...)`/`clearFollowUpRuntime()` 및 `BusAlarmLifecycleService.applyArrival()`에서 원래 UUID를 저장·제거하도록 연결한다. TASK-708은 `VehicleTrackingState.restoreFollowUp()`과 `evaluateFollowUp()`을 연결했다. memory가 없으면 저장된 UUID로 state를 복원하고 새 UUID를 생성하지 않는다. memory가 있으면 그 UUID가 persisted 값과 같아야 한다. Observation freshness, successor 도달 판단, 5분 만료와 Phase 5 tracking 정책은 유지한다.
 
-복원은 과거 Observation을 만들거나 ARRIVED를 다시 내는 작업이 아니다. fresh한 현재 Observation으로 after 후보를 판단하고, 적용 직전 current Alarm의 generation·FOLLOW_UP status·vehicle ID·cycle UUID·미만료 runtime을 재검증한다. 값이 없거나 서로 다르면 새 UUID로 보정하지 않고 적용을 거부해 불변조건 오류로 관찰한다. TASK-707/708 구현·검증 전에는 restart-safe continuity가 완성된 것으로 취급하지 않는다.
+복원은 과거 Observation을 만들거나 ARRIVED를 다시 내는 작업이 아니다. fresh한 현재 Observation으로 after 후보를 판단하고, 적용 직전 current Alarm의 generation·FOLLOW_UP status·vehicle ID·cycle UUID·미만료 runtime을 재검증한다. 값이 없거나 서로 다르면 새 UUID로 보정하지 않고 적용을 거부해 불변조건 오류로 관찰한다. TASK-708은 persisted FOLLOW_UP 재조회와 fresh Observation에 의한 원래 UUID의 after 후보 생성·적용을 집중 테스트로 검증했다. 실제 process restart/E2E는 TASK-811에 남는다.
 
 #### Atomic uniqueness와 중복 처리 선택
 
@@ -286,7 +286,7 @@ Blind upsert/REPLACE는 기존 decision을 변경·대체할 수 있고 INSERT I
 | TASK-706 | 이미 commit된 pending Delivery의 단일 durable dispatch worker와 전송 직전 recipient 재검증. Event 결정/fan-out transaction을 다시 구현하지 않음 |
 | TASK-709 | 아래 failure/retry/expiry 설계 계약 적용, 이후 result 처리·bounded retry·freshness·conditional cleanup 구현. 최종 횟수·간격·TTL은 smoke/latency 검증 후 확정 |
 
-실행 순서는 [Phase 7 dependency](../task-list.md#phase-7---notification)를 유지한다. TASK-708 설계만 완료했고 전체 Task는 미완료다. 이번 단계에는 code/Entity/Repository/Migration/test를 추가하지 않으며 테스트 실행 없이 문서 논리·코드 대조·링크·diff만 검증한다.
+실행 순서는 [Phase 7 dependency](../task-list.md#phase-7---notification)를 유지한다. TASK-708 구현은 V14 Entity/두 UNIQUE를 재사용하고 Migration·Dependency를 추가하지 않았다. `BusAlarmLifecycleService`의 결정 전체 transaction, current locking read·known Event UNIQUE rollback 재확인, 최초 0/N recipient set, Scheduler의 원래 pending candidate 보존과 commit 후 memory 반영을 연결했다. Type별 provisional TTL 설정/최대 두 번의 DB 시도와 구현 경계는 [Architecture](../architecture.md#notification-decision-transaction-task-708)가 소유한다. FCM 전송·Worker·운영 retry/expiry/cleanup과 최종 TTL 확정은 TASK-706/709의 책임이다.
 
 ### Durable dispatch와 persistence 역할
 

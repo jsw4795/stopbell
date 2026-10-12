@@ -555,7 +555,7 @@ TASK-509의 V1 evidence policy는 다음과 같다. `observedAt`과 서울의 `p
 
 `TransitObservation`과 ACTIVE Vehicle tracking state 전체는 V1에서 영속하지 않는다. Scheduler는 `(alarmId, activationGeneration)` key로 ACTIVE/FOLLOW_UP evaluation state를 memory에 보관하고 restart 뒤에는 `initial()` baseline으로 시작한다. Provider I/O 뒤 lifecycle 반영 직전에 `PESSIMISTIC_WRITE`로 current generation/status를 다시 검증하므로 stale result는 lifecycle과 memory state 모두 바꾸지 않는다. Durable Notification dedup에 필요한 activation generation, tracking cycle identity, event type은 TransitEvent에서 `NotificationEvent`로 전달한다. `TransitEvent`는 type, vehicle tracking ID, UUID cycle ID, latest observed time/position, optional provider data time 및 PASSED의 optional metadata-derived `stopsPastTarget`을 provider-neutral하게 전달한다.
 
-TASK-708 implementation에서는 FOLLOW_UP memory가 없을 때 `followUpTrackingCycleId`로 원래 cycle identity를 복원한다. 새 UUID나 과거 Observation을 만들지 않고 현재의 fresh Observation으로 기존 after 판정만 수행한다. DB retry는 선택한 `TransitEvent`와 원래 evaluation result를 재사용하며 evaluator 재실행으로 UUID를 바꾸지 않는다. ACTIVE restart의 새 cycle과 이전 cycle은 자동 연결하지 않는다. 현재 FOLLOW_UP UUID 재생성 및 ACTIVE baseline 재발행의 구현상 한계는 [ADR-010의 조사 결과](adr/ADR-010-notification-device-and-durable-delivery.md#현재-구현-조사와-보장-한계)를 따른다.
+TASK-708 평가기는 FOLLOW_UP memory가 없을 때 `followUpTrackingCycleId`로 원래 cycle identity를 복원한다. 새 UUID나 과거 Observation을 만들지 않고 현재의 fresh Observation으로 기존 after 판정만 수행한다. DB retry는 선택한 `TransitEvent`와 원래 evaluation result를 재사용하며 evaluator 재실행으로 UUID를 바꾸지 않는다. ACTIVE restart의 새 cycle과 이전 cycle은 자동 연결하지 않는다. FOLLOW_UP UUID 재생성 한계는 TASK-708에서 해결했고 ACTIVE baseline 재발행의 기존 한계는 [ADR-010의 조사 결과](adr/ADR-010-notification-device-and-durable-delivery.md#현재-구현-조사와-보장-한계)를 따른다.
 
 ------------------------------------------------------------------------
 

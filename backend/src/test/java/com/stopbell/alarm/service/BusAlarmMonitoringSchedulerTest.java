@@ -51,6 +51,23 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 class BusAlarmMonitoringSchedulerTest {
 
+    private static org.mockito.stubbing.Answer<BusAlarmDecisionResult> applied() {
+        return invocation -> {
+            AlarmEvaluationKey key = invocation.getArgument(0);
+            AlarmStatus expected = invocation.getArgument(1);
+            BusAlarmEvaluationResult result = invocation.getArgument(2);
+            TransitEvent event = result.eventCandidates().stream().findFirst().orElse(null);
+            boolean arrival = event != null && event.type() == TransitEventType.ARRIVED;
+            return new BusAlarmDecisionResult(BusAlarmDecisionResult.Outcome.COMMITTED,
+                    key.activationGeneration(), arrival ? AlarmStatus.FOLLOW_UP : expected,
+                    arrival ? event.vehicleTrackingId() : null, arrival ? event.trackingCycleId() : null);
+        };
+    }
+
+    private static BusAlarmDecisionResult stale() {
+        return new BusAlarmDecisionResult(BusAlarmDecisionResult.Outcome.STALE, -1, null, null, null);
+    }
+
     private final Clock clock = Clock.fixed(Instant.parse("2026-09-23T00:00:00Z"), ZoneOffset.UTC);
     private final BusAlarmPollingService pollingService = mock(BusAlarmPollingService.class);
     private final BusAlarmEvaluator evaluator = mock(BusAlarmEvaluator.class);
@@ -92,8 +109,8 @@ class BusAlarmMonitoringSchedulerTest {
         when(tagoClient.fetchVehicleLocations(any())).thenReturn(emptyTagoResponse());
         when(evaluator.evaluate(eq(alarm), any(BusAlarmEvaluationState.class), anySet(), anyList(), any(Instant.class)))
                 .thenReturn(result);
-        when(lifecycleService.applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(result)))
-                .thenReturn(true);
+        when(lifecycleService.applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(result), any(Instant.class)))
+                .thenAnswer(applied());
 
         scheduler.pollMonitoringAlarms();
         scheduler.pollMonitoringAlarms();
@@ -139,7 +156,7 @@ class BusAlarmMonitoringSchedulerTest {
         ));
         when(evaluator.evaluate(eq(alarm), any(BusAlarmEvaluationState.class), anySet(), anyList(), any(Instant.class)))
                 .thenReturn(result);
-        when(lifecycleService.applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(result))).thenReturn(true);
+        when(lifecycleService.applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(result), any(Instant.class))).thenAnswer(applied());
 
         seoulScheduler.pollMonitoringAlarms();
 
@@ -172,7 +189,7 @@ class BusAlarmMonitoringSchedulerTest {
         when(tagoClient.fetchVehicleLocations(any())).thenReturn(emptyTagoResponse());
         when(evaluator.evaluate(eq(alarm), any(BusAlarmEvaluationState.class), anySet(), anyList(), any(Instant.class)))
                 .thenReturn(arrival, noEvent);
-        when(lifecycleService.applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), any(BusAlarmEvaluationResult.class))).thenReturn(true);
+        when(lifecycleService.applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), any(BusAlarmEvaluationResult.class), any(Instant.class))).thenAnswer(applied());
 
         scheduler.pollMonitoringAlarms();
         scheduler.pollMonitoringAlarms();
@@ -205,7 +222,7 @@ class BusAlarmMonitoringSchedulerTest {
         when(tagoClient.fetchVehicleLocations(any())).thenReturn(emptyTagoResponse());
         when(evaluator.evaluate(eq(alarm), any(BusAlarmEvaluationState.class), anySet(), anyList(), any(Instant.class)))
                 .thenReturn(arrival);
-        when(lifecycleService.applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), any(BusAlarmEvaluationResult.class))).thenReturn(false);
+        when(lifecycleService.applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), any(BusAlarmEvaluationResult.class), any(Instant.class))).thenReturn(stale());
 
         scheduler.pollMonitoringAlarms();
         scheduler.pollMonitoringAlarms();
@@ -238,7 +255,7 @@ class BusAlarmMonitoringSchedulerTest {
         });
         BusAlarmEvaluationResult result = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
         when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
-        when(lifecycleService.applyIfCurrent(any(), any(), any())).thenReturn(true);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any(Instant.class))).thenAnswer(applied());
 
         monitored.pollMonitoringAlarms();
 
@@ -267,7 +284,7 @@ class BusAlarmMonitoringSchedulerTest {
         });
         BusAlarmEvaluationResult result = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
         when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
-        when(lifecycleService.applyIfCurrent(any(), any(), any())).thenReturn(true);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any(Instant.class))).thenAnswer(applied());
 
         monitored.pollMonitoringAlarms();
 
@@ -298,7 +315,7 @@ class BusAlarmMonitoringSchedulerTest {
         BusAlarmEvaluationResult retried = new BusAlarmEvaluationResult(List.of(), firstState, false);
         when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(first);
         when(evaluator.evaluatePartial(any(), any(), anySet(), anyList(), any())).thenReturn(retried);
-        when(lifecycleService.applyIfCurrent(any(), any(), any())).thenReturn(true);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any(Instant.class))).thenAnswer(applied());
 
         monitored.pollMonitoringAlarms();
 
@@ -309,7 +326,7 @@ class BusAlarmMonitoringSchedulerTest {
         order.verify(detailClient).fetchVehicleDetail("D");
         order.verify(evaluator).evaluate(eq(alarm), any(), eq(Set.of("A", "B", "C", "D")),
                 anyList(), any());
-        order.verify(lifecycleService).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(first));
+        order.verify(lifecycleService).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(first), any(Instant.class));
         order.verify(monitored).waitBeforeRetry();
         order.verify(detailClient).fetchVehicleDetail("B");
         order.verify(evaluator).evaluatePartial(eq(alarm), eq(firstState), eq(Set.of("B")), anyList(), any());
@@ -333,7 +350,7 @@ class BusAlarmMonitoringSchedulerTest {
                 .thenReturn(emptyTagoResponse());
         BusAlarmEvaluationResult result = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
         when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
-        when(lifecycleService.applyIfCurrent(any(), any(), any())).thenReturn(true);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any(Instant.class))).thenAnswer(applied());
 
         monitored.pollMonitoringAlarms();
 
@@ -360,7 +377,7 @@ class BusAlarmMonitoringSchedulerTest {
                 .thenThrow(providerFailure(TransitProviderClientFailureKind.TRANSPORT));
         BusAlarmEvaluationResult result = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
         when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
-        when(lifecycleService.applyIfCurrent(any(), any(), any())).thenReturn(true);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any(Instant.class))).thenAnswer(applied());
 
         monitored.pollMonitoringAlarms();
 
@@ -403,7 +420,7 @@ class BusAlarmMonitoringSchedulerTest {
         BusAlarmEvaluationResult stale = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
         when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(first, first);
         when(evaluator.evaluatePartial(any(), any(), anySet(), anyList(), any())).thenReturn(stale);
-        when(lifecycleService.applyIfCurrent(any(), any(), any())).thenReturn(true, false, true);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any(Instant.class))).thenAnswer(applied()).thenReturn(stale()).thenAnswer(applied());
 
         monitored.pollMonitoringAlarms();
         monitored.pollMonitoringAlarms();
@@ -412,7 +429,7 @@ class BusAlarmMonitoringSchedulerTest {
         verify(evaluator, times(2)).evaluate(eq(alarm), states.capture(), anySet(), anyList(), any());
         assertThat(states.getAllValues().get(1)).isEqualTo(firstState);
         verify(evaluator).evaluatePartial(eq(alarm), eq(firstState), eq(Set.of("B")), anyList(), any());
-        verify(lifecycleService).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(stale));
+        verify(lifecycleService).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(stale), any(Instant.class));
     }
 
     @Test
@@ -454,7 +471,7 @@ class BusAlarmMonitoringSchedulerTest {
                         new SeoulBusVehicleDetailResponse.Header("4", "empty"), null));
         BusAlarmEvaluationResult result = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
         when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
-        when(lifecycleService.applyIfCurrent(any(), any(), any())).thenReturn(true);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any(Instant.class))).thenAnswer(applied());
 
         monitored.pollMonitoringAlarms();
 
@@ -481,6 +498,88 @@ class BusAlarmMonitoringSchedulerTest {
 
         verify(detailClient).fetchVehicleDetail("B");
         verify(monitored, never()).waitBeforeRetry();
+    }
+
+    @Test
+    @DisplayName("DB 재시도와 commit 응답 유실은 원래 candidate·UUID·detectedAt을 유지하고 안전한 duplicate 뒤에만 memory를 반영한다")
+    void replays_original_decision_until_commit_is_confirmed() {
+        Alarm alarm = tagoActiveAlarm(true);
+        BusAlarmPollingGroup group = new BusAlarmPollingGroup(new BusPollingKey(TransitProvider.TAGO, "route-1", "31010"), List.of(alarm));
+        VehicleTrackingState tracking = VehicleTrackingState.begin(observation("vehicle-a"), clock.instant());
+        TransitEvent event = new TransitEvent(TransitEventType.ARRIVED, "vehicle-a", tracking.trackingCycleId(),
+                clock.instant(), "target", null, 20, null, null, null, null);
+        BusAlarmEvaluationResult arrival = new BusAlarmEvaluationResult(List.of(event), new BusAlarmEvaluationState(
+                true, Map.of("vehicle-a", tracking), Map.of(), Map.of()), false);
+        BusAlarmEvaluationResult empty = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(group));
+        when(tagoClient.fetchVehicleLocations(any())).thenReturn(emptyTagoResponse());
+        when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(arrival, empty);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any()))
+                .thenReturn(new BusAlarmDecisionResult(BusAlarmDecisionResult.Outcome.RETRY_REQUIRED, -1, null, null, null))
+                .thenThrow(new org.springframework.transaction.TransactionSystemException("commit acknowledgement lost"))
+                .thenReturn(new BusAlarmDecisionResult(BusAlarmDecisionResult.Outcome.DUPLICATE, 3, AlarmStatus.FOLLOW_UP,
+                        "vehicle-a", tracking.trackingCycleId()))
+                .thenAnswer(applied());
+        scheduler.pollMonitoringAlarms();
+        when(alarm.getStatus()).thenReturn(AlarmStatus.FOLLOW_UP);
+        scheduler.pollMonitoringAlarms();
+        verify(evaluator, times(1)).evaluate(any(), any(), anySet(), anyList(), any());
+        scheduler.pollMonitoringAlarms();
+        ArgumentCaptor<BusAlarmEvaluationState> states = ArgumentCaptor.forClass(BusAlarmEvaluationState.class);
+        verify(evaluator, times(2)).evaluate(any(), states.capture(), anySet(), anyList(), any());
+        assertThat(states.getAllValues().get(1).followUpVehicles().get("vehicle-a").trackingCycleId())
+                .isEqualTo(tracking.trackingCycleId());
+        ArgumentCaptor<BusAlarmEvaluationResult> results = ArgumentCaptor.forClass(BusAlarmEvaluationResult.class);
+        verify(lifecycleService, times(3)).applyIfCurrent(eq(new AlarmEvaluationKey(1L, 3)), eq(AlarmStatus.ACTIVE),
+                results.capture(), eq(clock.instant()));
+        assertThat(results.getAllValues().get(0)).isSameAs(results.getAllValues().get(1)).isSameAs(results.getAllValues().get(2));
+        assertThat(results.getValue().eventCandidates()).containsExactly(event);
+    }
+
+    @Test
+    @DisplayName("commit 응답 유실 뒤 Alarm이 monitoring에서 사라져도 원래 ARRIVED를 duplicate로 확인한다")
+    void reconciles_pending_decision_before_loading_monitoring_groups() {
+        Alarm alarm = tagoActiveAlarm(false);
+        BusAlarmPollingGroup group = new BusAlarmPollingGroup(new BusPollingKey(TransitProvider.TAGO, "route-1", "31010"), List.of(alarm));
+        TransitEvent event = new TransitEvent(TransitEventType.ARRIVED, "vehicle-a", java.util.UUID.randomUUID(),
+                clock.instant(), "target", null, 20, null, null, null, null);
+        BusAlarmEvaluationResult result = new BusAlarmEvaluationResult(List.of(event), BusAlarmEvaluationState.initial(), false);
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(group), List.of());
+        when(tagoClient.fetchVehicleLocations(any())).thenReturn(emptyTagoResponse());
+        when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any()))
+                .thenThrow(new org.springframework.transaction.TransactionSystemException("commit acknowledgement lost"))
+                .thenReturn(new BusAlarmDecisionResult(BusAlarmDecisionResult.Outcome.DUPLICATE, 3, AlarmStatus.INACTIVE, null, null));
+        scheduler.pollMonitoringAlarms();
+        scheduler.pollMonitoringAlarms();
+        scheduler.pollMonitoringAlarms();
+        verify(lifecycleService, times(2)).applyIfCurrent(eq(new AlarmEvaluationKey(1L, 3)), eq(AlarmStatus.ACTIVE), any(), eq(clock.instant()));
+        verify(evaluator, times(1)).evaluate(any(), any(), anySet(), anyList(), any());
+    }
+
+    @Test
+    @DisplayName("duplicate라도 current FOLLOW_UP cycle 또는 generation이 다르면 오래된 memory를 반영하지 않는다")
+    void refuses_memory_for_incompatible_duplicate() {
+        Alarm alarm = tagoActiveAlarm(true);
+        BusAlarmPollingGroup group = new BusAlarmPollingGroup(new BusPollingKey(TransitProvider.TAGO, "route-1", "31010"), List.of(alarm));
+        VehicleTrackingState tracking = VehicleTrackingState.begin(observation("vehicle-a"), clock.instant());
+        TransitEvent event = new TransitEvent(TransitEventType.ARRIVED, "vehicle-a", tracking.trackingCycleId(),
+                clock.instant(), "target", null, 20, null, null, null, null);
+        BusAlarmEvaluationResult result = new BusAlarmEvaluationResult(List.of(event), new BusAlarmEvaluationState(
+                true, Map.of("vehicle-a", tracking), Map.of(), Map.of()), false);
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(group));
+        when(tagoClient.fetchVehicleLocations(any())).thenReturn(emptyTagoResponse());
+        when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any()))
+                .thenReturn(new BusAlarmDecisionResult(BusAlarmDecisionResult.Outcome.DUPLICATE, 3, AlarmStatus.FOLLOW_UP,
+                        "vehicle-a", java.util.UUID.randomUUID()))
+                .thenReturn(new BusAlarmDecisionResult(BusAlarmDecisionResult.Outcome.DUPLICATE, 4, AlarmStatus.ACTIVE, null, null));
+        scheduler.pollMonitoringAlarms();
+        scheduler.pollMonitoringAlarms();
+        scheduler.pollMonitoringAlarms();
+        ArgumentCaptor<BusAlarmEvaluationState> states = ArgumentCaptor.forClass(BusAlarmEvaluationState.class);
+        verify(evaluator, times(3)).evaluate(any(), states.capture(), anySet(), anyList(), any());
+        assertThat(states.getAllValues()).containsOnly(BusAlarmEvaluationState.initial());
     }
 
     private BusAlarmMonitoringScheduler seoulScheduler(SeoulBusVehicleLocationClient rosterClient,

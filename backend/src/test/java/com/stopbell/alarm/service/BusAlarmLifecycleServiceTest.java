@@ -1,12 +1,18 @@
 package com.stopbell.alarm.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -16,16 +22,46 @@ import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.repository.AlarmRepository;
+import com.stopbell.notification.entity.Device;
+import com.stopbell.notification.repository.DeviceRepository;
+import com.stopbell.notification.repository.NotificationDeliveryRepository;
+import com.stopbell.notification.repository.NotificationEventRepository;
+import com.stopbell.notification.service.NotificationDecisionTtlPolicy;
 import com.stopbell.transit.domain.TransitEvent;
 import com.stopbell.transit.domain.TransitEventType;
 import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.user.entity.User;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 class BusAlarmLifecycleServiceTest {
 
     private final AlarmRepository alarmRepository = mock(AlarmRepository.class);
-    private final BusAlarmLifecycleService lifecycleService = new BusAlarmLifecycleService(alarmRepository);
+    private final NotificationEventRepository events =
+            mock(NotificationEventRepository.class);
+    private final NotificationDeliveryRepository deliveries =
+            mock(NotificationDeliveryRepository.class);
+    private final DeviceRepository devices =
+            mock(DeviceRepository.class);
+    private final PlatformTransactionManager transactions =
+            mock(PlatformTransactionManager.class);
+    private final BusAlarmLifecycleService lifecycleService = new BusAlarmLifecycleService(alarmRepository,
+            events, deliveries, devices, new NotificationDecisionTtlPolicy(Duration.ofSeconds(60),
+            Duration.ofSeconds(60), Duration.ofSeconds(60), Duration.ofSeconds(60)),
+            transactions, Clock.fixed(Instant.parse("2026-09-23T00:00:00Z"), ZoneOffset.UTC));
+
+    @BeforeEach
+    void configure_transaction_and_recipient() {
+        when(transactions.getTransaction(any())).thenReturn(
+                new SimpleTransactionStatus());
+        when(events.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(devices.findEligibleByUserIdForUpdate(1L)).thenReturn(
+                List.of(mock(Device.class)));
+    }
 
     @Test
     @DisplayName("현재 activation cycle의 ARRIVED는 after option에 따라 FOLLOW_UP을 시작한다")
@@ -35,9 +71,10 @@ class BusAlarmLifecycleServiceTest {
         when(alarmRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(alarm));
 
         BusAlarmEvaluationResult evaluationResult = result(TransitEventType.ARRIVED);
-        boolean applied = lifecycleService.applyIfCurrent(key, AlarmStatus.ACTIVE, evaluationResult);
+        BusAlarmDecisionResult applied = lifecycleService.applyIfCurrent(
+                key, AlarmStatus.ACTIVE, evaluationResult, evaluationResult.eventCandidates().getFirst().observedAt());
 
-        assertThat(applied).isTrue();
+        assertThat(applied.outcome()).isEqualTo(BusAlarmDecisionResult.Outcome.COMMITTED);
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.FOLLOW_UP);
         assertThat(alarm.getFollowUpVehicleTrackingId()).isEqualTo("vehicle-1");
         assertThat(alarm.getFollowUpTrackingCycleId())
@@ -51,13 +88,13 @@ class BusAlarmLifecycleServiceTest {
         Alarm alarm = activeAlarm();
         when(alarmRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(alarm));
 
-        boolean applied = lifecycleService.applyIfCurrent(
+        BusAlarmDecisionResult applied = lifecycleService.applyIfCurrent(
                 new AlarmEvaluationKey(1L, alarm.getActivationGeneration() - 1),
                 AlarmStatus.ACTIVE,
-                result(TransitEventType.ARRIVED)
+                result(TransitEventType.ARRIVED), Instant.parse("2026-09-23T00:00:00Z")
         );
 
-        assertThat(applied).isFalse();
+        assertThat(applied.outcome()).isEqualTo(BusAlarmDecisionResult.Outcome.STALE);
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
         verify(alarmRepository).findByIdForUpdate(1L);
     }
@@ -70,7 +107,7 @@ class BusAlarmLifecycleServiceTest {
         Instant observedAt = Instant.parse("2026-09-23T00:00:00Z");
         when(alarmRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(alarm));
 
-        lifecycleService.applyIfCurrent(key, AlarmStatus.ACTIVE, result(TransitEventType.ARRIVED, observedAt));
+        lifecycleService.applyIfCurrent(key, AlarmStatus.ACTIVE, result(TransitEventType.ARRIVED, observedAt), observedAt);
 
         assertThat(alarm.getFollowUpStartedAt()).isEqualTo(java.time.LocalDateTime.of(2026, 9, 23, 0, 0));
         assertThat(alarm.getFollowUpExpiresAt()).isEqualTo(java.time.LocalDateTime.of(2026, 9, 23, 0, 5));
@@ -95,13 +132,43 @@ class BusAlarmLifecycleServiceTest {
         assertThat(selectedFromReversed).isEqualTo(selected);
     }
 
+    @Test
+    @DisplayName("일시적 DB 실패는 한 호출에서 두 번만 재시도하고 원래 candidate를 다음 Scheduler cycle에 남긴다")
+    void bounds_transient_database_retries() {
+        when(alarmRepository.findByIdForUpdate(1L)).thenThrow(new CannotAcquireLockException("deadlock"));
+        BusAlarmEvaluationResult result = result(TransitEventType.ARRIVED);
+        BusAlarmDecisionResult decision = lifecycleService.applyIfCurrent(new AlarmEvaluationKey(1L, 1),
+                AlarmStatus.ACTIVE, result, result.eventCandidates().getFirst().observedAt());
+        assertThat(decision.outcome()).isEqualTo(BusAlarmDecisionResult.Outcome.RETRY_REQUIRED);
+        verify(alarmRepository, times(2)).findByIdForUpdate(1L);
+        verify(transactions, times(2)).rollback(any());
+    }
+
+    @Test
+    @DisplayName("Type별 TTL은 독립 설정을 사용하고 0·음수·microsecond 미만·overflow 값을 거부한다")
+    void validates_type_specific_ttl() {
+        NotificationDecisionTtlPolicy policy = new NotificationDecisionTtlPolicy(Duration.ofSeconds(1), Duration.ofSeconds(2),
+                Duration.ofSeconds(3), Duration.ofSeconds(4));
+        Instant observedAt = Instant.parse("2026-09-23T00:00:00Z");
+        assertThat(policy.expiresAt(TransitEventType.ONE_STOP_BEFORE, observedAt)).isEqualTo(observedAt.plusSeconds(1));
+        assertThat(policy.expiresAt(TransitEventType.ARRIVED, observedAt)).isEqualTo(observedAt.plusSeconds(2));
+        assertThat(policy.expiresAt(TransitEventType.PASSED, observedAt)).isEqualTo(observedAt.plusSeconds(3));
+        assertThat(policy.expiresAt(TransitEventType.ONE_STOP_AFTER, observedAt)).isEqualTo(observedAt.plusSeconds(4));
+        for (Duration invalid : List.of(Duration.ZERO, Duration.ofSeconds(-1), Duration.ofNanos(1), Duration.ofSeconds(Long.MAX_VALUE))) {
+            assertThatThrownBy(() -> new NotificationDecisionTtlPolicy(invalid,
+                    Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofSeconds(1))).isInstanceOf(RuntimeException.class);
+        }
+    }
+
     private static Alarm activeAlarm() {
         BusAlarmTarget target = new BusAlarmTarget(
                 TransitProvider.SEOUL_BUS, "route-1", "stop-1", 3, "143", "서울역",
                 new BigDecimal("37.5547000"), new BigDecimal("126.9707000"), null,
                 null, new AdjacentStopSnapshot("successor-stop", 4)
         );
-        Alarm alarm = new Alarm(null, target);
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(1L);
+        Alarm alarm = new Alarm(user, target);
         alarm.activate();
         return alarm;
     }

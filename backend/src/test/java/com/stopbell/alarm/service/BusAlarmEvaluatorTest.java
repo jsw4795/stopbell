@@ -371,6 +371,9 @@ class BusAlarmEvaluatorTest {
                         ArrivalEvidence.MOVING, NOW.plusSeconds(1)));
 
         assertThat(ignored.eventCandidates()).isEmpty();
+        assertThat(arrivedAfter.eventCandidates().getFirst().trackingCycleId()).isEqualTo(TRACKING_CYCLE_ID);
+        assertThat(arrivedAfter.nextState().followUpVehicles().get("follow-up-vehicle").trackingCycleId())
+                .isEqualTo(TRACKING_CYCLE_ID);
         assertThat(arrivedAfter.eventCandidates()).extracting(event -> event.type())
                 .containsExactly(TransitEventType.ONE_STOP_AFTER);
     }
@@ -385,6 +388,17 @@ class BusAlarmEvaluatorTest {
                         ArrivalEvidence.MOVING, NOW));
 
         assertThat(result.eventCandidates()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("FOLLOW_UP memory UUID가 persisted cycle과 다르면 새 UUID로 보정하지 않고 거부한다")
+    void rejects_follow_up_memory_uuid_mismatch() {
+        Alarm alarm = followUpAlarm();
+        TransitObservation observation = observation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "successor", 35,
+                ArrivalEvidence.MOVING, NOW);
+        BusAlarmEvaluationState wrong = new BusAlarmEvaluationState(true, java.util.Map.of(), java.util.Map.of(),
+                java.util.Map.of("follow-up-vehicle", VehicleTrackingState.begin(observation, NOW)));
+        assertThatThrownBy(() -> evaluate(alarm, wrong, observation)).isInstanceOf(IllegalStateException.class);
     }
 
     @Test

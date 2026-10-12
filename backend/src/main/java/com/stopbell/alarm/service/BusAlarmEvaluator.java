@@ -243,8 +243,14 @@ public class BusAlarmEvaluator {
     ) {
         if (!target.isNotifyOneStopAfter() || target.getSuccessorExternalStopId() == null
                 || target.getSuccessorStopOrder() == null || alarm.getFollowUpVehicleTrackingId() == null
-                || alarm.getFollowUpExpiresAt() == null) {
+                || alarm.getFollowUpExpiresAt() == null || alarm.getFollowUpTrackingCycleId() == null) {
             throw new IllegalStateException("Follow-up alarm requires complete successor and runtime state");
+        }
+        VehicleTrackingState persistedTracking = state.followUpVehicles().get(alarm.getFollowUpVehicleTrackingId());
+        if ((!state.followUpVehicles().isEmpty() && persistedTracking == null)
+                || (persistedTracking != null
+                && !persistedTracking.trackingCycleId().equals(alarm.getFollowUpTrackingCycleId()))) {
+            throw new IllegalStateException("Follow-up memory must match the persisted vehicle and cycle UUID");
         }
         if (!now.isBefore(alarm.getFollowUpExpiresAt().toInstant(ZoneOffset.UTC))) {
             return new BusAlarmEvaluationResult(List.of(), state, true);
@@ -265,6 +271,10 @@ public class BusAlarmEvaluator {
             next.followUpVehicles().put(followUpVehicleId, tracking.observe(tracking.lastObservation(), now));
             return new BusAlarmEvaluationResult(List.of(), next.freeze(), false);
         }
+        if (tracking == null && !hasKnownStopConflict(target, observation)) {
+            tracking = VehicleTrackingState.restoreFollowUp(alarm.getFollowUpTrackingCycleId(), observation, now);
+            next.followUpVehicles().put(followUpVehicleId, tracking);
+        }
         if (hasKnownStopConflict(target, observation) || !reachedSuccessor(target, observation)) {
             if (tracking != null) {
                 next.followUpVehicles().put(followUpVehicleId, tracking.observe(observation, now));
@@ -272,9 +282,6 @@ public class BusAlarmEvaluator {
             return new BusAlarmEvaluationResult(List.of(), next.freeze(), false);
         }
 
-        if (tracking == null) {
-            tracking = VehicleTrackingState.begin(observation, now);
-        }
         if (tracking.hasEmitted(TransitEventType.ONE_STOP_AFTER)) {
             next.followUpVehicles().put(followUpVehicleId, tracking.observe(observation, now));
             return new BusAlarmEvaluationResult(List.of(), next.freeze(), false);

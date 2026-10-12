@@ -153,7 +153,7 @@ Transit API 조회 실패, Notification 발송 결과, ARRIVED/PASSED Event는 A
 
 `activation_generation`은 서로 다른 activation cycle을 구분하는 persisted semantic generation이다. 새 Alarm은 0에서 시작하고 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하며 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset 없이 idempotent하다. Deactivate 뒤 reactivate, FOLLOW_UP 중 reactivate와 stale scheduler 결과를 구분한다. V11 Migration은 0 이상 CHECK를 함께 추가한다. lifecycle mutation과 Scheduler 결과 반영은 결과 적용 직전의 짧은 Alarm row `PESSIMISTIC_WRITE` transaction으로 보호하며 Provider I/O 중에는 lock을 잡지 않는다.
 
-TASK-708 설계에 따라 V14에서 적용한 runtime 확장은 `follow_up_tracking_cycle_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL` 하나다. Alarm은 UUID를 명시적으로 받아 저장하며 종료 시 함께 제거한다. 평가기의 재시작 복원은 TASK-708 implementation에 남는다. ARRIVED candidate의 UUID를 소문자 canonical hyphenated 형식으로 저장하며 ACTIVE history나 Observation을 저장하지 않는다. V14는 기존 `ck_alarms_lifecycle`을 FOLLOW_UP에서 기존 세 runtime 값과 cycle ID가 모두 non-null이고 expiry > start, INACTIVE/ACTIVE에서 네 값이 모두 NULL인 조건으로 교체했다. UUID 형식은 `ck_alarms_follow_up_tracking_cycle_id`에서 NULL 또는 아래 Event UUID와 같은 canonical 형식만 허용한다. `CHECK`의 UNKNOWN 통과를 막도록 status별 `IS NOT NULL`/`IS NULL` 조건을 명시한다. 복구는 기존 status index로 Alarm을 읽으므로 cycle ID index/FK는 추가하지 않는다.
+TASK-708 설계에 따라 V14에서 적용한 runtime 확장은 `follow_up_tracking_cycle_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL` 하나다. Alarm은 UUID를 명시적으로 받아 저장하며 종료 시 함께 제거한다. TASK-708 평가기는 persisted 원래 UUID를 사용해 FOLLOW_UP memory를 복원한다. ARRIVED candidate의 UUID를 소문자 canonical hyphenated 형식으로 저장하며 ACTIVE history나 Observation을 저장하지 않는다. V14는 기존 `ck_alarms_lifecycle`을 FOLLOW_UP에서 기존 세 runtime 값과 cycle ID가 모두 non-null이고 expiry > start, INACTIVE/ACTIVE에서 네 값이 모두 NULL인 조건으로 교체했다. UUID 형식은 `ck_alarms_follow_up_tracking_cycle_id`에서 NULL 또는 아래 Event UUID와 같은 canonical 형식만 허용한다. `CHECK`의 UNKNOWN 통과를 막도록 status별 `IS NOT NULL`/`IS NULL` 조건을 명시한다. 복구는 기존 status index로 Alarm을 읽으므로 cycle ID index/FK는 추가하지 않는다.
 
 기존 FOLLOW_UP row의 원래 UUID는 차량 ID/시간이나 초기 NotificationHistory로 복원할 수 없다. TASK-707 migration 적용 전 기존 follow-up이 정상 완료/기존 5분 정책으로 만료되어 FOLLOW_UP row가 없음을 확인하고 monitoring을 멈춘 상태에서 적용한다. 남은 row가 있으면 migration 적용을 진행하지 않으며 임의 UUID backfill은 금지한다. V6/V11 등 기존 Migration은 수정하지 않고 적용 순번에 맞는 새 Migration을 작성한다. Domain과 ARRIVED producer 연결도 같은 TASK-707에서 수행해 새 CHECK를 만족하지 못하는 중간 구현을 남기지 않는다.
 
@@ -196,7 +196,7 @@ Migration 전에 monitoring과 구형 History writer를 중단하고 FOLLOW_UP/H
 
 ### Phase 7 Notification persistence contract
 
-TASK-708 설계는 `notification_events`와 `notification_deliveries`의 identity column/UNIQUE를 다음과 같이 확정한다. TASK-707의 V14와 JPA Entity/Repository에 적용됐다. delivery operational field/query도 아래 TASK-709 설계에 따라 적용했으며 orchestration/Worker는 미구현이다.
+TASK-708 설계는 `notification_events`와 `notification_deliveries`의 identity column/UNIQUE를 다음과 같이 확정한다. TASK-707의 V14와 JPA Entity/Repository에 적용됐다. delivery operational field/query도 아래 TASK-709 설계에 따라 적용했으며 atomic decision/dedup/fan-out은 TASK-708에서 구현했고 Worker는 미구현이다.
 
 ```text
 NotificationEvent

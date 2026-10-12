@@ -79,9 +79,17 @@ class TransitMonitoringIntegrationTest {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private com.stopbell.notification.repository.NotificationEventRepository events;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoBean(name = "transitMetadataClock")
+    private Clock decisionClock;
+
     @BeforeEach
     @AfterEach
     void clearTestData() {
+        org.mockito.Mockito.when(decisionClock.instant()).thenReturn(NOW);
+        events.deleteAll();
         alarmRepository.deleteAll();
         userRepository.deleteAll();
     }

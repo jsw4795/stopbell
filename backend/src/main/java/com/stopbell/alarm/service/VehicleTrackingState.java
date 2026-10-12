@@ -34,6 +34,10 @@ public record VehicleTrackingState(
         return new VehicleTrackingState(UUID.randomUUID(), observation, seenAt, true, Set.of());
     }
 
+    public static VehicleTrackingState restoreFollowUp(UUID trackingCycleId, TransitObservation observation, Instant seenAt) {
+        return new VehicleTrackingState(trackingCycleId, observation, seenAt, false, Set.of(TransitEventType.ARRIVED));
+    }
+
     public VehicleTrackingState observe(TransitObservation observation, Instant seenAt) {
         return new VehicleTrackingState(trackingCycleId, observation, seenAt, hasObservedBeforeTarget, emittedEventTypes);
     }

@@ -54,6 +54,7 @@ public class BusAlarmMonitoringScheduler {
     private final Clock clock;
     private final Duration failureRetryDelay;
     private final Map<AlarmEvaluationKey, BusAlarmEvaluationState> evaluationStates = new HashMap<>();
+    private final Map<AlarmEvaluationKey, PendingDecision> pendingDecisions = new HashMap<>();
 
     public BusAlarmMonitoringScheduler(
             BusAlarmPollingService pollingService,
@@ -84,6 +85,11 @@ public class BusAlarmMonitoringScheduler {
 
     @Scheduled(fixedDelayString = "${transit.monitoring.fixed-delay:PT20S}")
     public void pollMonitoringAlarms() {
+        // Reconcile before loading monitoring groups: an ambiguous ARRIVED/after commit may already be INACTIVE.
+        Set<AlarmEvaluationKey> replayed = new LinkedHashSet<>(pendingDecisions.keySet());
+        for (AlarmEvaluationKey key : replayed) {
+            applyDecision(key, pendingDecisions.get(key));
+        }
         List<BusAlarmPollingGroup> groups = pollingService.findMonitoringGroups();
         retainCurrentEvaluationStates(groups);
         List<RetryTarget> retryTargets = new ArrayList<>();
@@ -232,6 +238,9 @@ public class BusAlarmMonitoringScheduler {
 
     private void evaluateAndApply(Alarm alarm, PollSnapshot snapshot, Instant now, boolean partialPresence) {
         AlarmEvaluationKey key = evaluationKey(alarm);
+        if (pendingDecisions.containsKey(key)) {
+            return;
+        }
         BusAlarmEvaluationState currentState = evaluationStates.getOrDefault(key, BusAlarmEvaluationState.initial());
         BusAlarmEvaluationResult result = partialPresence
                 ? evaluator.evaluatePartial(alarm, currentState, snapshot.presentVehicleIds(), snapshot.observations(), now)
@@ -242,13 +251,41 @@ public class BusAlarmMonitoringScheduler {
         BusAlarmEvaluationResult selectedResult = new BusAlarmEvaluationResult(
                 selectedEvent.map(List::of).orElseGet(List::of), result.nextState(), result.followUpExpired()
         );
-        if (lifecycleService.applyIfCurrent(key, alarm.getStatus(), selectedResult)) {
-            BusAlarmEvaluationState nextState = selectedResult.nextState();
-            if (isFollowUpTransition(alarm, selectedEvent)) {
-                nextState = nextState.forFollowUp(selectedEvent.orElseThrow().vehicleTrackingId());
-            }
-            evaluationStates.put(key, nextState);
+        PendingDecision decision = new PendingDecision(alarm.getStatus(), selectedResult, now);
+        pendingDecisions.put(key, decision);
+        applyDecision(key, decision);
+    }
+
+    private void applyDecision(AlarmEvaluationKey key, PendingDecision decision) {
+        BusAlarmDecisionResult applied;
+        try {
+            applied = lifecycleService.applyIfCurrent(key, decision.expectedStatus(), decision.result(), decision.detectedAt());
+        } catch (RuntimeException exception) {
+            // Preserve the original immutable candidate even when commit acknowledgement was lost.
+            log.warn("Notification decision failed: failureType={}", exception.getClass().getSimpleName());
+            return;
         }
+        if (applied.outcome() == BusAlarmDecisionResult.Outcome.RETRY_REQUIRED) {
+            return;
+        }
+        pendingDecisions.remove(key);
+        TransitEvent event = decision.result().eventCandidates().stream().findFirst().orElse(null);
+        if (!applied.permitsMemory(key, decision.expectedStatus(), event)) {
+            return;
+        }
+        if (applied.status() == AlarmStatus.INACTIVE) {
+            evaluationStates.remove(key);
+            return;
+        }
+        BusAlarmEvaluationState nextState = decision.result().nextState();
+        if (applied.status() == AlarmStatus.FOLLOW_UP && event != null && event.type() == TransitEventType.ARRIVED) {
+            VehicleTrackingState tracking = nextState.trackedVehicles().get(applied.followUpVehicleId());
+            if (tracking == null || !tracking.trackingCycleId().equals(applied.followUpTrackingCycleId())) {
+                return; // Next poll can restore from persisted runtime; never publish a different cycle.
+            }
+            nextState = nextState.forFollowUp(applied.followUpVehicleId());
+        }
+        evaluationStates.put(key, nextState);
     }
 
     private void retainCurrentEvaluationStates(List<BusAlarmPollingGroup> groups) {
@@ -288,11 +325,7 @@ public class BusAlarmMonitoringScheduler {
         return vehicleIds;
     }
 
-    private static boolean isFollowUpTransition(Alarm alarm, Optional<TransitEvent> selectedEvent) {
-        return alarm.getStatus() == AlarmStatus.ACTIVE
-                && alarm.getBusAlarmTarget().isNotifyOneStopAfter()
-                && selectedEvent.isPresent()
-                && selectedEvent.get().type() == TransitEventType.ARRIVED;
+    private record PendingDecision(AlarmStatus expectedStatus, BusAlarmEvaluationResult result, Instant detectedAt) {
     }
 
     private record PollSnapshot(List<TransitObservation> observations, Set<String> presentVehicleIds) {
