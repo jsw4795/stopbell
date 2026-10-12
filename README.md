@@ -16,7 +16,23 @@ V1의 첫 성공 기준은 사용자가 알림을 설정하고, 조건이 충족
 
 ## 현재 개발 상태
 
-Phase 0 환경 구성, Phase 1 도메인·Repository, Phase 2 인증, Phase 3 Transit Foundation, Phase 4 Alarm API의 주요 항목을 완료했습니다. Phase 5에서는 Transit provider HTTP client, 응답 DTO, 버스 메타데이터 영속화까지 구현했으며, provider 응답의 이벤트 변환·알림 평가·스케줄러·푸시 전송은 남아 있습니다. 자세한 진행 상태는 [Task List](docs/task-list.md)에서 관리합니다.
+**구현 완료**
+
+- Google 로그인과 서비스 자체 Access/Refresh Token 인증, 사용자별 Alarm 생성·조회·활성화·비활성화·삭제 API
+- 서울·경기 버스 노선·정류장 메타데이터 수집·저장 및 검색 API, 외부 교통 API HTTP 연동과 내부 관측 모델 변환
+- 도착·통과 및 전후 정류장 조건 판단, 노선별 요청을 공유하는 Scheduler 기반 관측과 Alarm 상태 반영. 외부 API 실패는 판단 불가로 처리해 도착·통과 이벤트를 만들지 않습니다.
+- Flutter의 Google 로그인, 토큰 보안 저장·자동 갱신, 노선·정류장 검색과 Alarm 생성·관리 화면. 주요 인증·검색·Alarm 흐름은 실제 iPhone에서 검증했습니다.
+- FCM iOS 기본 연동·실제 기기 수신 가능성 검증, Device 등록·비활성화 API, NotificationEvent / NotificationDelivery 영속화와 Durable Outbox용 DB 기반. 저장 구조와 전달 흐름의 분리 근거는 [ADR-010](docs/adr/ADR-010-notification-device-and-durable-delivery.md)에 기록했습니다.
+
+**진행 중 / 남은 작업**
+
+- Flutter 앱의 Push 권한·기기 등록·로그아웃·알림 탭 처리 흐름과 Backend의 실제 FCM 전송 Client·Notification Dispatch Worker 구현
+- Alarm 상태 변경과 Event·기기별 Delivery 생성을 하나의 트랜잭션으로 연결하고, 중복 알림 방지·전송 실패 재시도를 구현하는 작업. 설계와 DB 제약은 준비됐지만 실제 처리 흐름은 미완료입니다.
+- 실제 iPhone의 foreground/background/terminated 수신·탭 동작을 포함한 최종 알림 E2E 검증과 Production 배포 준비. FCM 전송 요청의 접수 성공만으로 기기 표시 성공을 판단하지 않습니다.
+
+**다음 목표**
+
+Alarm 조건 판단부터 실제 기기 알림 수신까지 V1 전달 흐름을 완성하고 검증합니다. 세부 진행 상태는 [Task List](docs/task-list.md)에서 관리합니다.
 
 ## 대표 의사결정
 
@@ -50,7 +66,8 @@ MyBatis는 현재 V1 production persistence에 사용하지 않으며, 도입 �
 ```text
 Flutter 앱
   └─ HTTPS / JSON ─> Spring Boot 백엔드 ─> MySQL
-                         └─ JPA: 현재 V1의 도메인 CRUD와 상태 관리
+                         ├─ JPA: 현재 V1의 도메인 CRUD와 상태 관리
+                         └─ 서울 버스 API / TAGO: 주기적 교통 상태 관측
 ```
 
 ```text
