@@ -11,6 +11,7 @@ import 'package:stopbell/features/auth/token_pair_storage.dart';
 const oldPair = TokenPair(
   accessToken: 'old-access',
   refreshToken: 'old-refresh',
+  sessionIdentity: 'fixture-restored-session',
 );
 const newPair = TokenPair(
   accessToken: 'new-access',
@@ -73,6 +74,33 @@ class FakeBackend extends BackendAuthClient {
 
 void main() {
   test(
+    '기존 저장 Token Pair는 durable login identity를 한 번 보강하고 재시작에 보존한다',
+    () async {
+      final storage = FakeStorage(
+        pair: const TokenPair(
+          accessToken: 'legacy-access',
+          refreshToken: 'legacy-refresh',
+        ),
+      );
+      final first = AuthSession(
+        authenticator: FakeAuthenticator(),
+        backend: FakeBackend(),
+        tokenStorage: storage,
+      );
+      await first.initialize();
+      expect(storage.saves, 1);
+      expect(storage.pair?.sessionIdentity, first.sessionIdentity);
+      final restored = AuthSession(
+        authenticator: FakeAuthenticator(),
+        backend: FakeBackend(),
+        tokenStorage: storage,
+      );
+      await restored.initialize();
+      expect(restored.sessionIdentity, first.sessionIdentity);
+      expect(storage.saves, 1);
+    },
+  );
+  test(
     'malformed Secure Storage entry는 self-heal 뒤 unauthenticated로 복구한다',
     () async {
       FlutterSecureStorage.setMockInitialValues({});
@@ -126,7 +154,9 @@ void main() {
     );
     await session.initialize();
     await session.login();
-    expect(storage.pair, same(newPair));
+    expect(storage.pair?.accessToken, newPair.accessToken);
+    expect(storage.pair?.refreshToken, newPair.refreshToken);
+    expect(storage.pair?.sessionIdentity, session.sessionIdentity);
     expect(session.currentPair, same(newPair));
     expect(session.state, AuthState.authenticated);
   });
@@ -158,7 +188,9 @@ void main() {
     );
     await session.initialize();
     expect(await session.refreshAfterUnauthorized('old-access'), same(newPair));
-    expect(storage.pair, same(newPair));
+    expect(storage.pair?.accessToken, newPair.accessToken);
+    expect(storage.pair?.refreshToken, newPair.refreshToken);
+    expect(storage.pair?.sessionIdentity, session.sessionIdentity);
     expect(session.currentPair, same(newPair));
     expect(session.state, AuthState.authenticated);
     expect(backend.refreshCalls, 1);

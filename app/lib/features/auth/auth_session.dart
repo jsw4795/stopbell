@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 
 import 'backend_auth_client.dart';
@@ -30,6 +33,29 @@ class AuthSession extends ChangeNotifier {
   String? _rotatedRefreshTokenForLogout;
   bool _refreshRejectedForLogout = false;
   int _generation = 0;
+  String? _sessionIdentity;
+
+  String? get sessionIdentity => _sessionIdentity;
+  String? get userIdentity {
+    try {
+      final payload = jsonDecode(
+        utf8.decode(
+          base64Url.decode(
+            base64Url.normalize(_pair!.accessToken.split('.')[1]),
+          ),
+        ),
+      );
+      final sub = payload['sub'];
+      return sub is String && sub.isNotEmpty ? sub : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _newSessionIdentity() {
+    final random = Random.secure();
+    return base64UrlEncode(List<int>.generate(32, (_) => random.nextInt(256)));
+  }
 
   AuthState get state => _state;
   TokenPair? get currentPair => _pair;
@@ -46,6 +72,10 @@ class AuthSession extends ChangeNotifier {
   Future<void> _restore() async {
     try {
       _pair = await _tokenStorage.read();
+      _sessionIdentity = _pair?.sessionIdentity ?? _newSessionIdentity();
+      if (_pair != null && _pair!.sessionIdentity == null) {
+        await _tokenStorage.save(_pair!.withSessionIdentity(_sessionIdentity!));
+      }
       _setState(
         _pair == null ? AuthState.unauthenticated : AuthState.authenticated,
       );
@@ -63,8 +93,10 @@ class AuthSession extends ChangeNotifier {
     final generation = _generation;
     final pair = await _authenticator.login();
     if (generation != _generation) throw const StaleSessionException();
-    await _tokenStorage.save(pair);
+    final identity = _newSessionIdentity();
+    await _tokenStorage.save(pair.withSessionIdentity(identity));
     if (generation != _generation) throw const StaleSessionException();
+    _sessionIdentity = identity;
     _pair = pair;
     _generation++;
     _setState(AuthState.authenticated);
@@ -193,7 +225,7 @@ class AuthSession extends ChangeNotifier {
     }
 
     try {
-      await _tokenStorage.save(rotated);
+      await _tokenStorage.save(rotated.withSessionIdentity(_sessionIdentity!));
     } catch (_) {
       if (!isCurrentGeneration(generation)) {
         if (_loggingOut) _rotatedRefreshTokenForLogout = rotated.refreshToken;

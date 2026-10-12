@@ -150,7 +150,7 @@ RefreshToken은 별도 Entity와 Repository로 관리한다. User Entity에 Refr
 | `lastRegisteredAt` | 마지막으로 적용한 등록의 서버 UTC 시각, disable/멱등 재요청에서 유지 |
 | `createdAt`, `updatedAt` | JPA callback의 UTC 생성·수정 시각 |
 
-Flutter는 설치 시 표준 hyphenated UUID v4를 생성하고 소문자로 정규화한다. Backend도 정확한 36자 UUID v4 형식과 variant를 검증한 뒤 `Locale.ROOT` 소문자로 저장한다. 공백 trim, 축약 UUID 또는 다른 UUID version은 허용하지 않는다. 재시작·업데이트·logout·계정 변경에는 유지하고 삭제 후 재설치에는 새로 생성한다. iOS Keychain/backup에 남은 값만으로 새 설치를 이전 설치로 복원하지 않도록 설치 범위 marker와 함께 관리한다. 실제 Flutter 저장 구현은 TASK-704 책임이다.
+Flutter는 설치 시 표준 hyphenated UUID v4를 생성하고 소문자로 정규화한다. Backend도 정확한 36자 UUID v4 형식과 variant를 검증한 뒤 `Locale.ROOT` 소문자로 저장한다. 공백 trim, 축약 UUID 또는 다른 UUID version은 허용하지 않는다. 재시작·업데이트·logout·계정 변경에는 유지하고 삭제 후 재설치에는 새로 생성한다. iOS Keychain/backup에 남은 값만으로 새 설치를 이전 설치로 복원하지 않도록 설치 범위 marker와 함께 관리한다. TASK-704의 저장·재설치 정책은 [ADR-010 Client 구현](adr/ADR-010-notification-device-and-durable-delivery.md#task-704-flutter-설치본등록-lifecycle-구현-2026-10-12)을 따른다.
 
 `installationId`는 공개 식별자이며 인증 수단이 아니다. 설치본 자격증명은 독립적인 CSPRNG 256-bit 비밀값으로 생성해 OS Secure Storage에 보관하고 logout에도 유지한다. Backend에는 hash만 보관하며 JWT와 함께 검증한다. UUID/FID/revision을 안다는 이유로 자격증명을 재발급·교체하거나 owner를 이전하지 않는다. 자격증명 유실은 fail closed이며 UUID만으로 복구하지 않는다. counter/generation metadata는 JWT와 해당 자격증명으로 보호하는 상태 조회로 복구할 수 있다.
 
@@ -166,7 +166,7 @@ FID는 대소문자를 구분하는 opaque delivery reference다. 22자 관측�
 
 등록은 enabled 상태로 생성/갱신/재활성화한다. disable은 row와 owner를 보존하고 enabled=false 및 FID=null로 해제한다. 다른 Device와 Alarm은 바꾸지 않는다. Provider invalid/unregistered cleanup은 실패 attempt의 owner/generation/target/revision이 current registration과 일치할 때만 조건부 disable하며 Client revision을 임의 증가시키지 않는다. 실제 cleanup은 TASK-709 책임이다.
 
-TASK-702의 `notification.entity.Device`, `DevicePlatform`과 V13 매핑을 유지한다. TASK-703은 `register`, `transferOwnership`, `disable` 상태 변경 method와 Repository/Service/Controller/DTO를 구현하고 권한·동시성·멱등 처리를 실제 MySQL에서 검증했다. Provider cleanup과 Flutter lifecycle은 각각 TASK-709와 TASK-704에 남는다.
+TASK-702의 `notification.entity.Device`, `DevicePlatform`과 V13 매핑을 유지한다. TASK-703은 `register`, `transferOwnership`, `disable` 상태 변경 method와 Repository/Service/Controller/DTO를 구현하고 권한·동시성·멱등 처리를 실제 MySQL에서 검증했다. Flutter 등록·ownership 이전·logout lifecycle은 TASK-704에서 구현했으며 Provider cleanup은 TASK-709에 남는다.
 
 ------------------------------------------------------------------------
 

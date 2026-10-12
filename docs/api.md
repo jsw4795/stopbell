@@ -280,7 +280,7 @@ X-Installation-Credential: <installation credential>
 
 UUID/header validation은 등록과 같다. JWT와 **해당 설치본 자격증명**을 모두 검증한다. 현재 owner가 다른 User여도 설치본 보유자는 계정 이전에 필요한 서버 상태를 조회할 수 있다. `200 OK`로 등록 응답의 id/정규화 installationId/enabled/revision/generation과 `ownedByCurrentUser` boolean을 반환한다. owner ID/FID/credential은 반환하지 않는다. row가 없으면 `404 DEVICE_NOT_FOUND`, 자격증명 불일치는 `403 DEVICE_CREDENTIAL_INVALID`다. 상태나 시각을 변경하지 않는다.
 
-이 조회는 응답 유실 후 계정 변경, 앱 재시작의 pending 요청 결과 불명확, counter/generation metadata 복구에 필요한 최소 동기화다. 현재 Auth Session의 **새 사용자 의도**에 대해서만 조회 상태를 반영해 local revision을 max(local, server)로 맞춘 뒤 증가시키고, current generation과 필요한 이전 intent를 새 요청에 snapshot한다. 조회와 mutation 사이 경쟁은 mutation transaction의 재검증으로 거부한다. 과거 pending 요청의 JWT/generation/revision을 교체하거나 자동 takeover하기 위한 조회로 사용하지 않는다. credential을 잃은 경우 조회·복구를 허용하지 않는다. Backend 조회는 TASK-703에서 구현했으며 Flutter 동기화는 TASK-704 책임이다.
+이 조회는 응답 유실 후 계정 변경, 앱 재시작의 pending 요청 결과 불명확, counter/generation metadata 복구에 필요한 최소 동기화다. 현재 Auth Session의 **새 사용자 의도**에 대해서만 조회 상태를 반영해 local revision을 max(local, server)로 맞춘 뒤 증가시키고, current generation과 필요한 이전 intent를 새 요청에 snapshot한다. 조회와 mutation 사이 경쟁은 mutation transaction의 재검증으로 거부한다. 과거 pending 요청의 JWT/generation/revision을 교체하거나 자동 takeover하기 위한 조회로 사용하지 않는다. credential을 잃은 경우 조회·복구를 허용하지 않는다. Backend 조회는 TASK-703에서 구현했으며 Flutter는 TASK-704에서 이 상태 조회와 local 마지막 등록 결과를 사용한 동기화를 구현했다.
 
 #### 비활성화
 
@@ -322,7 +322,7 @@ Flutter는 설치본 전체 revision을 logout/계정 변경에도 유지한다.
 
 앱 재시작은 저장한 counter/generation/pending 요청을 복원하며 counter는 응답 revision보다 낮아지지 않는다. 정상 응답 유실은 동일 요청 재전송으로 복구한다. counter/generation metadata가 유실되거나 backup과 불일치하면 위 인증된 상태 조회로 동기화한 후 새 의도를 처리한다. credential 자체의 유실에는 등록을 중단하며 UUID만으로 reset/복구하지 않는다. 재설치 때는 새로운 설치본 identity/credential/counter를 생성한다. 범용 동시성 framework를 선행 추가하지 않는다.
 
-| 검토 상황 | 계약 결과 (Backend correctness는 TASK-703 검증 완료, Flutter 실행은 TASK-704) |
+| 검토 상황 | 계약 결과 (Backend correctness는 TASK-703, Flutter correctness는 TASK-704 검증) |
 | --- | --- |
 | AAA r1 → BBB r2 | 동일 owner/generation에서 BBB 적용 |
 | BBB r2 뒤 AAA r1 지연 | stale 거부, BBB 유지 |
@@ -336,6 +336,8 @@ Flutter는 설치본 전체 revision을 logout/계정 변경에도 유지한다.
 | 이전 성공 응답 유실 후 동일 B 요청 | 같은 owner/r/FID/enabled와 이전 g의 재전송은 mutation 없이 성공 |
 | 앱 재시작 | durable counter/generation 복원, 필요 시 credential로 상태 조회, reset 금지 |
 | 신규 설치 UUID 충돌 | 다른 credential이면 403, 기존 row 유지 |
+
+TASK-704의 실제 Secure Storage 레코드, 재설치 marker와 Auth session snapshot, production FID bridge 및 rejected/pending 복구 정책은 [ADR-010 Client 구현](adr/ADR-010-notification-device-and-durable-delivery.md#task-704-flutter-설치본등록-lifecycle-구현-2026-10-12)을 따른다. API/보안 계약은 변경하지 않는다.
 
 #### Logout과 offline 한계
 
@@ -356,7 +358,7 @@ Push payload는 navigation hint 수준의 최소 정보만 포함한다.
 }
 ```
 
-`userId`, Auth Token, push registration identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체는 포함하지 않는다. Payload는 권한 근거가 아니며 Flutter는 Auth Session initialization 뒤 `alarmId` navigation entry를 사용해 Backend Alarm detail API에서 ownership과 current state를 다시 확인한다. 삭제되었거나 접근할 수 없는 Alarm은 stale notification으로 정상 처리한다. 최종 payload field/type 이름은 TASK-704/706에서 확정한다.
+`userId`, Auth Token, push registration identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체는 포함하지 않는다. Payload는 권한 근거가 아니며 Flutter는 Auth Session initialization 뒤 `alarmId` navigation entry를 사용해 Backend Alarm detail API에서 ownership과 current state를 다시 확인한다. 삭제되었거나 접근할 수 없는 Alarm은 stale notification으로 정상 처리한다. TASK-704 Client는 위 string field와 `ONE_STOP_BEFORE` / `ARRIVED` / `PASSED` / `ONE_STOP_AFTER` eventType을 검증한다. Provider payload 생성은 TASK-705/706의 후속 구현이다. initial/opened tap은 중복을 제거하고 로그인 전 대기하며, foreground 안내의 상세 action도 현재 Auth Session에 묶는다.
 
 ## 5. 오류 형식
 
@@ -470,6 +472,6 @@ Access Token blacklist는 사용하지 않으므로 Logout 뒤에도 이미 발�
 
 Flutter logout은 같은 Auth Session 안에서 refresh와 직렬화하며 local 인증 상태가 late refresh/API response로 되살아나지 않게 보호한다. 이는 서버에 이미 도착한 요청을 취소하거나 기존 Access Token을 즉시 무효화한다는 계약이 아니다. `/auth/google`과 `/auth/logout`도 refresh interceptor나 자동 재시도 대상이 아니다.
 
-Phase 7 Flutter logout은 이 기존 lifecycle/hook을 사용해 현재 Device unsubscribe/disable을 시도한 뒤 Auth logout과 local session 종료를 수행한다. Device 처리는 별도 authenticated API를 사용하며 이 request body에 Device field를 추가하지 않는다. Offline logout에서는 Backend Device disable을 즉시 보장할 수 없으므로 local session 종료를 영구 차단하지 않는다. Device 순서와 offline 한계는 [TASK-702 계약](#기기-등록해제-계약-task-702)을 따른다. Flutter 실행은 TASK-704에서 구현·검증한다.
+Phase 7 Flutter logout은 이 기존 lifecycle/hook을 사용해 현재 Device unsubscribe/disable을 시도한 뒤 Auth logout과 local session 종료를 수행한다. Device 처리는 별도 authenticated API를 사용하며 이 request body에 Device field를 추가하지 않는다. Offline logout에서는 Backend Device disable을 즉시 보장할 수 없으므로 local session 종료를 영구 차단하지 않는다. Device 순서와 offline 한계는 [TASK-702 계약](#기기-등록해제-계약-task-702)을 따른다. Flutter는 TASK-704에서 기존 `beforeLogout` hook으로 bounded disable을 연결했다.
 
 Alarm을 포함한 사용자 소유 Application API는 Client Request Body 또는 Query Parameter의 `userId`를 받지 않는다. Spring Security가 검증한 Access Token의 Principal에서 StopBell User를 식별한다.

@@ -12,12 +12,14 @@ class AlarmDetailScreen extends StatefulWidget {
     required this.client,
     required this.onBack,
     this.createdAlarm,
+    this.beforeActivate,
   });
 
   final int alarmId;
   final AlarmClient client;
   final VoidCallback onBack;
   final Alarm? createdAlarm;
+  final Future<bool> Function(BuildContext context)? beforeActivate;
 
   @override
   State<AlarmDetailScreen> createState() => _AlarmDetailScreenState();
@@ -66,13 +68,19 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
     }
   }
 
-  Future<void> _change(Future<Alarm> Function() action) async {
+  Future<void> _change(
+    Future<Alarm> Function() action, {
+    bool activating = false,
+  }) async {
     if (_mutating) return;
     setState(() {
       _mutating = true;
       _message = null;
     });
     try {
+      if (activating && widget.beforeActivate != null) {
+        if (!await widget.beforeActivate!(context) || !mounted) return;
+      }
       final alarm = await action();
       if (mounted) setState(() => _alarm = alarm);
     } on AlarmApiException catch (error) {
@@ -209,7 +217,10 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
         FilledButton(
           onPressed: _mutating
               ? null
-              : () => _change(() => widget.client.activate(alarm.id)),
+              : () => _change(
+                  () => widget.client.activate(alarm.id),
+                  activating: true,
+                ),
           child: const Text('활성화'),
         )
       else ...[
@@ -217,7 +228,10 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
           FilledButton(
             onPressed: _mutating
                 ? null
-                : () => _change(() => widget.client.activate(alarm.id)),
+                : () => _change(
+                    () => widget.client.activate(alarm.id),
+                    activating: true,
+                  ),
             child: const Text('다시 활성화'),
           ),
         OutlinedButton(

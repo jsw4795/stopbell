@@ -18,6 +18,8 @@ class AuthenticatedApiClient {
     String path, {
     Map<String, String> headers = const {},
     String? body,
+    int? expectedGeneration,
+    bool Function()? isRequestCurrent,
   }) async {
     final requestUri = apiBaseUrl.resolve(path);
     if (requestUri.scheme != apiBaseUrl.scheme ||
@@ -32,6 +34,9 @@ class AuthenticatedApiClient {
       throw ArgumentError('Auth endpoint는 BackendAuthClient를 사용해야 합니다.');
     }
     final generation = authSession.generation;
+    if (expectedGeneration != null && expectedGeneration != generation) {
+      throw const StaleSessionException();
+    }
     final accessToken = authSession.accessToken;
     if (accessToken == null || accessToken.trim().isEmpty) {
       throw const UnauthenticatedApiException();
@@ -44,7 +49,8 @@ class AuthenticatedApiClient {
       body,
       accessToken,
     );
-    if (!authSession.isCurrentGeneration(generation)) {
+    if (!authSession.isCurrentGeneration(generation) ||
+        isRequestCurrent?.call() == false) {
       throw const StaleSessionException();
     }
     if (response.statusCode != 401) return response;
@@ -53,7 +59,8 @@ class AuthenticatedApiClient {
       accessToken,
       generation: generation,
     );
-    if (!authSession.isCurrentGeneration(generation)) {
+    if (!authSession.isCurrentGeneration(generation) ||
+        isRequestCurrent?.call() == false) {
       throw const StaleSessionException();
     }
     final retried = await _send(
@@ -63,7 +70,8 @@ class AuthenticatedApiClient {
       body,
       rotated.accessToken,
     );
-    if (!authSession.isCurrentGeneration(generation)) {
+    if (!authSession.isCurrentGeneration(generation) ||
+        isRequestCurrent?.call() == false) {
       throw const StaleSessionException();
     }
     return retried;

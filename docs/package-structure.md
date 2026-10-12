@@ -247,7 +247,7 @@ V1은 필요한 수준의 Auth API, Transit API, Alarm API, Auth Session 관리,
 - `auth`: Google Login, Token Pair Secure Storage, startup 상태 복구, refresh 및 logout을 포함한 Auth Session
 - `alarm`: `INACTIVE`/`ACTIVE`/`FOLLOW_UP` 상태를 보존하는 Alarm 생성·조회·활성화/비활성화 화면과 Alarm ID 기반 navigation 진입점
 - `transit`: Bus Route 검색과 Bus Stop 선택 화면. Stop response의 `canNotifyOneStopBefore`/`canNotifyOneStopAfter`로 option을 제어하며 stale occurrence 생성 `404`에서는 Stop 재선택 흐름으로 복구
-- `notification`: Phase 7에서 기능 맥락 기반 Push permission, installation identity와 registration 갱신, 현재 Device disable, 알림 진입 흐름을 구현한다. Phase 6에서는 notification stub을 만들지 않는다.
+- `notification`: TASK-704의 `installation_storage.dart`가 secure 설치본/intent와 native marker를, `device_api_client.dart`가 세 Device API를, `push_permission_service.dart`가 Firebase/native readiness를, `push_registration_service.dart`가 serial session/ownership 동기화를 소유한다. `push_activation_prompt.dart`와 `notification_lifecycle.dart`는 activation permission 안내와 최소 tap/foreground hint를 기존 AlarmHome에 연결한다. 상세 저장·복구 계약은 ADR-010을 따른다.
 
 Flutter logout은 Phase 6 Auth Session의 logout lifecycle/hook에서 현재 Device unsubscribe/disable을 먼저 시도하고 Auth logout과 local session 종료를 이어간다. Device 호출은 별도 authenticated API를 사용하며 `/auth/logout` request에 Device field를 추가하지 않는다. Offline logout에서는 Backend disable을 즉시 보장하지 않고, late auth response가 session을 되살리지 못하게 하는 기존 session generation 보호를 유지한다.
 

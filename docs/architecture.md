@@ -115,7 +115,7 @@ Refresh Token은 SecureRandom으로 생성한 256-bit opaque token이며, 서버
 
 Flutter에서는 login, bootstrap, authenticated HTTP interceptor, logout이 Token을 각각 독립적으로 변경하지 않는다. 하나의 Auth Session 책임이 current Access/Refresh Token Pair, `initializing`/`authenticated`/`unauthenticated` 상태, refresh single-flight, Token Pair 교체와 Secure Storage 반영을 소유한다. Token Pair는 V1에서 pair 단위로 함께 저장하는 것을 기본으로 하며, 구체적인 storage serialization API는 구현 시 결정한다.
 
-startup은 Auth Session을 통해 저장된 Token Pair를 읽고 인증 상태를 복구한다. Access Token 만료 또는 보호 요청의 인증 실패는 같은 session 안에서 refresh를 한 번만 실행하며 concurrent `401`은 single-flight 결과를 공유한다. refresh 성공 뒤 각 보호 요청은 최대 한 번만 재시도한다. `/auth/google`, `/auth/refresh`, `/auth/logout`는 refresh 대상 또는 재시도 대상으로 취급하지 않아 refresh loop에 들어가지 않는다. refresh `401`은 Token Pair를 제거하고 unauthenticated로 전환하지만 network/offline/5xx는 저장된 장기 session을 즉시 제거하지 않는다.
+iOS startup은 TASK-704 설치본 marker/secure 레코드를 먼저 확인해 재설치 시 잔존 Keychain Token Pair를 지운 다음 Auth Session을 복구한다. Token Pair에는 재로그인마다 새로 생성하고 rotation/복원 동안 유지하는 durable login identity를 함께 저장한다. startup은 Auth Session을 통해 저장된 Token Pair를 읽고 인증 상태를 복구한다. Access Token 만료 또는 보호 요청의 인증 실패는 같은 session 안에서 refresh를 한 번만 실행하며 concurrent `401`은 single-flight 결과를 공유한다. refresh 성공 뒤 각 보호 요청은 최대 한 번만 재시도한다. `/auth/google`, `/auth/refresh`, `/auth/logout`는 refresh 대상 또는 재시도 대상으로 취급하지 않아 refresh loop에 들어가지 않는다. refresh `401`은 Token Pair를 제거하고 unauthenticated로 전환하지만 network/offline/5xx는 저장된 장기 session을 즉시 제거하지 않는다.
 
 logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. logout은 local session을 종료한 뒤 late refresh 또는 늦은 API 응답이 인증 상태를 되살리지 못하도록 session generation 또는 동등한 보호를 사용한다. 이는 서버에 이미 도착한 요청을 취소한다는 의미가 아니며, Access Token blacklist를 추가하지 않는 기존 Backend 계약도 바꾸지 않는다.
 
@@ -173,7 +173,7 @@ Device mutation은 JWT Principal과 별도 installation credential을 검증한�
 
 `DeviceService`는 `REQUIRES_NEW` TransactionTemplate으로 mutation과 read-only 상태 조회의 경계를 관리한다. 최초 등록은 Entity를 로드하지 않는 existence query 후 기존 row에만 current write lock을 얻어 없는 UUID의 gap lock 경쟁을 피한다. 알려진 Device UNIQUE 충돌만 전체 rollback/실패 persistence context 폐기 후 새 transaction에서 원래 요청을 한 번 재확인한다. 원인을 확인하지 못한 DB 오류는 정상 conflict로 분류하지 않는다. Device API의 예상 밖 persistence 오류는 상세 없는 500과 예외 종류만 남기는 log로 처리한다. MySQL 중복키 메시지의 원문 UUID/FID 노출을 막기 위해 `org.hibernate.orm.jdbc.error` 로그를 끈다. 현재 HTTP access log와 request/SQL parameter 상세 log는 활성화하지 않으며 상태 조회의 원문 URL을 추가 기록하지 않는다.
 
-Flutter는 설치본 counter/credential/generation을 logout에도 보존하고 요청을 session과 함께 snapshot해 계정 변경 뒤 이전 작업이 새 Principal로 재시도되지 않게 한다. Device disable 시도 → Auth logout → local session 종료의 경계를 유지하며 network 실패로 logout을 영구 차단하지 않는다. Offline 즉시 Push 해제와 이미 FCM에 접수된 알림 회수는 보장하지 않는다. 구체 계약/한계는 API 문서가 소유하며 Flutter 실행은 TASK-704 책임이다.
+Flutter는 설치본 counter/credential/generation을 logout에도 보존하고 요청을 session과 함께 snapshot해 계정 변경 뒤 이전 작업이 새 Principal로 재시도되지 않게 한다. Device disable 시도 → Auth logout → local session 종료의 경계를 유지하며 network 실패로 logout을 영구 차단하지 않는다. Offline 즉시 Push 해제와 이미 FCM에 접수된 알림 회수는 보장하지 않는다. 구체 계약/한계는 API 문서가 소유하며 TASK-704는 설치본 전용 serial mutation, durable pending/session snapshot, permission/readiness 및 startup/resume/FID rotation 동기화를 구현했다. Native production bridge는 기존 FlutterFire delegate를 전달·복원하며 smoke와 분리한다. 저장·재설치/복구의 상세 정책은 [ADR-010 Client 구현](adr/ADR-010-notification-device-and-durable-delivery.md#task-704-flutter-설치본등록-lifecycle-구현-2026-10-12)을 따른다.
 
 Notification persistence는 다음 책임으로 분리한다.
 

@@ -122,6 +122,21 @@ UUID v4는 식별자이고 Client revision은 순서값이므로 둘만으로 �
 
 TASK-702는 Device/Platform과 V13만 구현했다. TASK-703은 기존 row의 write lock과 최초 생성 UNIQUE 충돌 처리, revision·generation 비교, ownership/disable 및 상태 조회 Service/API를 구현하고 집중 MySQL correctness test 12개로 검증했다. Event 시점 recipient 확정, worker의 전송 직전 owner/enabled/target/revision 재검증과 TASK-707 persistence 책임은 유지한다. 이미 접수된 전송의 회수나 offline 즉시 해제는 보장하지 않는다.
 
+### TASK-704 Flutter 설치본·등록 lifecycle 구현 (2026-10-12)
+
+`features/notification`의 InstallationStorage, DeviceApiClient, FirebasePushProvider, PushRegistrationService와 NotificationLifecycle을 기존 AuthSession/AuthenticatedApiClient 및 AlarmHome에 연결했다. Backend API/Schema, Firebase project와 SDK version은 유지한다. Android Push, Provider 전송, Event/fan-out/worker/retry는 구현하지 않는다.
+
+- 설치본 UUID v4, CSPRNG 32-byte canonical credential, revision/generation, pending intent와 마지막 확정 등록을 Secure Storage의 **단일 JSON 레코드**에 저장한다. 기존 credential/identity 또는 완료된 레코드 유실은 fail-closed다. credential이 유효한 counter/generation metadata 유실은 인증된 Device 상태 조회로 복구한다.
+- iOS Application Support에 비밀값 없는 UUID marker와 bootstrap 완료 flag를 atomic file로 저장하고 backup에서 제외한다. marker가 새로 생성되거나 secure 레코드와 다르면 새 설치본으로 시작하고 **Auth Token Pair도 복원 전에 삭제**한다. Secure 레코드 저장 뒤 marker를 완료 처리해 중간 실패는 같은 identity로 복구한다. TASK-704 이전 앱에는 marker/Device identity가 없으므로 첫 적용 때도 기존 Keychain login을 새 설치로 이어받지 않는다. 이후 업데이트·logout·계정 전환은 identity/credential/counter를 보존한다. 설치본 bootstrap을 신뢰할 수 없으면 Auth Token 복원을 막고, credential 유실 자체는 알람 활성화 금지가 아니라 Push 등록 중단으로 처리한다.
+- Auth Token Pair에 CSPRNG login `sessionIdentity`를 함께 보존한다. 앱 복원/같은 session의 token rotation에는 유지하고 재로그인마다 새로 생성한다. 기존 Token Pair에는 한 번 보강한다. local JWT `sub`는 요청 문맥 비교용이며 권한 근거는 Backend JWT/Alarm ownership 검증이다. AuthSession의 in-memory generation 및 서버 ownershipGeneration과 구분한다.
+- 설치본 전용 Future chain이 register/disable을 직렬화한다. **전송 전에** revision과 원래 payload, 종류, expected generation/이전 intent, User/login identity/in-memory generation 및 당시 Access Token을 secure 레코드에 저장한다. timeout/5xx/응답 파싱 실패는 같은 intent를 유지한다. 같은 durable login identity/User에서만 replay하며 같은 session의 정상 rotation JWT만 허용한다. 요청 timeout 후에는 지연된 401의 refresh/retry도 차단한다. 현재 login과 다른 pending은 새 사용자의 GET 및 새 intent로 대체하며 과거 payload/JWT를 현재 계정으로 재작성하지 않는다. 명확한 4xx는 rejected로 보존하고 자동 retry하지 않으며, 현재 session의 명시적 activation에서만 새 상태 조회/intent를 허용한다.
+- FlutterFire `firebase_messaging 16.7.0`의 실제 Dart source와 Apple `12.19.0` header를 다시 확인했다. Dart FID register/callback API는 없으므로 release에도 존재하는 `com.stopbell.stopbell/push` MethodChannel을 사용한다. native FCM register completion과 delegate FID callback을 모두 확인하고 30초로 제한한다. 기존 FlutterFire MessagingDelegate를 임시 proxy로 전달·복원하며 UNUserNotificationCenter/SceneDelegate/swizzling을 교체하지 않는다. DEBUG smoke channel/request는 별도로 유지하고 두 등록의 동시 실행은 거부한다. APNs 대기는 10초로 제한하고 FIS getId는 callback FID와의 rotation 비교에만 사용한다.
+- Auth initialization 이후 startup/login, foreground resume 및 onIdChange에서 readiness와 인증된 Device 상태를 동기화한다. local 마지막 등록 FID/User/revision/generation과 서버 ownership/enabled/revision/generation이 일치하면 POST와 counter 증가를 생략한다. FID epoch가 작업 중 바뀌면 결과를 현재 준비 완료로 확정하지 않고 재동기화한다. Firebase 초기화/초기 message 조회의 일시 실패는 lifecycle 진입에서 다시 준비할 수 있다.
+- INACTIVE/FOLLOW_UP activation 직전 아직 결정하지 않은 permission을 설명 후 요청한다. denied/미준비/서버 실패를 구분해서 안내하며 사용자는 Push 준비 실패에도 Alarm activate를 선택할 수 있다. 일반 logout은 기존 beforeLogout hook에서 queue 대기 포함 최대 10초의 Device disable을 시도하고 기존 Auth 종료를 계속한다. 설치본이나 Firebase targeting identity는 삭제하지 않는다.
+- foreground는 generic SnackBar와 현재 session에 묶인 상세 보기 action을 제공한다. initial/opened tap의 최소 hint를 bounded dedup하고 로그인 전에는 대기한다. AlarmHome은 current session의 Backend detail 조회 성공 뒤만 상세를 표시하며 실패 시 안내 후 목록으로 돌아간다. logout/계정 변경 및 새로운 navigation intent가 이전 결과를 차단하고 dialog/foreground action을 정리한다.
+
+정식 iPhone 등록/동기화와 미검증 항목, 실행 절차는 [Local Development](../local-development.md#task-704-정식-ios-client-검증)에 기록한다. 최초 설치/복구·pending·계정 전환·권한·tap correctness는 집중 Dart 테스트로 검증한다. Notification 전체 foreground/background/terminated 수신 E2E는 TASK-710에 남긴다.
+
 ### TASK-701 Firebase iOS 기술 계약 (2026-10-06)
 
 공식 stable package와 선택 버전의 SDK source를 확인했다.

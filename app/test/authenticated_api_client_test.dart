@@ -13,6 +13,7 @@ import 'package:stopbell/features/auth/token_pair_storage.dart';
 const oldPair = TokenPair(
   accessToken: 'old-access',
   refreshToken: 'old-refresh',
+  sessionIdentity: 'fixture-restored-session',
 );
 const newPair = TokenPair(
   accessToken: 'new-access',
@@ -271,7 +272,9 @@ void main() {
       );
       expect(headers, ['Bearer old-access', 'Bearer new-access']);
       expect(backend.calls, 1);
-      expect(storage.pair, same(newPair));
+      expect(storage.pair?.accessToken, newPair.accessToken);
+      expect(storage.pair?.refreshToken, newPair.refreshToken);
+      expect(storage.pair?.sessionIdentity, authSession.sessionIdentity);
       expect(
         (await client.request(
           'POST',

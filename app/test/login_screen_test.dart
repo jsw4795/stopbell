@@ -266,7 +266,9 @@ void main() {
     expect(find.text('노선번호를 입력해 검색하세요.'), findsNothing);
     auth.result.complete(pair);
     await tester.pumpAndSettle();
-    expect(storage.pair, same(pair));
+    expect(storage.pair?.accessToken, pair.accessToken);
+    expect(storage.pair?.refreshToken, pair.refreshToken);
+    expect(storage.pair?.sessionIdentity, isNotNull);
     expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
   });
 

@@ -251,11 +251,38 @@ SDK/target/lifecycle 계약의 Owner는 [ADR-010](adr/ADR-010-notification-devic
 
 실패 시 `401/403`은 로그인·IAM·API/project 설정, `404`는 FID 복사·입력의 정확성과 올바른 project의 현재 FCM 등록 FID인지, APNs 미준비는 entitlement/profile/signing/network, 접수 후 미수신은 APNs key 환경·permission·알림 표시 설정을 확인한다. Smoke 도구는 raw error body를 출력하지 않고 알려진 top-level status와 FCM errorCode만 출력한다(예: `FCM HTTP 404: status=NOT_FOUND, fcmErrorCode=UNREGISTERED`). JSON 파싱 실패나 예상 밖의 schema에서는 확인 가능한 항목만 출력하며, 확인할 항목이 없으면 HTTP status만 출력한다.
 
-사용자가 확인한 이전 404의 최종 원인은 수동 FID 입력 오류(`I`/`l` 혼동)이며 SDK/FCM 결함으로 확정된 문제는 없다. Native unregister, foreground/terminated 수신과 tap navigation, Backend Admin SDK 연동은 아직 미검증이다. Backend Device API는 TASK-703에서 구현했으며 Flutter 제품의 Device 등록과 Backend Provider Client는 후속 작업이다.
+사용자가 확인한 이전 404의 최종 원인은 수동 FID 입력 오류(`I`/`l` 혼동)이며 SDK/FCM 결함으로 확정된 문제는 없다. Native unregister, foreground/terminated 수신과 tap navigation, Backend Admin SDK 연동은 아직 미검증이다. Backend Device API와 Flutter 제품의 Device 등록은 각각 TASK-703/704에서 구현했으며 Backend Provider Client는 후속 작업이다.
 
 Smoke 앱은 명시적 FCM 등록을 남기지만 auto-init을 켜지 않으며 StopBell Backend Device에는 등록하지 않는다. 반복하려면 현재 FID를 다시 준비한다. 일반 product entrypoint로 돌아오려면 기존 `flutter run --dart-define-from-file=config/local.json`을 사용한다. 이번 smoke에서 Firebase installation deletion을 logout/정리 수단으로 호출하지 않는다.
 
 공식 setup 근거: [Flutter FCM Apple capability/APNs/swizzling](https://firebase.google.com/docs/cloud-messaging/flutter/get-started), [Firebase Apple app/config setup](https://firebase.google.com/docs/ios/setup), [HTTP v1 fid targeting](https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages), [FCM authorization](https://firebase.google.com/docs/cloud-messaging/send/v1-api).
+
+## TASK-704 정식 iOS Client 검증
+
+정식 진입점은 `lib/main.dart`이며 기존 `config/local.json`을 사용한다. Firebase/설치본 저장·pending/계정 전환 정책은 [ADR-010 Client 구현](adr/ADR-010-notification-device-and-durable-delivery.md#task-704-flutter-설치본등록-lifecycle-구현-2026-10-12), Endpoint는 [Device API](api.md#기기-등록해제-계약-task-702)가 소유한다. SDK dependency, 실제 Firebase config, Info.plist의 FID mode/auto-init, SPM과 기존 signing 설정은 유지한다.
+
+```text
+flutter run --debug --no-pub --dart-define-from-file=config/local.json -d <실제-iPhone-ID>
+```
+
+1. Google 로그인 뒤 비활성 또는 FOLLOW_UP 알람에서 활성화를 선택한다. permission이 notDetermined이면 이유 안내 → 계속 → OS permission 요청이 나온다. 이미 허용했다면 반복 permission popup 없이 준비한다.
+2. 허용된 permission, APNs readiness, native FCM completion/callback FID 및 Backend Device 등록/조회 확인이 끝나면 `이 기기의 알림 수신 준비를 완료했습니다.`를 표시한다. 이 안내는 실제 Push 수신 성공을 뜻하지 않으며 Alarm activate 성공/실패도 별도로 확인한다.
+3. denied/미준비/Backend 실패 때 안내의 `알람 활성화`로 계속할 수 있다. denied에서는 `설정 열기`를 제공한다. 무한 APNs polling과 자동 ownership conflict retry는 없다.
+4. background → foreground, 앱 initialization 재실행에서 불필요한 Device POST 없이 준비 상태가 복원되는지 확인한다. 정상 logout에서는 Device disable을 확인하고 같은 계정 재로그인은 높은 revision으로 재등록한다.
+5. 다른 계정 로그인 및 A→B→A를 확인한다. 이전 계정의 Alarm 상세/foreground action/dialog가 남지 않아야 한다. 서버 generation은 ownership 이전에만 증가한다. 원문 UUID/FID/credential/JWT를 출력하거나 캡처하지 않는다.
+6. 재설치/강제 FID rotation은 별도 검증 환경에서 수행한다. 일반 logout을 위해 앱 삭제, FIS delete, FCM deleteToken/unregister를 호출하지 않는다. 실제 수신과 foreground/background/terminated tap E2E는 TASK-710에서 검증한다.
+
+DEBUG 상태 로그는 `StopBell push stage`의 APNs/FID readiness·Device register/disable 확인 및 `StopBell push outcome`의 안전한 enum만 출력한다. 원문 식별자, JWT, credential, request/response/error body는 출력하지 않는다. 정식 bridge는 release에도 존재하며 TASK-701 smoke channel은 DEBUG에만 남는다.
+
+### 2026-10-12 확인 결과
+
+- production `main.dart` 경로를 연결된 **iPhone 13 Pro Max**에 기존 개발 signing/config로 설치·실행했다. 기존 Backend와 HTTPS 개발 주소의 `/actuator/health` 200을 확인했다. 계정/credential은 사용자가 직접 사용했으며 생성·대체하지 않았다.
+- 안전한 상태 로그로 APNs readiness → FCM 등록 callback FID → Backend Device register → ready를 확인했고 사용자가 activation의 준비 완료 안내를 확인했다. 이 기기의 현재 허용 상태로 검증했으며 최초 notDetermined popup/denied 설정 변경의 실기기 결과를 별도로 주장하지 않는다.
+- 반복 동기화와 foreground 복귀는 Device mutation 없이 ready를 반환했다. logout은 Backend disable-confirmed, 같은 계정 재로그인은 register-confirmed/ready를 반환했고 사용자가 목록과 무오류 동작을 확인했다.
+- Dart hot restart로 initialization/Auth/Secure Storage를 다시 복원한 뒤 Device mutation 없이 ready를 확인했다. 전체 OS process 재시작/재설치 검증과 구분한다.
+- 실제 A→B→A에서 각각 disable → register-confirmed/ready를 확인했고, 사용자가 계정별 목록/이전 상세 정리/무오류 동작을 확인했다. 원문 계정/설치본/FID 정보는 기록하지 않았다.
+- 집중 Flutter 테스트 4개 파일 35개는 저장·응답 유실/pending·FID rotation·계정 전환·permission/tap을 검증한다. 변경된 Auth/API/bootstrap의 직접 관련 회귀 테스트까지 총 98개가 통과했고 변경 Flutter 파일 analyze는 No issues다. Backend suite/Testcontainers는 재실행하지 않았다. Apple SDK 12.19.0과 unsigned **release** 빌드 및 signed debug 실기기 빌드가 성공했고 native request의 callback/completion 양쪽 순서·중복 completion·nil FID·실패 처리를 좁은 Swift 검사로 확인했다.
+- **미검증:** 실기기 재설치, 강제 FID rotation, 실제 offline logout, permission 최초/거부 전환, full OS process restart, 실제 Provider 전송 및 foreground/background/terminated notification tap/수신 E2E. 앞선 correctness는 집중 테스트로, 실제 Provider smoke는 TASK-705, 최종 수신/tap E2E는 TASK-710으로 구분한다.
 
 ## Backend Connection
 

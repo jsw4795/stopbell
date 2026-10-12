@@ -31,6 +31,8 @@ class SecureTokenPairStorage implements TokenPairStorage {
       value: jsonEncode({
         'accessToken': pair.accessToken,
         'refreshToken': pair.refreshToken,
+        if (pair.sessionIdentity != null)
+          'sessionIdentity': pair.sessionIdentity,
       }),
     );
   }
@@ -63,7 +65,13 @@ class SecureTokenPairStorage implements TokenPairStorage {
       return null;
     }
 
-    return TokenPair(accessToken: accessToken, refreshToken: refreshToken);
+    return TokenPair(
+      accessToken: accessToken,
+      refreshToken: refreshToken,
+      sessionIdentity: decoded['sessionIdentity'] is String
+          ? decoded['sessionIdentity'] as String
+          : null,
+    );
   }
 
   @override
