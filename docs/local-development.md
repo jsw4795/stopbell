@@ -321,7 +321,28 @@ Smoke payload는 `ALARM_EVENT`, 선택 `alarmId`, `ARRIVED`, **합성 navigation
 
 ### TASK-706 자동 dispatch 구성 경계
 
-TASK-706 Worker 구조와 집중 Fake Provider/MySQL Testcontainers 검증을 추가했다. `notification.dispatch.enabled=false`가 기본이며 TASK-705 FCM enabled/local Smoke와 독립적이다. TASK-706 당시 handler 부재 gate는 TASK-709에서 production Handler와 FCM 정적 설정 gate로 대체했다. 코드와 Mock Provider/MySQL 자동 테스트 기준의 opt-in 연결은 가능하지만 실제 자동 Firebase/iPhone E2E 및 운영 latency tuning은 미검증이다. **TASK-710 검증 전 운영 자동 활성화하지 않는다.** 설정과 구현/후속 recovery 경계는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. Codex는 실제 Firebase 전송, local DB dispatch/bootRun, iPhone/Flutter/Xcode 작업을 수행하지 않았다.
+TASK-706 Worker 구조와 집중 Fake Provider/MySQL Testcontainers 검증을 추가했다. `notification.dispatch.enabled=false`가 기본이며 TASK-705 FCM enabled/local Smoke와 독립적이다. TASK-706 당시 handler 부재 gate는 TASK-709에서 production Handler와 FCM 정적 설정 gate로 대체했다. 실제 자동 Firebase/iPhone 검증의 현재 진행 상태는 아래 TASK-710 기록을 따르며, 전체 E2E 및 운영 latency tuning은 미완료다. **TASK-710 검증 전 운영 자동 활성화하지 않는다.** 설정과 구현/후속 recovery 경계는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. Codex는 실제 Firebase 전송, local DB dispatch/bootRun, iPhone/Flutter/Xcode 작업을 수행하지 않았다.
+
+## TASK-710 실제 iPhone 수신 및 tap 검증
+
+### 2026-10-16 사용자 확인 결과
+
+사용자가 직접 확인한 실제 iPhone 검증 결과다. Codex는 이번 기록 작업에서 코드 수정, 테스트 실행, 실제 FCM 전송을 수행하지 않았다.
+
+- 실제 버스 이벤트 기반 자동 FCM 알림 수신 성공
+- iPhone 포그라운드 수신 성공
+- iPhone 백그라운드 수신 성공
+- iPhone 앱 완전 종료 상태 수신 성공
+- 백그라운드 알림 탭 후 알람 상세 화면 이동 성공
+- MySQL `NotificationDelivery`의 `ACCEPTED` 기록 확인
+
+미검증 항목:
+
+- 완전 종료 상태에서 알림 탭 후 상세 화면 이동
+- 삭제되거나 유효하지 않은 알람의 알림 탭 처리
+- 계정 변경 및 소유권 불일치 시 접근 차단
+
+위 결과는 확인된 수신·화면 이동·DB 기록 범위에 한정하며 전체 수신/tap E2E 완료를 뜻하지 않는다. TASK-710과 최종 E2E/regression 보강 TASK-711은 모두 미완료로 유지한다.
 
 ## Backend Connection
 
