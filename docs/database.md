@@ -196,7 +196,7 @@ Migration 전에 monitoring과 구형 History writer를 중단하고 FOLLOW_UP/H
 
 ### Phase 7 Notification persistence contract
 
-TASK-708 설계는 `notification_events`와 `notification_deliveries`의 identity column/UNIQUE를 다음과 같이 확정한다. TASK-707의 V14와 JPA Entity/Repository에 적용됐다. delivery operational field/query도 아래 TASK-709 설계에 따라 적용했으며 atomic decision/dedup/fan-out은 TASK-708에서 구현했고 Worker는 미구현이다.
+TASK-708 설계는 기존 Alarm의 `notification_events`와 `notification_deliveries` identity column/UNIQUE를 다음과 같이 확정한다. TASK-707의 V14와 JPA Entity/Repository에 적용됐다. delivery operational field/query와 atomic decision/dedup/fan-out, Worker/Handler는 TASK-706~709에서 구현했다. 아래는 현재 ALARM 물리 Schema이며 TASK-903의 세션 source 확장은 별도 후속 계약이다.
 
 ```text
 NotificationEvent
@@ -360,6 +360,82 @@ Route snapshot sync는 동일 Route/Stop identity의 display·operational metada
 `destination_name`은 V12 nullable migration으로 추가한 사용자 표시 metadata다. 동일 occurrence의 목적지만 변경되거나 검증 실패로 null이 되면 기존 내부 ID를 유지하며 current snapshot 값으로 갱신한다. GBIS ID나 방향 raw field는 영속하지 않는다.
 
 TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `lastCompleteSyncAt` 의미를 저장해 fresh DB bootstrap 완료, readiness와 last successful complete sync age를 판단한다. 구체 table/column/type은 구현 시 정하며 sync/checksum history, staging table, error journal은 요구하지 않는다.
+
+### Phase 9 Boarding persistence contract (TASK-903)
+
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 **후속 Schema 계약**이다. 현재 DB·V1~V14·JPA는 수정하지 않는다. `boarding_sessions`는 TASK-905, Notification source 확장은 TASK-906에서 새 Migration과 함께 구현·검증한다. 기존 Alarm/BusAlarmTarget에는 column·FK·lifecycle 변경이 없다.
+
+#### boarding_sessions
+
+| Column | Type / NULL | 의미 |
+| --- | --- | --- |
+| `id` | BIGINT AUTO_INCREMENT PK | 불변 Session ID |
+| `user_id` | BIGINT NOT NULL, users FK | 인증된 owner. cascade 없음 |
+| `client_request_id` | CHAR(36) ascii_bin NOT NULL | 생성 요청의 canonical UUID |
+| `request_fingerprint` | CHAR(64) ascii_bin NOT NULL | 원래 확정 요청 canonical SHA-256, 재전송 비교 |
+| `provider` | VARCHAR(20) NOT NULL | TAGO / SEOUL_BUS |
+| `external_route_id` | VARCHAR(255) NOT NULL | opaque Route reference |
+| `vehicle_tracking_id` | VARCHAR(255) NOT NULL | TAGO vehicleno / 서울 vehId |
+| `vehicle_number` | VARCHAR(255) NOT NULL | 사용자가 대조한 전체 번호, 서울 plainNo 별도 보존 |
+| `city_code` | VARCHAR(50) NULL | TAGO 필수, 서울 NULL |
+| `route_number`, `target_name` | VARCHAR(100), VARCHAR(255) NOT NULL | 최소 표시 snapshot |
+| `traversal_snapshot` | JSON NOT NULL | 아래 고정 구조의 불변 순서 snapshot |
+| `traversal_fingerprint` | CHAR(64) ascii_bin NOT NULL | canonical 구조 hash |
+| `status` | VARCHAR(20) NOT NULL | TRACKING / SUSPENDED / COMPLETED / CANCELLED / EXPIRED |
+| `revision` | BIGINT NOT NULL | 0 이상, checkpoint/상태 반영의 semantic revision |
+| `state_reason` | VARCHAR(64) NULL | allowlist의 보류/종료 사유, raw 오류 저장 금지 |
+| `checkpoint_stop_external_id` | VARCHAR(255) NULL | 실제 관측 ID. order-only면 NULL 유지 |
+| `checkpoint_stop_order`, `checkpoint_index` | INT NOT NULL | 양의 raw order / 0 이상 snapshot index |
+| `checkpoint_evidence` | VARCHAR(32) NOT NULL | ID_ORDER / VERIFIED_ORDER_ONLY 등 검증 근거 종류 |
+| `checkpoint_direction_context` | VARCHAR(255) NULL | 실제 확보·검증에 사용한 경우만 보존 |
+| `checkpoint_observed_at` | DATETIME(6) NOT NULL | 마지막 검증 성공 응답 수신 UTC |
+| `checkpoint_provider_data_time` | DATETIME(6) NULL | 실제 Provider 제공시각, 없는 값 합성 없음 |
+| `created_at`, `updated_at`, `expires_at` | DATETIME(6) NOT NULL | UTC microsecond. expiresAt은 최초 수명으로 고정 |
+| `ended_at` | DATETIME(6) NULL | terminal에서만 필수 |
+| `open_user_id` | BIGINT generated nullable | TRACKING/SUSPENDED이면 user_id, 그 외 NULL |
+
+`traversal_snapshot`은 version·ordered occurrences·targetIndex와 대상의 하차 가능/불가/미확인 분류를 갖는 고정 스키마다. occurrence에는 실제 external Stop ID/order와 반복·회차 판단에 필요한 **검증된** 문맥만 둔다. 전체 Route 구조가 필요하면 포함하되 GPS·raw response·일반 Map provider context·모든 표시 metadata는 복제하지 않는다. 분류 근거가 없으면 UNKNOWN이며 ALIGHT 지원을 추측하지 않는다. 현재 TASK-903은 PREPARE_ALIGHT만 지원 계약으로 두고 검증 안 된 접근/통과 알림을 Schema로 선행 구현하지 않는다.
+
+fingerprint는 provider/Route·typed request context·순서화한 occurrence ID/order·target 의미·판단에 사용하는 분류/검증 문맥의 canonical 직렬화로 계산한다. 표시 이름·조회 시각·단순 sync 완료 시각은 구조 hash에 넣지 않는다. SHA-256 hash만 저장하는 것으로 실제 snapshot을 대체하지 않는다. metadata Entity FK 없이 선택 당시 snapshot을 보존하고 sync로 덮어쓰지 않는다.
+
+제약·query 계약:
+
+- `UNIQUE(user_id, client_request_id)`: 동일 생성 의도 중복 방지. 다른 request fingerprint는 conflict이며 terminal 원래 세션도 재생성하지 않음
+- `UNIQUE(open_user_id)`: nullable generated key로 User당 미종료 하나. 별도 active-session table·users의 current-session pointer 없음
+- CHECK: provider·status·reason/evidence allowlist, non-empty required reference/번호, revision/index 0 이상·order 양수, TAGO cityCode/서울 NULL, expiresAt>createdAt, terminal에서 endedAt 필수/미종료에서 NULL. nullable CHECK는 UNKNOWN 통과를 피하도록 명시
+- JSON 구조/version·target/index 범위·checkpoint 대응·분류 근거·시간 일관성은 Domain에서 검증. 조회가 필요 없는 JSON 내부에 speculative index를 추가하지 않음
+- `INDEX(status, id)`: 미종료 polling/복구의 bounded 조회. current User 조회는 open_user_id UNIQUE, 요청 복구는 request UNIQUE 사용
+- Session/ID/번호/hash 비교는 대소문자·공백을 임의로 합치지 않는 opaque semantics를 유지하고 UUID만 canonical 형식 검증. 정확한 collation과 CHECK SQL은 후속 MySQL 검증에서 확인
+
+기존 row의 mutation은 Session PESSIMISTIC_WRITE와 semantic revision을 사용한다. 생성만 User lock을 먼저 얻어 current 미종료 조회와 직렬화하며 UNIQUE가 최종 경계다. @Version·별도 CAS framework·tracking/event-history table·prepareNotified boolean은 없다. checkpoint 한 개를 overwrite하되 소실/역행 등 알려진 연속성 상실 사유는 영속한다. Session 수명과 준비 Event 기한은 [Architecture](architecture.md#boarding-초기-설정과-만료), 상태 의미는 [Domain](domain-model.md#boardingsession)을 따른다.
+
+#### Notification source 확장 (TASK-906 구현 예정)
+
+기존 notification_events에 다음 분기를 추가하고 Delivery operational Schema와 Event×Device UNIQUE는 유지한다. 기존 V14를 수정하지 않으며 새 Migration으로 기존 row를 ALARM source로 보존한다.
+
+| Field | 후속 계약 |
+| --- | --- |
+| `source_type` | VARCHAR(24) ascii_bin NOT NULL. ALARM / BOARDING_SESSION |
+| 기존 `alarm_id`, `activation_generation`, `tracking_cycle_id`, `event_type` | 세션 분기를 위해 physical NULL 허용으로 변경하되 ALARM branch CHECK에서 기존 네 값 모두 필수·기존 값 범위 강제 |
+| `boarding_session_id` | BIGINT NULL. BOARDING_SESSION이면 양수 필수 |
+| `boarding_event_type` | VARCHAR(20) ascii_bin NULL. BOARDING_SESSION이면 PREPARE_ALIGHT 필수 |
+| `expires_at` | DATETIME(6) NULL. BOARDING_SESSION이면 observedAt보다 뒤인 불변 기한 필수. ALARM은 기존 Delivery 기한 정책 유지 |
+
+Source CHECK는 ALARM일 때 boarding 세 필드가 모두 NULL이고 기존 네 값은 유효, BOARDING_SESSION일 때 기존 네 값은 모두 NULL이고 boarding 세 필드는 모두 유효하도록 IS NULL/IS NOT NULL을 명시한다. 기존 enum/UUID/generation CHECK도 이 분기에 맞추되 Alarm 값 집합을 넓히지 않는다. 가짜 Alarm ID·generation·cycle을 만들지 않는다.
+
+기존 `UNIQUE(alarm_id, activation_generation, tracking_cycle_id, event_type)`는 유지한다. nullable column으로 바뀌어도 ALARM branch는 전부 NOT NULL이므로 기존 atomic identity가 보존된다. 세션에는 `UNIQUE(boarding_session_id, boarding_event_type)`를 추가하며 해당 branch의 두 값은 CHECK로 필수다. revision을 dedup key에 넣지 않는다. Event source/owner/evidence/시각/세션 expiresAt은 생성 후 불변이다.
+
+Session ID는 Alarm 원본 ID처럼 불변 source reference로 보존하며 live resource cascade FK나 임의 hard-delete API를 추가하지 않는다. 세션 Event의 expiresAt은 recipient가 0개여도 Event 기한을 보존하기 위한 최소 필드다. 최초 각 Delivery는 같은 기한을 복사하며 raw FID는 여전히 저장하지 않는다. Session 부재는 전송 허용 근거가 아니고 fail closed한다.
+
+최초 PREPARE_ALIGHT 저장 전 만료는 Event/Delivery를 INSERT하지 않는 application invariant다. 이미 존재하는 Event/Delivery는 만료·실패·재확인으로 삭제/재생성하지 않는다. 기존 ALARM의 만료된 Event+EXPIRED Delivery 생성은 유지한다. Task-906은 branch CHECK/UNIQUE·migration backfill·rollback·no-recipient·expired-candidate 재판단을 검증한다.
+
+#### 세션 Worker 조회 계약
+
+기존 due index/Device FK/Delivery UNIQUE를 재사용하고 새 claim/lease/status/attempt table을 추가하지 않는다. 단일 Worker의 각 cycle은 독립 bounded 조회로 (1) 모든 source의 expired PENDING 정리, (2) ALARM due, (3) ready BOARDING_SESSION due를 처리한다. 각 조회는 기존 batch-size 상한을 적용해 세션 대기가 Alarm 예산을 점유하지 않는다.
+
+세션 조회는 `PENDING AND next_attempt_at <= now AND expires_at > now`에 BOARDING_SESSION source, 현재 프로세스의 gate-ready Session ID 집합, current Session TRACKING/미만료 조건을 **LIMIT 전에** 적용하고 next_attempt_at/id 순서로 제한한다. ready 집합이 비면 세션 send 조회만 생략한다. 만료 조회는 source/gate 없이 `PENDING AND expires_at <= now`이며 예약 invariant상 이미 due다. 조회 결과는 권한이 아니고 current revision/상태/gate는 attempt transaction에서 재검증한다.
+
+JPA/SQL 구체 형태·parameter 분할·실제 EXPLAIN은 TASK-906에서 확인한다. 메모리 filtering 후 LIMIT, 반복 대기 row로 batch 소진, gate를 열기 위한 nextAttemptAt/TTL 연장은 허용하지 않는다. 기존 index로 모든 부하의 성능이 검증됐다고 주장하지 않으며 추측성 index 추가도 하지 않는다. 실행·lock 순서는 [Architecture](architecture.md#복구-gate와-worker-공정성)를 따른다.
 
 ## 7. 외부 교통 데이터
 

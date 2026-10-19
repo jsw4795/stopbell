@@ -537,6 +537,12 @@ V1은 첫 Alarm activation 직전에 기능 맥락을 설명한 뒤 Notification
 
 Payload는 `type`, `alarmId`, `eventType`, `notificationEventId` 수준의 navigation hint만 담는다. `userId`, Auth Token, push targeting identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체는 포함하지 않는다. Tap payload를 권한 근거로 사용하지 않고 Auth Session 초기화 뒤 Backend Alarm detail API로 ownership과 current state를 확인한다.
 
+### TASK-903 세션 source의 후속 확장 (2026-10-19)
+
+[ADR-012](ADR-012-boarding-session-and-alight-notification-contract.md)는 기존 ALARM 계약을 유지하고 BOARDING_SESSION의 PREPARE_ALIGHT만 별도 source로 추가한다. 현재 NotificationEvent/DispatchTarget/SendRequest/FCM은 Alarm 기반이며 실제 source 확장·복구 gate·공정한 due 조회·Session current status/revision 검증은 TASK-906에 남는다. 가짜 alarmId를 사용하지 않는다. 상세 실행은 [Architecture](../architecture.md#탑승-세션-실행과-notification-연계-task-903), 분기 CHECK/UNIQUE는 [Database](../database.md#notification-source-확장-task-906-구현-예정)가 소유한다.
+
+위 Freshness의 만료된 최초 Event 보존은 **기존 ALARM 정책**이다. PREPARE_ALIGHT만 최초 INSERT 시 이미 원래 observedAt 기반 기한이 지났으면 Event/Delivery를 생성하지 않아 다음 새 관측의 기회를 남긴다. 이미 저장된 세션 Event는 만료·실패·recipient 없음으로 재생성하지 않는다. 기존 Device·Delivery·recipient 고정·bounded attempt·외부 접수/표시 한계는 바꾸지 않는다. 이 차이를 기존 Alarm 정책에 소급 적용하지 않는다.
+
 ## 근거
 
 Installation identity를 Provider targeting에서 분리하면 Firebase 계약 변화와 registration rotation이 StopBell Device lifecycle을 오염시키지 않는다. Activation generation과 cycle identity는 memory-based tracking을 유지하면서도 durable Notification dedup에 필요한 최소 문맥을 제공한다.

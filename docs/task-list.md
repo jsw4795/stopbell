@@ -381,7 +381,7 @@ Future Consideration:
 - TASK-901 결과에 따라 지원 범위와 후속 설계를 조정할 수 있다. 필요한 근거를 확보하지 못하면 제약·미지원 범위·추가 판단을 기록하고, GPS나 추측으로 보완하여 구현 완료로 처리하지 않는다.
 - 지하철 하차 알림은 향후 별도 Phase로 계획하며 이번 Phase 9에는 조사·설계·구현을 포함하지 않는다.
 
-이번 Phase 등록은 계획 추가이며 Domain/API/DB 계약을 확정하거나 구현한 것으로 취급하지 않는다. 설계 Task에서 확정한 변경은 해당 Owner 문서와 필요한 ADR에 반영한다. 기존 TASK-710/711과 Phase 8의 상태·검증 책임은 유지하며 TASK-908이 이를 대체하지 않는다.
+이번 Phase 등록 자체는 계획 추가이며 구현 완료를 뜻하지 않는다. TASK-902/903에서 승인한 설계는 ADR-011/012와 Owner 문서가 정의하며 TASK-904~908 구현·검증 완료와 구분한다. 기존 TASK-710/711과 Phase 8의 상태·검증 책임은 유지하며 TASK-908이 이를 대체하지 않는다.
 
 - [x] TASK-901 TAGO·서울 버스 차량 식별 가능성 조사
   - 목적: 경기 TAGO와 서울 버스 API에서 실제 탑승 차량을 사용자가 확인하고 동일 차량을 지속 추적할 수 있는지 GPS 없이 검증한다.
@@ -400,7 +400,7 @@ Future Consideration:
   - 선행 관계: TASK-901 완료 및 지원 가능 범위 확인 후 수행한다. TASK-903/904의 추천·확정 경계 입력이 된다.
   - 설계 결과: [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md). 후보 선정·보조 정렬·추천/확정 구분·재조회·Provider별 지원 범위와 정상/예외 사례를 정의한다. 실제 알고리즘·API·화면 구현은 후속 Task에 남긴다.
 
-- [ ] TASK-903 탑승 세션 및 하차 알림 도메인 설계
+- [x] TASK-903 탑승 세션 및 하차 알림 도메인 설계
   - 목적: 확인된 탑승 차량, 목적 정류장 occurrence와 하차 알림의 수명을 기존 도착 알림과 혼동하지 않는 Domain/API/Persistence 계약으로 설계한다.
   - 완료 기준:
     - 인증된 User의 소유권, 후보 조회→사용자 차량 확인→추적 시작→알림/종료 흐름, 취소·중복 요청·동시 변경·재확인·만료·재시작 시 동작을 정의한다. 차량 확정/조회/취소 등 필요한 API 계약과 최소 저장 범위를 결정한다.
@@ -408,6 +408,7 @@ Future Consideration:
     - GPS 없이 하차를 알릴 시점과 충분한 근거, 놓친 관측·목적지 통과·불확실 시 처리, 세션 종료 및 중복 방지 기준을 정의한다. 지원 불가능한 시점/노선은 명시하고 임의 threshold나 보장되지 않는 정확도를 약속하지 않는다.
     - 기존 도착 알림 lifecycle과의 경계, Notification 재사용에 필요한 Event identity·수명·recipient·tap 계약의 최소 확장을 결정하고 관련 Owner 문서/ADR을 동기화한다. 구체 Entity/Schema/API field는 이 Task 전에는 확정하지 않는다.
   - 선행 관계: TASK-901/902 완료 후 수행한다. 기존 Alarm/Transit 및 Phase 7 Notification 계약을 검토하며 TASK-904~907의 구현 기준이 된다.
+  - 설계 결과: [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md). 번호 확정과 즉시 추적, occurrence 간격 2/1 및 세션당 PREPARE_ALIGHT 최대 1회, snapshot/checkpoint와 PT2M 조건부 자동 복구, PT4H 수명·PT30S 준비 TTL을 정의한다. Source 분기·복구 gate·LIMIT 이전 filtering과 Alarm 조회 예산·전송 시 current Session/revision 재검증·최초 저장 전 TTL 초과의 기회 미소비를 Owner 문서에 동기화한다. 신규 Schema/API/Worker는 후속 구현이며 이번 작업에서 코드·Migration·외부 호출·커밋은 수행하지 않는다.
 
 - [ ] TASK-904 탑승 차량 후보 조회 API 구현
   - 목적: 사용자 확인과 추천에 필요한 차량 후보 및 근거를 인증된 Client에 제공한다.
@@ -436,7 +437,7 @@ Future Consideration:
 - [ ] TASK-907 Flutter 하차 알림 UI 구현
   - 목적: 사용자가 탑승 차량을 직접 확인하고 목적 정류장을 선택한 뒤 하차 알림의 상태와 한계를 이해할 수 있게 한다.
   - 완료 기준:
-    - 후보 조회·추천 근거 표시→사용자 차량 확인→목적 occurrence 선택→추적 시작/상태 조회/취소 흐름을 연결한다. 추천과 확정을 명확히 구분하고 기존 버스 도착 알림 UI를 보존한다.
+    - 목적 occurrence 문맥의 후보 조회·추천 근거 표시→사용자 차량번호 확인·확정과 즉시 추적→상태 조회/취소 흐름을 연결한다. 별도 Start 버튼은 제공하지 않으며 추천과 확정을 구분하고 기존 버스 도착 알림 UI를 보존한다.
     - loading/empty/error/retry, 복수 후보·식별 불가·stale 후보·차량 소실·재확인/종료 상태를 표시한다. 불확실한 차량을 자동 선택/확정하거나 추적 차량을 자동 교체하지 않으며 위치 권한/GPS를 요구하지 않는다.
     - 하차 알림 수신/tap에서 인증·소유권·현재 세션을 재조회하고 종료·취소·접근 불가 상태를 처리한다. UI/API 연동과 기존 인증·도착 알림 회귀를 검증한다.
   - 선행 관계: Phase 6 및 TASK-904~906 완료 후 수행한다. 화면 구성 검토는 TASK-903 계약 확정 뒤 가능하나 API/Notification 연결 전에는 완료 처리하지 않는다.

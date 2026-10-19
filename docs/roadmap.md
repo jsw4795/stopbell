@@ -156,7 +156,7 @@ TASK-711 최종 E2E/regression
 
 ## Phase 8 — Quality / Operations / Production Readiness
 
-Phase 8은 Phase 5/7 correctness를 처음 구현하는 단계가 아니라, 이미 구현한 lifecycle, dedup, durable delivery correctness를 race, restart, actual-device, production-like 조건에서 검증하고 최소 운영 계약을 갖추는 단계다. ACTIVE tracking은 V1 memory 기반과 restart-safe rebaseline을 유지하며, TASK-811이 실제 품질 문제를 입증하기 전에는 persistence나 event sourcing을 추가하지 않는다.
+Phase 8은 Phase 5/7 correctness를 처음 구현하는 단계가 아니라, 이미 구현한 lifecycle, dedup, durable delivery correctness를 race, restart, actual-device, production-like 조건에서 검증하고 최소 운영 계약을 갖추는 단계다. 기존 Alarm의 ACTIVE tracking은 V1 memory 기반과 restart-safe rebaseline을 유지하며, TASK-811이 실제 품질 문제를 입증하기 전에는 Alarm tracking persistence나 event sourcing을 추가하지 않는다. 별도 BoardingSession의 snapshot/checkpoint와 조건부 복구는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 후속 계약이며 이 Alarm 정책을 변경하지 않는다.
 
 ```text
 TASK-809 최소 CI는 지금부터 시작 가능

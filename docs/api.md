@@ -195,7 +195,7 @@ POST /api/v1/alarms/{alarmId}/deactivate
 DELETE /api/v1/alarms/{alarmId}
 ```
 
-현재 인증된 User가 소유한 Alarm을 삭제한다. 성공은 response body 없는 `204 No Content`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다. 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime과 공유 PK BusAlarmTarget을 함께 제거한다. 현재 초기 physical model에서는 종속 NotificationHistory도 함께 제거되며, Phase 7 NotificationEvent/Delivery의 정확한 lifecycle은 TASK-707에서 결정한다. 구체적인 scheduler coordination은 후속 Task에서 결정한다.
+현재 인증된 User가 소유한 Alarm을 삭제한다. 성공은 response body 없는 `204 No Content`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다. 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime과 공유 PK BusAlarmTarget을 함께 제거한다. TASK-707에서 확정한 대로 NotificationEvent/Delivery와 원본 Alarm ID는 보존하고 PENDING만 FAILED/DISPATCH_NOT_ALLOWED로 종료한다. terminal/실제 attempt 결과는 보존하며 진행·접수 중 FCM 회수는 보장하지 않는다. [삭제 transaction](architecture.md#alarm-삭제-transaction-task-707)을 따른다.
 
 ### Alarm response
 
@@ -358,7 +358,100 @@ Push payload는 navigation hint 수준의 최소 정보만 포함한다.
 }
 ```
 
-`userId`, Auth Token, push registration identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체는 포함하지 않는다. Payload는 권한 근거가 아니며 Flutter는 Auth Session initialization 뒤 `alarmId` navigation entry를 사용해 Backend Alarm detail API에서 ownership과 current state를 다시 확인한다. 삭제되었거나 접근할 수 없는 Alarm은 stale notification으로 정상 처리한다. TASK-704 Client는 위 string field와 `ONE_STOP_BEFORE` / `ARRIVED` / `PASSED` / `ONE_STOP_AFTER` eventType을 검증한다. Provider payload 생성은 TASK-705/706의 후속 구현이다. initial/opened tap은 중복을 제거하고 로그인 전 대기하며, foreground 안내의 상세 action도 현재 Auth Session에 묶는다.
+`userId`, Auth Token, push registration identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체는 포함하지 않는다. Payload는 권한 근거가 아니며 Flutter는 Auth Session initialization 뒤 `alarmId` navigation entry를 사용해 Backend Alarm detail API에서 ownership과 current state를 다시 확인한다. 삭제되었거나 접근할 수 없는 Alarm은 stale notification으로 정상 처리한다. TASK-704 Client는 위 string field와 `ONE_STOP_BEFORE` / `ARRIVED` / `PASSED` / `ONE_STOP_AFTER` eventType을 검증한다. 기존 Alarm payload 생성/전달은 TASK-705/706에서 구현했으며 세션 source는 아래 후속 계약으로 확장한다. initial/opened tap은 중복을 제거하고 로그인 전 대기하며, foreground 안내의 상세 action도 현재 Auth Session에 묶는다.
+
+### 탑승 세션 API (TASK-903)
+
+다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 **미구현 계약**이다. TASK-904/905/907에서 구현하며 기존 Alarm API/DTO를 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
+
+#### 후보 조회
+
+```http
+GET /api/v1/bus-routes/{routeId}/boarding-candidates?targetStopOccurrenceId={id}&boardingStopOccurrenceId={optionalId}
+```
+
+routeId/occurrence ID는 기존 선택 API의 양의 내부 ID다. 목적 occurrence는 필수이며 같은 Route 소속이어야 한다. 승차 occurrence는 선택이며 후보 정렬 보조 용도다. 후보 조회는 session/Alarm/Event를 만들지 않는다. 목적지는 후보 조회 문맥에 포함하므로 화면 흐름에서 번호 확인과 목적 선택 순서를 바꾸더라도 확정 전 이 문맥의 후보 검증이 필요하다.
+
+정상 200 response는 `observedAt`, `providerDataTime`(nullable), `candidateSetStatus`(AVAILABLE/EMPTY/PARTIAL), `candidates`를 갖는다. 각 항목은 `candidateRef`, 전체 `vehicleNumber`, `confirmationStatus`(AVAILABLE/HELD), `reasonCode`(nullable), 검증된 진행 설명/occurrence 간격(nullable), 준비 추적 지원 여부·보류 사유를 제공한다. 세부 추천 순서는 ADR-011을 따른다. partial은 item/detail 검증의 불확실 범위를 드러내고 유일성을 주장하지 않는다. 전체 목록 실패/불완전은 정상 empty/AVAILABLE로 반환하지 않는다.
+
+candidateRef는 User·Route·target/optional boarding occurrence·차량 ID/번호 대응·구조 fingerprint·원래 관측 시각에 묶인 opaque reference다. index/번호만으로 대체하지 않는다. 임시 reference의 재시작/eviction/원래 관측 freshness 만료는 재조회 사유다. 검증 불가 항목을 정상 확정 대상으로 표시하지 않으며, 전체 번호를 실제 차량과 대조할 수 없으면 미확정으로 남는다.
+
+#### 차량 확정과 즉시 추적
+
+```http
+POST /api/v1/boarding-sessions
+Content-Type: application/json
+```
+
+```json
+{
+  "clientRequestId": "8be1dffa-8e2c-4547-b136-d99bfd84e45c",
+  "candidateRef": "opaque-reference",
+  "confirmedVehicleNumber": "화면의 전체 차량번호"
+}
+```
+
+Client는 사용자의 실제 번호 대조·명시적 확정 뒤 요청을 보낸다. confirmedVehicleNumber는 대조한 전체 값이며 끝 네 자리로 축약하거나 Provider ID를 보내지 않는다. Backend는 reference의 원래 target 문맥과 최신 차량 조회·metadata·운행 연속성을 검증한다. 성공은 201 Created와 Session response이며 status=TRACKING, 최초 checkpoint·expiresAt을 저장하고 즉시 추적한다. 별도 Start API/CONFIRMED 상태가 없다. 현재 이미 목적지/이후이거나 목적지가 앞인지 불명확하거나 지원 검증을 통과하지 못하면 새 세션 없이 거부한다.
+
+같은 User/clientRequestId와 동일 원래 요청은 200으로 원래 Session의 **현재 상태**를 반환하며 baseline·기한·Event를 초기화하지 않는다. fingerprint 비교는 candidateRef와 대조 번호 등 원래 body의 canonical 값으로 수행한다. 중복 확인은 ephemeral reference 조회보다 먼저 DB에서 수행해 성공 응답 유실 후 reference 만료/restart에도 복구한다. 같은 key의 다른 내용은 409다. 다른 요청으로 미종료 세션이 이미 있으면 자동 대체하지 않고 409다.
+
+화면 순위 변경·일관된 차량 진행만으로 다른 차량을 고르지 않는다. ID/번호 대응·target 의미·관련 구조 변경/소실/충돌이면 재확인 요구다. Client는 timeout 시 원래 UUID/body와 원래 Auth Session으로만 재전송한다. 계정 전환 뒤 새 JWT로 이전 요청을 재작성하지 않는다.
+
+#### 세션 조회와 응답 유실 복구
+
+```http
+GET /api/v1/boarding-sessions/{sessionId}
+GET /api/v1/boarding-sessions?scope=current
+GET /api/v1/boarding-sessions?clientRequestId={uuid}
+```
+
+상세는 소유한 terminal 세션도 200으로 반환한다. 부재/다른 owner는 동일 404다. scope=current는 TRACKING/SUSPENDED의 0..1개 array, clientRequestId 조회는 terminal 포함 0..1개 array를 200으로 반환한다. 두 query는 동시 지정하지 않는다. 재시작 후 local session ID를 잃었거나 생성 응답이 유실되어도 이 조회로 복구한다.
+
+Session response는 `id`, `status`, `revision`, `routeNumber`, `vehicleNumber`, `targetName`, `targetOrder`, `remainingOccurrenceGap`(nullable), `checkpointObservedAt`, `providerDataTime`(nullable), `evaluationStatus`(READY/RECOVERY_PENDING/HELD/ENDED), `reasonCode`(nullable), `expiresAt`, `endedAt`(nullable)를 제공한다. gap은 Provider 진행 기준의 occurrence edge 수이며 실제 정차 수·정확한 현 위치·거리/ETA가 아니다. 복구 전에는 cached gap을 현재 값처럼 반환하지 않고 null과 RECOVERY_PENDING을 표시한다. raw Provider ID/전체 traversal/fingerprint/gate 내부 값/FID는 노출하지 않는다.
+
+#### 동일 차량 재확인과 취소
+
+```http
+POST /api/v1/boarding-sessions/{sessionId}/reconfirm
+POST /api/v1/boarding-sessions/{sessionId}/cancel
+```
+
+reconfirm body는 `expectedRevision`, 최신 `candidateRef`, `confirmedVehicleNumber`다. SUSPENDED인 동일 ID/번호·Route·목적지의 최신 검증 성공 시 200 TRACKING으로 즉시 재개한다. 다른 차량·목적지를 이 endpoint로 변경하지 않는다. 원래 expiresAt과 준비 Event 소비는 유지하고 불확실 공백과 연결하지 않는 checkpoint를 저장한다. 별도 Start 호출은 없다.
+
+cancel body는 `expectedRevision`이다. current revision이 일치하는 미종료 세션을 CANCELLED로 만들고 관련 PENDING 종료를 원자 반영한 뒤 200 Session response를 반환한다. 이미 CANCELLED/COMPLETED/EXPIRED이면 무변경 현재 response를 반환하며 실제 취소된 것으로 위장하지 않는다. 그 외 revision 불일치는 409다. reconfirm의 응답 유실 후 stale revision도 409+GET으로 현재 상태를 복구하며 재요청이 baseline/Event를 다시 초기화하지 않는다. 소유권 검증은 모든 상태보다 먼저 적용한다.
+
+#### 세션 오류
+
+기존 code/message 두 필드 형식과 JWT 401을 유지한다. 아래는 후속 추가 계약이며 error message는 안전한 고정 영문 문구로 제공하고 Provider 원문·다른 User 상태를 노출하지 않는다.
+
+| Code | HTTP | 의미 |
+| --- | --- | --- |
+| INVALID_REQUEST | 400 | ID/UUID/body/지원하지 않는 query 조합 오류 |
+| BUS_ROUTE_NOT_FOUND / TARGET_STOP_OCCURRENCE_NOT_FOUND | 404 | current metadata 부재. 기존 코드 재사용 |
+| BOARDING_SESSION_NOT_FOUND | 404 | 부재 또는 다른 owner |
+| BOARDING_CANDIDATE_CHANGED | 409 | reference 소실/만료, ID/번호·metadata 문맥 변경/충돌 |
+| BOARDING_SESSION_CONFLICT | 409 | 다른 미종료 세션 존재 |
+| BOARDING_REQUEST_CONFLICT | 409 | 동일 생성 요청 UUID의 다른 내용 |
+| BOARDING_REVISION_CONFLICT | 409 | 오래된 mutation revision |
+| BOARDING_TARGET_NOT_AHEAD | 409 | 목적지를 앞이라고 검증할 수 없음 |
+| BOARDING_TRACKING_UNSUPPORTED | 409 | 요청한 하차 추적의 Provider/위치 근거 미지원 |
+| BOARDING_RECONFIRM_REQUIRED | 409 | 재확인 가능한 같은 차량·목적/상태 조건 불충족 |
+| TRANSIT_TEMPORARILY_UNAVAILABLE | 503 | Provider/transport/protocol/전체 목록 불완전. 정상 empty와 구분 |
+
+#### 탑승 세션 Push와 tap
+
+TASK-906/907의 후속 payload는 아래처럼 기존 ALARM_EVENT와 구분한다. 기존 payload의 alarmId·네 Event Type을 변경하지 않고 세션 payload에는 alarmId를 넣지 않는다.
+
+```json
+{
+  "type": "BOARDING_SESSION_EVENT",
+  "boardingSessionId": "123",
+  "eventType": "PREPARE_ALIGHT",
+  "notificationEventId": "456"
+}
+```
+
+모두 string navigation hint이며 userId·Auth Token·FID·Provider external ID·GPS·내부 revision을 포함하지 않는다. 준비 문구는 정확한 정차 수를 단정하지 않는다. initial/opened/foreground 모두 현재 Auth Session에 묶고 tap 후 소유 Session 상세로 상태·수명·evaluationStatus를 재검증한다. 종료·취소·만료·접근 불가는 정상 stale 안내이며 추적을 재개하지 않는다. 기존 Device owner/generation·registration·FCM 결과·retry 의미는 보존한다. OS 표시 exactly-once·접수된 알림 회수·도착 전 표시를 보장하지 않는다.
 
 ## 5. 오류 형식
 

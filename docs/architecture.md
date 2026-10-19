@@ -157,7 +157,7 @@ TASK-503은 Spring `RestClient`와 JDK HTTP client로 TAGO `getRouteAcctoBusLcLi
 
 TASK-902의 후보 생성·추천과 사용자 번호 확인 경계는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. 후속 후보 orchestration은 기존 Transit Client/DTO와 DB metadata를 사용해 검증된 식별·표시 대응과 진행 근거를 제공하고, Flutter는 번호 대조·사용자 명시적 확정을 담당한다. 현재 서울 Mapper가 plainNo를 보존하지 않고 요청/응답 ID·roster/detail 번호 결합 검증도 완성되지 않았으므로 기존 Observation 또는 Alarm Evaluator 결과만으로 후보를 완성하지 않는다. 필요한 최소 보강은 TASK-903 계약에 따라 TASK-904/905에서 구현한다.
 
-후보 조회는 기존 Alarm lifecycle·Evaluation·Notification 결정을 변경하지 않는다. 정상 응답의 최신 가용 데이터 수용과 물리 위치 시각 보장은 구분하며, 원본 시각 부재만으로 TAGO 추천을 차단하지 않는다. 기존 Polling/Freshness·timeout/retry 설정을 유지하고, 요청 공유 가능성을 활용하되 후보 전용 캐시·스케줄러·인프라나 세션 Schema를 선행 도입하지 않는다. 이 문단은 채택된 설계의 실행 경계이며 후보 API/Flutter 구현 완료를 뜻하지 않는다.
+후보 조회는 기존 Alarm lifecycle·Evaluation·Notification 결정을 변경하지 않는다. 정상 응답의 최신 가용 데이터 수용과 물리 위치 시각 보장은 구분하며, 원본 시각 부재만으로 TAGO 추천을 차단하지 않는다. 기존 Polling/Freshness·timeout/retry 설정을 유지한다. TASK-902에서 선행 확정하지 않았던 세션·후보 reference의 후속 경계는 아래 TASK-903 계약을 따른다. 후보 API/Flutter 구현 완료를 뜻하지 않는다.
 
 Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync에서 받아 StopBell DB의 현재 상태로 보관한다. 경기 GBIS route/routeStation bulk는 전체 TAGO traversal이 검증된 Route의 destination 표시값만 보강하며 Provider identity와 realtime routing은 TAGO를 유지한다. 사용자 Route/Stop 조회와 Alarm 생성은 DB metadata를 사용하고, Alarm 생성 시 필요한 값은 `BusAlarmTarget` snapshot으로 복사한다. Alarm target은 metadata Entity를 FK로 장기 참조하지 않으므로 subsequent sync가 기존 Alarm을 변경하지 않는다.
 
@@ -271,6 +271,69 @@ TASK-709는 `DurableNotificationAttemptHandler`로 아래 계약을 구현했다
 Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Event write lock을 나중에 추가해 TASK-708의 Alarm → Event → Device와 반대 순서를 만들지 않는다. Event는 불변 owner/evidence source로 읽으며 TASK-707의 dispatch 종료/삭제는 Delivery lock과 조율하고 일관된 lock 순서를 검증해야 한다. 신규 fan-out의 아직 commit되지 않은 Delivery는 worker에 보이지 않는다. Device mutation은 Device lock만 사용한다. 삭제 transaction/FK는 위 TASK-707 계약을 따르며 범용 cancellation system은 추가하지 않는다.
 
 단일 worker는 진행 중 request와 별도 expiry sweep을 겹치게 하지 않는다. 후보 조회가 exclusion/lease는 아니므로 multiple worker 안전성을 보장하지 않는다. 전송 직전 검증 이후 registration 변경 경쟁, accepted 뒤 result commit 전 crash의 duplicate, 내부 retry의 wire count와 외부 접수 복원 한계는 [ADR crash/restart 계약](adr/ADR-010-notification-device-and-durable-delivery.md#crashrestart와-safety-경계)을 따른다. 다음 cycle/restart도 terminal을 PENDING으로 reset하거나 과거 recipient를 확장하지 않는다.
+
+### 탑승 세션 실행과 Notification 연계 (TASK-903)
+
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 후속 구현 계약이다. 현재 코드·Schema가 이미 이를 지원한다는 뜻이 아니다. Domain·복구 판정은 [BoardingSession](domain-model.md#boardingsession), 필드·제약·조회는 [Database](database.md#phase-9-boarding-persistence-contract-task-903), HTTP는 [API](api.md#탑승-세션-api-task-903)가 소유한다.
+
+#### 확정과 평가 transaction
+
+후보 생성은 기존 Transit Client/raw DTO와 DB metadata를 사용하며 Alarm Evaluator로 후보를 완성하지 않는다. opaque candidateRef는 인증 User·Route·목적/선택적 승차 occurrence·ID/전체 번호·관측 시각·구조 fingerprint의 임시 snapshot에 연결한다. 단일 프로세스의 제한된 메모리 reference이며 새 cache 인프라/table은 없다. 원래 관측의 기존 freshness를 벗어나거나 eviction/restart로 잃으면 재조회한다. 캐시 재표시로 observedAt을 갱신하지 않는다. 후보 목록 전체 detail 선조회·별도 polling 주기·무제한 cache를 도입하지 않는다.
+
+확정/재확인은 Provider I/O 전에 일관된 metadata snapshot을 읽고 I/O는 DB transaction·lock 밖에서 수행한다. 결과 반영의 짧은 transaction은 새 current metadata 구조를 일관되게 다시 읽어 fingerprint를 비교한다. 계산은 고정 session snapshot만 사용하고 버전을 섞지 않는다. 공유 Route Lock이나 기존 Sync 변경은 없으므로 비교 뒤 sync commit까지 차단하는 전역 최신성 보장은 아니다. 이후 구조 변경을 발견하면 보류하고 목적지·snapshot을 자동 교체하지 않는다.
+
+생성은 User PESSIMISTIC_WRITE 뒤 중복 요청·미종료 세션을 current read로 확인하고 Session을 저장한다. 기존 세션의 API mutation/평가/복구는 Session PESSIMISTIC_WRITE로 원래 status/revision·차량·수명·checkpoint를 다시 검증한다. checkpoint·상태·필요한 Event·최초 recipient Delivery를 한 transaction으로 commit한다. 알려진 UNIQUE 충돌·commit 응답 유실은 전체 rollback/새 persistence context에서 원래 요청/후보로 제한 재확인하며 blind upsert·Event만 별도 commit은 금지한다. commit 확인 전 memory next-state나 전송 gate를 열지 않는다.
+
+후속 polling은 기존 Route 요청 공유 개념과 selected 차량 detail 합집합을 활용하되 기존 Alarm의 다중 차량 선택·baseline·lifecycle을 세션에 복제하지 않는다. 세션 snapshot/checkpoint는 전체 raw history나 event sourcing이 아니다.
+
+#### Boarding 초기 설정과 만료
+
+| 설정 | 초기값 | 계약 |
+| --- | --- | --- |
+| `boarding.session.max-lifetime` | `PT4H` | 생성 시 createdAt + 수명으로 expiresAt 고정. polling/복구/재확인으로 연장 없음 |
+| `boarding.recovery.max-observation-gap` | `PT2M` | 마지막 검증 observedAt→새 observedAt의 공백 상한. 초과하면 재확인 필요 |
+| `notification.decision.ttl.prepare-alight` | `PT30S` | 최초 후보의 originalObservedAt 기준. 기존 Alarm TTL과 독립 |
+
+양수·유한·UTC microsecond 표현과 overflow를 검증한다. 정확도·회차 불가능성·도착 전 표시의 실측 기준이 아닌 조정 가능한 운영 초기값이다. 세션 수명은 방치 추적/점유를 제한하고, 복구값은 여러 기존 polling 기회를 포함한 짧은 중단을 허용하며, 준비 TTL은 늦은 queue/retry 안내를 제한한다. 기존 20초 polling·60초 Observation freshness·Alarm TTL·FOLLOW_UP 5분을 변경하지 않는다. 설정 변경으로 이미 저장한 Session/Delivery 기한을 늘리지 않는다. 기존 세션의 복구 판단은 현재 승인 설정으로 수행하며 시간값만으로 운행 연속성을 보장하지 않는다.
+
+PREPARE_ALIGHT의 기한 E는 `min(originalObservedAt + TTL, session.expiresAt)`이다. 신규 결정은 Session lock 아래 current 유효성·Event 부재 확인 후 INSERT 직전 `now < E`를 요구한다. `now >= E`면 Event·Delivery·소비 표식 없이 반환하고 checkpoint/필요 상태만 반영할 수 있다. 같은 오래된 후보를 now로 바꾸지 않으며 이후 새 유효 관측으로 다시 판단한다. Event INSERT 시점 검증이며 미래 commit 완료 시각을 예측하는 보장은 아니다. 유효하게 INSERT한 뒤 commit 지연으로 기한이 지나면 이미 정해진 Event는 보존하고 worker가 만료 정리한다.
+
+Event 저장이 가능한 경우 eligible Device를 ID 순서 current lock으로 고정하고 기존 ownership generation을 복사해 Delivery를 만든다. 0 recipients도 유효 Event를 소비한다. 저장 후 만료·실패로 Event를 삭제하거나 recipient를 추가하지 않는다. Session 만료는 EXPIRED 전환과 PENDING 종료를 같은 transaction으로 처리한다. Delivery 기한도 Session 기한으로 cap되어 만료 session의 새 FCM 호출을 허용하지 않는다. Delivery의 실제 시간 만료는 EXPIRED, 기한 전 취소·연속성 상실·목적지 도달에 따른 명시 종료는 FAILED/DISPATCH_NOT_ALLOWED이며 terminal과 실제 attempt/result는 보존한다.
+
+#### Notification source와 전송 모델 확장
+
+현재 `NotificationDispatchTarget`·`NotificationSendRequest`는 primitive alarmId와 TransitEventType을 필수로 받고 FCM payload도 ALARM_EVENT로 고정한다. TASK-906은 두 source만 갖는 작은 typed source hint로 최소 확장한다. 공통 FID/Event ID/expiresAt 및 DispatchTarget의 Delivery/Device/owner/generation/revision 정보는 유지한다.
+
+| source hint | 필수값 | 금지값 |
+| --- | --- | --- |
+| ALARM | 양수 alarmId, 기존 TransitEventType | boardingSessionId/boardingEventType |
+| BOARDING_SESSION | 양수 boardingSessionId, PREPARE_ALIGHT | alarmId/TransitEventType |
+
+공통 constructor/validation·`request()`·payload builder는 이 두 분기만 지원하며 가짜 alarmId, 0 sentinel, 범용 plugin/provider framework를 추가하지 않는다. DispatchTarget의 세션 attempt에는 전송 검증 당시 current Session revision을 담고 gate 재검증에 사용한다. 이는 Event의 불변 identity나 SendRequest의 공개 payload가 아니다. 기존 Alarm constructor 의미·네 type·ALARM_EVENT payload를 보존한다. Notification DB source 분기는 [Schema](database.md#notification-source-확장-task-906-구현-예정), payload는 [API](api.md#탑승-세션-push와-tap)가 소유한다.
+
+#### 복구 gate와 Worker 공정성
+
+단일 Backend·단일 non-overlapping Worker가 전제다. 메모리 gate는 세션별 `{sessionId, validatedRevision, validatedObservedAt}`의 현재 프로세스 허용 근거이며 기본은 차단이다. Session 생성/복구의 DB commit 확인 후만 열고, 재시작 시 이전 허용 근거를 복원하지 않는다. 오래된 revision의 after-commit 결과가 새 취소/보류를 덮어 열지 못하게 한다. gate는 영속 Source of Truth·claim/lease가 아니며 여러 Backend의 dispatch 안전성을 제공하지 않는다.
+
+후속 Worker cycle은 기존 batch-size를 각 bounded 조회의 상한으로 사용하고 다음 순서로 실행한다. 별도 worker/thread/queue는 없다.
+
+1. **만료 정리:** 모든 source의 expired PENDING을 gate와 무관하게 제한 조회해 EXPIRED로 종료. CONFIGURATION 차단 중에도 실행한다.
+2. **Alarm 조회/전달:** ALARM due 조회는 기존 순서·자격·bounded 예산을 유지한다. 세션 대기/세션 만료 row가 이 LIMIT을 점유하지 않는다.
+3. **세션 조회/전달:** current 프로세스의 허용 session ID 집합과 current DB 상태를 predicate에 적용한 due 조회다. 미복구/보류 세션을 LIMIT **이전**에 제외하고 nextAttemptAt/id 순서로 제한한다. 조회 후 메모리 filtering만으로 batch 공정성을 구현하지 않는다.
+
+각 cycle은 세 조회에 실행 기회를 주며 Alarm을 우선 처리한다. ready set이 비었어도 만료·Alarm 조회는 수행한다. 세션 대기 때문에 PENDING 예약/attempt/TTL을 변경하거나 루프에서 기다리지 않는다. 추가 실제 FCM I/O의 전체 처리시간이 0이라는 보장은 아니며 예산·SQL/EXPLAIN과 backlog 공정성은 TASK-906에서 검증한다.
+
+#### 복구 후에도 적용하는 Session dispatch 검증
+
+세션 source의 `beginAttempt`는 immutable Event source로 Session ID를 식별한 뒤 **Session → Delivery → Device** 순서로 current write lock을 얻는다. 기존 Alarm 경로는 **Delivery → Device**를 유지하며 뒤에 Session/Alarm lock을 추가하지 않는다. 세션 결정/취소도 Session을 먼저 잠그며 result transaction은 기존 Delivery → Device만 사용한다.
+
+Session source는 expiry를 우선 처리한 뒤 current status=TRACKING, 미만료, Event owner/Session owner 일치, 현재 검증 가능한 목적지 이전 진행, gate와 current Session revision 일치, checkpoint freshness, 원래 Event/Delivery 기한을 검증한다. gate 미준비·일시 보류는 attempt 증가 없이 대기한다. 취소/완료/회복 불가 사유는 lifecycle transaction에서 pending을 명시 종료하며 만료는 gate 없이 처리한다. 정상 polling으로 revision이 증가한 경우 새 검증 commit의 gate를 사용한다. **Event 생성 당시 revision과 현재 revision이 같아야 한다는 조건은 두지 않는다.** Event 기한·identity를 새 revision으로 갱신하지 않는다.
+
+그 뒤 기존 recipient preflight와 durable attempt 시작을 commit하고 모든 DB lock을 해제한 뒤 FCM을 호출한다. 실제 호출 직전에도 gate의 attempt revision·관측 유효성·기한을 확인한다. 시작 commit 후 gate가 닫혀 호출을 생략하면 이미 소비한 count를 되돌리거나 가짜 Provider 결과를 만들지 않고 기존 bounded recovery/종료 경로로 처리한다. 복구 검증은 전송 권한의 영구 허가가 아니다.
+
+세션 취소·만료·목적지 도달·연속성 상실은 gate를 차단하고 pending을 원자 종료하며 늦은 결과로 되살리지 않는다. gate 사전 차단 뒤 DB rollback이면 보수적으로 다음 재검증까지 닫힌 상태를 유지할 수 있다. 마지막 검증 직후 상태 변경과 이미 시작/접수된 외부 요청 사이 경쟁·회수 불가는 기존 한계다. DB 장애/commit 불확실 중에는 gate를 열거나 새 외부 요청을 시작하지 않는다.
+
+TASK-905는 checkpoint/복구와 lifecycle 판단을, TASK-906은 위 atomic Notification 연결·source·gate·fair query·전송 검증을 구현한다. TASK-906 완료 전 하차 Event/FCM을 지원 완료로 취급하지 않는다.
 
 ### common
 

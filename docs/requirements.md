@@ -119,7 +119,21 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 - 조회 시각·선택적 제공시각, 확인 가능한 진행 정보와 불확실 사유를 구분해 표시한다. 정상 후보 없음과 Provider 실패를 혼동하지 않으며 사용자가 잘못 확인한 실제 탑승 사실을 자동 검출한다고 보장하지 않는다.
 - 단말 GPS·위치 권한·Provider GPS 좌표에 의존하지 않는다. 재조회로 확정 차량을 바꾸지 않으며, 소실·식별 연속성 상실 때 다른 차량에 자동 연결하지 않는다.
 
-추천 알고리즘·Provider별 지원 범위·정상/예외 사례와 결정 근거는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. Polling과 Observation Freshness는 별개이며 기존 설정과 기존 도착 알림의 기능·판정·상태 전이는 유지한다. 탑승 세션·하차 시점·API/DB 계약은 TASK-903에서 결정한다.
+추천 알고리즘·Provider별 지원 범위·정상/예외 사례와 결정 근거는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. Polling과 Observation Freshness는 별개이며 기존 설정과 기존 도착 알림의 기능·판정·상태 전이는 유지한다. 후속 세션 계약은 아래 TASK-903 설계를 따른다.
+
+### Phase 9 탑승 세션과 하차 준비 알림
+
+TASK-903에서 승인한 후속 구현 요구사항이다. [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 설계 완료는 Backend/Flutter·DB 구현이나 실측 지원 완료를 의미하지 않는다.
+
+- 전체 차량번호를 확인한 확정 요청에서 최신 차량·운행·목적 occurrence를 검증하고 성공 시 즉시 추적한다. CONFIRMED 상태, 별도 Start API/버튼은 없다. 실패 시 세션을 만들지 않는다.
+- User당 미종료 세션은 하나이며 확정 차량만 추적한다. 다른 차량·노선·목적지로 자동 전환하지 않는다. 후보 조회나 화면 선택 자체는 추적을 시작하지 않는다.
+- 검증된 traversal에서 목적 occurrence까지의 간격 2에 준비 알림을 우선 결정하고, 놓쳤다면 간격 1에서 대체한다. 미정차·경유 지점도 간격에 포함하며 실제 정차 횟수·거리·남은 시간으로 표현하지 않는다. stopFlag=1은 준비 판단의 필수 조건이 아니다.
+- PREPARE_ALIGHT logical Event는 세션당 최대 한 번이다. 최초 저장 시 원래 관측 기반 TTL이 지났으면 Event·Delivery를 생성하지 않고 이후 새 유효 관측에서 다시 판단할 수 있다. 이미 저장된 Event의 실패·만료·recipient 없음은 새 알림 기회를 만들지 않는다.
+- 도착·이후 진행·회차·관측 누락을 구분한다. 근거가 부족하면 판단을 보류하고 놓친 준비 알림이나 실제 정차·사용자 하차 사실을 추측하지 않는다. 실제 하차 불가 지점을 정상 하차 대상으로 표현하지 않으며 접근·통과 목적과 구분한다.
+- 세션 snapshot과 마지막 검증 checkpoint를 보존하고, 새 관측과 조건부 자동 복구한다. 재시작이나 같은 ID만으로 동일 운행을 확정하지 않으며 소실·식별 변경·회차·공백으로 연속성이 불명확하면 보류·재확인한다.
+- 세션 알림은 복구 검증 전 전송을 차단한다. 복구 후에도 현재 Session 상태/revision과 Event 기한을 검증한다. 복구 대기 Delivery가 기존 Alarm의 조회 batch를 점유하지 않으며 만료 정리는 gate와 무관하게 수행한다. 메모리 gate는 단일 Backend만 지원한다.
+- 초기 세션 수명·복구 공백·준비 알림 TTL은 각각 PT4H/PT2M/PT30S이며 검증된 정확도 기준이 아닌 조정 가능한 운영값이다. 새 설정으로 기존 저장 기한을 늘리지 않는다. 정확한 설정·만료 실행은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
+- GPS 비의존, TAGO 정확한 하차 시점 지원 보류와 서울 조건부 지원을 유지한다. 기존 Alarm/Notification 계약을 보존하며 실제 구현은 TASK-904~907, 현장 검증은 TASK-908에 남긴다. 기존 도착 Alarm의 미정차 개선은 별도 후속 범위다.
 
 ### V1 Push Notification 계약
 
@@ -128,7 +142,7 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 - 동일 installation의 registration update는 monotonic revision 또는 동등한 계약으로 순서 역전된 stale update가 최신 push target을 덮어쓰지 못하게 한다. 같은 revision과 같은 registration의 재요청은 idempotent하게 처리할 수 있어야 한다.
 - 현재 installation logout은 해당 Device의 Push subscription disable/unregister를 시도하지만 Alarm lifecycle과 다른 Device는 변경하지 않는다. Auth logout은 Refresh Session 종료 책임을 유지하며 Device lifecycle은 별도 authenticated API 또는 동등한 명시적 흐름으로 처리한다. Offline logout에서 Backend Device disable을 즉시 보장하지 않는다.
 - 첫 Alarm activation 직전에 기능 맥락을 설명한 뒤 Notification permission을 요청하는 것을 기본 방향으로 한다. Permission이 거부되어도 Alarm 생성·활성화를 Backend에서 금지하지 않으며, 현재 Device가 Push를 받을 수 없다는 안내와 Settings 진입을 제공하고 app resume에서 상태를 재동기화할 수 있어야 한다.
-- Push payload는 navigation hint에 필요한 `type`, `alarmId`, `eventType`, `notificationEventId` 수준으로 제한한다. `userId`, Auth Token, push targeting identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체를 포함하지 않는다. Tap 뒤에는 Auth Session 초기화 후 Backend Alarm detail API로 소유권과 현재 상태를 다시 확인하며, 삭제되었거나 접근할 수 없는 Alarm은 정상적인 stale-notification UX로 처리한다.
+- 기존 Alarm Push payload는 navigation hint에 필요한 `type`, `alarmId`, `eventType`, `notificationEventId` 수준으로 제한한다. `userId`, Auth Token, push targeting identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체를 포함하지 않는다. Tap 뒤에는 Auth Session 초기화 후 Backend Alarm detail API로 소유권과 현재 상태를 다시 확인하며, 삭제되었거나 접근할 수 없는 Alarm은 정상적인 stale-notification UX로 처리한다. 별도 세션 source의 hint와 tap은 [세션 API 계약](api.md#탑승-세션-push와-tap)을 따른다.
 - Alarm lifecycle transaction은 current lifecycle/activation generation 검증, lifecycle transition, durable logical `NotificationEvent` 생성과 그 시점에 eligible한 Device별 Delivery 생성을 함께 처리한다. 유효 기한이면 PENDING이며 이미 만료된 경우 EXPIRED 기록을 남기고 늦은 알림을 전송하지 않는다. freshness는 원래 StopBell observedAt 기준이며 [TASK-709 계약](adr/ADR-010-notification-device-and-durable-delivery.md#freshness와-local-expiry)을 따른다. commit 뒤 단일 Spring Backend의 fixed-delay, non-overlapping worker는 due PENDING Delivery만 처리한다. 전송 직전 recipient Device의 current owner, ownership generation, enabled 상태, current push target/revision을 다시 확인하고 실제 attempt revision을 기록한다. FCM I/O는 이 transaction 안에서 수행하지 않으며 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다. claim/lease, `claimedAt`, `SENDING`, stale-claim recovery, multi-worker coordination은 V1 요구가 아니다.
 - eligible Device가 0개여도 `NotificationEvent`는 생성하고 Delivery는 0개로 둔다. 이를 Provider failure나 delivery success로 해석하거나 별도 status enum을 강제하지 않고 no-recipient operational log/metric으로 관찰한다.
 - Delivery lifecycle은 `PENDING`, `ACCEPTED`, `FAILED`, `EXPIRED`를 기본 방향으로 하며 retry는 `PENDING + attemptCount + nextAttemptAt + freshness`로 표현할 수 있다. Provider result는 `ACCEPTED`, `INVALID_TARGET`, `RETRYABLE`, `CONFIGURATION`, `PERMANENT_REQUEST`, `AMBIGUOUS_TIMEOUT`을 구분한다. `EXPIRED`는 local freshness 종료 의미이며 Provider accepted는 실제 사용자 표시 성공을 뜻하지 않는다.
@@ -157,7 +171,7 @@ Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고
 
 Phase 7은 stale activation/lifecycle 보호, logical Notification DB uniqueness, Event 시점의 multi-device recipient Delivery 생성, durable pending dispatch recovery, invalid registration의 조건부 정리, bounded retry state를 포함해야 한다. Phase 8 검증은 이 correctness를 대체하지 않는다.
 
-ACTIVE tracking은 V1에서 memory 기반 상태와 restart-safe rebaseline을 유지한다. restart 전후 Observation을 연결해 PASSED를 추론하지 않으며, TASK-811이 실제 품질 문제를 입증하기 전에는 tracking persistence나 event sourcing을 추가하지 않는다.
+기존 Alarm의 ACTIVE tracking은 V1에서 memory 기반 상태와 restart-safe rebaseline을 유지한다. restart 전후 Observation을 연결해 PASSED를 추론하지 않으며, TASK-811이 실제 품질 문제를 입증하기 전에는 Alarm tracking persistence나 event sourcing을 추가하지 않는다. 별도 BoardingSession의 최소 checkpoint 영속·조건부 복구는 TASK-903 계약이며 이 Alarm 정책을 변경하지 않는다.
 
 ### NFR-002 관측성
 

@@ -16,6 +16,7 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
     User
 
      ├── Alarm
+     ├── BoardingSession (TASK-903 후속 구현 계약)
      ├── RefreshToken
      └── Device
 
@@ -451,7 +452,81 @@ TASK-902에서 정의한 후보·화면 선택·사용자 확정은 서로 다�
 
 재조회는 확정 대상의 identity를 변경하지 않는다. 확정 차량 소실·식별 변경·회차/진행 모호성은 판단 보류·사용자 재확인 또는 종료의 입력이며 다른 차량으로 자동 전환·재연결하지 않는다. 기존 Alarm의 다중 차량 tracking cycle·FOLLOW_UP을 탑승 세션으로 간주하지 않는다.
 
-후보 생성·표시 정렬·보류 규칙과 지원 범위는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md), 사용자 보장은 [요구사항](requirements.md#phase-9-탑승-차량-추천과-확인)을 따른다. 이 절은 세션 Entity/상태 enum·영속 필드·HTTP 계약을 추가하지 않으며 해당 설계는 TASK-903에 남긴다.
+후보 생성·표시 정렬·보류 규칙과 지원 범위는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md), 사용자 보장은 [요구사항](requirements.md#phase-9-탑승-차량-추천과-확인)을 따른다. 아래 BoardingSession은 TASK-903에서 확정한 후속 계약이며 후보·화면 선택과 추적 시작을 구분한다.
+
+# BoardingSession
+
+## Purpose and Identity
+
+사용자가 전체 번호를 대조한 특정 차량만 목적 occurrence까지 추적하는 독립 aggregate다. 기존 Alarm/BusAlarmTarget/ACTIVE/FOLLOW_UP을 세션으로 재사용하지 않는다. TASK-903 설계이며 아직 Entity·Migration·API 구현은 없다. 결정 근거는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
+
+소유자는 인증된 User다. TRACKING/SUSPENDED를 미종료로 보며 User당 최대 하나다. Provider·externalRouteId·vehicleTrackingId·전체 표시 번호·목적 occurrence는 한 세션 안에서 불변이다. TAGO vehicleno, 서울 vehId/plainNo 구분과 typed cityCode 문맥을 유지한다. 번호는 ID 누락·변경의 대체 identity가 아니다. 없는 direction/trip/lap 값을 만들지 않는다.
+
+## Lifecycle
+
+| 현재 상태 / 입력 | 다음 상태 / 의미 |
+| --- | --- |
+| 세션 없음 + 사용자 확정·최신 검증 성공 | TRACKING. 최초 checkpoint 저장과 즉시 추적, CONFIRMED/별도 Start 없음 |
+| 시작 검증 실패·목적지가 이미 현재/이후 | 새 세션 없음. 목적지가 아직 앞인지 불명확해도 시작 거부 |
+| TRACKING + 유효한 준비 Event | TRACKING 유지. 같은 차량만 계속 추적 |
+| TRACKING + 충분한 목적지 직접 도착 또는 같은 운행의 이후 진행 | COMPLETED. 종료 사유로 ARRIVAL_OBSERVED/PASSED_OBSERVED 구분 |
+| TRACKING + 실패·식별/진행 불확실 | SUSPENDED와 사유. 실패를 소실·운행 종료로 바꾸지 않음 |
+| SUSPENDED + 자동 재검증 성공 | 일시 실패 등 자동 복구 가능한 사유만 TRACKING |
+| SUSPENDED + 동일 차량의 사용자 재확인·최신 검증 성공 | TRACKING. 별도 Start 없이 재개, 과거 불확실 공백과 연결하지 않는 새 checkpoint |
+| 미종료 + 사용자 취소 / 수명 종료 | CANCELLED / EXPIRED. 추적·pending 전달 종료 |
+| terminal + 늦은 결과·재요청 | terminal 유지. 재시작·Device 변경·FCM 결과로 되살리지 않음 |
+
+COMPLETED는 사용자 실제 하차나 Push 성공을 뜻하지 않는다. 완료 뒤 별도 Arrival/PASSED Push를 자동 요구하지 않는다. TASK-903의 세션 Notification 종류는 PREPARE_ALIGHT이며 도착·이후 진행은 종료 근거다. 차량·목적지를 바꾸려면 기존 세션 취소 후 새 세션을 생성한다. 재확인도 수명·Event 소비 여부를 초기화하지 않는다.
+
+`revision`은 checkpoint·상태 반영 때 증가하는 의미 값이다. API 의도·조회 결과·복구 gate의 오래된 snapshot을 거부하며 Event identity가 아니다. 회차·소실 등의 연속성 상실 사유는 마지막 정상 checkpoint와 함께 보존해 재시작으로 잊지 않는다.
+
+| stateReason | 자동 복구 / 종료 의미 |
+| --- | --- |
+| TEMPORARY_PROVIDER_FAILURE / STALE_PROGRESS | 유효 관측을 자동 재조회. 공백 상한 안에서 다른 조건도 충족해야 재개 |
+| VEHICLE_MISSING / IDENTITY_CONFLICT / PROGRESS_REGRESSION / TRAVERSAL_AMBIGUOUS / CONTINUITY_GAP_EXCEEDED | 재확인 필요. 단순 재등장·번호 일치로 사유를 자동 제거하지 않음 |
+| METADATA_CHANGED | 구조 변경 보류. 기존 불변 snapshot과 다시 일치하지 않으면 취소 후 목적지를 새로 선택하며 자동 치환 없음 |
+| ARRIVAL_OBSERVED / PASSED_OBSERVED | COMPLETED 종료 사유 |
+| USER_CANCELLED / SESSION_LIFETIME_EXPIRED | CANCELLED / EXPIRED 종료 사유 |
+
+TRACKING의 stateReason은 NULL, SUSPENDED는 보류 사유, terminal은 해당 종료 사유를 갖는다. runtime RECOVERY_PENDING은 DB stateReason이 아니며 재시작만으로 모든 row를 갱신하지 않는다.
+
+## Snapshot and Progress
+
+세션은 일관되게 읽은 ordered traversal snapshot과 구조 fingerprint를 불변으로 가진다. 같은 Stop 재방문은 Stop ID와 order/문맥으로 구분하고 다음 lap을 자동 가정하지 않는다. 미정차·경유 occurrence를 배열에서 제거하지 않으며 metadata에 없는 지점을 합성하지 않는다.
+
+`remainingOccurrenceGap = targetIndex - progressIndex`다. raw order 차이, 실제 정차 수, 거리·ETA가 아니다. 진행 기준점의 의미·같은 traversal의 대응·시각·차량 연속성이 검증되어 목적지가 아직 앞일 때만 계산한다. nodeid 누락 시에도 ADR-011의 order 단독 대응 검증을 충족하면 활용할 수 있으나 정확한 Stop ID/정차 위치를 채워 넣지 않는다.
+
+현재 metadata fingerprint가 구조적으로 바뀌거나 대응이 모순되면 보류한다. 표시 이름만의 변경은 구조 변경이 아니다. snapshot을 자동 교체하지 않으며 공유 Route Lock 없이 commit 순간의 전역 최신성을 보장한다고 하지 않는다.
+
+## Preparation Decision
+
+같은 확정 차량·유효 세션·신선하고 일관된 진행·지원 검증을 전제로 간격 2에서 PREPARE_ALIGHT를 우선 선택하고, Event가 없으면 간격 1에서 대체한다. 초기 확정 또는 복구 직후의 새 유효 관측도 이 조건을 만족하면 가능하다. stopFlag=1은 필수가 아니지만 order 숫자 일치만으로 검증을 대체하지 않는다. 서울 이동 중 detail 의미는 검증된 범위만 사용하며 TAGO의 정확한 하차 판단은 검증 전까지 지원 보류다.
+
+간격 3→1은 현재 1로 판단할 수 있다. 목적지/이후로 jump하면 준비·도착 관측을 소급 생성하지 않는다. 이후 진행은 같은 운행의 충분한 이전/현재 근거가 있어야 하며 실제 무정차·사용자 하차 실패를 뜻하지 않는다. 직접 도착은 별도의 충분한 도착 근거를 요구한다. 근거가 없으면 단순 gap=0이나 order 증가만으로 완료하지 않는다.
+
+세션 Notification identity는 `(boardingSessionId, PREPARE_ALIGHT)`이며 revision·restart·재확인 횟수는 포함하지 않는다. 최초 Event INSERT 직전 원래 observedAt 기반 기한이 지났으면 Event·Delivery·소비 표식을 만들지 않는다. 검증된 checkpoint 갱신만 가능하며 이후 새 관측으로 재판단한다. 이미 존재하는 Event는 recipient 없음·전송 실패·만료 뒤에도 기회를 소비한 상태로 보존한다. prepareNotified boolean이나 별도 tracking cycle은 추가하지 않는다.
+
+## Recovery
+
+재시작만으로 DB 상태를 일괄 SUSPENDED로 바꾸지 않는다. 새 프로세스의 세션 전송 gate는 모두 차단하며 저장 checkpoint와 새 관측을 먼저 검증한다. 복구 전 과거 checkpoint 자체로 새 Event를 만들지 않는다.
+
+자동 복구는 미종료·미만료, ID/번호/Route 대응, 구조 fingerprint, 새 관측의 freshness·시각 일관성, 같은 traversal의 정지/단조 진행, 회차·reset·다른 lap 모호성 없음과 [복구 공백 설정](architecture.md#boarding-초기-설정과-만료)을 함께 요구한다. gap은 마지막 검증 observedAt부터 새 observedAt까지다. 과거 checkpoint는 현재 위치가 아닌 비교 기준이므로 기존 Observation freshness만으로 폐기하지 않되 복구 공백 상한은 지킨다.
+
+| 상황 | 복구 규칙 |
+| --- | --- |
+| 짧은 공백 + 동일 ID/번호 + 설명 가능한 같은 traversal 진행 | 사용자 조작 없이 자동 복구 가능. 물리 동일 운행의 절대 보장은 아님 |
+| 같은 occurrence 유지 | 정체 가능성 인정. 동일 제공시각/응답을 새 진행으로 세지 않음 |
+| 중간 occurrence 관측 누락 | 유일한 전진 경로로 설명 가능하면 허용. 관측하지 않은 정차·도착 추정 없음 |
+| 일시 HTTP/Provider 실패·stale | 자동 재조회 대기, empty/소실과 구분. 공백 상한을 넘기면 재확인 필요 |
+| 소실·ID/번호 불일치·역행·reset·다른 lap 모호성·공백 상한 초과 | 판단 보류·사용자 재확인. 이후 ID 재등장만으로 자동 해소하지 않음 |
+
+반복 Stop이 있다는 이유만으로 Route 전체를 차단하지 않으며 이번 관측 쌍의 occurrence를 구별하는지 판단한다. 알려진 회차 가능성을 시간 이내라는 이유로 무시하지 않는다. 실제 ID 안정성·이동 중 의미·복구 정확성과 시간값은 미검증이며 TASK-908에 남긴다.
+
+## Ownership and Notification Boundary
+
+다른 계정은 세션을 조회·취소·재확인할 수 없다. 계정 변경은 세션 owner를 이전하거나 자동 취소하지 않는다. 이전 세션 종료가 필요하면 해당 User로 취소하며 offline 즉시 반영은 보장하지 않는다. Flutter는 Auth generation으로 이전 요청·화면·tap을 분리하고 현재 계정으로 재조회한다.
+
+NotificationEvent owner·Device generation·Event 시점 recipient 고정은 기존과 같다. 세션 revision은 결정/전송의 current 검증 값이며 과거 Event를 새 revision의 Event로 복제하지 않는다. 기존 Alarm identity·만료된 Event 보존·Device/Delivery lifecycle은 아래 기존 계약을 유지한다. 세션 전용 TTL 예외와 전송 경계는 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903), Schema는 [Database](database.md#phase-9-boarding-persistence-contract-task-903)를 따른다.
 
 # Transit Evaluation 및 TransitEvent
 
@@ -585,6 +660,8 @@ TASK-708 평가기는 FOLLOW_UP memory가 없을 때 `followUpTrackingCycleId`�
 
 ## Conceptual Identity
 
+다음 네 값과 만료된 최초 Event 보존 규칙은 기존 ALARM source 계약이다. TASK-903의 BOARDING_SESSION source는 위 BoardingSession identity·TTL 예외를 적용하며, 필드 분기는 [후속 Notification Schema](database.md#notification-source-확장-task-906-구현-예정)를 따른다. 현재 구현은 아직 ALARM만 지원한다.
+
 ```text
 alarmId
 + activationGeneration
@@ -654,6 +731,8 @@ Alarm hard delete는 NotificationEvent/Delivery와 원본 alarmId/owner를 보�
 ------------------------------------------------------------------------
 
 # Domain Relationship Overview
+
+아래는 기존 Alarm 전달 관계다. 후속 BoardingSession은 같은 User에 속하는 별도 aggregate이며 PREPARE_ALIGHT source로 같은 NotificationEvent/Delivery 기반에 연결된다. Alarm의 자식이나 BusAlarmTarget이 아니다.
 
                      User
 
