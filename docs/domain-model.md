@@ -422,6 +422,8 @@ direct arrival evidence
 
 `observedAt`은 StopBell이 성공한 Provider response를 받은 직후의 시각이고 항상 존재한다. polling 시작 시각이 아니며, 같은 response에서 mapping한 차량은 같은 receive-time context를 공유한다. Java 표현은 UTC `Instant`이며 mapper의 test 가능한 `Clock`에서 한 response당 한 번 얻는다. `providerDataTime`은 Provider가 제공한 원본 data 시각이며 optional이다. 서울 `dataTm`의 `yyyyMMddHHmmss` 값은 조사 시각과 같은 `Asia/Seoul`로 명시 해석해 UTC `Instant`로 변환한다. 둘을 구분해야 반복·stale data를 판단할 수 있다. Provider가 data 시각을 주지 않으면 현재 수신 시각만으로 upstream freshness가 보장된다고 가정하지 않는다.
 
+TASK-902의 추천에서는 정상 호출한 응답을 조회 시점의 최신 가용 데이터로 수용한다. 이는 upstream freshness 또는 실제 물리 위치의 시각 일치를 보장한다는 의미가 아니며 위 시간 의미와 양립한다. `providerDataTime` 부재만으로 TAGO 추천을 보류하지 않는다. 명시적 stale/future·식별/진행 충돌 검증과 기존 Observation Freshness는 유지하며, Polling 간격을 Freshness로 대체하거나 재표시한 관측의 `observedAt`을 갱신하지 않는다.
+
 `directionContext`와 `sectionContext`는 Provider가 제공할 때 같은 Route traversal에서 Stop order를 비교할 수 있는지 판단하는 operational evidence다. Provider raw field 이름을 Domain contract로 노출하지 않고, 없는 방향·회차 정보를 추측하지 않는다. Stop order가 역행하거나 순환·회차·분기로 traversal이 모호하면 위치 관계는 `UNKNOWN`이다.
 
 현재 Observation에 `previousStopId`/`previousStopOrder`를 중복 저장하지 않는다. Evaluation은 같은 Alarm·Route·Vehicle tracking cycle의 이전 `TransitObservation`과 현재 값을 비교한다.
@@ -440,6 +442,16 @@ direct arrival evidence
 서울 Route 전체 조회는 차량 roster와 coarse 상태를 확인하는 용도이며 `sectOrd`, `sectionId`, `nextStId`만으로 target Stop occurrence를 확정하지 않는다. 필요한 서울 차량의 정확한 Stop observation은 vehicle detail의 `stId`/`stOrd`/`stopFlag`에서 만든다. 어떤 차량을 detail 조회할지는 Client가 아니라 polling/orchestration이 결정하며, `sectOrd == stOrd` 같은 관계를 만들지 않는다. TASK-503은 timeout/network, HTTP non-success, Provider logical error, decode/protocol error를 정상 empty와 구분해 전달하고, TASK-504는 정상 raw response만 이 Domain 계약으로 mapping한다.
 
 TAGO Arrival의 `arrprevstationcnt`와 `arrtime`은 Route/Stop 수준의 auxiliary evidence다. Vehicle identifier가 없으므로 특정 Location 차량의 direct arrival evidence로 채우지 않는다. `MOVING`은 “직접 도착 상태가 아님”이라는 뜻이며 target을 이미 통과했다는 뜻이 아니다. `UNAVAILABLE`은 `false`가 아니며 direct flag가 없거나 사용할 수 없음을 뜻한다.
+
+## 탑승 차량 추천과 확인
+
+TASK-902에서 정의한 후보·화면 선택·사용자 확정은 서로 다른 의미다. 사용자 확정은 실제 전체 차량번호 대조와 유효한 후보의 명시적 선택을 요구하며 후보 개수·간격·목록 순서로 대체하지 않는다. 승차 occurrence와의 간격은 차량 identity 또는 탑승 신뢰도를 구성하지 않는다. 사용자 확정은 물리적 탑승 사실을 시스템이 관측했다는 의미도 아니다.
+
+후보는 Provider/Route 문맥 안의 transient 차량 reference와 확인용 번호의 대응을 보존한다. TAGO는 vehicleno, 서울은 vehId와 plainNo의 구분을 유지하고 번호를 대체 ID로 합성하지 않는다. 위치 ID가 없다는 사실만으로 식별 가능한 후보를 버리지 않으며, 검증된 order 참고도 누락된 Stop ID나 정확한 정차 위치를 합성하지 않는다.
+
+재조회는 확정 대상의 identity를 변경하지 않는다. 확정 차량 소실·식별 변경·회차/진행 모호성은 판단 보류·사용자 재확인 또는 종료의 입력이며 다른 차량으로 자동 전환·재연결하지 않는다. 기존 Alarm의 다중 차량 tracking cycle·FOLLOW_UP을 탑승 세션으로 간주하지 않는다.
+
+후보 생성·표시 정렬·보류 규칙과 지원 범위는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md), 사용자 보장은 [요구사항](requirements.md#phase-9-탑승-차량-추천과-확인)을 따른다. 이 절은 세션 Entity/상태 enum·영속 필드·HTTP 계약을 추가하지 않으며 해당 설계는 TASK-903에 남긴다.
 
 # Transit Evaluation 및 TransitEvent
 

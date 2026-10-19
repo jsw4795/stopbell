@@ -109,6 +109,18 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 
 세부 Observation, Event 및 lifecycle 계약은 `adr/ADR-007-bus-alarm-transit-observation-and-event-semantics.md`를 따른다.
 
+### Phase 9 탑승 차량 추천과 확인
+
+다음은 TASK-902에서 확정한 후속 개발 요구사항이며 현재 Backend/Flutter에 구현된 기능을 뜻하지 않는다. 기존 정류장 도착 알림과 별도로 사용자가 실제 탄 버스를 확인하는 목적을 지원한다.
+
+- 핵심 UX는 확인할 후보의 전체 차량번호를 실제 차량 표시와 직접 대조하고 사용자가 명시적으로 확정하는 방식이다. 번호를 확인할 수 없으면 미확정으로 남길 수 있어야 한다. 후보가 한 대이거나 화면 첫 번째라는 이유로 자동 선택·확정하지 않는다.
+- 승차 정류장과의 간격은 화면 정렬 보조 정보로만 사용한다. 실제 탑승 가능성·신뢰도·확정의 직접 근거가 아니며, 승차 occurrence를 입력하지 않아도 번호 확인 경로를 제공한다.
+- 정상 호출한 Provider 응답은 해당 조회 시점의 최신 가용 데이터로 사용한다. TAGO 원본 생성시각 부재만으로 추천을 보류하지 않는다. 조회 시각과 실제 물리 위치의 일치는 보장하지 않으며, 식별 충돌·진행 모순·불완전 응답 등은 구분해 보류한다.
+- 조회 시각·선택적 제공시각, 확인 가능한 진행 정보와 불확실 사유를 구분해 표시한다. 정상 후보 없음과 Provider 실패를 혼동하지 않으며 사용자가 잘못 확인한 실제 탑승 사실을 자동 검출한다고 보장하지 않는다.
+- 단말 GPS·위치 권한·Provider GPS 좌표에 의존하지 않는다. 재조회로 확정 차량을 바꾸지 않으며, 소실·식별 연속성 상실 때 다른 차량에 자동 연결하지 않는다.
+
+추천 알고리즘·Provider별 지원 범위·정상/예외 사례와 결정 근거는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. Polling과 Observation Freshness는 별개이며 기존 설정과 기존 도착 알림의 기능·판정·상태 전이는 유지한다. 탑승 세션·하차 시점·API/DB 계약은 TASK-903에서 결정한다.
+
 ### V1 Push Notification 계약
 
 - StopBell Device identity는 Client가 앱 installation마다 생성한 `installationId`를 기준으로 하며 User-scoped identity가 아니다. 하나의 `installationId`에는 동시에 current owner가 최대 한 명이어야 하고, 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference로 분리하고 APNs device token은 StopBell Device identity로 사용하지 않는다. TASK-702에서 확정한 단일 Firebase Project의 현재 FID uniqueness 정책은 `database.md`의 devices Schema를 따른다.
