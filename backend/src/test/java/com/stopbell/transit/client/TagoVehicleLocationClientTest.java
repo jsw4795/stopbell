@@ -131,6 +131,24 @@ class TagoVehicleLocationClientTest {
         );
     }
 
+    @Test
+    @DisplayName("TAGO totalCount 누락은 정상 empty로 처리하지 않는다")
+    void missing_total_count_is_protocol_failure() {
+        expectRequest().andRespond(withSuccess("""
+                {"response":{"header":{"resultCode":"00"},"body":{"items":{"item":[]}}}}
+                """, MediaType.APPLICATION_JSON));
+        assertFailure(TransitProviderClientFailureKind.PROTOCOL, () -> client.fetchVehicleLocations(request()));
+    }
+
+    @Test
+    @DisplayName("TAGO 음수 totalCount는 정상 empty로 처리하지 않는다")
+    void negative_total_count_is_protocol_failure() {
+        expectRequest().andRespond(withSuccess("""
+                {"response":{"header":{"resultCode":"00"},"body":{"items":{"item":[]},"totalCount":-1}}}
+                """, MediaType.APPLICATION_JSON));
+        assertFailure(TransitProviderClientFailureKind.PROTOCOL, () -> client.fetchVehicleLocations(request()));
+    }
+
     private VehicleLocationRequest<TagoVehicleLocationRequestContext> request() {
         return new VehicleLocationRequest<>("GGB200000112", new TagoVehicleLocationRequestContext("31010"));
     }

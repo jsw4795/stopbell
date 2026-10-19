@@ -410,12 +410,13 @@ Future Consideration:
   - 선행 관계: TASK-901/902 완료 후 수행한다. 기존 Alarm/Transit 및 Phase 7 Notification 계약을 검토하며 TASK-904~907의 구현 기준이 된다.
   - 설계 결과: [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md). 번호 확정과 즉시 추적, occurrence 간격 2/1 및 세션당 PREPARE_ALIGHT 최대 1회, snapshot/checkpoint와 PT2M 조건부 자동 복구, PT4H 수명·PT30S 준비 TTL을 정의한다. Source 분기·복구 gate·LIMIT 이전 filtering과 Alarm 조회 예산·전송 시 current Session/revision 재검증·최초 저장 전 TTL 초과의 기회 미소비를 Owner 문서에 동기화한다. 신규 Schema/API/Worker는 후속 구현이며 이번 작업에서 코드·Migration·외부 호출·커밋은 수행하지 않는다.
 
-- [ ] TASK-904 탑승 차량 후보 조회 API 구현
+- [x] TASK-904 탑승 차량 후보 조회 API 구현
   - 목적: 사용자 확인과 추천에 필요한 차량 후보 및 근거를 인증된 Client에 제공한다.
   - 완료 기준:
     - TASK-902/903 계약에 따라 검증된 노선·운행 문맥의 후보, 확인 가능한 차량 표시 정보, 추천 근거·데이터 시점·식별 한계를 제공한다. Provider raw ID/표시 정보의 관계를 추측하지 않는다.
     - 후보 없음, 복수 후보, stale/부분 실패/Provider 실패를 구분하며 실패를 확정 가능한 정상 후보로 반환하지 않는다. 후보 조회 자체로 탑승 차량이나 세션을 자동 확정하지 않는다.
     - 인증/입력 검증, 추천 순서, 불확실 응답, GPS 비의존성과 기존 조회 기능 보존을 관련 API 검증으로 확인한다. 외부 조회는 기존 Provider client와 공유 가능한 조회 경로를 재사용하고 호출 증폭을 확인한다.
+  - 구현·검증 결과: JWT 후보 API, Provider별 번호/ID·시각·진행 검증, index 간격 정렬, bounded memory candidateRef와 AVAILABLE/EMPTY/PARTIAL·503 구분을 구현했다. 후보 관련 48개 및 TAGO count 보강 2개를 포함한 전체 Backend 504개 테스트를 실패·skip 없이 통과했다. 실제 Provider 호출, 세션/추적/Notification·Flutter 변경, Dependency·Migration 추가는 없으며 응답·호출량·reference 계약은 [API](api.md#후보-조회)를 따른다.
   - 선행 관계: TASK-901~903 완료 후 수행한다. TASK-905/907에서 실제 후보 확인 흐름을 연결한다.
 
 - [ ] TASK-905 특정 차량 추적 및 하차 시점 판단 구현

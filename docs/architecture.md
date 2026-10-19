@@ -155,9 +155,9 @@ TASK-503은 Spring `RestClient`와 JDK HTTP client로 TAGO `getRouteAcctoBusLcLi
 
 현재 TAGO realtime Client는 `pageNo=1`, `numOfRows=1000`을 명시하고 `totalCount`가 없거나 음수이거나 실제 item 수와 다르면 `PROTOCOL` 실패로 전달한다. 추가 페이지 수집 구현은 아니며, 성공 코드의 empty도 `totalCount=0`과 실제 0건이 일치해야 한다. 개수 검증을 item별 식별·진행 정보의 유효성 보장으로 확대하지 않는다.
 
-TASK-902의 후보 생성·추천과 사용자 번호 확인 경계는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. 후속 후보 orchestration은 기존 Transit Client/DTO와 DB metadata를 사용해 검증된 식별·표시 대응과 진행 근거를 제공하고, Flutter는 번호 대조·사용자 명시적 확정을 담당한다. 현재 서울 Mapper가 plainNo를 보존하지 않고 요청/응답 ID·roster/detail 번호 결합 검증도 완성되지 않았으므로 기존 Observation 또는 Alarm Evaluator 결과만으로 후보를 완성하지 않는다. 필요한 최소 보강은 TASK-903 계약에 따라 TASK-904/905에서 구현한다.
+TASK-902의 후보 생성·추천과 사용자 번호 확인 경계는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. TASK-904의 `BoardingCandidateService`는 기존 Transit Client/DTO와 DB metadata를 사용하며, 별도 `BoardingCandidateMapper`에서 서울 vehId/plainNo를 함께 보존하고 요청/응답 ID·roster/detail 번호 대응을 검증한다. 기존 Alarm용 Mapper/Observation/Evaluator는 변경하지 않는다. `BoardingCandidateMetadataService`는 read-only transaction에서 불변 traversal을 읽고 Provider I/O는 transaction 밖에서 수행한다. Flutter의 번호 대조·사용자 명시적 확정과 실제 세션 시작은 TASK-905/907에 남는다.
 
-후보 조회는 기존 Alarm lifecycle·Evaluation·Notification 결정을 변경하지 않는다. 정상 응답의 최신 가용 데이터 수용과 물리 위치 시각 보장은 구분하며, 원본 시각 부재만으로 TAGO 추천을 차단하지 않는다. 기존 Polling/Freshness·timeout/retry 설정을 유지한다. TASK-902에서 선행 확정하지 않았던 세션·후보 reference의 후속 경계는 아래 TASK-903 계약을 따른다. 후보 API/Flutter 구현 완료를 뜻하지 않는다.
+후보 조회는 기존 Alarm lifecycle·Evaluation·Notification 결정을 변경하지 않는다. 정상 응답의 최신 가용 데이터 수용과 물리 위치 시각 보장은 구분하며, 원본 시각 부재만으로 TAGO 추천을 차단하지 않는다. 기존 Polling/Freshness·timeout/retry 설정을 유지한다. 세션·후보 reference의 경계는 아래 TASK-903 계약을 따르며 후보 API 구현을 세션/Flutter 구현 완료로 취급하지 않는다.
 
 Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync에서 받아 StopBell DB의 현재 상태로 보관한다. 경기 GBIS route/routeStation bulk는 전체 TAGO traversal이 검증된 Route의 destination 표시값만 보강하며 Provider identity와 realtime routing은 TAGO를 유지한다. 사용자 Route/Stop 조회와 Alarm 생성은 DB metadata를 사용하고, Alarm 생성 시 필요한 값은 `BusAlarmTarget` snapshot으로 복사한다. Alarm target은 metadata Entity를 FK로 장기 참조하지 않으므로 subsequent sync가 기존 Alarm을 변경하지 않는다.
 
@@ -278,7 +278,7 @@ Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Eve
 
 #### 확정과 평가 transaction
 
-후보 생성은 기존 Transit Client/raw DTO와 DB metadata를 사용하며 Alarm Evaluator로 후보를 완성하지 않는다. opaque candidateRef는 인증 User·Route·목적/선택적 승차 occurrence·ID/전체 번호·관측 시각·구조 fingerprint의 임시 snapshot에 연결한다. 단일 프로세스의 제한된 메모리 reference이며 새 cache 인프라/table은 없다. 원래 관측의 기존 freshness를 벗어나거나 eviction/restart로 잃으면 재조회한다. 캐시 재표시로 observedAt을 갱신하지 않는다. 후보 목록 전체 detail 선조회·별도 polling 주기·무제한 cache를 도입하지 않는다.
+후보 생성은 기존 Transit Client/raw DTO와 DB metadata를 사용하며 Alarm Evaluator로 후보를 완성하지 않는다. opaque candidateRef는 인증 User·Route·목적/선택적 승차 occurrence·ID/전체 번호·관측 시각·구조 fingerprint의 임시 snapshot에 연결한다. 단일 프로세스의 제한된 메모리 reference이며 새 cache 인프라/table은 없다. 원래 관측의 기존 freshness를 벗어나거나 eviction/restart로 잃으면 재조회한다. 캐시 재표시로 observedAt을 갱신하지 않는다. 후보 목록 전체 detail의 무조건 선조회·별도 polling 주기·무제한 cache를 도입하지 않는다. TASK-904의 `BoardingCandidateReferenceStore`는 발급 순서 기준 최대 10,000개를 유지하며 동일 사용자/화면 문맥 재조회는 이전 reference를 교체한다. 구조 fingerprint에는 Provider/Route/typed cityCode와 ordered occurrence ID·external Stop ID·order를 포함하고 표시 이름은 제외한다. 서버 내부 resolve는 인증 User를 요구해 원래 문맥을 복원하며, 이미 가진 전체 문맥과의 일치 검증도 제공한다. 최신 차량·metadata 재검증을 대체하지 않는다. 서울 detail 선택 조건과 호출량·응답 필드는 [후보 API](api.md#후보-조회)를 따른다.
 
 확정/재확인은 Provider I/O 전에 일관된 metadata snapshot을 읽고 I/O는 DB transaction·lock 밖에서 수행한다. 결과 반영의 짧은 transaction은 새 current metadata 구조를 일관되게 다시 읽어 fingerprint를 비교한다. 계산은 고정 session snapshot만 사용하고 버전을 섞지 않는다. 공유 Route Lock이나 기존 Sync 변경은 없으므로 비교 뒤 sync commit까지 차단하는 전역 최신성 보장은 아니다. 이후 구조 변경을 발견하면 보류하고 목적지·snapshot을 자동 교체하지 않는다.
 

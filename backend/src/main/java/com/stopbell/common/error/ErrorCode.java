@@ -15,6 +15,7 @@ public enum ErrorCode {
     DEVICE_REGISTRATION_STALE(HttpStatus.CONFLICT, "Device registration revision is stale."),
     DEVICE_REVISION_CONFLICT(HttpStatus.CONFLICT, "Device registration revision conflicts."),
     DEVICE_PUSH_TARGET_CONFLICT(HttpStatus.CONFLICT, "Push target is already registered."),
+    TRANSIT_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Transit is temporarily unavailable."),
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "Request is invalid.");
 
     private final HttpStatus httpStatus;

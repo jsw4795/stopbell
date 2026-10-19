@@ -362,7 +362,7 @@ Push payload는 navigation hint 수준의 최소 정보만 포함한다.
 
 ### 탑승 세션 API (TASK-903)
 
-다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 **미구현 계약**이다. TASK-904/905/907에서 구현하며 기존 Alarm API/DTO를 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
+다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904에서 구현하며, 차량 확정·세션 API와 Flutter 연결은 TASK-905/907의 후속 구현이다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
 
 #### 후보 조회
 
@@ -375,6 +375,36 @@ routeId/occurrence ID는 기존 선택 API의 양의 내부 ID다. 목적 occurr
 정상 200 response는 `observedAt`, `providerDataTime`(nullable), `candidateSetStatus`(AVAILABLE/EMPTY/PARTIAL), `candidates`를 갖는다. 각 항목은 `candidateRef`, 전체 `vehicleNumber`, `confirmationStatus`(AVAILABLE/HELD), `reasonCode`(nullable), 검증된 진행 설명/occurrence 간격(nullable), 준비 추적 지원 여부·보류 사유를 제공한다. 세부 추천 순서는 ADR-011을 따른다. partial은 item/detail 검증의 불확실 범위를 드러내고 유일성을 주장하지 않는다. 전체 목록 실패/불완전은 정상 empty/AVAILABLE로 반환하지 않는다.
 
 candidateRef는 User·Route·target/optional boarding occurrence·차량 ID/번호 대응·구조 fingerprint·원래 관측 시각에 묶인 opaque reference다. index/번호만으로 대체하지 않는다. 임시 reference의 재시작/eviction/원래 관측 freshness 만료는 재조회 사유다. 검증 불가 항목을 정상 확정 대상으로 표시하지 않으며, 전체 번호를 실제 차량과 대조할 수 없으면 미확정으로 남는다.
+
+TASK-904의 후보 응답 상세는 다음과 같다. `confirmationStatus=AVAILABLE`은 번호 대조가 가능한 후보라는 의미이며 차량 확정·세션 생성·추적 시작 성공을 뜻하지 않는다. 추적 시작의 지원 범위는 `trackingSupport`와 `trackingReasonCode`를 별도로 확인한다. HELD 항목도 목록에 보존하며 `candidateRef`는 null이다.
+
+| 후보 필드 | 의미 |
+| --- | --- |
+| `candidateRef` | 서버 발급 opaque reference. 확인 가능한 후보만 발급하며 HELD는 null |
+| `vehicleNumber` | 전체 차량번호. 누락 항목은 null이며 raw ID로 대체하지 않음 |
+| `confirmationStatus`, `reasonCode` | AVAILABLE/HELD와 식별·시각·위치/detail 불확실 사유(nullable) |
+| `progress` | nullable. exact ID/order로 metadata에 대응한 `occurrenceId`, `stopName`, `order`, `kind` |
+| `progress.kind` | TAGO/flag 미확인은 ROUTE_PROGRESS, 서울 flag=1은 ARRIVAL_OBSERVED, flag=0은 MOVING_REFERENCE. 정확한 물리 정차/탑승 사실이 아님 |
+| `boardingOccurrenceGap` | nullable. 선택한 승차 occurrence와 검증된 진행 occurrence의 배열 index 차이 절댓값. 실제 정차 수·거리·ETA가 아님 |
+| `observedAt`, `providerDataTime` | 원래 roster 수신 시각, nullable 제공시각. 서울 detail 사용 시 제공시각은 detail의 값이며 reference 만료는 roster/detail 양쪽 시각을 검증 |
+| `trackingSupport`, `trackingReasonCode` | CONDITIONAL/HELD. 서울 검증된 진행이 목적지 이전이면 REVALIDATION_REQUIRED와 CONDITIONAL이며 확정 시 최신 재검증 필수. TAGO는 TAGO_ALIGHT_UNVERIFIED와 HELD 유지 |
+| `limitations` | 복수 불확실성·지원 제한 reason code 배열. 위치가 없다는 이유만으로 식별 가능한 번호 후보를 제거하지 않음 |
+
+최상위 `observedAt`은 roster 수신 시각이다. 최상위 `providerDataTime`은 모든 후보의 제공시각이 같을 때만 그 값이며, 서로 다르거나 후보가 없으면 null이다. 차량별 시각은 각 후보에서 확인한다. TAGO는 원본 생성시각이 없어 null이며 upstream age·물리 위치 시각을 보장하지 않는다. `candidateSetStatus=PARTIAL`은 보류 항목 또는 요청한 detail의 실패/empty를 포함한다. 요청하지 않은 detail이나 단순 위치 누락은 그 사실만으로 PARTIAL을 만들지 않는다. 목록 전체 실패·TAGO 개수 불일치는 503 `TRANSIT_TEMPORARILY_UNAVAILABLE`이다.
+
+`reasonCode`/`limitations`는 다음 값으로 불확실 범위를 구분한다.
+
+- 식별: VEHICLE_ID_MISSING, VEHICLE_NUMBER_MISSING, IDENTITY_CONFLICT, DETAIL_ID_MISMATCH, DETAIL_NUMBER_MISMATCH
+- 시각: PROVIDER_TIME_MISSING, PROVIDER_TIME_INVALID, STALE_OBSERVATION, FUTURE_OBSERVATION
+- 위치/metadata: POSITION_UNAVAILABLE, METADATA_MISMATCH, DETAIL_NOT_REQUESTED, DETAIL_EMPTY
+- 상세 실패: DETAIL_HTTP_FAILURE, DETAIL_TRANSPORT_FAILURE, DETAIL_PROVIDER_FAILURE, DETAIL_PROTOCOL_FAILURE
+- 추적 제한: TAGO_ALIGHT_UNVERIFIED, TARGET_NOT_AHEAD, REVALIDATION_REQUIRED
+
+위치 미확인 후보는 간격이 있는 후보 뒤에 표시하고 같은 간격은 번호 순으로 표시한다. 이 순서는 탑승 가능성·신뢰도 우열이나 자동 선택을 뜻하지 않는다. raw Provider ID/GPS/fingerprint는 응답에 노출하지 않는다. 같은 Route 소속이 아닌 occurrence는 400 INVALID_REQUEST, 존재하지 않는 목적/승차 occurrence는 기존 404 TARGET_STOP_OCCURRENCE_NOT_FOUND다.
+
+서울 번호 확인만 필요한 승차 occurrence 미입력 조회는 roster 1회이며 detail을 요청하지 않는다. 승차 occurrence가 있으면 간격 표시를 위해 roster에서 식별·시각 검증을 통과한 고유 차량만 각각 detail 1회 조회한다. 충돌·누락·stale 차량에는 detail을 호출하지 않고 동일 item의 중복은 합친다. 일부 detail이 실패해도 정상 후보를 제공하며 전체 유일성을 주장하지 않는다. 후보 API 자체는 재시도·추가 polling·관측 캐시를 도입하지 않는다.
+
+reference의 메모리 상한·eviction은 [Architecture](architecture.md#확정과-평가-transaction)를 따른다. 동일 User·Route·목적/선택 승차 occurrence 재조회는 기존 문맥의 reference를 교체한다. 실패한 전체 roster 조회는 기존 관측을 새로 갱신하지 않는다. 원래 관측 및 제공시각의 60초 freshness를 넘거나 restart/eviction된 reference는 재조회가 필요하며 화면 선택 자체로 세션을 만들지 않는다. TASK-905의 내부 resolve는 인증 User와 reference로 원래 roster/detail·typed Route·구조 fingerprint snapshot을 찾아 원래 노선/목적 문맥을 서버에서 복원한다. 문맥을 이미 가진 호출자는 User·Route·목적/승차 occurrence 전체 일치도 요구할 수 있다. 실제 확정에는 최신 metadata와 Provider 재검증이 여전히 필요하다.
 
 #### 차량 확정과 즉시 추적
 
