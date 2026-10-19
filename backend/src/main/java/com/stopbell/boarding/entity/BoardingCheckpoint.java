@@ -96,4 +96,18 @@ public class BoardingCheckpoint {
     public LocalDateTime getProviderDataTime() {
         return providerDataTime;
     }
+
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof BoardingCheckpoint value && stopOrder == value.stopOrder && index == value.index
+                && evidence == value.evidence && java.util.Objects.equals(stopExternalId, value.stopExternalId)
+                && java.util.Objects.equals(directionContext, value.directionContext)
+                && java.util.Objects.equals(observedAt, value.observedAt)
+                && java.util.Objects.equals(providerDataTime, value.providerDataTime);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(stopExternalId, stopOrder, index, evidence, directionContext, observedAt, providerDataTime);
+    }
 }

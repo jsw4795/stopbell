@@ -37,17 +37,19 @@ public class BoardingSessionService {
     private final BoardingSessionProperties properties;
     private final Clock clock;
     private final TransactionTemplate transaction;
+    private final BoardingTrackingRuntime runtime;
 
     public BoardingSessionService(BoardingSessionRepository sessions, UserRepository users,
             BoardingSessionStartValidator validator, BoardingCandidateMetadataService metadata,
             BoardingSessionProperties properties, PlatformTransactionManager manager,
-            @Qualifier("transitMetadataClock") Clock clock) {
+            @Qualifier("transitMetadataClock") Clock clock, BoardingTrackingRuntime runtime) {
         this.sessions = sessions;
         this.users = users;
         this.validator = validator;
         this.metadata = metadata;
         this.properties = properties;
         this.clock = clock;
+        this.runtime = runtime;
         transaction = new TransactionTemplate(manager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -72,16 +74,22 @@ public class BoardingSessionService {
         }
         // All Provider I/O occurs here, before either User or Session lock is acquired.
         VerifiedBoardingStart start = validator.validate(userId, request.candidateRef(), request.confirmedVehicleNumber());
+        CreationResult result;
         try {
-            return createTransaction(userId, request, start);
+            result = createTransaction(userId, request, start);
         } catch (DataAccessException | TransactionException exception) {
             if (exception instanceof DataIntegrityViolationException integrity && !knownUnique(integrity)) {
                 throw exception;
             }
             // One bounded reconciliation in a fresh transaction/persistence context. Use the
             // original request/evidence; never refetch a different vehicle or blindly upsert.
-            return createTransaction(userId, request, start);
+            result = createTransaction(userId, request, start);
         }
+        // A duplicate read after restart must not admit an old session without recovery.
+        if (result.created()) {
+            runtime.admitCreated(result.response().id());
+        }
+        return result;
     }
 
     private CreationResult createTransaction(Long userId, CreateBoardingSessionRequest request, VerifiedBoardingStart start) {
@@ -118,7 +126,7 @@ public class BoardingSessionService {
             BoardingSession session = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(),
                     request.fingerprint(), start.vehicleTrackingId(), start.vehicleNumber(), start.routeNumber(),
                     start.targetName(), start.traversal(), start.checkpoint(), now, now.plus(properties.getMaxLifetime())));
-            return new CreationResult(BoardingSessionResponse.from(session), true);
+            return new CreationResult(runtime.response(session, now()), true);
         });
     }
 
@@ -126,7 +134,7 @@ public class BoardingSessionService {
         if (!session.getRequestFingerprint().equals(request.fingerprint())) {
             throw new ApiException(ErrorCode.BOARDING_REQUEST_CONFLICT);
         }
-        return BoardingSessionResponse.from(session);
+        return runtime.response(session, now());
     }
 
     public BoardingSessionResponse find(Long userId, Long id) {
@@ -135,7 +143,7 @@ public class BoardingSessionService {
             authenticated(userId);
             BoardingSession session = owned(userId, id);
             session.expire(now());
-            return BoardingSessionResponse.from(session);
+            return runtime.response(session, now());
         });
     }
 
@@ -145,7 +153,7 @@ public class BoardingSessionService {
             var current = sessions.findCurrentForUpdate(userId);
             current.ifPresent(session -> session.expire(now()));
             return current.filter(session -> session.getStatus().isOpen()).stream()
-                    .map(BoardingSessionResponse::from).toList();
+                    .map(session -> runtime.response(session, now())).toList();
         });
     }
 
@@ -160,7 +168,7 @@ public class BoardingSessionService {
             authenticated(userId);
             var session = sessions.findRequestForUpdate(userId, key);
             session.ifPresent(value -> value.expire(now()));
-            return session.stream().map(BoardingSessionResponse::from).toList();
+            return session.stream().map(value -> runtime.response(value, now())).toList();
         });
     }
 
@@ -180,7 +188,7 @@ public class BoardingSessionService {
             // TASK-906 can terminate this aggregate's PENDING deliveries in this transaction.
             session.cancel(expectedRevision, now);
             sessions.flush();
-            return BoardingSessionResponse.from(session);
+            return runtime.response(session, now());
         });
     }
 

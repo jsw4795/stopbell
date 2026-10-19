@@ -17,15 +17,18 @@ public record BoardingSessionResponse(
     public enum EvaluationStatus { READY, RECOVERY_PENDING, HELD, ENDED }
 
     public static BoardingSessionResponse from(BoardingSession session) {
+        return from(session, null);
+    }
+
+    public static BoardingSessionResponse from(BoardingSession session, Integer verifiedGap) {
         var traversal = session.getTraversal();
-        // No polling or recovery gate is implemented in TASK-905 step 1. Never expose a cached
-        // checkpoint gap as live progress, even in a successful creation response.
         EvaluationStatus evaluation = !session.getStatus().isOpen() ? EvaluationStatus.ENDED
                 : session.getStatus() == BoardingSessionStatus.SUSPENDED ? EvaluationStatus.HELD
-                : EvaluationStatus.RECOVERY_PENDING;
+                : verifiedGap != null ? EvaluationStatus.READY : EvaluationStatus.RECOVERY_PENDING;
         return new BoardingSessionResponse(session.getId(), session.getStatus(), session.getRevision(),
                 session.getRouteNumber(), session.getVehicleNumber(), session.getTargetName(),
-                traversal.occurrences().get(traversal.targetIndex()).order(), null,
+                traversal.occurrences().get(traversal.targetIndex()).order(),
+                evaluation == EvaluationStatus.READY ? verifiedGap : null,
                 instant(session.getCheckpoint().getObservedAt()), instant(session.getCheckpoint().getProviderDataTime()),
                 evaluation, session.getStateReason(), instant(session.getExpiresAt()), instant(session.getEndedAt()));
     }

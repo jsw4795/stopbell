@@ -157,7 +157,41 @@ public class BoardingSession {
         if (reason == null || !reason.isSuspension()) {
             throw new IllegalArgumentException("Suspension requires a suspension reason");
         }
-        change(BoardingSessionStatus.SUSPENDED, reason, now);
+        if (status != BoardingSessionStatus.SUSPENDED || stateReason != reason) {
+            change(BoardingSessionStatus.SUSPENDED, reason, now);
+        }
+    }
+
+    public void track(long expectedRevision, BoardingCheckpoint next, BoardingStateReason completion, LocalDateTime now) {
+        requireOpenRevision(expectedRevision);
+        if (status == BoardingSessionStatus.SUSPENDED && !stateReason.allowsAutomaticRevalidation()) {
+            throw new IllegalStateException("Continuity loss requires user confirmation");
+        }
+        if (!time(now).isBefore(expiresAt) || next == null || next.getObservedAt().isAfter(now)) {
+            throw new IllegalArgumentException("Live checkpoint is required");
+        }
+        next.validateAgainst(getTraversal());
+        if (next.getIndex() < checkpoint.getIndex() || next.getObservedAt().isBefore(checkpoint.getObservedAt())
+                || !java.util.Objects.equals(next.getDirectionContext(), checkpoint.getDirectionContext())
+                || (next.getIndex() != checkpoint.getIndex() && (next.getObservedAt().equals(checkpoint.getObservedAt())
+                    || (next.getProviderDataTime() != null && next.getProviderDataTime().equals(checkpoint.getProviderDataTime()))))
+                || (checkpoint.getProviderDataTime() != null && (next.getProviderDataTime() == null
+                    || next.getProviderDataTime().isBefore(checkpoint.getProviderDataTime())))) {
+            throw new IllegalArgumentException("Checkpoint must preserve monotonic progress and time");
+        }
+        if (completion != null && completion != BoardingStateReason.ARRIVAL_OBSERVED
+                && completion != BoardingStateReason.PASSED_OBSERVED) {
+            throw new IllegalArgumentException("Invalid completion reason");
+        }
+        if (next.equals(checkpoint) && status == BoardingSessionStatus.TRACKING && completion == null) {
+            return;
+        }
+        if (completion == null) {
+            change(BoardingSessionStatus.TRACKING, null, now);
+        } else {
+            finish(BoardingSessionStatus.COMPLETED, completion, now);
+        }
+        checkpoint = next;
     }
 
     private void finish(BoardingSessionStatus next, BoardingStateReason reason, LocalDateTime now) {

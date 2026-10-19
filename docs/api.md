@@ -362,11 +362,11 @@ Push payload는 navigation hint 수준의 최소 정보만 포함한다.
 
 ### 탑승 세션 API (TASK-903)
 
-다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904, 세션 Persistence와 생성·조회·취소 API 경계는 TASK-905 1단계에서 구현했다. 지속 추적·판정·복구는 TASK-905 후속 단계, Notification과 Flutter 연결은 TASK-906/907에 남는다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
+다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904, 세션 Persistence와 생성·조회·취소 API 경계는 TASK-905 1단계에서 구현했다. 특정 차량 polling과 준비 후보·종료 판정은 TASK-905 2단계에서 구현했으며 재시작 자동 복구는 3단계, Notification과 Flutter 연결은 TASK-906/907에 남는다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
 
-**TASK-905 1단계 구현 경계:** TAGO 정확한 하차 추적은 계속 지원 보류이며, 서울 이동 중 detail·order 단독·반복 Stop의 회차 문맥도 검증된 것으로 취급하지 않는다. 서울 exact ID/order + direct flag=1의 최신 대응·단조 진행 검증을 통과해도 현재 metadata에는 목적 occurrence의 하차 가능 근거가 없어 UNKNOWN이다. 근거 부족 시 실제 POST 생성은 `BOARDING_TRACKING_UNSUPPORTED`로 거부하며, 하차 가능을 추측하거나 미구현 추적/FCM 성공을 반환하지 않는다. 아래 201 저장 경로는 검증된 입력을 전달하는 경계의 통합 테스트로 검증하며 실제 Provider 지원 완료의 근거가 아니다. 검증 근거 공급 전 기능 활성화를 위한 우회 설정은 제공하지 않는다.
+**TASK-905 1·2단계 지원 경계:** TAGO 정확한 하차 추적은 계속 지원 보류이며, 서울 이동 중 detail·order 단독·반복 Stop의 회차 문맥도 검증된 것으로 취급하지 않는다. 서울 exact ID/order + direct flag=1의 최신 대응·단조 진행 검증을 통과해도 현재 metadata에는 목적 occurrence의 하차 가능 근거가 없어 UNKNOWN이다. 근거 부족 시 실제 POST 생성은 `BOARDING_TRACKING_UNSUPPORTED`로 거부하며, 하차 가능을 추측하거나 미구현 추적/FCM 성공을 반환하지 않는다. 아래 201 저장 경로는 검증된 입력을 전달하는 경계의 통합 테스트로 검증하며 실제 Provider 지원 완료의 근거가 아니다. 검증 근거 공급 전 기능 활성화를 위한 우회 설정은 제공하지 않는다.
 
-조회는 Provider 재호출이나 지속 추적을 실행하지 않는다. 1단계의 TRACKING 응답은 `remainingOccurrenceGap=null`, `evaluationStatus=RECOVERY_PENDING`이며, SUSPENDED는 HELD, terminal은 ENDED다. 조회·취소·중복 요청 확인 및 생성 transaction의 current 확인에서 기한이 된 세션을 EXPIRED로 반영한다. 자동 만료 sweep과 재시작 복구는 후속 단계에 남는다. reconfirm endpoint도 이번 단계에는 구현하지 않는다.
+조회는 Provider 재호출이나 polling을 실행하지 않는다. 현재 프로세스에서 생성 commit을 확인하고 polling 결과의 commit revision과 현재 revision이 일치하며 checkpoint 시각이 유효한 TRACKING만 `evaluationStatus=READY`와 검증된 `remainingOccurrenceGap`을 반환한다. 최초 polling 전·재시작 후 미복구·freshness 만료는 null과 RECOVERY_PENDING, SUSPENDED는 null과 HELD, terminal은 null과 ENDED다. 과거 checkpoint 시각은 마지막 검증 근거로 보존하며 현재 위치를 뜻하지 않는다. 조회·취소·중복 요청 확인·생성 transaction과 enabled Scheduler cycle은 수명이 끝난 세션을 EXPIRED로 반영한다. 재시작 자동 복구와 reconfirm endpoint는 이번 단계에 구현하지 않는다.
 
 #### 후보 조회
 

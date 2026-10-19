@@ -54,6 +54,7 @@ backend/
     │   └── dto/
     │
     ├── boarding/
+    │   ├── domain/
     │   ├── controller/
     │   ├── service/
     │   ├── repository/
@@ -133,7 +134,7 @@ Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기
 
 ### boarding
 
-독립 BoardingSession aggregate의 불변 snapshot·checkpoint·수명·revision과 생성·조회·취소 API를 소유한다. `service`의 확정 검증은 기존 `transit` 후보 reference·metadata·Provider 재검증을 재사용하고, 검증 입력과 저장 transaction을 분리한다. 기존 Alarm lifecycle과 Notification persistence는 변경하지 않는다. TASK-905 1단계의 실제 지원 경계는 [API](api.md#탑승-세션-api-task-903), 후속 polling·판정·복구 및 Notification 연결은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
+독립 BoardingSession aggregate의 불변 snapshot·checkpoint·수명·revision과 생성·조회·취소 API를 소유한다. `service`의 확정 검증은 기존 `transit` 후보 reference·metadata·Provider 재검증을 재사용하고, 검증 입력과 저장 transaction을 분리한다. 기존 Alarm lifecycle과 Notification persistence는 변경하지 않는다. `domain`은 detached 추적 입력과 관측·판정 결과를, `service`는 polling·Provider 검증·순수 진행 판정·짧은 저장 transaction·프로세스 runtime readiness를 소유한다. 2단계는 기존 Scheduler의 cycle 한정 원본 응답 공유를 사용한다. 실제 지원 경계는 [API](api.md#탑승-세션-api-task-903), 현재 polling과 후속 복구·Notification 연결은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
 
 ### transit
 

@@ -376,7 +376,7 @@ class BoardingSessionApiIntegrationTest {
                 }
                 public void rollback(TransactionStatus status) { manager.rollback(status); }
             };
-            var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, failing, clock);
+            var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, failing, clock, new com.stopbell.boarding.service.BoardingTrackingRuntime());
             var result = tested.create(owner.getId(), request(REQUEST_ID, "ref"));
             assertThat(sessions.count()).isEqualTo(1);
             assertThat(result.created()).isEqualTo(!committed);

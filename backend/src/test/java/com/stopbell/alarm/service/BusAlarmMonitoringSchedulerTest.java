@@ -84,7 +84,7 @@ class BusAlarmMonitoringSchedulerTest {
             new TagoTransitObservationMapper(clock),
             new SeoulBusTransitObservationMapper(clock),
             clock,
-            Duration.ZERO
+            Duration.ZERO, mock(com.stopbell.boarding.service.BoardingSessionPollingService.class)
     );
 
     @Test
@@ -130,7 +130,7 @@ class BusAlarmMonitoringSchedulerTest {
         BusAlarmMonitoringScheduler seoulScheduler = new BusAlarmMonitoringScheduler(
                 pollingService, evaluator, lifecycleService, tagoClient, seoulLocationClient, seoulDetailClient,
                 new TagoTransitObservationMapper(clock), new SeoulBusTransitObservationMapper(clock), clock,
-                Duration.ZERO
+                Duration.ZERO, mock(com.stopbell.boarding.service.BoardingSessionPollingService.class)
         );
         Alarm alarm = mock(Alarm.class);
         BusAlarmTarget target = mock(BusAlarmTarget.class);
@@ -582,11 +582,36 @@ class BusAlarmMonitoringSchedulerTest {
         assertThat(states.getAllValues()).containsOnly(BusAlarmEvaluationState.initial());
     }
 
+    @Test
+    @DisplayName("여러 Route에 겹친 서울 차량의 detail 실패와 한 번 재시도도 고유 차량 ID로 중복 제거한다")
+    void shares_detail_failure_and_retry_by_vehicle_id() {
+        var rosterClient = mock(SeoulBusVehicleLocationClient.class);
+        var detailClient = mock(SeoulBusVehicleDetailClient.class);
+        var first = seoulActiveAlarm(1L, "route-1");
+        var second = seoulActiveAlarm(2L, "route-2");
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(seoulGroup(first, "route-1"), seoulGroup(second, "route-2")));
+        when(rosterClient.fetchVehicleLocations(any())).thenReturn(seoulRoster("same-vehicle"));
+        when(detailClient.fetchVehicleDetail("same-vehicle"))
+                .thenThrow(TransitProviderClientException.transport(TransitProvider.SEOUL_BUS, "detail", null))
+                .thenReturn(seoulDetail("same-vehicle"));
+        var result = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
+        when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
+        when(evaluator.evaluatePartial(any(), any(), anySet(), anyList(), any())).thenReturn(result);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any())).thenAnswer(applied());
+
+        seoulScheduler(rosterClient, detailClient).pollMonitoringAlarms();
+
+        verify(rosterClient, times(2)).fetchVehicleLocations(any());
+        verify(detailClient, times(2)).fetchVehicleDetail("same-vehicle");
+        verify(evaluator, times(2)).evaluate(any(), any(), eq(Set.of("same-vehicle")), eq(List.of()), any());
+        verify(evaluator, times(2)).evaluatePartial(any(), any(), anySet(), anyList(), any());
+    }
+
     private BusAlarmMonitoringScheduler seoulScheduler(SeoulBusVehicleLocationClient rosterClient,
             SeoulBusVehicleDetailClient detailClient) {
         return new BusAlarmMonitoringScheduler(pollingService, evaluator, lifecycleService, tagoClient,
                 rosterClient, detailClient, new TagoTransitObservationMapper(clock),
-                new SeoulBusTransitObservationMapper(clock), clock, Duration.ZERO);
+                new SeoulBusTransitObservationMapper(clock), clock, Duration.ZERO, mock(com.stopbell.boarding.service.BoardingSessionPollingService.class));
     }
 
     private static Alarm seoulActiveAlarm(long id, String routeId) {

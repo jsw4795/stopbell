@@ -228,7 +228,7 @@ class TransitMonitoringIntegrationTest {
     ) {
         return new BusAlarmMonitoringScheduler(
                 pollingService, evaluator, lifecycleService, tagoClient, rosterClient, detailClient,
-                new TagoTransitObservationMapper(CLOCK), new SeoulBusTransitObservationMapper(CLOCK), CLOCK, Duration.ZERO
+                new TagoTransitObservationMapper(CLOCK), new SeoulBusTransitObservationMapper(CLOCK), CLOCK, Duration.ZERO, mock(com.stopbell.boarding.service.BoardingSessionPollingService.class)
         );
     }
 

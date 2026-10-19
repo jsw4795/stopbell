@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import com.stopbell.boarding.service.BoardingSessionPollingService;
+import com.stopbell.transit.service.VehiclePollingCycle;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.transit.client.SeoulBusVehicleDetailClient;
@@ -44,6 +46,7 @@ public class BusAlarmMonitoringScheduler {
     private static final Logger log = LoggerFactory.getLogger(BusAlarmMonitoringScheduler.class);
 
     private final BusAlarmPollingService pollingService;
+    private final BoardingSessionPollingService boardingPolling;
     private final BusAlarmEvaluator evaluator;
     private final BusAlarmLifecycleService lifecycleService;
     private final TagoVehicleLocationClient tagoVehicleLocationClient;
@@ -66,9 +69,11 @@ public class BusAlarmMonitoringScheduler {
             TagoTransitObservationMapper tagoMapper,
             SeoulBusTransitObservationMapper seoulMapper,
             Clock transitMetadataClock,
-            @Value("${transit.monitoring.failure-retry-delay:PT5S}") Duration failureRetryDelay
+            @Value("${transit.monitoring.failure-retry-delay:PT5S}") Duration failureRetryDelay,
+            BoardingSessionPollingService boardingPolling
     ) {
         this.pollingService = pollingService;
+        this.boardingPolling = boardingPolling;
         this.evaluator = evaluator;
         this.lifecycleService = lifecycleService;
         this.tagoVehicleLocationClient = tagoVehicleLocationClient;
@@ -84,7 +89,9 @@ public class BusAlarmMonitoringScheduler {
     }
 
     @Scheduled(fixedDelayString = "${transit.monitoring.fixed-delay:PT20S}")
-    public void pollMonitoringAlarms() {
+    public synchronized void pollMonitoringAlarms() {
+        VehiclePollingCycle cycle = new VehiclePollingCycle(tagoVehicleLocationClient, seoulBusVehicleLocationClient,
+                seoulBusVehicleDetailClient, clock);
         // Reconcile before loading monitoring groups: an ambiguous ARRIVED/after commit may already be INACTIVE.
         Set<AlarmEvaluationKey> replayed = new LinkedHashSet<>(pendingDecisions.keySet());
         for (AlarmEvaluationKey key : replayed) {
@@ -96,7 +103,7 @@ public class BusAlarmMonitoringScheduler {
         for (BusAlarmPollingGroup group : groups) {
             List<RetryTarget> groupRetries = new ArrayList<>();
             try {
-                pollGroup(group, groupRetries);
+                pollGroup(group, groupRetries, cycle);
                 retryTargets.addAll(groupRetries);
             } catch (TransitProviderClientException exception) {
                 logProviderFailure(group, null, exception, false);
@@ -106,15 +113,22 @@ public class BusAlarmMonitoringScheduler {
                         group.key().provider(), group.key().externalRouteId(), exception);
             }
         }
+        try {
+            boardingPolling.poll(cycle);
+        } catch (RuntimeException exception) {
+            log.warn("Boarding polling cycle failed: failureType={}", exception.getClass().getSimpleName());
+        }
         if (retryTargets.isEmpty() || !waitBeforeRetry()) {
             return;
         }
+        VehiclePollingCycle retryCycle = new VehiclePollingCycle(tagoVehicleLocationClient,
+                seoulBusVehicleLocationClient, seoulBusVehicleDetailClient, clock);
         for (RetryTarget target : retryTargets) {
             try {
                 if (target.vehicleId() == null) {
-                    pollGroup(target.group(), null);
+                    pollGroup(target.group(), null, retryCycle);
                 } else {
-                    retrySeoulDetail(target);
+                    retrySeoulDetail(target, retryCycle);
                 }
             } catch (TransitProviderClientException exception) {
                 logProviderFailure(target.group(), target.vehicleId(), exception, true);
@@ -136,10 +150,10 @@ public class BusAlarmMonitoringScheduler {
         }
     }
 
-    private void pollGroup(BusAlarmPollingGroup group, List<RetryTarget> retryTargets) {
+    private void pollGroup(BusAlarmPollingGroup group, List<RetryTarget> retryTargets, VehiclePollingCycle cycle) {
         PollSnapshot snapshot = switch (group.key().provider()) {
-            case TAGO -> pollTago(group);
-            case SEOUL_BUS -> pollSeoul(group, retryTargets);
+            case TAGO -> pollTago(group, cycle);
+            case SEOUL_BUS -> pollSeoul(group, retryTargets, cycle);
         };
         Instant now = clock.instant();
         for (Alarm alarm : group.alarms()) {
@@ -147,27 +161,27 @@ public class BusAlarmMonitoringScheduler {
         }
     }
 
-    private PollSnapshot pollTago(BusAlarmPollingGroup group) {
+    private PollSnapshot pollTago(BusAlarmPollingGroup group, VehiclePollingCycle cycle) {
         VehicleLocationRequest<TagoVehicleLocationRequestContext> request = new VehicleLocationRequest<>(
                 group.key().externalRouteId(), new TagoVehicleLocationRequestContext(group.key().cityCode())
         );
-        List<TransitObservation> observations = tagoMapper.map(request, tagoVehicleLocationClient.fetchVehicleLocations(request));
+        List<TransitObservation> observations = tagoMapper.map(request, cycle.tago(group.key().externalRouteId(), group.key().cityCode()).response());
         return new PollSnapshot(observations, vehicleIds(observations));
     }
 
-    private PollSnapshot pollSeoul(BusAlarmPollingGroup group, List<RetryTarget> retryTargets) {
+    private PollSnapshot pollSeoul(BusAlarmPollingGroup group, List<RetryTarget> retryTargets, VehiclePollingCycle cycle) {
         VehicleLocationRequest<SeoulBusVehicleLocationRequestContext> request = new VehicleLocationRequest<>(
                 group.key().externalRouteId(), new SeoulBusVehicleLocationRequestContext()
         );
         List<SeoulBusVehicleLocationItem> roster = rosterItems(
-                seoulBusVehicleLocationClient.fetchVehicleLocations(request)
+                cycle.roster(group.key().externalRouteId()).response()
         );
         Set<String> presentVehicleIds = rosterVehicleIds(roster);
         Set<String> vehicleIds = selectSeoulDetailVehicleIds(group.alarms(), presentVehicleIds);
         List<TransitObservation> observations = new ArrayList<>();
         for (String vehicleId : vehicleIds) {
             try {
-                observations.addAll(seoulMapper.map(request, seoulBusVehicleDetailClient.fetchVehicleDetail(vehicleId)));
+                observations.addAll(seoulMapper.map(request, cycle.detail(vehicleId).response()));
             } catch (TransitProviderClientException exception) {
                 logProviderFailure(group, vehicleId, exception, retryTargets == null);
                 if (retryTargets != null) {
@@ -178,12 +192,12 @@ public class BusAlarmMonitoringScheduler {
         return new PollSnapshot(observations, presentVehicleIds);
     }
 
-    private void retrySeoulDetail(RetryTarget target) {
+    private void retrySeoulDetail(RetryTarget target, VehiclePollingCycle cycle) {
         VehicleLocationRequest<SeoulBusVehicleLocationRequestContext> request = new VehicleLocationRequest<>(
                 target.group().key().externalRouteId(), new SeoulBusVehicleLocationRequestContext()
         );
         List<TransitObservation> observations = seoulMapper.map(
-                request, seoulBusVehicleDetailClient.fetchVehicleDetail(target.vehicleId())
+                request, cycle.detail(target.vehicleId()).response()
         );
         if (observations.isEmpty()) {
             return;

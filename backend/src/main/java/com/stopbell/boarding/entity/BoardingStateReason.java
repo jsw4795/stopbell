@@ -5,6 +5,10 @@ public enum BoardingStateReason {
     PROGRESS_REGRESSION, TRAVERSAL_AMBIGUOUS, CONTINUITY_GAP_EXCEEDED, METADATA_CHANGED,
     ARRIVAL_OBSERVED, PASSED_OBSERVED, USER_CANCELLED, SESSION_LIFETIME_EXPIRED;
 
+    public boolean allowsAutomaticRevalidation() {
+        return this == TEMPORARY_PROVIDER_FAILURE || this == STALE_PROGRESS || this == METADATA_CHANGED;
+    }
+
     public boolean isSuspension() {
         return switch (this) {
             case TEMPORARY_PROVIDER_FAILURE, STALE_PROGRESS, VEHICLE_MISSING, IDENTITY_CONFLICT,

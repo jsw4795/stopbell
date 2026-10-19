@@ -16,7 +16,7 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
     User
 
      ├── Alarm
-     ├── BoardingSession (TASK-905 1단계 Persistence, 추적·판정·복구는 후속)
+     ├── BoardingSession (TASK-905 1·2단계 구현, 재시작 자동 복구는 후속)
      ├── RefreshToken
      └── Device
 
@@ -458,7 +458,7 @@ TASK-902에서 정의한 후보·화면 선택·사용자 확정은 서로 다�
 
 ## Purpose and Identity
 
-사용자가 전체 번호를 대조한 특정 차량만 목적 occurrence까지 추적하는 독립 aggregate다. 기존 Alarm/BusAlarmTarget/ACTIVE/FOLLOW_UP을 세션으로 재사용하지 않는다. TASK-905 1단계에서 Entity·V15·최초 checkpoint와 생성·조회·취소 API 경계를 구현했다. 실제 Provider 생성의 지원 보류는 [API](api.md#탑승-세션-api-task-903), 지속 추적·하차 판정·재시작 복구는 후속 단계에 남는다. 결정 근거는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
+사용자가 전체 번호를 대조한 특정 차량만 목적 occurrence까지 추적하는 독립 aggregate다. 기존 Alarm/BusAlarmTarget/ACTIVE/FOLLOW_UP을 세션으로 재사용하지 않는다. TASK-905 1단계에서 Entity·V15·최초 checkpoint와 생성·조회·취소 API 경계를 구현했다. 2단계는 특정 차량 polling·checkpoint 갱신·하차 준비 후보 및 종료 판정을 구현했다. 실제 Provider 생성의 지원 보류는 [API](api.md#탑승-세션-api-task-903)를 유지하며 재시작 자동 복구는 3단계에 남는다. 결정 근거는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
 
 소유자는 인증된 User다. TRACKING/SUSPENDED를 미종료로 보며 User당 최대 하나다. Provider·externalRouteId·vehicleTrackingId·전체 표시 번호·목적 occurrence는 한 세션 안에서 불변이다. TAGO vehicleno, 서울 vehId/plainNo 구분과 typed cityCode 문맥을 유지한다. 번호는 ID 누락·변경의 대체 identity가 아니다. 없는 direction/trip/lap 값을 만들지 않는다.
 
@@ -494,7 +494,11 @@ TRACKING의 stateReason은 NULL, SUSPENDED는 보류 사유, terminal은 해당 
 
 세션은 일관되게 읽은 ordered traversal snapshot과 구조 fingerprint를 불변으로 가진다. 같은 Stop 재방문은 Stop ID와 order/문맥으로 구분하고 다음 lap을 자동 가정하지 않는다. 미정차·경유 occurrence를 배열에서 제거하지 않으며 metadata에 없는 지점을 합성하지 않는다.
 
-`remainingOccurrenceGap = targetIndex - progressIndex`다. raw order 차이, 실제 정차 수, 거리·ETA가 아니다. 진행 기준점의 의미·같은 traversal의 대응·시각·차량 연속성이 검증되어 목적지가 아직 앞일 때만 계산한다. nodeid 누락 시에도 ADR-011의 order 단독 대응 검증을 충족하면 활용할 수 있으나 정확한 Stop ID/정차 위치를 채워 넣지 않는다.
+`remainingOccurrenceGap = targetIndex - progressIndex`다. raw order 차이, 실제 정차 수, 거리·ETA가 아니다. 진행 기준점의 의미·같은 traversal의 대응·시각·차량 연속성이 검증될 때 계산하며, 0/음수도 도착/통과의 충분한 근거와 별도로 구분한다. nodeid 누락 시에도 ADR-011의 order 단독 대응 검증을 충족하면 활용할 수 있으나 정확한 Stop ID/정차 위치를 채워 넣지 않는다.
+
+2단계의 평가 입력은 `BoardingTrackingSnapshot`과 `BoardingProgressObservation`이다. 후자는 검증된 기준점/직접 도착/미검증 의미와 order-only 검증 여부·방향/회차 모호성을 분리한다. 실제 adapter는 서울 exact stopped detail만 직접 도착 근거로 전달하며 서울 이동 중·TAGO 하차·order-only 지원을 새로 활성화하지 않는다. 검증된 이동 기준점과 order-only의 정상 판정은 통제된 fixture로 검증한다.
+
+동일 제공시각·동일 occurrence의 반복은 checkpoint 수신시각을 갱신하거나 새 후보를 만들지 않는다. 제공시각이 없고 같은 occurrence가 반복되어도 새 진행으로 세지 않는다. 같은 제공시각의 위치 변경, 제공시각/진행 역행, 방향 변경과 모호한 occurrence 대응은 보류한다. 새 유효 제공시각으로 같은 occurrence를 다시 검증하면 checkpoint의 새 freshness 근거로 반영할 수 있다. 동일 보류 사유의 반복은 불필요하게 revision을 증가시키지 않는다.
 
 현재 metadata fingerprint가 구조적으로 바뀌거나 대응이 모순되면 보류한다. 표시 이름만의 변경은 구조 변경이 아니다. snapshot을 자동 교체하지 않으며 공유 Route Lock 없이 commit 순간의 전역 최신성을 보장한다고 하지 않는다.
 
@@ -503,6 +507,8 @@ TRACKING의 stateReason은 NULL, SUSPENDED는 보류 사유, terminal은 해당 
 같은 확정 차량·유효 세션·신선하고 일관된 진행·지원 검증을 전제로 간격 2에서 PREPARE_ALIGHT를 우선 선택하고, Event가 없으면 간격 1에서 대체한다. 초기 확정 또는 복구 직후의 새 유효 관측도 이 조건을 만족하면 가능하다. stopFlag=1은 필수가 아니지만 order 숫자 일치만으로 검증을 대체하지 않는다. 서울 이동 중 detail 의미는 검증된 범위만 사용하며 TAGO의 정확한 하차 판단은 검증 전까지 지원 보류다.
 
 간격 3→1은 현재 1로 판단할 수 있다. 목적지/이후로 jump하면 준비·도착 관측을 소급 생성하지 않는다. 이후 진행은 같은 운행의 충분한 이전/현재 근거가 있어야 하며 실제 무정차·사용자 하차 실패를 뜻하지 않는다. 직접 도착은 별도의 충분한 도착 근거를 요구한다. 근거가 없으면 단순 gap=0이나 order 증가만으로 완료하지 않는다.
+
+2단계의 `BoardingTrackingDecision`은 PREPARE_ALIGHT 후보, NO_CANDIDATE, HELD, ARRIVAL_OBSERVED, PASSED_OBSERVED, EXPIRED_CANDIDATE를 구분한다. 후보 기한은 원래 observedAt과 세션 수명으로 고정하며 저장 lock을 기다리는 동안 TTL이 지나도 checkpoint만 반영할 수 있다. gap=0의 검증된 기준점만으로 직접 도착을 확정하지 않고, 목적지 이후는 같은 traversal의 이전/현재 연속성이 있어야 종료한다.
 
 세션 Notification identity는 `(boardingSessionId, PREPARE_ALIGHT)`이며 revision·restart·재확인 횟수는 포함하지 않는다. 최초 Event INSERT 직전 원래 observedAt 기반 기한이 지났으면 Event·Delivery·소비 표식을 만들지 않는다. 검증된 checkpoint 갱신만 가능하며 이후 새 관측으로 재판단한다. 이미 존재하는 Event는 recipient 없음·전송 실패·만료 뒤에도 기회를 소비한 상태로 보존한다. prepareNotified boolean이나 별도 tracking cycle은 추가하지 않는다.
 
