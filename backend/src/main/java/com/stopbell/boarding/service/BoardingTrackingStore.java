@@ -5,14 +5,19 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.stopbell.boarding.domain.*;
 import com.stopbell.boarding.domain.BoardingTrackingDecision.Outcome;
 import com.stopbell.boarding.entity.BoardingSessionStatus;
+import com.stopbell.boarding.entity.BoardingSession;
 import com.stopbell.boarding.entity.BoardingStateReason;
 import com.stopbell.boarding.repository.BoardingSessionRepository;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -43,58 +48,105 @@ public class BoardingTrackingStore {
                 .map(BoardingTrackingSnapshot::from).toList());
     }
 
+    private record Commit(Applied result, BoardingTrackingSnapshot snapshot) { }
+
     public Applied apply(BoardingTrackingSnapshot expected, BoardingTrackingDecision decision) {
-        Applied result = transaction.execute(transactionStatus -> {
-            var session = sessions.findForUpdate(expected.id()).orElse(null);
-            if (session == null) {
-                return new Applied(expected.id(), false, -1, null, null);
+        var attempted = new AtomicReference<Commit>();
+        Commit committed;
+        try {
+            committed = transaction.execute(transactionStatus -> {
+                Commit result = applyLocked(expected, decision);
+                attempted.set(result);
+                return result;
+            });
+        } catch (DataAccessException | TransactionException exception) {
+            if (exception instanceof DataIntegrityViolationException || attempted.get() == null
+                    || !attempted.get().result().accepted()) {
+                throw exception;
             }
-            LocalDateTime now = now();
-            session.expire(now);
-            if (!session.getStatus().isOpen() || !expected.matches(session) || !runtime.isAdmitted(expected.id())) {
-                return new Applied(expected.id(), false, session.getRevision(), session.getStatus(), null);
-            }
-            // Current structure is checked again under the short apply transaction. Sync is not locked globally.
-            BoardingTrackingDecision current = expected.requiresConfirmation()
-                    ? BoardingTrackingDecision.held(expected.reason()) : decision;
-            if (!expected.requiresConfirmation() && !metadata.matches(expected)) {
-                current = BoardingTrackingDecision.held(BoardingStateReason.METADATA_CHANGED);
-            }
-            if (current.outcome() == Outcome.HELD) {
-                session.suspend(expected.revision(), current.reason(), now);
-            } else if (current.checkpoint() != null) {
-                if (current.observedAt().isAfter(now)
-                        || current.observedAt().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))
-                        || (current.checkpoint().getProviderDataTime() != null && (current.checkpoint().getProviderDataTime().isAfter(now)
-                            || current.checkpoint().getProviderDataTime().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))))) {
-                    current = BoardingTrackingDecision.held(BoardingStateReason.STALE_PROGRESS);
-                    session.suspend(expected.revision(), current.reason(), now);
-                } else {
-                    session.track(expected.revision(), current.checkpoint(), current.reason(), now);
+            // Commit acknowledgement may be lost. Read exact original result once in a fresh
+            // transaction; never replay a mutation or call the Provider again here.
+            committed = transaction.execute(status -> {
+                var current = sessions.findForUpdate(expected.id()).orElse(null);
+                var original = attempted.get();
+                if (current != null && original.snapshot().matches(current)
+                        && (!current.getStatus().isOpen() || metadata.matches(original.snapshot()))) {
+                    return original;
                 }
-            }
-            sessions.flush();
-            return new Applied(expected.id(), true, session.getRevision(), session.getStatus(), current);
-        });
-        // execute returns only after commit. An exception never publishes memory readiness or a candidate.
-        if (result.accepted()) {
-            runtime.committed(expected.id(), result.revision(), result.status() == BoardingSessionStatus.TRACKING);
-            var current = result.decision();
-            if (current.outcome() == Outcome.PREPARE_ALIGHT && !now().isBefore(current.expiresAt())) {
-                current = new BoardingTrackingDecision(Outcome.EXPIRED_CANDIDATE, current.checkpoint(), null,
-                        current.remainingOccurrenceGap(), current.observedAt(), current.expiresAt());
-                result = new Applied(result.sessionId(), true, result.revision(), result.status(), current);
+                return current == null ? new Commit(new Applied(expected.id(), false, -1, null, null), null)
+                        : rejected(current);
+            });
+        }
+        Applied result = committed.result();
+        if (committed.snapshot() != null) {
+            if (result.accepted() && result.decision().checkpoint() != null) {
+                runtime.verified(committed.snapshot());
+            } else if (result.status() != BoardingSessionStatus.TRACKING) {
+                runtime.committed(expected.id(), result.revision(), false);
             }
         }
-        if (result.status() != null && !result.status().isOpen()) {
-            runtime.forget(expected.id());
+        if (result.accepted() && result.status() == BoardingSessionStatus.TRACKING
+                && result.decision().checkpoint() != null && !runtime.isReady(committed.snapshot(), now())) {
+            // A newer cancellation/hold may commit between DB acknowledgement and publication.
+            return new Applied(result.sessionId(), false, result.revision(), result.status(), null);
+        }
+        if (result.accepted() && result.decision().outcome() == Outcome.PREPARE_ALIGHT
+                && !now().isBefore(result.decision().expiresAt())) {
+            var current = result.decision();
+            result = new Applied(result.sessionId(), true, result.revision(), result.status(),
+                    new BoardingTrackingDecision(Outcome.EXPIRED_CANDIDATE, current.checkpoint(), null,
+                            current.remainingOccurrenceGap(), current.observedAt(), current.expiresAt()));
         }
         return result;
     }
 
+    private Commit rejected(BoardingSession session) {
+        return new Commit(new Applied(session.getId(), false, session.getRevision(), session.getStatus(), null),
+                BoardingTrackingSnapshot.from(session));
+    }
+
+    private Commit applyLocked(BoardingTrackingSnapshot expected, BoardingTrackingDecision decision) {
+        var session = sessions.findForUpdate(expected.id()).orElse(null);
+        if (session == null) {
+            return new Commit(new Applied(expected.id(), false, -1, null, null), null);
+        }
+        LocalDateTime now = now();
+        session.expire(now);
+        if (!session.getStatus().isOpen() || !expected.matches(session)) {
+            return rejected(session);
+        }
+        // Current structure is checked again under the short apply transaction. Sync is not locked globally.
+        BoardingTrackingDecision current = expected.requiresConfirmation()
+                ? BoardingTrackingDecision.held(expected.reason()) : decision;
+        if (!expected.requiresConfirmation() && !metadata.matches(expected)) {
+            current = BoardingTrackingDecision.held(BoardingStateReason.METADATA_CHANGED);
+        }
+        if (current.outcome() == Outcome.HELD) {
+            session.suspend(expected.revision(), current.reason(), now);
+        } else if (current.checkpoint() != null) {
+            if (current.observedAt().isAfter(now)
+                    || current.observedAt().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))
+                    || (current.checkpoint().getProviderDataTime() != null && (current.checkpoint().getProviderDataTime().isAfter(now)
+                        || current.checkpoint().getProviderDataTime().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))))) {
+                current = BoardingTrackingDecision.held(BoardingStateReason.STALE_PROGRESS);
+                session.suspend(expected.revision(), current.reason(), now);
+            } else {
+                session.track(expected.revision(), current.checkpoint(), current.reason(), now);
+            }
+        }
+        sessions.flush();
+        return new Commit(new Applied(expected.id(), true, session.getRevision(), session.getStatus(), current),
+                BoardingTrackingSnapshot.from(session));
+    }
+
     public void expire(BoardingTrackingSnapshot expected) {
-        transaction.executeWithoutResult(status -> sessions.findForUpdate(expected.id()).ifPresent(session -> session.expire(now())));
-        runtime.forget(expected.id());
+        var ended = transaction.execute(status -> sessions.findForUpdate(expected.id()).map(session -> {
+            session.expire(now());
+            return BoardingTrackingSnapshot.from(session);
+        }).orElse(null));
+        if (ended != null && !ended.status().isOpen()) {
+            runtime.committed(ended.id(), ended.revision(), false);
+        }
     }
 
     private LocalDateTime now() {

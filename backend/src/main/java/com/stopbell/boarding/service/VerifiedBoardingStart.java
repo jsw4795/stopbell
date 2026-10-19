@@ -6,7 +6,7 @@ import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.boarding.entity.BoardingTraversalSnapshot;
 import com.stopbell.transit.service.BoardingRouteSnapshot;
 
-/** Only validated evidence crosses into the creation transaction; no live Provider objects. */
+/** Only validated evidence crosses into creation/reconfirmation transactions; no live Provider objects. */
 public record VerifiedBoardingStart(
         BoardingRouteSnapshot metadata, BoardingTraversalSnapshot traversal, BoardingCheckpoint checkpoint,
         Instant referenceExpiresAt, String vehicleTrackingId, String vehicleNumber, String routeNumber, String targetName

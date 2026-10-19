@@ -5,6 +5,7 @@ import java.util.List;
 import com.stopbell.boarding.dto.BoardingSessionResponse;
 import com.stopbell.boarding.dto.CancelBoardingSessionRequest;
 import com.stopbell.boarding.dto.CreateBoardingSessionRequest;
+import com.stopbell.boarding.dto.ReconfirmBoardingSessionRequest;
 import com.stopbell.boarding.service.BoardingSessionService;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
@@ -64,6 +65,12 @@ public class BoardingSessionController {
             return service.findRequest(jwtTokens.extractUserId(jwt), query.getFirst("clientRequestId"));
         }
         throw new ApiException(ErrorCode.INVALID_REQUEST);
+    }
+
+    @PostMapping("/{sessionId}/reconfirm")
+    public BoardingSessionResponse reconfirm(@AuthenticationPrincipal Jwt jwt, @PathVariable Long sessionId,
+            @RequestBody ReconfirmBoardingSessionRequest request) {
+        return service.reconfirm(jwtTokens.extractUserId(jwt), sessionId, request);
     }
 
     @PostMapping("/{sessionId}/cancel")

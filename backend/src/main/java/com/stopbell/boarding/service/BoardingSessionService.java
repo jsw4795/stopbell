@@ -6,7 +6,11 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
+import com.stopbell.boarding.domain.BoardingTrackingSnapshot;
+import com.stopbell.boarding.dto.ReconfirmBoardingSessionRequest;
+import com.stopbell.boarding.entity.BoardingSessionStatus;
 import com.stopbell.boarding.dto.BoardingSessionResponse;
 import com.stopbell.boarding.dto.CreateBoardingSessionRequest;
 import com.stopbell.boarding.entity.BoardingSession;
@@ -26,6 +30,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 @Service
@@ -65,7 +71,7 @@ public class BoardingSessionService {
                 return Optional.empty();
             }
             return sessions.findRequestForUpdate(userId, request.clientRequestId()).map(session -> {
-                session.expire(now());
+                expire(session);
                 return existing(session, request);
             });
         });
@@ -99,11 +105,11 @@ public class BoardingSessionService {
             var duplicate = sessions.findRequestForUpdate(userId, request.clientRequestId());
             if (duplicate.isPresent()) {
                 var session = duplicate.orElseThrow();
-                session.expire(now());
+                expire(session);
                 return new CreationResult(existing(session, request), false);
             }
             var current = sessions.findCurrentForUpdate(userId);
-            current.ifPresent(session -> session.expire(now()));
+            current.ifPresent(this::expire);
             if (current.filter(session -> session.getStatus().isOpen()).isPresent()) {
                 throw new ApiException(ErrorCode.BOARDING_SESSION_CONFLICT);
             }
@@ -126,7 +132,7 @@ public class BoardingSessionService {
             BoardingSession session = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(),
                     request.fingerprint(), start.vehicleTrackingId(), start.vehicleNumber(), start.routeNumber(),
                     start.targetName(), start.traversal(), start.checkpoint(), now, now.plus(properties.getMaxLifetime())));
-            return new CreationResult(runtime.response(session, now()), true);
+            return new CreationResult(response(session), true);
         });
     }
 
@@ -134,7 +140,7 @@ public class BoardingSessionService {
         if (!session.getRequestFingerprint().equals(request.fingerprint())) {
             throw new ApiException(ErrorCode.BOARDING_REQUEST_CONFLICT);
         }
-        return runtime.response(session, now());
+        return response(session);
     }
 
     public BoardingSessionResponse find(Long userId, Long id) {
@@ -142,8 +148,8 @@ public class BoardingSessionService {
         return transaction.execute(status -> {
             authenticated(userId);
             BoardingSession session = owned(userId, id);
-            session.expire(now());
-            return runtime.response(session, now());
+            expire(session);
+            return response(session);
         });
     }
 
@@ -151,9 +157,9 @@ public class BoardingSessionService {
         return transaction.execute(status -> {
             authenticated(userId);
             var current = sessions.findCurrentForUpdate(userId);
-            current.ifPresent(session -> session.expire(now()));
+            current.ifPresent(this::expire);
             return current.filter(session -> session.getStatus().isOpen()).stream()
-                    .map(session -> runtime.response(session, now())).toList();
+                    .map(session -> response(session)).toList();
         });
     }
 
@@ -167,8 +173,8 @@ public class BoardingSessionService {
         return transaction.execute(status -> {
             authenticated(userId);
             var session = sessions.findRequestForUpdate(userId, key);
-            session.ifPresent(value -> value.expire(now()));
-            return session.stream().map(value -> runtime.response(value, now())).toList();
+            session.ifPresent(this::expire);
+            return session.stream().map(value -> response(value)).toList();
         });
     }
 
@@ -181,15 +187,131 @@ public class BoardingSessionService {
             authenticated(userId);
             BoardingSession session = owned(userId, id);
             LocalDateTime now = now();
-            session.expire(now);
+            expire(session);
             if (session.getStatus().isOpen() && session.getRevision() != expectedRevision) {
                 throw new ApiException(ErrorCode.BOARDING_REVISION_CONFLICT);
             }
             // TASK-906 can terminate this aggregate's PENDING deliveries in this transaction.
             session.cancel(expectedRevision, now);
             sessions.flush();
-            return runtime.response(session, now());
+            return response(session);
         });
+    }
+
+    public BoardingSessionResponse reconfirm(Long userId, Long id, ReconfirmBoardingSessionRequest request) {
+        validId(id);
+        if (request == null) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST);
+        }
+        var expected = transaction.execute(status -> {
+            authenticated(userId);
+            var session = owned(userId, id);
+            expire(session);
+            response(session);
+            return BoardingTrackingSnapshot.from(session);
+        });
+        requireReconfirmation(expected, request.expectedRevision());
+        // Reuse reference ownership/expiry, current metadata and selected vehicle validation.
+        // The production validator still refuses unsupported alighting evidence.
+        var start = validator.validate(userId, request.candidateRef(), request.confirmedVehicleNumber());
+        if (start.traversal().provider() != expected.provider()
+                || !start.traversal().externalRouteId().equals(expected.routeId())
+                || !java.util.Objects.equals(start.traversal().cityCode(), expected.cityCode())
+                || !start.vehicleTrackingId().equals(expected.vehicleId())
+                || !start.vehicleNumber().equals(expected.vehicleNumber())
+                || !start.vehicleNumber().equals(request.confirmedVehicleNumber())
+                || !start.traversal().equals(expected.traversal())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        var attempted = new AtomicReference<BoardingTrackingSnapshot>();
+        BoardingTrackingSnapshot committed;
+        try {
+            committed = transaction.execute(status -> {
+                var session = owned(userId, id);
+                expire(session);
+                response(session);
+                var current = BoardingTrackingSnapshot.from(session);
+                if (!current.status().isOpen()) {
+                    return current;
+                }
+                requireReconfirmation(current, request.expectedRevision());
+                if (!expected.matches(session)) {
+                    throw new ApiException(ErrorCode.BOARDING_REVISION_CONFLICT);
+                }
+                var latest = metadata.read(start.metadata().routeId(), start.metadata().targetOccurrenceId(),
+                        start.metadata().boardingOccurrenceId());
+                if (!latest.fingerprint().equals(start.metadata().fingerprint()) || !fresh(start, now())) {
+                    throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+                }
+                session.reconfirm(request.expectedRevision(), start.checkpoint(), now());
+                sessions.flush();
+                var result = BoardingTrackingSnapshot.from(session);
+                attempted.set(result);
+                return result;
+            });
+        } catch (DataAccessException | TransactionException exception) {
+            if (exception instanceof DataIntegrityViolationException || attempted.get() == null) {
+                throw exception;
+            }
+            // Read-only reconciliation of this exact baseline. Rollback is never a reason to replay it.
+            committed = transaction.execute(status -> {
+                var current = owned(userId, id);
+                var latest = metadata.read(start.metadata().routeId(), start.metadata().targetOccurrenceId(),
+                        start.metadata().boardingOccurrenceId());
+                if (!attempted.get().matches(current) || !latest.fingerprint().equals(start.metadata().fingerprint())
+                        || !fresh(start, now()) || !now().isBefore(current.getExpiresAt())) {
+                    throw exception;
+                }
+                return BoardingTrackingSnapshot.from(current);
+            });
+        }
+        if (committed.status() != BoardingSessionStatus.TRACKING) {
+            runtime.committed(committed.id(), committed.revision(), false);
+            throw new ApiException(ErrorCode.BOARDING_RECONFIRM_REQUIRED);
+        }
+        runtime.verified(committed);
+        return find(userId, id);
+    }
+
+    private static void requireReconfirmation(BoardingTrackingSnapshot session, long revision) {
+        if (session.revision() != revision) {
+            throw new ApiException(ErrorCode.BOARDING_REVISION_CONFLICT);
+        }
+        if (session.status() != BoardingSessionStatus.SUSPENDED) {
+            throw new ApiException(ErrorCode.BOARDING_RECONFIRM_REQUIRED);
+        }
+    }
+
+    private boolean fresh(VerifiedBoardingStart start, LocalDateTime now) {
+        var checkpoint = start.checkpoint();
+        return !clock.instant().isAfter(start.referenceExpiresAt())
+                && !checkpoint.getObservedAt().isAfter(now)
+                && !checkpoint.getObservedAt().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))
+                && (checkpoint.getProviderDataTime() == null || (!checkpoint.getProviderDataTime().isAfter(now)
+                    && !checkpoint.getProviderDataTime().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))));
+    }
+
+    private void expire(BoardingSession session) {
+        session.expire(now());
+        closeAfterCommit(session);
+    }
+
+    private void closeAfterCommit(BoardingSession session) {
+        if (session.getStatus() != BoardingSessionStatus.TRACKING) {
+            Long id = session.getId();
+            long revision = session.getRevision();
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    runtime.committed(id, revision, false);
+                }
+            });
+        }
+    }
+
+    private BoardingSessionResponse response(BoardingSession session) {
+        closeAfterCommit(session);
+        return runtime.response(session, now());
     }
 
     private BoardingSession owned(Long userId, Long id) {

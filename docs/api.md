@@ -362,11 +362,11 @@ Push payload는 navigation hint 수준의 최소 정보만 포함한다.
 
 ### 탑승 세션 API (TASK-903)
 
-다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904, 세션 Persistence와 생성·조회·취소 API 경계는 TASK-905 1단계에서 구현했다. 특정 차량 polling과 준비 후보·종료 판정은 TASK-905 2단계에서 구현했으며 재시작 자동 복구는 3단계, Notification과 Flutter 연결은 TASK-906/907에 남는다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
+다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904, 세션 Persistence와 생성·조회·취소 API 경계는 TASK-905 1단계에서 구현했다. TASK-905는 특정 차량 polling·준비 후보·종료 판정, checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API까지 구현했다. Notification과 Flutter 연결은 TASK-906/907에 남는다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
 
-**TASK-905 1·2단계 지원 경계:** TAGO 정확한 하차 추적은 계속 지원 보류이며, 서울 이동 중 detail·order 단독·반복 Stop의 회차 문맥도 검증된 것으로 취급하지 않는다. 서울 exact ID/order + direct flag=1의 최신 대응·단조 진행 검증을 통과해도 현재 metadata에는 목적 occurrence의 하차 가능 근거가 없어 UNKNOWN이다. 근거 부족 시 실제 POST 생성은 `BOARDING_TRACKING_UNSUPPORTED`로 거부하며, 하차 가능을 추측하거나 미구현 추적/FCM 성공을 반환하지 않는다. 아래 201 저장 경로는 검증된 입력을 전달하는 경계의 통합 테스트로 검증하며 실제 Provider 지원 완료의 근거가 아니다. 검증 근거 공급 전 기능 활성화를 위한 우회 설정은 제공하지 않는다.
+**TASK-905 지원 경계:** TAGO 정확한 하차 추적은 계속 지원 보류이며, 서울 이동 중 detail·order 단독·반복 Stop의 회차 문맥도 검증된 것으로 취급하지 않는다. 서울 exact ID/order + direct flag=1의 최신 대응·단조 진행 검증을 통과해도 현재 metadata에는 목적 occurrence의 하차 가능 근거가 없어 UNKNOWN이다. 근거 부족 시 실제 POST 생성·재확인은 `BOARDING_TRACKING_UNSUPPORTED`로 거부하며, 하차 가능을 추측하거나 미구현 추적/FCM 성공을 반환하지 않는다. 아래 생성·복구·재확인 성공 경로는 검증된 fixture를 전달하는 경계의 통합 테스트로 검증하며 실제 Provider 지원 완료의 근거가 아니다. 검증 근거 공급 전 기능 활성화를 위한 우회 설정은 제공하지 않는다.
 
-조회는 Provider 재호출이나 polling을 실행하지 않는다. 현재 프로세스에서 생성 commit을 확인하고 polling 결과의 commit revision과 현재 revision이 일치하며 checkpoint 시각이 유효한 TRACKING만 `evaluationStatus=READY`와 검증된 `remainingOccurrenceGap`을 반환한다. 최초 polling 전·재시작 후 미복구·freshness 만료는 null과 RECOVERY_PENDING, SUSPENDED는 null과 HELD, terminal은 null과 ENDED다. 과거 checkpoint 시각은 마지막 검증 근거로 보존하며 현재 위치를 뜻하지 않는다. 조회·취소·중복 요청 확인·생성 transaction과 enabled Scheduler cycle은 수명이 끝난 세션을 EXPIRED로 반영한다. 재시작 자동 복구와 reconfirm endpoint는 이번 단계에 구현하지 않는다.
+조회는 Provider 재호출이나 polling을 실행하지 않는다. 현재 프로세스에서 새 관측 검증과 생성 후 polling·복구·재확인 commit을 확인하고 허용 revision/checkpoint가 현재 DB 상태와 일치하며 시각이 유효한 TRACKING만 `evaluationStatus=READY`와 검증된 `remainingOccurrenceGap`을 반환한다. 최초 polling 전·재시작 후 미복구·freshness 만료는 null과 RECOVERY_PENDING, SUSPENDED는 null과 HELD, terminal은 null과 ENDED다. 과거 checkpoint 시각은 마지막 검증 근거로 보존하며 현재 위치를 뜻하지 않는다. 조회·취소·중복 요청 확인·생성 transaction과 enabled Scheduler cycle은 수명이 끝난 세션을 EXPIRED로 반영한다. 재시작 직후에는 기존 TRACKING을 일괄 변경하지 않고 RECOVERY_PENDING으로 반환한다. 기존 Scheduler에서 새 관측의 자동 복구 검증·commit이 확인된 뒤 READY가 될 수 있다. GET 자체는 복구를 실행하지 않는다.
 
 #### 후보 조회
 
@@ -450,7 +450,7 @@ POST /api/v1/boarding-sessions/{sessionId}/reconfirm
 POST /api/v1/boarding-sessions/{sessionId}/cancel
 ```
 
-reconfirm body는 `expectedRevision`, 최신 `candidateRef`, `confirmedVehicleNumber`다. SUSPENDED인 동일 ID/번호·Route·목적지의 최신 검증 성공 시 200 TRACKING으로 즉시 재개한다. 다른 차량·목적지를 이 endpoint로 변경하지 않는다. 원래 expiresAt과 준비 Event 소비는 유지하고 불확실 공백과 연결하지 않는 checkpoint를 저장한다. 별도 Start 호출은 없다.
+reconfirm body는 `expectedRevision`, 최신 `candidateRef`, `confirmedVehicleNumber`다. SUSPENDED인 동일 ID/번호·Route·목적지의 최신 검증 성공 시 200 TRACKING으로 즉시 재개한다. 다른 차량·목적지를 이 endpoint로 변경하지 않는다. 원래 expiresAt과 준비 Event 소비는 유지하고 불확실 공백과 연결하지 않는 checkpoint를 저장한다. 별도 Start 호출은 없다. 소유권·상태/revision 조회 → transaction 밖의 기존 후보/Provider 재검증 → 짧은 Session lock transaction의 동일 snapshot/revision·metadata·관측 유효성 재확인 → commit 확인 후 runtime 허용 순서다. 반영 중 취소·만료가 확인되면 재활성화하지 않으며 409로 현재 상태 조회를 요구한다. DB commit 응답이 불확실하면 새 transaction에서 원래 결과와 정확히 같은 baseline이 저장됐는지만 한 번 재조회하고, rollback된 요청을 blind replay하지 않는다.
 
 cancel body는 `expectedRevision`이다. current revision이 일치하는 미종료 세션을 CANCELLED로 만들고 관련 PENDING 종료를 원자 반영한 뒤 200 Session response를 반환한다. 이미 CANCELLED/COMPLETED/EXPIRED이면 무변경 현재 response를 반환하며 실제 취소된 것으로 위장하지 않는다. 그 외 revision 불일치는 409다. reconfirm의 응답 유실 후 stale revision도 409+GET으로 현재 상태를 복구하며 재요청이 baseline/Event를 다시 초기화하지 않는다. 소유권 검증은 모든 상태보다 먼저 적용한다.
 

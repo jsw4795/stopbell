@@ -123,6 +123,10 @@ public class BoardingProgressEvaluator {
         return new BoardingTrackingDecision(outcome, checkpoint, null, gap, observedAt, expiry);
     }
 
+    public boolean continuityExpired(BoardingTrackingSnapshot session, LocalDateTime now) {
+        return Duration.between(session.checkpoint().getObservedAt(), now).compareTo(maxObservationGap) > 0;
+    }
+
     private static boolean invalidTime(LocalDateTime time, LocalDateTime now) {
         return time == null || time.isAfter(now) || time.isBefore(now.minus(FRESHNESS));
     }

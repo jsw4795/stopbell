@@ -49,9 +49,6 @@ public class BoardingSessionPollingService {
                     store.expire(session);
                     continue;
                 }
-                if (!runtime.isAdmitted(session.id())) {
-                    continue; // Existing database rows await step 3 recovery, without mass suspension.
-                }
                 BoardingTrackingDecision decision;
                 if (session.requiresConfirmation()) {
                     continue;
@@ -66,6 +63,10 @@ public class BoardingSessionPollingService {
                     }
                     decision = input.reason() != null ? BoardingTrackingDecision.held(input.reason())
                             : evaluator.evaluate(session, input.observation(), now());
+                    if (decision.reason() != null && decision.reason().allowsAutomaticRevalidation()
+                            && evaluator.continuityExpired(session, now())) {
+                        decision = BoardingTrackingDecision.held(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
+                    }
                 }
                 results.add(store.apply(session, decision));
             } catch (RuntimeException exception) {

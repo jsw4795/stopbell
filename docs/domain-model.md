@@ -16,7 +16,7 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
     User
 
      ├── Alarm
-     ├── BoardingSession (TASK-905 1·2단계 구현, 재시작 자동 복구는 후속)
+     ├── BoardingSession (TASK-905 추적·재시작 복구·재확인 구현)
      ├── RefreshToken
      └── Device
 
@@ -458,7 +458,7 @@ TASK-902에서 정의한 후보·화면 선택·사용자 확정은 서로 다�
 
 ## Purpose and Identity
 
-사용자가 전체 번호를 대조한 특정 차량만 목적 occurrence까지 추적하는 독립 aggregate다. 기존 Alarm/BusAlarmTarget/ACTIVE/FOLLOW_UP을 세션으로 재사용하지 않는다. TASK-905 1단계에서 Entity·V15·최초 checkpoint와 생성·조회·취소 API 경계를 구현했다. 2단계는 특정 차량 polling·checkpoint 갱신·하차 준비 후보 및 종료 판정을 구현했다. 실제 Provider 생성의 지원 보류는 [API](api.md#탑승-세션-api-task-903)를 유지하며 재시작 자동 복구는 3단계에 남는다. 결정 근거는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
+사용자가 전체 번호를 대조한 특정 차량만 목적 occurrence까지 추적하는 독립 aggregate다. 기존 Alarm/BusAlarmTarget/ACTIVE/FOLLOW_UP을 세션으로 재사용하지 않는다. TASK-905 1단계에서 Entity·V15·최초 checkpoint와 생성·조회·취소 API 경계를 구현했다. 2단계는 특정 차량 polling·checkpoint 갱신·하차 준비 후보 및 종료 판정을 구현했다. 3단계는 새 관측과 저장 checkpoint를 비교하는 재시작 자동 복구 및 동일 차량 재확인을 구현했다. 실제 Provider 생성·재확인의 지원 보류는 [API](api.md#탑승-세션-api-task-903)를 유지한다. 결정 근거는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
 
 소유자는 인증된 User다. TRACKING/SUSPENDED를 미종료로 보며 User당 최대 하나다. Provider·externalRouteId·vehicleTrackingId·전체 표시 번호·목적 occurrence는 한 세션 안에서 불변이다. TAGO vehicleno, 서울 vehId/plainNo 구분과 typed cityCode 문맥을 유지한다. 번호는 ID 누락·변경의 대체 identity가 아니다. 없는 direction/trip/lap 값을 만들지 않는다.
 
@@ -514,7 +514,7 @@ TRACKING의 stateReason은 NULL, SUSPENDED는 보류 사유, terminal은 해당 
 
 ## Recovery
 
-재시작만으로 DB 상태를 일괄 SUSPENDED로 바꾸지 않는다. 새 프로세스의 세션 전송 gate는 모두 차단하며 저장 checkpoint와 새 관측을 먼저 검증한다. 복구 전 과거 checkpoint 자체로 새 Event를 만들지 않는다.
+재시작만으로 DB 상태를 일괄 SUSPENDED로 바꾸지 않는다. 새 프로세스의 세션 전송 gate는 모두 차단하며 저장 checkpoint와 새 관측을 먼저 검증한다. 복구 전 과거 checkpoint 자체로 새 Event를 만들지 않는다. 기존 `BoardingProgressEvaluator`를 정상 polling과 복구가 함께 사용하며, 새 checkpoint가 없는 반복 결과는 복구 허용 근거가 아니다. 재확인은 SUSPENDED의 같은 불변 identity/traversal만 새 검증 baseline으로 전환하며, 이전 checkpoint와의 단조 연결 조건을 재개 근거로 사용하지 않는다. 최초 수명과 후속 durable Event identity는 그대로 유지한다.
 
 자동 복구는 미종료·미만료, ID/번호/Route 대응, 구조 fingerprint, 새 관측의 freshness·시각 일관성, 같은 traversal의 정지/단조 진행, 회차·reset·다른 lap 모호성 없음과 [복구 공백 설정](architecture.md#boarding-초기-설정과-만료)을 함께 요구한다. gap은 마지막 검증 observedAt부터 새 observedAt까지다. 과거 checkpoint는 현재 위치가 아닌 비교 기준이므로 기존 Observation freshness만으로 폐기하지 않되 복구 공백 상한은 지킨다.
 

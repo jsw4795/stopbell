@@ -211,13 +211,18 @@ class BoardingTrackingIntegrationTest {
     }
 
     @Test
-    @DisplayName("재시작을 나타내는 미등록 세션은 과거 checkpoint를 재평가하거나 Provider를 조회하지 않는다")
+    @DisplayName("재시작 직후에는 복구 대기이며 새 관측의 복구 commit 뒤에만 READY와 준비 후보를 공개한다")
     void recovery_remains_pending() {
         runtime.forget(session.getId());
-        assertThat(polling.poll(cycle())).isEmpty();
-        assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.TRACKING);
+        var pending = api.find(session.getUser().getId(), session.getId());
+        assertThat(pending.evaluationStatus()).isEqualTo(EvaluationStatus.RECOVERY_PENDING);
+        assertThat(pending.remainingOccurrenceGap()).isNull();
         verifyNoInteractions(seoul, detail, tago);
-        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.RECOVERY_PENDING);
+        var recovered = polling.poll(cycle()).getFirst();
+        assertThat(recovered.accepted()).isTrue();
+        assertThat(recovered.decision().outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
+        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.READY);
+        assertThat(recovered.decision().observedAt()).isEqualTo(utc());
     }
 
     @Test
@@ -255,7 +260,7 @@ class BoardingTrackingIntegrationTest {
         assertThat(held.getStateReason()).isEqualTo(BoardingStateReason.VEHICLE_MISSING);
         assertThat(held.getCheckpoint().getIndex()).isZero();
         assertThat(held.getRevision()).isEqualTo(1);
-        when(seoul.fetchVehicleLocations(any())).thenReturn(roster());
+        doAnswer(invocation -> roster()).when(seoul).fetchVehicleLocations(any());
         assertThat(polling.poll(cycle())).isEmpty();
         var current = sessions.findById(session.getId()).orElseThrow();
         assertThat(current.getStateReason()).isEqualTo(BoardingStateReason.VEHICLE_MISSING);
@@ -424,6 +429,231 @@ class BoardingTrackingIntegrationTest {
         assertThat(result.decision().outcome()).isEqualTo(Outcome.EXPIRED_CANDIDATE);
         assertThat(result.decision().observedAt()).isEqualTo(UTC_NOW.plusSeconds(20));
         assertThat(result.decision().expiresAt()).isEqualTo(UTC_NOW.plusSeconds(50));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3, 4})
+    @DisplayName("재시작 뒤 같은 occurrence·전진·관측 누락을 새 근거로 복구하며 목적지 이후 준비 알림은 소급하지 않는다")
+    void restart_progress(int index) {
+        runtime.forget(session.getId());
+        when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> detail(index));
+        var result = polling.poll(cycle()).getFirst();
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.decision().checkpoint().getIndex()).isEqualTo(index);
+        assertThat(result.decision().outcome()).isEqualTo(switch (index) {
+            case 1, 2 -> Outcome.PREPARE_ALIGHT;
+            case 3 -> Outcome.ARRIVAL_OBSERVED;
+            case 4 -> Outcome.PASSED_OBSERVED;
+            default -> Outcome.NO_CANDIDATE;
+        });
+        var response = api.find(session.getUser().getId(), session.getId());
+        assertThat(response.evaluationStatus()).isEqualTo(index < 3 ? EvaluationStatus.READY : EvaluationStatus.ENDED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {120, 121})
+    @DisplayName("재시작 복구 공백은 마지막 검증 관측부터 계산하며 2분 경계를 초과하면 재확인을 요구한다")
+    void recovery_gap_boundary(int seconds) {
+        runtime.forget(session.getId());
+        time.set(NOW.plusSeconds(seconds));
+        var result = polling.poll(cycle()).getFirst();
+        assertThat(result.status()).isEqualTo(seconds == 120 ? BoardingSessionStatus.TRACKING : BoardingSessionStatus.SUSPENDED);
+        if (seconds > 120) {
+            assertThat(result.decision().reason()).isEqualTo(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
+            assertThat(result.decision().checkpoint()).isNull();
+        }
+    }
+
+    @Test
+    @DisplayName("재시작 후 동일 제공시각의 과거 checkpoint 반복은 gate를 열거나 준비 후보를 만들지 않는다")
+    void restart_repeated_checkpoint() {
+        polling.poll(cycle());
+        runtime.forget(session.getId());
+        var result = polling.poll(cycle()).getFirst();
+        assertThat(result.decision().checkpoint()).isNull();
+        assertThat(result.decision().outcome()).isEqualTo(Outcome.NO_CANDIDATE);
+        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.RECOVERY_PENDING);
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = BoardingStateReason.class, names = {
+            "VEHICLE_MISSING", "IDENTITY_CONFLICT", "PROGRESS_REGRESSION", "TRAVERSAL_AMBIGUOUS", "CONTINUITY_GAP_EXCEEDED"})
+    @DisplayName("알려진 연속성 상실은 재시작 후에도 사유와 checkpoint를 보존하며 Provider 자동 연결을 시도하지 않는다")
+    void restart_preserves_hold(BoardingStateReason reason) {
+        store.apply(store.findOpen().getFirst(), BoardingTrackingDecision.held(reason));
+        runtime.forget(session.getId());
+        assertThat(polling.poll(cycle())).isEmpty();
+        assertThat(store.findOpen().getFirst().reason()).isEqualTo(reason);
+        verifyNoInteractions(seoul, detail, tago);
+    }
+
+    @Test
+    @DisplayName("재시작 후 Provider 실패를 자동 재조회하다 공백을 초과하면 소실 대신 연속성 공백 사유를 저장한다")
+    void restart_provider_failure_gap() {
+        runtime.forget(session.getId());
+        when(seoul.fetchVehicleLocations(any())).thenThrow(TransitProviderClientException.protocol(TransitProvider.SEOUL_BUS, "roster", null));
+        polling.poll(cycle());
+        assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
+        time.set(NOW.plusSeconds(121));
+        polling.poll(cycle());
+        assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
+        time.set(NOW.plusSeconds(140));
+        doAnswer(invocation -> roster()).when(seoul).fetchVehicleLocations(any());
+        assertThat(polling.poll(cycle())).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("복구 commit 응답 유실은 같은 결과를 새 transaction에서 재조회하고 rollback이면 gate를 닫아 둔다")
+    void recovery_commit_reconciliation(boolean persisted) {
+        runtime.forget(session.getId());
+        var expected = store.findOpen().getFirst();
+        var once = new java.util.concurrent.atomic.AtomicBoolean(true);
+        PlatformTransactionManager uncertain = new PlatformTransactionManager() {
+            public TransactionStatus getTransaction(TransactionDefinition definition) { return manager.getTransaction(definition); }
+            public void commit(TransactionStatus status) {
+                if (once.getAndSet(false)) {
+                    assertThat(runtime.response(session, utc()).evaluationStatus()).isEqualTo(EvaluationStatus.RECOVERY_PENDING);
+                    if (persisted) { manager.commit(status); } else { manager.rollback(status); }
+                    throw new TransactionSystemException("controlled acknowledgement loss");
+                }
+                manager.commit(status);
+            }
+            public void rollback(TransactionStatus status) { manager.rollback(status); }
+        };
+        var tested = new BoardingTrackingStore(sessions, metadata, runtime, uncertain, clock);
+        var result = tested.apply(expected, decision(expected, 1));
+        assertThat(result.accepted()).isEqualTo(persisted);
+        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus())
+                .isEqualTo(persisted ? EvaluationStatus.READY : EvaluationStatus.RECOVERY_PENDING);
+        assertThat(sessions.findById(session.getId()).orElseThrow().getRevision()).isEqualTo(persisted ? 1 : 0);
+        verifyNoInteractions(seoul, detail, tago);
+    }
+
+    @Test
+    @DisplayName("복구 commit 후 runtime 등록 직전 취소가 commit되면 늦은 복구 callback이 gate를 다시 열지 못한다")
+    void cancel_before_recovery_publication() {
+        runtime.forget(session.getId());
+        var expected = store.findOpen().getFirst();
+        PlatformTransactionManager delayed = new PlatformTransactionManager() {
+            public TransactionStatus getTransaction(TransactionDefinition definition) { return manager.getTransaction(definition); }
+            public void commit(TransactionStatus status) {
+                manager.commit(status);
+                api.cancel(session.getUser().getId(), session.getId(), 1);
+            }
+            public void rollback(TransactionStatus status) { manager.rollback(status); }
+        };
+        var result = new BoardingTrackingStore(sessions, metadata, runtime, delayed, clock).apply(expected, decision(expected, 1));
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.decision()).isNull();
+        var current = sessions.findById(session.getId()).orElseThrow();
+        assertThat(current.getStatus()).isEqualTo(BoardingSessionStatus.CANCELLED);
+        assertThat(runtime.isReady(BoardingTrackingSnapshot.from(current), utc())).isFalse();
+        var late = new BoardingTrackingSnapshot(expected.id(), 1, BoardingSessionStatus.TRACKING, null,
+                expected.provider(), expected.routeId(), expected.cityCode(), expected.vehicleId(), expected.vehicleNumber(),
+                expected.traversal(), decision(expected, 1).checkpoint(), expected.expiresAt());
+        runtime.verified(late);
+        assertThat(runtime.isReady(late, utc())).isFalse();
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"0,IDENTITY_CONFLICT", "1,IDENTITY_CONFLICT", "2,PROGRESS_REGRESSION",
+            "3,TRAVERSAL_AMBIGUOUS", "4,STALE_PROGRESS", "5,STALE_PROGRESS", "6,TRAVERSAL_AMBIGUOUS"})
+    @DisplayName("복구의 ID·번호 충돌과 제공시각 역행·상충·stale·future·다른 lap은 checkpoint와 허용을 갱신하지 않는다")
+    void restart_rejects_invalid_evidence(int scenario, BoardingStateReason reason) {
+        runtime.forget(session.getId());
+        var expected = store.findOpen().getFirst();
+        var observation = BoardingProgressEvaluatorTest.observation(expected, 1, Meaning.VERIFIED_REFERENCE, 20);
+        var vehicle = observation.vehicle();
+        vehicle = switch (scenario) {
+            case 0 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle("other", vehicle.number(), vehicle.stopId(),
+                    vehicle.order(), 0, vehicle.observedAt(), vehicle.providerDataTime(), null, null);
+            case 1 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), "다른번호1234", vehicle.stopId(),
+                    vehicle.order(), 0, vehicle.observedAt(), vehicle.providerDataTime(), null, null);
+            case 2 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(),
+                    vehicle.order(), 0, vehicle.observedAt(), NOW.minusSeconds(2), null, null);
+            case 3 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(),
+                    vehicle.order(), 0, vehicle.observedAt(), NOW.minusSeconds(1), null, null);
+            case 4 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(),
+                    vehicle.order(), 0, NOW.minusSeconds(61), NOW.minusSeconds(62), null, null);
+            case 5 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(),
+                    vehicle.order(), 0, NOW.plusSeconds(21), NOW.plusSeconds(20), null, null);
+            default -> vehicle;
+        };
+        observation = new BoardingProgressObservation(expected.provider(), expected.routeId(), expected.cityCode(), vehicle,
+                observation.meaning(), false, null, scenario == 6);
+        doReturn(new BoardingVehicleTracker.Input(observation, null)).when(tracker).observe(any(), any());
+        var result = polling.poll(cycle()).getFirst();
+        assertThat(result.decision().reason()).isEqualTo(reason);
+        var held = sessions.findById(session.getId()).orElseThrow();
+        assertThat(held.getCheckpoint()).isEqualTo(expected.checkpoint());
+        assertThat(runtime.isReady(BoardingTrackingSnapshot.from(held), utc())).isFalse();
+        assertThat(api.find(held.getUser().getId(), held.getId()).remainingOccurrenceGap()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("미복구 세션의 검증 중 취소·만료가 되어도 최신 terminal과 revision을 보존한다")
+    void recovery_terminal_during_io(boolean expired) throws Exception {
+        runtime.forget(session.getId());
+        terminal_during_io(expired);
+    }
+
+    @Test
+    @DisplayName("미복구 snapshot의 중복 반영과 새로운 checkpoint 경합은 row lock과 revision으로 직렬화한다")
+    void recovery_concurrent_results() throws Exception {
+        runtime.forget(session.getId());
+        concurrent_apply();
+        var latest = store.findOpen().getFirst();
+        assertThat(latest.revision()).isEqualTo(1);
+        var decision = evaluator.evaluate(latest,
+                BoardingProgressEvaluatorTest.observation(latest, 2, Meaning.VERIFIED_REFERENCE, 40), UTC_NOW.plusSeconds(40));
+        time.set(NOW.plusSeconds(40));
+        assertThat(store.apply(latest, decision).accepted()).isTrue();
+        assertThat(store.apply(latest, decision).accepted()).isFalse();
+        assertThat(store.findOpen().getFirst().checkpoint().getIndex()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("재시작 복구도 metadata 재확인에서 구조 경합을 거부하고 snapshot을 교체하지 않는다")
+    void recovery_metadata_race() {
+        runtime.forget(session.getId());
+        metadata_race();
+        var current = store.findOpen().getFirst();
+        assertThat(current.reason()).isEqualTo(BoardingStateReason.METADATA_CHANGED);
+        assertThat(runtime.isReady(current, utc())).isFalse();
+    }
+
+    @Test
+    @DisplayName("current 조회가 만료 세션을 빈 목록으로 반환하더라도 이전 허용 revision은 commit 뒤 닫힌다")
+    void current_query_expiration_closes_gate() {
+        polling.poll(cycle());
+        var validated = store.findOpen().getFirst();
+        assertThat(runtime.isReady(validated, utc())).isTrue();
+        time.set(NOW.plusSeconds(14400));
+        assertThat(api.findCurrent(session.getUser().getId())).isEmpty();
+        assertThat(runtime.isReady(validated, UTC_NOW.plusSeconds(20))).isFalse();
+        assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.EXPIRED);
+    }
+
+    @Test
+    @DisplayName("복구 성공 commit 직후 식별 충돌이 commit되면 오래된 후보 공개와 gate 재허용을 차단한다")
+    void identity_conflict_before_recovery_publication() {
+        runtime.forget(session.getId());
+        var expected = store.findOpen().getFirst();
+        PlatformTransactionManager delayed = new PlatformTransactionManager() {
+            public TransactionStatus getTransaction(TransactionDefinition definition) { return manager.getTransaction(definition); }
+            public void commit(TransactionStatus status) {
+                manager.commit(status);
+                store.apply(store.findOpen().getFirst(), BoardingTrackingDecision.held(BoardingStateReason.IDENTITY_CONFLICT));
+            }
+            public void rollback(TransactionStatus status) { manager.rollback(status); }
+        };
+        var result = new BoardingTrackingStore(sessions, metadata, runtime, delayed, clock).apply(expected, decision(expected, 1));
+        assertThat(result.accepted()).isFalse();
+        assertThat(result.decision()).isNull();
+        assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.IDENTITY_CONFLICT);
+        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.HELD);
     }
 
     private BoardingTrackingDecision decision(BoardingTrackingSnapshot expected, int index) {

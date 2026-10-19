@@ -45,12 +45,57 @@ class BoardingTrackingRuntimeTest {
         }
         var runtime = new BoardingTrackingRuntime();
         runtime.admitCreated(1L);
-        runtime.committed(1L, 3, true);
+        runtime.verified(com.stopbell.boarding.domain.BoardingTrackingSnapshot.from(session));
         runtime.committed(1L, 2, true);
         runtime.retainLoaded(Set.of(1L), Set.of(1L));
         assertThat(runtime.response(session, UTC_NOW.plusSeconds(3)).evaluationStatus()).isEqualTo(EvaluationStatus.READY);
         runtime.forget(1L);
         runtime.committed(1L, 4, true);
         assertThat(runtime.response(session, UTC_NOW.plusSeconds(3)).evaluationStatus()).isEqualTo(EvaluationStatus.RECOVERY_PENDING);
+    }
+    @Test
+    @DisplayName("보류한 revision은 이전 허용값을 남기지 않고 같은 revision과 더 오래된 callback의 재허용도 차단한다")
+    void close_revokes_previous_readiness() {
+        var session = session(new User(AuthProvider.GOOGLE, "owner"));
+        ReflectionTestUtils.setField(session, "id", 1L);
+        var runtime = new BoardingTrackingRuntime();
+        var original = com.stopbell.boarding.domain.BoardingTrackingSnapshot.from(session);
+        runtime.verified(original);
+        assertThat(runtime.isReady(original, UTC_NOW)).isTrue();
+        runtime.committed(1L, 1, false);
+        runtime.committed(1L, 0, true);
+        runtime.committed(1L, 1, true);
+        runtime.verified(original);
+        assertThat(runtime.isReady(original, UTC_NOW)).isFalse();
+    }
+
+    @Test
+    @DisplayName("freshness가 끝난 revision의 허용을 닫고 같은 관측의 늦은 검증 callback으로 다시 열지 않는다")
+    void expired_evidence_cannot_reopen() {
+        var session = session(new User(AuthProvider.GOOGLE, "owner"));
+        ReflectionTestUtils.setField(session, "id", 1L);
+        var snapshot = com.stopbell.boarding.domain.BoardingTrackingSnapshot.from(session);
+        var runtime = new BoardingTrackingRuntime();
+        runtime.verified(snapshot);
+        assertThat(runtime.isReady(snapshot, UTC_NOW.plusSeconds(61))).isFalse();
+        runtime.verified(snapshot);
+        assertThat(runtime.isReady(snapshot, UTC_NOW)).isFalse();
+    }
+
+    @Test
+    @DisplayName("새 프로세스는 DB TRACKING이나 일반 commit 알림만으로 등록되지 않으며 정확한 검증 revision만 READY다")
+    void unknown_process_and_revision_mismatch() {
+        var session = session(new User(AuthProvider.GOOGLE, "owner"));
+        ReflectionTestUtils.setField(session, "id", 1L);
+        var original = com.stopbell.boarding.domain.BoardingTrackingSnapshot.from(session);
+        var runtime = new BoardingTrackingRuntime();
+        assertThat(runtime.isReady(original, UTC_NOW)).isFalse();
+        runtime.committed(1L, 0, true);
+        assertThat(runtime.isReady(original, UTC_NOW)).isFalse();
+        runtime.forget(1L);
+        runtime.verified(original);
+        session.suspend(0, com.stopbell.boarding.entity.BoardingStateReason.STALE_PROGRESS, UTC_NOW);
+        assertThat(runtime.response(session, UTC_NOW).remainingOccurrenceGap()).isNull();
+        assertThat(runtime.isReady(com.stopbell.boarding.domain.BoardingTrackingSnapshot.from(session), UTC_NOW)).isFalse();
     }
 }

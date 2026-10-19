@@ -194,6 +194,21 @@ public class BoardingSession {
         checkpoint = next;
     }
 
+    public void reconfirm(long expectedRevision, BoardingCheckpoint next, LocalDateTime now) {
+        requireOpenRevision(expectedRevision);
+        if (status != BoardingSessionStatus.SUSPENDED || !time(now).isBefore(expiresAt)
+                || next == null || next.getObservedAt().isAfter(now)) {
+            throw new IllegalStateException("Only a live suspended session can be reconfirmed");
+        }
+        next.validateAgainst(getTraversal());
+        if (next.getIndex() >= getTraversal().targetIndex()) {
+            throw new IllegalArgumentException("Reconfirmed target must remain ahead");
+        }
+        // This is a new verified baseline, never a claim of continuity across the uncertain interval.
+        change(BoardingSessionStatus.TRACKING, null, now);
+        checkpoint = next;
+    }
+
     private void finish(BoardingSessionStatus next, BoardingStateReason reason, LocalDateTime now) {
         change(next, reason, now);
         endedAt = updatedAt;

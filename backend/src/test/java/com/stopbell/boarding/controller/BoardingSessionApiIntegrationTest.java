@@ -17,6 +17,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.stopbell.boarding.dto.CreateBoardingSessionRequest;
+import com.stopbell.boarding.dto.ReconfirmBoardingSessionRequest;
+import com.stopbell.boarding.dto.BoardingSessionResponse;
+import com.stopbell.boarding.entity.BoardingCheckpoint;
+import com.stopbell.boarding.entity.BoardingSessionStatus;
+import com.stopbell.boarding.service.VerifiedBoardingStart;
+import com.stopbell.boarding.service.BoardingTrackingRuntime;
 import com.stopbell.boarding.entity.BoardingStateReason;
 import com.stopbell.boarding.repository.BoardingSessionRepository;
 import com.stopbell.boarding.service.BoardingSessionService;
@@ -75,6 +81,7 @@ class BoardingSessionApiIntegrationTest {
     @Autowired private BusRouteStopOccurrenceRepository occurrences;
     @Autowired private BoardingSessionRepository sessions;
     @Autowired private BoardingSessionService service;
+    @Autowired private BoardingTrackingRuntime runtime;
     @Autowired private BoardingCandidateMetadataService metadata;
     @Autowired private BoardingCandidateService candidates;
     @Autowired private com.stopbell.boarding.service.BoardingSessionProperties properties;
@@ -383,6 +390,259 @@ class BoardingSessionApiIntegrationTest {
             assertThat(result.response().checkpointObservedAt()).isEqualTo(NOW);
             assertThat(result.response().expiresAt()).isEqualTo(NOW.plusSeconds(14400));
         }
+    }
+
+    @Test
+    @DisplayName("재확인은 JWT와 소유권을 먼저 검증하고 타 사용자와 없는 세션을 같은 404로 반환한다")
+    void reconfirm_authentication_and_ownership() throws Exception {
+        long id = suspendedFixture();
+        clearInvocations(validator);
+        mvc.perform(reconfirmRequest(id, 1, "ref")).andExpect(status().isUnauthorized());
+        mvc.perform(auth(reconfirmRequest(id, 1, "ref"), other)).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("BOARDING_SESSION_NOT_FOUND"));
+        mvc.perform(auth(reconfirmRequest(999999L, 1, "ref"), owner)).andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("BOARDING_SESSION_NOT_FOUND"));
+        verifyNoInteractions(validator);
+    }
+
+    @Test
+    @DisplayName("검증 fixture 재확인은 같은 세션과 최초 기한을 유지하며 새 checkpoint commit 뒤 READY로 재개한다")
+    void reconfirm_success_and_lost_response_retry() throws Exception {
+        long id = suspendedFixture();
+        var original = sessions.findById(id).orElseThrow();
+        freshReconfirmationFixture();
+        mvc.perform(auth(reconfirmRequest(id, 1, "ref"), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id)).andExpect(jsonPath("$.status").value("TRACKING"))
+                .andExpect(jsonPath("$.revision").value(2)).andExpect(jsonPath("$.evaluationStatus").value("READY"))
+                .andExpect(jsonPath("$.remainingOccurrenceGap").value(2))
+                .andExpect(jsonPath("$.checkpointObservedAt").value(time.get().toString()))
+                .andExpect(jsonPath("$.expiresAt").value(NOW.plusSeconds(14400).toString()));
+        var recovered = sessions.findById(id).orElseThrow();
+        assertThat(recovered.getTraversal()).isEqualTo(original.getTraversal());
+        assertThat(recovered.getCreatedAt()).isEqualTo(original.getCreatedAt());
+        mvc.perform(auth(reconfirmRequest(id, 1, "ref"), owner)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BOARDING_REVISION_CONFLICT"));
+        assertThat(sessions.findById(id).orElseThrow().getCheckpoint()).isEqualTo(recovered.getCheckpoint());
+        assertThat(sessions.count()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("실제 Provider의 미검증 하차 가능 근거는 재확인에서도 성공으로 우회하지 않는다")
+    void reconfirm_real_provider_remains_unsupported() throws Exception {
+        long id = suspendedFixture();
+        doCallRealMethod().when(validator).validate(anyLong(), anyString(), anyString());
+        mvc.perform(auth(reconfirmRequest(id, 1, candidateRef()), owner)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BOARDING_TRACKING_UNSUPPORTED"));
+        assertThat(sessions.findById(id).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.SUSPENDED);
+    }
+
+    @Test
+    @DisplayName("만료되거나 사라진 candidateRef는 재확인 세션을 변경하지 않는다")
+    void reconfirm_expired_reference() throws Exception {
+        long id = suspendedFixture();
+        doCallRealMethod().when(validator).validate(anyLong(), anyString(), anyString());
+        String reference = candidateRef();
+        time.set(NOW.plusSeconds(61));
+        mvc.perform(auth(reconfirmRequest(id, 1, reference), owner)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
+        assertThat(sessions.findById(id).orElseThrow().getRevision()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3, 4})
+    @DisplayName("재확인으로 차량 ID·전체 번호·목적 occurrence·Route·Provider를 변경할 수 없다")
+    void reconfirm_identity_and_target_change(int scenario) throws Exception {
+        long id = suspendedFixture();
+        var context = metadata.read(route.getId(), target.getId(), first.getId());
+        if (scenario == 2) {
+            var middle = occurrences.findAllByRouteOrderByStopOrderAsc(route).get(1);
+            context = metadata.read(route.getId(), middle.getId(), first.getId());
+        } else if (scenario == 3 || scenario == 4) {
+            context = new com.stopbell.transit.service.BoardingRouteSnapshot(context.routeId(),
+                    scenario == 4 ? TransitProvider.TAGO : context.provider(),
+                    scenario == 3 ? "other-route" : context.externalRouteId(), scenario == 4 ? "31010" : null,
+                    context.targetOccurrenceId(), context.boardingOccurrenceId(), context.traversal(), context.routeNumber());
+        }
+        var original = verified(context);
+        var changed = new VerifiedBoardingStart(context, original.traversal(), original.checkpoint(), original.referenceExpiresAt(),
+                scenario == 0 ? "other-vehicle" : original.vehicleTrackingId(), scenario == 1 ? "다른번호1234" : NUMBER,
+                original.routeNumber(), original.targetName());
+        doReturn(changed).when(validator).validate(anyLong(), anyString(), anyString());
+        mvc.perform(auth(reconfirmRequest(id, 1, "ref"), owner)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
+        assertThat(sessions.findById(id).orElseThrow().getRevision()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"TRACKING", "CANCELLED", "COMPLETED", "EXPIRED"})
+    @DisplayName("보류 이외 상태와 terminal 세션은 재확인으로 활성화할 수 없다")
+    void reconfirm_requires_suspension(String state) throws Exception {
+        long id = suspendedFixture();
+        var tx = new TransactionTemplate(manager);
+        tx.executeWithoutResult(status -> {
+            var session = sessions.findForUpdate(id).orElseThrow();
+            switch (state) {
+                case "TRACKING" -> session.reconfirm(1, session.getCheckpoint(), com.stopbell.boarding.BoardingSessionFixtures.UTC_NOW.plusSeconds(20));
+                case "CANCELLED" -> session.cancel(1, com.stopbell.boarding.BoardingSessionFixtures.UTC_NOW.plusSeconds(20));
+                case "EXPIRED" -> session.expire(session.getExpiresAt());
+                default -> {
+                    session.reconfirm(1, session.getCheckpoint(), com.stopbell.boarding.BoardingSessionFixtures.UTC_NOW.plusSeconds(20));
+                    var t = session.getTraversal().occurrences().get(2);
+                    session.track(2, new BoardingCheckpoint(t.externalStopId(), t.order(), 2, BoardingCheckpoint.Evidence.ID_ORDER,
+                            null, UTC_NOW.plusSeconds(20), UTC_NOW.plusSeconds(19)), BoardingStateReason.ARRIVAL_OBSERVED,
+                            UTC_NOW.plusSeconds(20));
+                }
+            }
+        });
+        long revision = sessions.findById(id).orElseThrow().getRevision();
+        mvc.perform(auth(reconfirmRequest(id, revision, "ref"), owner)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BOARDING_RECONFIRM_REQUIRED"));
+        assertThat(sessions.findById(id).orElseThrow().getStatus().name()).isEqualTo(state);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("재확인 Provider I/O 중 취소·만료가 되면 checkpoint를 저장하거나 terminal을 되살리지 않는다")
+    void reconfirm_terminal_during_io(boolean expired) throws Exception {
+        long id = suspendedFixture();
+        freshReconfirmationFixture();
+        var start = freshStart();
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            entered.countDown();
+            assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
+            return start;
+        }).when(validator).validate(anyLong(), anyString(), anyString());
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var result = pool.submit(() -> {
+                try { service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, "ref", NUMBER)); return "SUCCESS"; }
+                catch (ApiException exception) { return exception.getErrorCode().name(); }
+            });
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            if (expired) { time.set(NOW.plusSeconds(14400)); }
+            else { service.cancel(owner.getId(), id, 1); }
+            release.countDown();
+            assertThat(result.get(10, TimeUnit.SECONDS)).isEqualTo("BOARDING_RECONFIRM_REQUIRED");
+        } finally { release.countDown(); }
+        var ended = sessions.findById(id).orElseThrow();
+        assertThat(ended.getStatus()).isEqualTo(expired ? BoardingSessionStatus.EXPIRED : BoardingSessionStatus.CANCELLED);
+        assertThat(ended.getCheckpoint().getObservedAt()).isEqualTo(UTC_NOW);
+        assertThat(runtime.isReady(com.stopbell.boarding.domain.BoardingTrackingSnapshot.from(ended), UTC_NOW.plusSeconds(20))).isFalse();
+    }
+
+    @Test
+    @DisplayName("재확인 검증 후 metadata가 바뀌면 원래 snapshot을 보존하고 반영하지 않는다")
+    void reconfirm_metadata_race() throws Exception {
+        long id = suspendedFixture();
+        freshReconfirmationFixture();
+        var start = freshStart();
+        doAnswer(invocation -> {
+            occurrence("added", 40);
+            return start;
+        }).when(validator).validate(anyLong(), anyString(), anyString());
+        mvc.perform(auth(reconfirmRequest(id, 1, "ref"), owner)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
+        assertThat(sessions.findById(id).orElseThrow().getRevision()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("재확인 commit 응답 유실은 새 transaction에서 같은 baseline을 확인하고 rollback은 재적용하지 않는다")
+    void reconfirm_commit_reconciliation(boolean persisted) {
+        long id = suspendedFixture();
+        freshReconfirmationFixture();
+        var counter = new java.util.concurrent.atomic.AtomicInteger();
+        PlatformTransactionManager uncertain = new PlatformTransactionManager() {
+            public TransactionStatus getTransaction(TransactionDefinition definition) { return manager.getTransaction(definition); }
+            public void commit(TransactionStatus status) {
+                if (counter.incrementAndGet() == 2) {
+                    if (persisted) { manager.commit(status); } else { manager.rollback(status); }
+                    throw new TransactionSystemException("controlled acknowledgement loss");
+                }
+                manager.commit(status);
+            }
+            public void rollback(TransactionStatus status) { manager.rollback(status); }
+        };
+        var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, uncertain, clock, runtime);
+        var request = new ReconfirmBoardingSessionRequest(1, "ref", NUMBER);
+        if (persisted) {
+            assertThat(tested.reconfirm(owner.getId(), id, request).evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
+        } else {
+            assertThatThrownBy(() -> tested.reconfirm(owner.getId(), id, request)).isInstanceOf(TransactionSystemException.class);
+        }
+        var current = sessions.findById(id).orElseThrow();
+        assertThat(current.getRevision()).isEqualTo(persisted ? 2 : 1);
+        assertThat(current.getExpiresAt()).isEqualTo(UTC_NOW.plusHours(4));
+    }
+
+    @Test
+    @DisplayName("동일 revision의 재확인 두 요청은 MySQL lock 아래 한 번만 적용되며 다른 결과는 409다")
+    void concurrent_reconfirmation() throws Exception {
+        long id = suspendedFixture();
+        freshReconfirmationFixture();
+        var start = freshStart();
+        var both = new CountDownLatch(2);
+        doAnswer(invocation -> {
+            both.countDown();
+            assertThat(both.await(10, TimeUnit.SECONDS)).isTrue();
+            return start;
+        }).when(validator).validate(anyLong(), anyString(), anyString());
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            java.util.concurrent.Callable<String> call = () -> {
+                try { service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, "ref", NUMBER)); return "SUCCESS"; }
+                catch (ApiException exception) { return exception.getErrorCode().name(); }
+            };
+            var a = pool.submit(call);
+            var b = pool.submit(call);
+            assertThat(List.of(a.get(15, TimeUnit.SECONDS), b.get(15, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder("SUCCESS", "BOARDING_REVISION_CONFLICT");
+        }
+        assertThat(sessions.findById(id).orElseThrow().getRevision()).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"expectedRevision\":1}",
+            "{\"expectedRevision\":1.5,\"candidateRef\":\"ref\",\"confirmedVehicleNumber\":\"number\"}",
+            "{\"expectedRevision\":-1,\"candidateRef\":\"ref\",\"confirmedVehicleNumber\":\"number\"}",
+            "{\"expectedRevision\":1,\"candidateRef\":42,\"confirmedVehicleNumber\":\"number\"}"})
+    @DisplayName("재확인 body는 음수가 아닌 정수 revision과 문자열 reference·전체 번호를 요구한다")
+    void reconfirm_invalid_body(String body) throws Exception {
+        mvc.perform(auth(post("/api/v1/boarding-sessions/1/reconfirm").contentType("application/json").content(body), owner))
+                .andExpect(status().isBadRequest());
+    }
+
+    private long suspendedFixture() {
+        supportFixture();
+        long id = service.create(owner.getId(), request(REQUEST_ID, "ref")).response().id();
+        new TransactionTemplate(manager).executeWithoutResult(status -> sessions.findForUpdate(id).orElseThrow()
+                .suspend(0, BoardingStateReason.CONTINUITY_GAP_EXCEEDED, UTC_NOW));
+        runtime.committed(id, 1, false);
+        return id;
+    }
+
+    private VerifiedBoardingStart freshStart() {
+        var start = verified(metadata.read(route.getId(), target.getId(), first.getId()));
+        var at = java.time.LocalDateTime.ofInstant(time.get(), java.time.ZoneOffset.UTC);
+        var checkpoint = new BoardingCheckpoint("s1", 10, 0, BoardingCheckpoint.Evidence.ID_ORDER, null, at, at.minusSeconds(1));
+        return new VerifiedBoardingStart(start.metadata(), start.traversal(), checkpoint, time.get().plusSeconds(60),
+                start.vehicleTrackingId(), NUMBER, start.routeNumber(), start.targetName());
+    }
+
+    private void freshReconfirmationFixture() {
+        time.set(NOW.plusSeconds(20));
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return freshStart();
+        }).when(validator).validate(anyLong(), anyString(), anyString());
+    }
+
+    private static MockHttpServletRequestBuilder reconfirmRequest(long id, long revision, String reference) {
+        return post("/api/v1/boarding-sessions/" + id + "/reconfirm").contentType("application/json")
+                .content("{\"expectedRevision\":" + revision + ",\"candidateRef\":\"" + reference
+                        + "\",\"confirmedVehicleNumber\":\"" + NUMBER + "\"}");
     }
 
     private void supportFixture() {

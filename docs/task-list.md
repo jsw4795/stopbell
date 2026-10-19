@@ -419,8 +419,8 @@ Future Consideration:
   - 구현·검증 결과: JWT 후보 API, Provider별 번호/ID·시각·진행 검증, index 간격 정렬, bounded memory candidateRef와 AVAILABLE/EMPTY/PARTIAL·503 구분을 구현했다. 후보 관련 48개 및 TAGO count 보강 2개를 포함한 전체 Backend 504개 테스트를 실패·skip 없이 통과했다. 실제 Provider 호출, 세션/추적/Notification·Flutter 변경, Dependency·Migration 추가는 없으며 응답·호출량·reference 계약은 [API](api.md#후보-조회)를 따른다.
   - 선행 관계: TASK-901~903 완료 후 수행한다. TASK-905/907에서 실제 후보 확인 흐름을 연결한다.
 
-- [ ] TASK-905 특정 차량 추적 및 하차 시점 판단 구현
-  - 구현 진행: 1단계 Persistence/API와 2단계 특정 차량 polling·checkpoint·준비 후보/종료 판정 구현. 실제 Provider 지원 보류 유지. 3단계 재시작 자동 복구·동시성 최종 감사·최종 회귀가 남아 전체 Task는 미완료다. Notification 연결은 TASK-906 범위다.
+- [x] TASK-905 특정 차량 추적 및 하차 시점 판단 구현
+  - 구현 완료: Persistence/API·특정 차량 polling·checkpoint·준비 후보/종료 판정과 3단계 재시작 자동 복구·동일 차량 재확인·runtime revision 정합성 구현. 전체 Gradle 733개(기존 676개 포함), Boarding 218개 통과, 실패·오류·skip 없음. 실제 Provider 지원·실차 E2E는 보류하며 Notification durable 중복 억제·Event/Delivery/FCM 연결은 TASK-906 범위다.
   - 목적: 사용자가 확인한 차량만 추적하고, 설계된 근거를 충족할 때 하차 알림 후보를 생성한다.
   - 완료 기준:
     - TASK-903의 차량 확인·세션 시작/조회/취소 계약을 구현하고, 조회 뒤 변한 후보를 확정하는 요청과 중복·동시 요청을 안전하게 처리한다. 소유권과 유효한 차량/목적 occurrence를 검증한다.
