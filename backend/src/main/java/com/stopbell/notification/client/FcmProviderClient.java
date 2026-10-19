@@ -19,6 +19,7 @@ import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.gson.Gson;
 import com.stopbell.notification.client.FcmFailureMapper.Classification;
+import com.stopbell.notification.entity.NotificationSourceType;
 import org.apache.http.Header;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -144,18 +145,24 @@ public final class FcmProviderClient {
     }
 
     static String payload(NotificationSendRequest request) {
-        String body = switch (request.eventType()) {
+        boolean boarding = request.source().sourceType() == NotificationSourceType.BOARDING_SESSION;
+        String body = boarding ? "곧 하차할 정류장에 도착할 수 있어요. 하차를 준비해 주세요." : switch (request.eventType()) {
             case ONE_STOP_BEFORE -> "목표 정류장까지 한 정거장 남았어요.";
             case ARRIVED -> "버스가 목표 정류장에 도착했어요.";
             case PASSED -> "버스가 목표 정류장을 지나갔어요.";
             case ONE_STOP_AFTER -> "버스가 목표 정류장 다음 정류장에 도착했어요.";
         };
+        Map<String, String> data = boarding
+                ? Map.of("type", "BOARDING_SESSION_EVENT", "boardingSessionId", Long.toString(request.source().boardingSessionId()),
+                    "eventType", request.source().boardingEventType().name(),
+                    "notificationEventId", Long.toString(request.notificationEventId()))
+                : Map.of("type", "ALARM_EVENT", "alarmId", Long.toString(request.alarmId()),
+                    "eventType", request.eventType().name(),
+                    "notificationEventId", Long.toString(request.notificationEventId()));
         Map<String, String> alert = Map.of("title", "StopBell 알림", "body", body);
         return JSON.toJson(Map.of("message", Map.of(
                 "fid", request.fid(),
-                "data", Map.of("type", "ALARM_EVENT", "alarmId", Long.toString(request.alarmId()),
-                        "eventType", request.eventType().name(),
-                        "notificationEventId", Long.toString(request.notificationEventId())),
+                "data", data,
                 "notification", alert,
                 "apns", Map.of("headers", Map.of("apns-push-type", "alert", "apns-priority", "10",
                                 "apns-expiration", Long.toString(request.expiresAt().getEpochSecond())),

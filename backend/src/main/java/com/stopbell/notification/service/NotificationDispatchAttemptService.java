@@ -8,6 +8,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 import com.stopbell.notification.client.NotificationSendResult;
+import com.stopbell.boarding.domain.BoardingTrackingSnapshot;
+import com.stopbell.boarding.entity.BoardingSessionStatus;
+import com.stopbell.boarding.repository.BoardingSessionRepository;
+import com.stopbell.boarding.service.BoardingTrackingRuntime;
+import com.stopbell.notification.entity.BoardingNotificationEventType;
 import com.stopbell.notification.entity.NotificationDelivery;
 import com.stopbell.notification.entity.NotificationDeliveryStatus;
 import com.stopbell.notification.entity.NotificationSourceType;
@@ -28,10 +33,21 @@ public class NotificationDispatchAttemptService {
     private final NotificationAttemptHandler handler;
     private final Clock clock;
     private final TransactionTemplate transaction;
+    private final BoardingSessionRepository sessions;
+    private final BoardingTrackingRuntime runtime;
 
     public NotificationDispatchAttemptService(NotificationDeliveryRepository deliveries,
             NotificationRecipientPreflight recipients, NotificationAttemptHandler handler,
             PlatformTransactionManager manager, Clock clock) {
+        this(deliveries, recipients, handler, manager, clock, null, null);
+    }
+
+    public NotificationDispatchAttemptService(NotificationDeliveryRepository deliveries,
+            NotificationRecipientPreflight recipients, NotificationAttemptHandler handler,
+            PlatformTransactionManager manager, Clock clock, BoardingSessionRepository sessions,
+            BoardingTrackingRuntime runtime) {
+        this.sessions = sessions;
+        this.runtime = runtime;
         this.deliveries = deliveries;
         this.recipients = recipients;
         this.handler = handler;
@@ -41,8 +57,28 @@ public class NotificationDispatchAttemptService {
     }
 
     public Optional<NotificationAttemptSnapshot> beginAttempt(long id) {
+        // This projection crosses no managed entity/snapshot into the locking transaction.
+        var identity = deliveries.findSourceIdentity(id).orElse(null);
+        if (identity == null) {
+            return Optional.empty();
+        }
         // execute() returns only after commit. A commit exception never exposes a sendable snapshot.
         return transaction.execute(status -> {
+            BoardingTrackingSnapshot validated = null;
+            Long sessionOwner = null;
+            if (identity.getSourceType() == NotificationSourceType.BOARDING_SESSION) {
+                if (sessions == null || runtime == null || identity.getBoardingSessionId() == null) {
+                    return Optional.empty();
+                }
+                // Never load Delivery first. This current read precedes any consistent entity read.
+                var session = sessions.findForUpdate(identity.getBoardingSessionId()).orElse(null);
+                if (session == null || session.getStatus() != BoardingSessionStatus.TRACKING
+                        || !now().isBefore(session.getExpiresAt())) {
+                    return Optional.empty();
+                }
+                validated = BoardingTrackingSnapshot.from(session);
+                sessionOwner = session.getUser().getId();
+            }
             NotificationDelivery delivery = deliveries.findByIdForUpdate(id).orElse(null);
             LocalDateTime now = now();
             if (delivery == null || delivery.getStatus() != NotificationDeliveryStatus.PENDING
@@ -50,8 +86,20 @@ public class NotificationDispatchAttemptService {
                 log.debug("Notification dispatch skipped: deliveryId={}, reason=NOT_DUE_PENDING", id);
                 return Optional.empty();
             }
-            // TASK-906 step 3 replaces this boundary with Session-first locks and current Session/gate validation.
-            if (delivery.getNotificationEvent().getSourceType() != NotificationSourceType.ALARM) {
+            var event = delivery.getNotificationEvent();
+            if (!Objects.equals(event.getId(), identity.getEventId()) || event.getSourceType() != identity.getSourceType()
+                    || !Objects.equals(event.getBoardingSessionId(), identity.getBoardingSessionId())) {
+                return Optional.empty();
+            }
+            // Expiry wins even when recovery is pending; no recipient locks or attempts are needed.
+            if (validated != null && !now.isBefore(delivery.getExpiresAt())) {
+                delivery.expire(now);
+                return Optional.empty();
+            }
+            if (validated != null && (event.getBoardingEventType() != BoardingNotificationEventType.PREPARE_ALIGHT
+                    || !Objects.equals(event.getUser().getId(), sessionOwner)
+                    || !Objects.equals(event.getExpiresAt(), delivery.getExpiresAt())
+                    || !runtime.isReady(validated, now))) {
                 return Optional.empty();
             }
             if (!handler.checkEligibility(delivery, now)) {
@@ -61,10 +109,22 @@ public class NotificationDispatchAttemptService {
             if (!now.isBefore(delivery.getExpiresAt())) {
                 throw new IllegalStateException("Attempt handler allowed an expired Delivery");
             }
-            NotificationRecipientPreflight.Result recipient = recipients.check(delivery);
+            NotificationRecipientPreflight.Result recipient = validated == null
+                    ? recipients.check(delivery) : recipients.check(delivery, validated);
+            if (validated != null) {
+                // Device lock waits must not turn an old eligibility timestamp into a fresh attempt or rejection.
+                now = now();
+                if (!now.isBefore(delivery.getExpiresAt())) {
+                    delivery.expire(now);
+                    return Optional.empty();
+                }
+            }
             if (recipient.rejection() != null) {
                 handler.rejectRecipient(delivery, recipient.rejection(), now);
                 log.debug("Notification dispatch skipped: deliveryId={}, reason={}", id, recipient.rejection());
+                return Optional.empty();
+            }
+            if (validated != null && !runtime.isReady(validated, now)) {
                 return Optional.empty();
             }
             int previousCount = delivery.getAttemptCount();
@@ -80,6 +140,15 @@ public class NotificationDispatchAttemptService {
             deliveries.flush();
             return Optional.of(snapshot);
         });
+    }
+
+    /** No DB locks cross this final runtime/deadline check or the subsequent Provider I/O. */
+    public boolean allowsBeforeSend(NotificationAttemptSnapshot snapshot) {
+        var target = snapshot.target();
+        return target.source().sourceType() == NotificationSourceType.ALARM
+                || (runtime != null && target.validatedSession() != null
+                    && target.source().boardingSessionId().equals(target.validatedSession().id())
+                    && now().isBefore(target.expiresAt()) && runtime.isReady(target.validatedSession(), now()));
     }
 
     public void completeAttempt(NotificationAttemptSnapshot snapshot, NotificationSendResult result) {

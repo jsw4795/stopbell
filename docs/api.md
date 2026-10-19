@@ -358,11 +358,11 @@ Push payload는 navigation hint 수준의 최소 정보만 포함한다.
 }
 ```
 
-`userId`, Auth Token, push registration identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체는 포함하지 않는다. Payload는 권한 근거가 아니며 Flutter는 Auth Session initialization 뒤 `alarmId` navigation entry를 사용해 Backend Alarm detail API에서 ownership과 current state를 다시 확인한다. 삭제되었거나 접근할 수 없는 Alarm은 stale notification으로 정상 처리한다. TASK-704 Client는 위 string field와 `ONE_STOP_BEFORE` / `ARRIVED` / `PASSED` / `ONE_STOP_AFTER` eventType을 검증한다. 기존 Alarm payload 생성/전달은 TASK-705/706에서 구현했으며 세션 source는 아래 후속 계약으로 확장한다. initial/opened tap은 중복을 제거하고 로그인 전 대기하며, foreground 안내의 상세 action도 현재 Auth Session에 묶는다.
+`userId`, Auth Token, push registration identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체는 포함하지 않는다. Payload는 권한 근거가 아니며 Flutter는 Auth Session initialization 뒤 `alarmId` navigation entry를 사용해 Backend Alarm detail API에서 ownership과 current state를 다시 확인한다. 삭제되었거나 접근할 수 없는 Alarm은 stale notification으로 정상 처리한다. TASK-704 Client는 위 string field와 `ONE_STOP_BEFORE` / `ARRIVED` / `PASSED` / `ONE_STOP_AFTER` eventType을 검증한다. 기존 Alarm payload 생성/전달은 TASK-705/706에서 구현했으며 TASK-906의 세션 source payload는 아래 계약을 따른다. initial/opened tap은 중복을 제거하고 로그인 전 대기하며, foreground 안내의 상세 action도 현재 Auth Session에 묶는다.
 
 ### 탑승 세션 API (TASK-903)
 
-다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904, 세션 Persistence와 생성·조회·취소 API 경계는 TASK-905 1단계에서 구현했다. TASK-905는 특정 차량 polling·준비 후보·종료 판정, checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API까지 구현했다. Notification과 Flutter 연결은 TASK-906/907에 남는다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
+다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904, 세션 Persistence와 생성·조회·취소 API 경계는 TASK-905 1단계에서 구현했다. TASK-905는 특정 차량 polling·준비 후보·종료 판정, checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API까지 구현했다. TASK-906은 Backend Notification dispatch를 연결했으며 Flutter 연결은 TASK-907에 남는다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
 
 **TASK-905 지원 경계:** TAGO 정확한 하차 추적은 계속 지원 보류이며, 서울 이동 중 detail·order 단독·반복 Stop의 회차 문맥도 검증된 것으로 취급하지 않는다. 서울 exact ID/order + direct flag=1의 최신 대응·단조 진행 검증을 통과해도 현재 metadata에는 목적 occurrence의 하차 가능 근거가 없어 UNKNOWN이다. 근거 부족 시 실제 POST 생성·재확인은 `BOARDING_TRACKING_UNSUPPORTED`로 거부하며, 하차 가능을 추측하거나 미구현 추적/FCM 성공을 반환하지 않는다. 아래 생성·복구·재확인 성공 경로는 검증된 fixture를 전달하는 경계의 통합 테스트로 검증하며 실제 Provider 지원 완료의 근거가 아니다. 검증 근거 공급 전 기능 활성화를 위한 우회 설정은 제공하지 않는다.
 
@@ -474,7 +474,7 @@ cancel body는 `expectedRevision`이다. current revision이 일치하는 미종
 
 #### 탑승 세션 Push와 tap
 
-TASK-906/907의 후속 payload는 아래처럼 기존 ALARM_EVENT와 구분한다. 기존 payload의 alarmId·네 Event Type을 변경하지 않고 세션 payload에는 alarmId를 넣지 않는다.
+TASK-906의 Backend FCM data payload는 아래처럼 기존 ALARM_EVENT와 구분한다. 기존 payload의 alarmId·네 Event Type을 변경하지 않고 세션 payload에는 alarmId를 넣지 않는다.
 
 ```json
 {
@@ -485,7 +485,7 @@ TASK-906/907의 후속 payload는 아래처럼 기존 ALARM_EVENT와 구분한�
 }
 ```
 
-모두 string navigation hint이며 userId·Auth Token·FID·Provider external ID·GPS·내부 revision을 포함하지 않는다. 준비 문구는 정확한 정차 수를 단정하지 않는다. initial/opened/foreground 모두 현재 Auth Session에 묶고 tap 후 소유 Session 상세로 상태·수명·evaluationStatus를 재검증한다. 종료·취소·만료·접근 불가는 정상 stale 안내이며 추적을 재개하지 않는다. 기존 Device owner/generation·registration·FCM 결과·retry 의미는 보존한다. OS 표시 exactly-once·접수된 알림 회수·도착 전 표시를 보장하지 않는다.
+모두 string navigation hint이며 userId·Auth Token·FID·Provider external ID·GPS·내부 revision을 포함하지 않는다. 준비 문구는 “곧 하차할 정류장에 도착할 수 있어요. 하차를 준비해 주세요.”이며 정확한 정차 수·물리 위치·도착 시각을 단정하지 않는다. APNs alert/sound와 원래 Event/Delivery 기한의 apns-expiration을 보존한다. 아래 Client 수신/tap 처리는 TASK-907의 후속 구현 계약이다. initial/opened/foreground 모두 현재 Auth Session에 묶고 tap 후 소유 Session 상세로 상태·수명·evaluationStatus를 재검증한다. 종료·취소·만료·접근 불가는 정상 stale 안내이며 추적을 재개하지 않는다. 기존 Device owner/generation·registration·FCM 결과·retry 의미는 보존한다. OS 표시 exactly-once·접수된 알림 회수·도착 전 표시를 보장하지 않는다.
 
 ## 5. 오류 형식
 

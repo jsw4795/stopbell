@@ -98,4 +98,28 @@ class BoardingTrackingRuntimeTest {
         assertThat(runtime.response(session, UTC_NOW).remainingOccurrenceGap()).isNull();
         assertThat(runtime.isReady(com.stopbell.boarding.domain.BoardingTrackingSnapshot.from(session), UTC_NOW)).isFalse();
     }
+    @Test
+    @DisplayName("수천 복구 대기와 보류 watermark는 READY window를 점유하지 않고 ID cursor는 bounded 순환한다")
+    void bounded_ready_windows_exclude_recovery_backlog() {
+        var runtime = new BoardingTrackingRuntime();
+        for (long id = 1; id <= 2000; id++) {
+            runtime.admitCreated(id);
+            if (id % 2 == 0) { runtime.committed(id, 1, false); }
+        }
+        for (long id = 2001; id <= 2003; id++) {
+            var session = session(new User(AuthProvider.GOOGLE, "owner-" + id));
+            ReflectionTestUtils.setField(session, "id", id);
+            runtime.verified(com.stopbell.boarding.domain.BoardingTrackingSnapshot.from(session));
+        }
+        var first = runtime.readyWindow(0, 2, UTC_NOW);
+        assertThat(first.ids()).containsExactly(2001L, 2002L);
+        var second = runtime.readyWindow(first.cursor(), 2, UTC_NOW);
+        assertThat(second.ids()).containsExactly(2003L);
+        assertThat(runtime.readyWindow(second.cursor(), 2, UTC_NOW).ids()).containsExactly(2001L, 2002L);
+        runtime.committed(2001L, 1, false);
+        assertThat(runtime.readyWindow(0, 2, UTC_NOW).ids()).containsExactly(2002L, 2003L);
+        assertThat(runtime.readyWindow(0, 2, UTC_NOW.plusSeconds(61)).ids()).isEmpty();
+        assertThat(runtime.readyWindow(0, 2, UTC_NOW).ids()).isEmpty();
+    }
+
 }

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
 import java.time.Clock;
+import com.stopbell.boarding.repository.BoardingSessionRepository;
+import com.stopbell.boarding.service.BoardingTrackingRuntime;
 import java.time.Duration;
 import java.util.List;
 
@@ -23,6 +25,8 @@ class NotificationDispatchConfigurationTest {
     private final ApplicationContextRunner context = new ApplicationContextRunner()
             .withUserConfiguration(NotificationDispatchConfiguration.class)
             .withBean(NotificationDeliveryRepository.class, () -> mock(NotificationDeliveryRepository.class))
+            .withBean(BoardingSessionRepository.class, () -> mock(BoardingSessionRepository.class))
+            .withBean(BoardingTrackingRuntime.class, BoardingTrackingRuntime::new)
             .withBean(DeviceRepository.class, () -> mock(DeviceRepository.class))
             .withBean(PlatformTransactionManager.class, () -> mock(PlatformTransactionManager.class))
             .withBean(FcmProviderClient.class, () -> mock(FcmProviderClient.class))

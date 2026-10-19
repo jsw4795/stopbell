@@ -194,6 +194,7 @@ public class BoardingSessionService {
             if (session.getStatus().isOpen() && session.getRevision() != expectedRevision) {
                 throw new ApiException(ErrorCode.BOARDING_REVISION_CONFLICT);
             }
+            runtime.committed(id, session.getRevision(), false);
             session.cancel(expectedRevision, now);
             notifications.terminatePending(session);
             sessions.flush();

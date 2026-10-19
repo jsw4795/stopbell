@@ -9,6 +9,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import com.stopbell.notification.client.FcmProviderClient;
 import com.stopbell.notification.client.NotificationSendResult;
 import com.stopbell.notification.entity.NotificationProviderResult;
+import com.stopbell.notification.entity.NotificationSourceType;
+import com.stopbell.boarding.service.BoardingTrackingRuntime;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,10 +33,19 @@ public class NotificationDispatchWorker {
     private final AtomicBoolean running = new AtomicBoolean();
     private volatile boolean stopping;
     private boolean configurationBlocked;
+    private final BoardingTrackingRuntime runtime;
+    private long readyCursor;
 
     public NotificationDispatchWorker(NotificationDispatchProperties properties,
             NotificationDeliveryRepository deliveries, NotificationDispatchAttemptService attempts,
             FcmProviderClient provider, Clock clock) {
+        this(properties, deliveries, attempts, provider, clock, null);
+    }
+
+    public NotificationDispatchWorker(NotificationDispatchProperties properties,
+            NotificationDeliveryRepository deliveries, NotificationDispatchAttemptService attempts,
+            FcmProviderClient provider, Clock clock, BoardingTrackingRuntime runtime) {
+        this.runtime = runtime;
         this.properties = properties;
         this.deliveries = deliveries;
         this.attempts = attempts;
@@ -55,28 +66,32 @@ public class NotificationDispatchWorker {
             requireNoTransaction();
             LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
             PageRequest page = PageRequest.of(0, properties.batchSize());
-            List<Long> ids = configurationBlocked ? deliveries.findExpiredPendingIds(now, page)
-                    : deliveries.findDuePendingIds(now, page);
-            candidates = ids.size();
-            for (Long id : ids) {
-                if (stopping || Thread.currentThread().isInterrupted()) {
-                    break;
-                }
-                try {
-                    if (configurationBlocked) {
-                        attempts.expireDuePending(id);
-                        continue;
+            for (NotificationSourceType source : NotificationSourceType.values()) {
+                List<Long> expired = deliveries.findExpiredPendingIdsBySource(source, now, page);
+                candidates += expired.size();
+                for (Long id : expired) {
+                    if (stopping || Thread.currentThread().isInterrupted()) {
+                        return;
                     }
-                    dispatch(id);
-                    processed++;
-                } catch (DataAccessException | TransactionException exception) {
-                    log.warn("Notification dispatch cycle stopped: reason=DATABASE_FAILURE, exceptionType={}",
-                            exception.getClass().getSimpleName());
-                    break;
-                } catch (RuntimeException exception) {
-                    // Never print raw exception messages/causes; do not resend after any failure.
-                    log.warn("Notification dispatch candidate failed: deliveryId={}, exceptionType={}",
-                            id, exception.getClass().getSimpleName());
+                    attempts.expireDuePending(id);
+                }
+            }
+            if (configurationBlocked) {
+                return;
+            }
+            List<Long> alarms = deliveries.findDuePendingIds(now, page);
+            candidates += alarms.size();
+            processed += dispatchBatch(alarms);
+            if (!configurationBlocked && !stopping && runtime != null) {
+                // One bounded keyset window per cycle. Recovery/hold entries are absent from the runtime lookup index.
+                var ready = runtime.readyWindow(readyCursor, properties.batchSize(),
+                        LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
+                readyCursor = ready.cursor();
+                if (!ready.ids().isEmpty()) {
+                    var sessions = deliveries.findBoardingDuePendingIds(ready.ids(),
+                            LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC), page);
+                    candidates += sessions.size();
+                    processed += dispatchBatch(sessions);
                 }
             }
         } catch (RuntimeException exception) {
@@ -88,6 +103,26 @@ public class NotificationDispatchWorker {
         }
     }
 
+    private int dispatchBatch(List<Long> ids) {
+        int processed = 0;
+        for (Long id : ids) {
+            if (configurationBlocked || stopping || Thread.currentThread().isInterrupted()) {
+                break;
+            }
+            try {
+                dispatch(id);
+                processed++;
+            } catch (DataAccessException | TransactionException exception) {
+                // Abort both sources on DB uncertainty; never resend a Provider request.
+                throw exception;
+            } catch (RuntimeException exception) {
+                log.warn("Notification dispatch candidate failed: deliveryId={}, exceptionType={}",
+                        id, exception.getClass().getSimpleName());
+            }
+        }
+        return processed;
+    }
+
     private void dispatch(long id) {
         NotificationAttemptSnapshot snapshot = attempts.beginAttempt(id).orElse(null);
         if (snapshot == null) {
@@ -96,6 +131,11 @@ public class NotificationDispatchWorker {
         requireNoTransaction();
         if (!clock.instant().isBefore(snapshot.target().expiresAt().toInstant(ZoneOffset.UTC))) {
             attempts.expireBeforeSend(snapshot);
+            return;
+        }
+        if (snapshot.target().source().sourceType() == NotificationSourceType.BOARDING_SESSION
+                && !attempts.allowsBeforeSend(snapshot)) {
+            // Keep the durable count/recovery reservation. No synthetic Provider result.
             return;
         }
         NotificationSendResult result = provider.send(snapshot.target().request());

@@ -2,6 +2,8 @@ package com.stopbell.notification.service;
 
 import java.time.Clock;
 
+import com.stopbell.boarding.repository.BoardingSessionRepository;
+import com.stopbell.boarding.service.BoardingTrackingRuntime;
 import com.stopbell.notification.client.FcmProviderClient;
 import com.stopbell.notification.client.FcmClientProperties;
 import com.stopbell.notification.repository.DeviceRepository;
@@ -38,9 +40,10 @@ public class NotificationDispatchConfiguration {
     NotificationDispatchWorker notificationDispatchWorker(NotificationDispatchProperties properties,
             NotificationAttemptHandler handler, NotificationDeliveryRepository deliveries,
             DeviceRepository devices, PlatformTransactionManager manager, FcmProviderClient provider,
+            BoardingSessionRepository sessions, BoardingTrackingRuntime runtime,
             @Qualifier("transitMetadataClock") Clock clock) {
         NotificationDispatchAttemptService attempts = new NotificationDispatchAttemptService(deliveries,
-                new NotificationRecipientPreflight(devices), handler, manager, clock);
-        return new NotificationDispatchWorker(properties, deliveries, attempts, provider, clock);
+                new NotificationRecipientPreflight(devices), handler, manager, clock, sessions, runtime);
+        return new NotificationDispatchWorker(properties, deliveries, attempts, provider, clock, runtime);
     }
 }

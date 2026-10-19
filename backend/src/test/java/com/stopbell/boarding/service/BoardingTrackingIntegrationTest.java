@@ -911,7 +911,7 @@ class BoardingTrackingIntegrationTest {
     }
 
     @Test
-    @DisplayName("Session 준비 Event가 저장되어도 Worker LIMIT 전에 제외하고 직접 attempt 진입과 FCM은 차단한다")
+    @DisplayName("Session 준비 Event는 Alarm LIMIT을 점유하지 않고 gate 미연결 attempt는 차단하며 만료는 전체 source에서 조회한다")
     void persisted_session_delivery_remains_unsendable() {
         device(session.getUser());
         var expected = store.findOpen().getFirst();
@@ -926,7 +926,7 @@ class BoardingTrackingIntegrationTest {
         assertThat(deliveries.findById(delivery.getId()).orElseThrow()).usingRecursiveComparison()
                 .ignoringFields("notificationEvent", "device").isEqualTo(delivery);
         time.set(NOW.plusSeconds(50));
-        assertThat(deliveries.findExpiredPendingIds(utc(), PageRequest.of(0, 1))).isEmpty();
+        assertThat(deliveries.findExpiredPendingIds(utc(), PageRequest.of(0, 1))).containsExactly(delivery.getId());
     }
 
     @ParameterizedTest

@@ -141,6 +141,10 @@ public class BoardingTrackingStore {
         if (!expected.requiresConfirmation() && !metadata.matches(expected)) {
             current = BoardingTrackingDecision.held(BoardingStateReason.METADATA_CHANGED);
         }
+        if (current.outcome() == Outcome.HELD || current.checkpoint() != null) {
+            // Close before the mutation can commit. Rollback may conservatively remain closed.
+            runtime.committed(session.getId(), session.getRevision(), false);
+        }
         if (current.outcome() == Outcome.HELD) {
             session.suspend(expected.revision(), current.reason(), now);
         } else if (current.checkpoint() != null) {

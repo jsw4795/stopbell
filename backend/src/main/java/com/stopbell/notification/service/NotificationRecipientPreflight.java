@@ -1,6 +1,8 @@
 package com.stopbell.notification.service;
 
 import com.stopbell.notification.entity.Device;
+import com.stopbell.notification.client.NotificationSourceHint;
+import com.stopbell.boarding.domain.BoardingTrackingSnapshot;
 import com.stopbell.notification.entity.NotificationDelivery;
 import com.stopbell.notification.entity.NotificationEvent;
 import com.stopbell.notification.entity.NotificationSourceType;
@@ -21,12 +23,18 @@ public class NotificationRecipientPreflight {
     }
 
     public Result check(NotificationDelivery delivery) {
+        return check(delivery, null);
+    }
+
+    /** Session validation is supplied only by the Session-first attempt boundary before Device lock. */
+    Result check(NotificationDelivery delivery, BoardingTrackingSnapshot validatedSession) {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Recipient preflight requires a Delivery transaction");
         }
         NotificationEvent event = delivery.getNotificationEvent();
-        if (event.getSourceType() != NotificationSourceType.ALARM) {
-            throw new IllegalStateException("Recipient preflight currently supports ALARM only");
+        if (event.getSourceType() == NotificationSourceType.BOARDING_SESSION
+                && (validatedSession == null || !event.getBoardingSessionId().equals(validatedSession.id()))) {
+            throw new IllegalStateException("Session preflight requires validated Session-first locks");
         }
         Device device = devices.findByIdForUpdate(delivery.getDevice().getId()).orElse(null);
         if (device == null) {
@@ -46,9 +54,12 @@ public class NotificationRecipientPreflight {
         } catch (IllegalArgumentException exception) {
             return rejected(Rejection.TARGET_MISSING);
         }
-        return new Result(new NotificationDispatchTarget(delivery.getId(), event.getId(), event.getAlarmId(),
-                event.getEventType(), device.getId(), event.getUser().getId(), device.getOwnershipGeneration(),
-                device.getRegistrationRevision(), device.getCurrentPushTargetId(), delivery.getExpiresAt()), null);
+        NotificationSourceHint source = event.getSourceType() == NotificationSourceType.ALARM
+                ? NotificationSourceHint.alarm(event.getAlarmId(), event.getEventType())
+                : NotificationSourceHint.boardingSession(event.getBoardingSessionId(), event.getBoardingEventType());
+        return new Result(new NotificationDispatchTarget(delivery.getId(), event.getId(), source, device.getId(),
+                event.getUser().getId(), device.getOwnershipGeneration(),
+                device.getRegistrationRevision(), device.getCurrentPushTargetId(), delivery.getExpiresAt(), validatedSession), null);
     }
 
     private Result rejected(Rejection reason) {

@@ -102,9 +102,10 @@ class NotificationDispatchIntegrationTest {
                     on event.id=delivery.notification_event_id where event.source_type='BOARDING_SESSION' order by delivery.id
                 """);
         assertThat(deliveries.findDuePendingIds(NOW, PageRequest.of(0, 1))).containsExactly(alarm.deliveryId());
-        assertThat(deliveries.findExpiredPendingIds(NOW, PageRequest.of(0, 1))).isEmpty();
+        assertThat(deliveries.findExpiredPendingIds(NOW, PageRequest.of(0, 1))).containsExactly(sessionIds.getFirst());
         jdbc.update("update notification_deliveries set next_attempt_at=?, expires_at=? where id=?", NOW, NOW, alarm.deliveryId());
-        assertThat(deliveries.findExpiredPendingIds(NOW, PageRequest.of(0, 1))).containsExactly(alarm.deliveryId());
+        assertThat(deliveries.findExpiredPendingIdsBySource(NotificationSourceType.ALARM, NOW, PageRequest.of(0, 1)))
+                .containsExactly(alarm.deliveryId());
         jdbc.update("update notification_deliveries set expires_at=? where id=?", NOW.plusSeconds(60), alarm.deliveryId());
         worker(attempts, 1).dispatchPending();
         assertThat(handler.eligibilityIds).containsExactly(alarm.deliveryId());
@@ -114,10 +115,12 @@ class NotificationDispatchIntegrationTest {
         assertThat(sent.getValue().eventType()).isEqualTo(TransitEventType.ARRIVED);
         assertThat(sent.getValue().notificationEventId()).isEqualTo(alarm.eventId());
         assertThat(sent.getValue().expiresAt()).isEqualTo(NOW.plusSeconds(60).toInstant(ZoneOffset.UTC));
+        assertThat(jdbc.queryForObject("select status from notification_deliveries where id=?", String.class,
+                sessionIds.getFirst())).isEqualTo("EXPIRED");
         assertThat(jdbc.queryForList("""
                 select delivery.* from notification_deliveries delivery join notification_events event
                     on event.id=delivery.notification_event_id where event.source_type='BOARDING_SESSION' order by delivery.id
-                """)).isEqualTo(before);
+                """).subList(1, sessionIds.size())).isEqualTo(before.subList(1, sessionIds.size()));
     }
 
     @Test
@@ -136,7 +139,7 @@ class NotificationDispatchIntegrationTest {
             DeviceRepository unusedDevices = mock(DeviceRepository.class);
             NotificationDelivery delivery = deliveries.findByIdForUpdate(id).orElseThrow();
             assertThatThrownBy(() -> new NotificationRecipientPreflight(unusedDevices).check(delivery))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("ALARM only");
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("Session-first locks");
             verifyNoInteractions(unusedDevices);
         });
     }
@@ -163,7 +166,8 @@ class NotificationDispatchIntegrationTest {
         worker(attempts, 2).dispatchPending();
         assertThat(handler.eligibilityIds).containsExactly(second.deliveryId(), first.deliveryId());
         worker.dispatchPending();
-        assertThat(handler.eligibilityIds).containsExactly(second.deliveryId(), first.deliveryId(), expired.deliveryId(), capped.deliveryId());
+        assertThat(handler.eligibilityIds).containsExactly(second.deliveryId(), first.deliveryId(), capped.deliveryId());
+        assertThat(deliveries.findById(expired.deliveryId()).orElseThrow().getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
         verify(provider, times(2)).send(any());
     }
 

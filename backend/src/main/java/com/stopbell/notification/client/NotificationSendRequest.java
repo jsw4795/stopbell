@@ -5,17 +5,24 @@ import java.time.Instant;
 import com.stopbell.notification.entity.Device;
 import com.stopbell.transit.domain.TransitEventType;
 
-/** Immutable Event hints supplied by the future worker; contains no persistence behavior. */
+/** Immutable source-specific Event hints supplied by the worker; contains no persistence behavior. */
 public record NotificationSendRequest(
-        String fid, long alarmId, TransitEventType eventType, long notificationEventId, Instant expiresAt
+        String fid, NotificationSourceHint source, long notificationEventId, Instant expiresAt
 ) {
     public NotificationSendRequest {
         Device.validatePushTarget(fid);
-        if (alarmId <= 0 || notificationEventId <= 0 || eventType == null || expiresAt == null
+        if (source == null || notificationEventId <= 0 || expiresAt == null
                 || expiresAt.getEpochSecond() <= 0) {
             throw new IllegalArgumentException("Invalid notification hints");
         }
     }
+
+    public NotificationSendRequest(String fid, long alarmId, TransitEventType eventType, long notificationEventId, Instant expiresAt) {
+        this(fid, NotificationSourceHint.alarm(alarmId, eventType), notificationEventId, expiresAt);
+    }
+
+    public Long alarmId() { return source.alarmId(); }
+    public TransitEventType eventType() { return source.eventType(); }
 
     @Override
     public String toString() {

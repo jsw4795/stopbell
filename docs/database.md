@@ -196,7 +196,7 @@ Migration 전에 monitoring과 구형 History writer를 중단하고 FOLLOW_UP/H
 
 ### Phase 7 Notification persistence contract
 
-TASK-708 설계는 기존 Alarm의 `notification_events`와 `notification_deliveries` identity column/UNIQUE를 다음과 같이 확정한다. TASK-707의 V14와 JPA Entity/Repository에 적용됐다. delivery operational field/query와 atomic decision/dedup/fan-out, Worker/Handler는 TASK-706~709에서 구현했다. 아래는 현재 ALARM 물리 Schema이며 TASK-903의 세션 source 확장은 별도 후속 계약이다.
+TASK-708 설계는 기존 Alarm의 `notification_events`와 `notification_deliveries` identity column/UNIQUE를 다음과 같이 확정한다. TASK-707의 V14와 JPA Entity/Repository에 적용됐다. delivery operational field/query와 atomic decision/dedup/fan-out, Worker/Handler는 TASK-706~709에서 구현했다. 아래는 ALARM 물리 Schema의 기준이며 TASK-906 V16의 세션 source 확장은 아래 Phase 9 절을 따른다.
 
 ```text
 NotificationEvent
@@ -322,7 +322,7 @@ JPA도 동일 predicate/정렬과 bounded Pageable을 사용한다. TASK-906 1�
 
 모든 PENDING 예약은 nextAttemptAt<=expiresAt이다. retry/recovery 가능 시각이 기한 이상이면 nextAttemptAt=expiresAt으로 저장하여 기한 도래 때 위 조회로 local 종료하고 그 예약으로 FCM을 호출하지 않는다. 이미 만료된 초기 row는 EXPIRED로 생성하므로 조회되지 않는다. 이 규칙은 미래 Retry-After와 오랜 restart 때문에 expired row가 due query에서 영구 누락되는 것을 막는다.
 
-TASK-709의 runtime CONFIGURATION 차단 중에는 `findExpiredPendingIds(now, Pageable)`가 위 due predicate/정렬에 `delivery.expires_at <= :now`를 추가해 만료 PENDING만 제한 조회한다. TASK-906 1단계는 이 조회도 ALARM source로 제한한다. 미만료 row를 보존해도 그 row 뒤의 만료 후보가 batch에서 누락되지 않게 하며 기존 due index를 유지한다. V14 Migration은 수정하지 않는다.
+TASK-906 3단계의 만료 조회는 아래 세션 Worker 조회 계약을 따른다. due 예약과 독립적인 expiresAt 기준으로 두 source의 만료를 정리하고 CONFIGURATION 중에도 실행한다. 기존 due index와 V14 Migration은 유지한다.
 
 ### bus_routes, bus_stops, bus_route_stop_occurrences
 
@@ -435,13 +435,15 @@ TASK-906 2단계는 최초 PREPARE_ALIGHT 저장 전 만료 시 Event/Delivery�
 
 #### 세션 Worker 조회 계약
 
-현재 1단계는 `findDuePendingIds`와 `findExpiredPendingIds` 모두 ALARM만 LIMIT 이전에 조회한다. 2단계에서 준비 Event/Delivery를 원자 저장해도 기존 Worker가 Session attempt를 소비하거나 전송하지 않는다. 아래 모든 source 만료 정리와 ready Session 조회는 3단계의 후속 계약이며 아직 구현하지 않았다.
+TASK-906 3단계는 `findDuePendingIds`의 ALARM 전용 예산을 유지하고 `findBoardingDuePendingIds`와 모든 source 만료 정리를 연결했다. Session 조회의 runtime ID 후보는 같은 runtime 내 검증 snapshot 인덱스의 bounded keyset window에서 얻으며, 미복구·보류 세션 전체를 DB에서 읽지 않는다.
 
-기존 due index/Device FK/Delivery UNIQUE를 재사용하고 새 claim/lease/status/attempt table을 추가하지 않는다. 단일 Worker의 각 cycle은 독립 bounded 조회로 (1) 모든 source의 expired PENDING 정리, (2) ALARM due, (3) ready BOARDING_SESSION due를 처리한다. 각 조회는 기존 batch-size 상한을 적용해 세션 대기가 Alarm 예산을 점유하지 않는다.
+기존 due index/Device FK/Delivery UNIQUE를 재사용하고 새 claim/lease/status/attempt table을 추가하지 않는다. 단일 Worker의 각 cycle은 독립 bounded 조회로 (1) ALARM/BOARDING_SESSION 각각의 expired PENDING 정리, (2) ALARM due, (3) ready BOARDING_SESSION due를 처리한다. 각 조회는 기존 batch-size 상한을 적용해 세션 대기가 Alarm 예산을 점유하지 않는다.
 
-세션 조회는 `PENDING AND next_attempt_at <= now AND expires_at > now`에 BOARDING_SESSION source, 현재 프로세스의 gate-ready Session ID 집합, current Session TRACKING/미만료 조건을 **LIMIT 전에** 적용하고 next_attempt_at/id 순서로 제한한다. ready 집합이 비면 세션 send 조회만 생략한다. 만료 조회는 source/gate 없이 `PENDING AND expires_at <= now`이며 예약 invariant상 이미 due다. 조회 결과는 권한이 아니고 current revision/상태/gate는 attempt transaction에서 재검증한다.
+세션 조회는 `PENDING AND next_attempt_at <= now AND expires_at > now`에 BOARDING_SESSION source, 현재 프로세스의 gate-ready Session ID 집합, current Session TRACKING/미만료 조건을 **LIMIT 전에** 적용하고 next_attempt_at/id 순서로 제한한다. ready 집합이 비면 세션 send 조회만 생략한다. 만료 조회는 `PENDING AND expires_at <= now`이며 gate와 nextAttemptAt을 요구하지 않는다. Worker는 source별 `findExpiredPendingIdsBySource`를 각각 batch-size로 제한하고 expiresAt/id로 정렬해 한 source의 backlog가 다른 source의 만료를 밀어내지 않게 한다. 공통 `findExpiredPendingIds`도 모든 source에 동일 만료 기준을 적용한다. 조회 결과는 권한이 아니고 current revision/상태/gate는 attempt transaction에서 재검증한다.
 
-JPA/SQL 구체 형태·parameter 분할·실제 EXPLAIN은 TASK-906에서 확인한다. 메모리 filtering 후 LIMIT, 반복 대기 row로 batch 소진, gate를 열기 위한 nextAttemptAt/TTL 연장은 허용하지 않는다. 기존 index로 모든 부하의 성능이 검증됐다고 주장하지 않으며 추측성 index 추가도 하지 않는다. 실행·lock 순서는 [Architecture](architecture.md#복구-gate와-worker-공정성)를 따른다.
+`findSourceIdentity`는 Delivery PK로 immutable Event ID/source/Session ID만 projection 조회한다. 실제 attempt는 별도 REQUIRES_NEW persistence context에서 Session→Delivery current lock과 Event identity 재확인 후 Device lock을 얻어 오래된 REPEATABLE READ snapshot을 자격으로 쓰지 않는다.
+
+Session due JPQL은 Event·Session·Delivery를 join하고 `event.boarding_session_id IN (:readyIds)`와 Session TRACKING/미만료/owner 일치, PENDING/due/미만료를 LIMIT 이전에 적용한다. IN과 결과 LIMIT은 각각 batch-size 이하이며 window 내 nextAttemptAt/id로 정렬한다. MySQL 8.4.11의 미복구/일시 보류 각 1,000개의 독립 Session·Event·Delivery와 추가 미복구/보류/READY/ALARM 혼합 fixture에서 동등한 Session SQL의 EXPLAIN은 Event Session UNIQUE `const`, Session PRIMARY `const`, Delivery Event×Device UNIQUE의 left prefix `ref`를 선택했고 due 정렬은 filesort였다. 같은 fixture의 ALARM 만료 SQL은 Event 2,004행을 `ALL`로 읽고 Delivery Event×Device UNIQUE `ref`와 temporary/filesort를 선택했다. 이는 해당 데이터 분포의 결과이며 대규모 전체 backlog에서의 비용/지연 보장은 아니다. 메모리 filtering 후 LIMIT, 반복 대기 row로 batch 소진, gate를 열기 위한 nextAttemptAt/TTL 연장은 허용하지 않는다. Session ID의 PK와 Event의 기존 Session UNIQUE, Delivery의 Event×Device UNIQUE/due index를 사용할 수 있다. 만료 조회는 전용 expiresAt index가 없어 status 후보 탐색과 expiresAt 필터/정렬 비용이 남는다. LIMIT이 scan row 수까지 제한한다는 뜻은 아니며 기존 index로 모든 부하의 성능이 검증됐다고 주장하지 않고 추측성 index 추가도 하지 않는다. 실행·lock 순서는 [Architecture](architecture.md#복구-gate와-worker-공정성)를 따른다.
 
 ## 7. 외부 교통 데이터
 

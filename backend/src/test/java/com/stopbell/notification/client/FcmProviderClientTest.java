@@ -79,6 +79,33 @@ class FcmProviderClientTest {
                 .isEqualTo(message.getAsJsonObject("notification"));
     }
 
+    @Test
+    @DisplayName("Session HTTP v1은 FID targeting과 원래 APNs 기한 및 네 문자열 navigation 필드만 전송한다")
+    void sends_boarding_payload_without_internal_state() throws Exception {
+        URI endpoint = server(exchange -> respond(exchange, 200, "{\"name\":\"projects/stopbell/messages/session\"}"));
+        var source = NotificationSourceHint.boardingSession(123,
+                com.stopbell.notification.entity.BoardingNotificationEventType.PREPARE_ALIGHT);
+        var request = new NotificationSendRequest(FID, source, 456, NOW.plusSeconds(30));
+        assertThat(client(endpoint, Duration.ofSeconds(2), attempt -> TOKEN).send(request).result()).isEqualTo(ACCEPTED);
+        var message = JsonParser.parseString(payload.get()).getAsJsonObject().getAsJsonObject("message");
+        assertThat(message.get("fid").getAsString()).isEqualTo(FID);
+        var data = message.getAsJsonObject("data");
+        assertThat(data.keySet()).containsExactlyInAnyOrder("type", "boardingSessionId", "eventType", "notificationEventId");
+        assertThat(data.get("type").getAsString()).isEqualTo("BOARDING_SESSION_EVENT");
+        assertThat(data.get("boardingSessionId").getAsString()).isEqualTo("123");
+        assertThat(data.get("eventType").getAsString()).isEqualTo("PREPARE_ALIGHT");
+        assertThat(data.get("notificationEventId").getAsString()).isEqualTo("456");
+        data.entrySet().forEach(item -> assertThat(item.getValue().getAsJsonPrimitive().isString()).isTrue());
+        var apns = message.getAsJsonObject("apns");
+        assertThat(apns.getAsJsonObject("headers").get("apns-expiration").getAsString())
+                .isEqualTo(Long.toString(request.expiresAt().getEpochSecond()));
+        var aps = apns.getAsJsonObject("payload").getAsJsonObject("aps");
+        assertThat(aps.getAsJsonObject("alert")).isEqualTo(message.getAsJsonObject("notification"));
+        assertThat(aps.get("sound").getAsString()).isEqualTo("default");
+        assertThat(message.getAsJsonObject("notification").get("body").getAsString()).contains("하차를 준비");
+        assertThat(payload.get()).doesNotContain("alarmId", "userId", "revision", "checkpoint", "fingerprint", "GPS");
+    }
+
     @ParameterizedTest
     @CsvSource({"ONE_STOP_BEFORE,한 정거장", "ARRIVED,도착", "PASSED,지나갔", "ONE_STOP_AFTER,다음 정류장"})
     @DisplayName("네 Event type은 위치 상세 없이 자연스러운 한국어 알림을 만든다")
@@ -86,6 +113,9 @@ class FcmProviderClientTest {
         var request = new NotificationSendRequest(FID, 123, type, 456, NOW.plusSeconds(60));
         var message = JsonParser.parseString(FcmProviderClient.payload(request)).getAsJsonObject()
                 .getAsJsonObject("message");
+        assertThat(message.getAsJsonObject("data")).isEqualTo(JsonParser.parseString(
+                "{\"type\":\"ALARM_EVENT\",\"alarmId\":\"123\",\"eventType\":\"" + type.name()
+                    + "\",\"notificationEventId\":\"456\"}"));
         assertThat(message.getAsJsonObject("notification").get("body").getAsString()).contains(word);
         assertThat(message.getAsJsonObject("data").get("eventType").getAsString()).isEqualTo(type.name());
     }

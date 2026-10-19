@@ -325,40 +325,40 @@ TASK-906 1단계는 V16, 두 source의 Event Entity와 identity Repository, 공�
 
 `BoardingSessionService`의 공통 expire 경계는 상세/current/clientRequestId 조회·기존 생성 요청/현재 세션 확인·취소·재확인을 모두 포함한다. 취소와 `BoardingTrackingStore`의 만료·완료·재확인이 필요한 연속성 상실도 같은 transaction에서 Session source PENDING만 종료한다. TEMPORARY_PROVIDER_FAILURE/STALE_PROGRESS 및 기존 자동 재검증 사유 METADATA_CHANGED는 PENDING을 유지하며 후속 전송 gate가 판단한다. terminal/attempt/result를 보존하고 실제 기한 만료를 명시 종료보다 우선한다. lifecycle은 Session → exact Session Event current lock → Event ID별 PENDING Delivery current lock 순서다. Event와 Delivery를 분리 조회해 API 인증이 먼저 연 REPEATABLE READ snapshot 때문에 새로 commit된 Event를 join에서 놓치지 않으며, 기존 Alarm lock/query는 변경하지 않는다. Provider 지원 제한은 유지한다.
 
-1단계의 임시 전송 경계는 `NotificationDeliveryRepository.findDuePendingIds`/`findExpiredPendingIds`의 ALARM predicate와 `NotificationDispatchAttemptService.beginAttempt`의 handler/recipient 이전 ALARM 검사다. Session backlog는 두 조회의 LIMIT을 점유하지 않고 직접 Session Delivery ID가 입력돼도 attempt·예약·결과를 변경하지 않는다. `NotificationRecipientPreflight`도 ALARM 이외 입력을 Device 조회 전에 거부해 nullable alarmId의 unboxing을 막는다. 별도 Worker는 추가하지 않는다. 3단계에서 이 query/attempt/preflight 경계를 아래 source-aware 조회·Session 선행 lock/gate·전송 모델로 확장해야 하며 단순 차단 해제만으로 전송을 활성화하면 안 된다. 모든 source 만료 sweep도 3단계에 남는다.
-
-현재 `NotificationDispatchTarget`·`NotificationSendRequest`는 primitive alarmId와 TransitEventType을 필수로 받고 FCM payload도 ALARM_EVENT로 고정한다. 3단계는 두 source만 갖는 작은 typed source hint로 최소 확장한다. 공통 FID/Event ID/expiresAt 및 DispatchTarget의 Delivery/Device/owner/generation/revision 정보는 유지한다.
+TASK-906 3단계는 임시 ALARM-only 차단을 source-aware dispatch로 교체했다. `NotificationSourceHint`는 ALARM/BOARDING_SESSION 두 분기만 검증하며 `NotificationDispatchTarget`·`NotificationSendRequest`가 공유한다. 기존 Alarm 생성자·네 Event Type·payload는 유지하고, 공통 FID/Event ID/expiresAt와 Target의 Delivery/Device/owner/generation/registration revision을 보존한다.
 
 | source hint | 필수값 | 금지값 |
 | --- | --- | --- |
 | ALARM | 양수 alarmId, 기존 TransitEventType | boardingSessionId/boardingEventType |
 | BOARDING_SESSION | 양수 boardingSessionId, PREPARE_ALIGHT | alarmId/TransitEventType |
 
-후속 공통 constructor/validation·`request()`·payload builder는 이 두 분기만 지원하며 가짜 alarmId, 0 sentinel, 범용 plugin/provider framework를 추가하지 않는다. DispatchTarget의 세션 attempt에는 전송 검증 당시 current Session revision을 담고 gate 재검증에 사용한다. 이는 Event의 불변 identity나 SendRequest의 공개 payload가 아니다. 기존 Alarm constructor 의미·네 type·ALARM_EVENT payload를 보존한다. Notification DB source 분기는 [Schema](database.md#notification-source-확장-task-906-1단계), payload는 [API](api.md#탑승-세션-push와-tap)가 소유한다.
+공통 constructor/validation·`request()`·payload builder는 이 두 분기만 지원하며 가짜 alarmId, 0 sentinel, 범용 plugin/provider framework를 추가하지 않는다. DispatchTarget의 세션 attempt에는 전송 검증 당시 current Session snapshot(revision·checkpoint·원래 세션 기한)을 담고 gate 재검증에 사용한다. 이는 Event의 불변 identity나 SendRequest의 공개 payload가 아니다. 기존 Alarm constructor 의미·네 type·ALARM_EVENT payload를 보존한다. Notification DB source 분기는 [Schema](database.md#notification-source-확장-task-906-1단계), payload는 [API](api.md#탑승-세션-push와-tap)가 소유한다.
 
 #### 복구 gate와 Worker 공정성
 
 단일 Backend·단일 non-overlapping Worker가 전제다. 메모리 gate는 세션별 `{sessionId, validatedRevision, validatedObservedAt}`의 현재 프로세스 허용 근거이며 기본은 차단이다. Session 생성/복구의 DB commit 확인 후만 열고, 재시작 시 이전 허용 근거를 복원하지 않는다. 오래된 revision의 after-commit 결과가 새 취소/보류를 덮어 열지 못하게 한다. gate는 영속 Source of Truth·claim/lease가 아니며 여러 Backend의 dispatch 안전성을 제공하지 않는다.
 
-후속 Worker cycle은 기존 batch-size를 각 bounded 조회의 상한으로 사용하고 다음 순서로 실행한다. 별도 worker/thread/queue는 없다.
+Worker cycle은 기존 batch-size를 각 bounded 조회의 상한으로 사용하고 다음 순서로 실행한다. 별도 worker/thread/queue는 없다.
 
-1. **만료 정리:** 모든 source의 expired PENDING을 gate와 무관하게 제한 조회해 EXPIRED로 종료. CONFIGURATION 차단 중에도 실행한다.
+1. **만료 정리:** ALARM, BOARDING_SESSION 각각의 expired PENDING을 독립 제한 조회해 EXPIRED로 종료한다. gate·nextAttemptAt과 무관하며 CONFIGURATION 차단 중에도 두 source의 예산을 유지한다.
 2. **Alarm 조회/전달:** ALARM due 조회는 기존 순서·자격·bounded 예산을 유지한다. 세션 대기/세션 만료 row가 이 LIMIT을 점유하지 않는다.
 3. **세션 조회/전달:** current 프로세스의 허용 session ID 집합과 current DB 상태를 predicate에 적용한 due 조회다. 미복구/보류 세션을 LIMIT **이전**에 제외하고 nextAttemptAt/id 순서로 제한한다. 조회 후 메모리 filtering만으로 batch 공정성을 구현하지 않는다.
 
-각 cycle은 세 조회에 실행 기회를 주며 Alarm을 우선 처리한다. ready set이 비었어도 만료·Alarm 조회는 수행한다. 세션 대기 때문에 PENDING 예약/attempt/TTL을 변경하거나 루프에서 기다리지 않는다. 추가 실제 FCM I/O의 전체 처리시간이 0이라는 보장은 아니며 예산·SQL/EXPLAIN과 backlog 공정성은 TASK-906에서 검증한다.
+각 cycle은 세 조회에 실행 기회를 주며 Alarm을 우선 처리한다. ready set이 비었어도 만료·Alarm 조회는 수행한다. 세션 대기 때문에 PENDING 예약/attempt/TTL을 변경하거나 루프에서 기다리지 않는다. runtime은 revision watermark와 별도로 같은 컴포넌트 내부에 검증 snapshot의 정렬 조회 인덱스를 유지한다. 미복구/보류 항목은 이 인덱스에 없으며 새로운 허가 저장소가 아니다. cycle당 최대 batch-size개의 항목을 ID keyset window로 방문하고 cursor를 순환해 무제한 IN/전체 DB Session 스캔을 피한다. 이 window의 READY ID를 SQL IN predicate에 전달하고 current DB TRACKING/수명/owner 조건을 LIMIT 전에 적용한다. due 정렬은 window 안에서 nextAttemptAt/id 순서다. 여러 window의 전역 FIFO나 전체 Session을 한 cycle에 처리한다고 주장하지 않는다.
+
+cycle의 최대 조회/후속 처리 예산은 만료 source별 batch-size(합계 2B), ALARM due B, Session due B다. 실제 FCM 호출은 두 due batch 합계 최대 2B이며 Alarm을 먼저 처리한다. Session I/O로 다음 cycle까지의 wall time은 늘 수 있으므로 이전과 같은 지연 시간을 보장하지 않는다. 기존 Device·Event·due index를 재사용하며 SQL/EXPLAIN의 검증 범위와 비용은 Database를 따른다.
 
 #### 복구 후에도 적용하는 Session dispatch 검증
 
 세션 source의 `beginAttempt`는 immutable Event source로 Session ID를 식별한 뒤 **Session → Delivery → Device** 순서로 current write lock을 얻는다. 기존 Alarm 경로는 **Delivery → Device**를 유지하며 뒤에 Session/Alarm lock을 추가하지 않는다. 세션 결정/취소도 Session을 먼저 잠그며 result transaction은 기존 Delivery → Device만 사용한다.
 
-Session source는 expiry를 우선 처리한 뒤 current status=TRACKING, 미만료, Event owner/Session owner 일치, 현재 검증 가능한 목적지 이전 진행, gate와 current Session revision 일치, checkpoint freshness, 원래 Event/Delivery 기한을 검증한다. gate 미준비·일시 보류는 attempt 증가 없이 대기한다. 취소/완료/회복 불가 사유는 lifecycle transaction에서 pending을 명시 종료하며 만료는 gate 없이 처리한다. 정상 polling으로 revision이 증가한 경우 새 검증 commit의 gate를 사용한다. **Event 생성 당시 revision과 현재 revision이 같아야 한다는 조건은 두지 않는다.** Event 기한·identity를 새 revision으로 갱신하지 않는다.
+Session source는 expiry를 우선 처리한 뒤 current status=TRACKING, 미만료, Event owner/Session owner 일치, 현재 검증 가능한 목적지 이전 진행, gate와 current Session revision 일치, checkpoint freshness, 원래 Event/Delivery 기한을 검증한다. 서울 checkpoint는 실제 providerDataTime을 요구하고 미래 시각/관측 시각 이후의 Provider 시각을 거부한다. Device lock 대기 후에도 시각·gate를 재확인한 뒤 attempt를 저장한다. gate 미준비·일시 보류는 attempt 증가 없이 대기한다. 취소/완료/회복 불가 사유는 lifecycle transaction에서 pending을 명시 종료하며 만료는 gate 없이 처리한다. 정상 polling으로 revision이 증가한 경우 새 검증 commit의 gate를 사용한다. **Event 생성 당시 revision과 현재 revision이 같아야 한다는 조건은 두지 않는다.** Event 기한·identity를 새 revision으로 갱신하지 않는다.
 
 그 뒤 기존 recipient preflight와 durable attempt 시작을 commit하고 모든 DB lock을 해제한 뒤 FCM을 호출한다. 실제 호출 직전에도 gate의 attempt revision·관측 유효성·기한을 확인한다. 시작 commit 후 gate가 닫혀 호출을 생략하면 이미 소비한 count를 되돌리거나 가짜 Provider 결과를 만들지 않고 기존 bounded recovery/종료 경로로 처리한다. 복구 검증은 전송 권한의 영구 허가가 아니다.
 
-세션 취소·만료·목적지 도달·연속성 상실은 gate를 차단하고 pending을 원자 종료하며 늦은 결과로 되살리지 않는다. gate 사전 차단 뒤 DB rollback이면 보수적으로 다음 재검증까지 닫힌 상태를 유지할 수 있다. 마지막 검증 직후 상태 변경과 이미 시작/접수된 외부 요청 사이 경쟁·회수 불가는 기존 한계다. DB 장애/commit 불확실 중에는 gate를 열거나 새 외부 요청을 시작하지 않는다.
+취소 및 polling checkpoint/보류/종료 변경은 Session lock 아래 mutation 전에 이전 revision의 gate를 닫는다. 새 검증 checkpoint는 commit 확인 후만 공개한다. 세션 취소·만료·목적지 도달·연속성 상실은 pending을 원자 종료하며 늦은 결과로 되살리지 않는다. gate 사전 차단 뒤 DB rollback이면 보수적으로 다음 재검증까지 닫힌 상태를 유지할 수 있다. 마지막 메모리 검증과 `FcmProviderClient.send`/실제 HTTP 시작 사이에는 원자성이 없다. 그 사이 취소 commit·Device 변경이 발생하거나 이미 요청이 시작/접수됐다면 회수 또는 새 호출의 완전 차단을 보장하지 않는다. 네트워크 동안 DB lock을 유지하지 않는 기존 한계다. DB 장애/commit 불확실 중에는 gate를 열거나 새 외부 요청을 시작하지 않는다.
 
-TASK-905는 checkpoint/복구와 lifecycle 판단을, TASK-906은 위 atomic Notification 연결·source·gate·fair query·전송 검증을 구현한다. TASK-906 완료 전 하차 Event/FCM을 지원 완료로 취급하지 않는다.
+TASK-905는 checkpoint/복구와 lifecycle 판단을, TASK-906은 위 atomic Notification 연결·source·gate·fair query·전송 검증을 구현한다. TASK-906의 Backend dispatch 구현과 실제 Provider 지원/기기 표시 검증은 구분한다. 실제 세션 생성·재확인은 BOARDING_TRACKING_UNSUPPORTED를 유지하며 Flutter와 실차 검증은 TASK-907/908 및 기존 TASK-710/711에 남는다.
 
 ### common
 
