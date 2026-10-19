@@ -5,6 +5,8 @@ import java.nio.charset.StandardCharsets;
 
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.dto.tago.TagoVehicleLocationResponse;
+import com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Body;
+
 import org.springframework.http.MediaType;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
@@ -63,6 +65,8 @@ public class TagoVehicleLocationClient
                 .queryParam("cityCode", UriUtils.encodeQueryParam(request.context().cityCode(), StandardCharsets.UTF_8))
                 .queryParam("routeId", UriUtils.encodeQueryParam(request.externalRouteId(), StandardCharsets.UTF_8))
                 .queryParam("_type", "json")
+                .queryParam("pageNo", 1)
+                .queryParam("numOfRows", 1000)
                 .build(true)
                 .toUri();
     }
@@ -81,6 +85,24 @@ public class TagoVehicleLocationClient
         }
         if (response.response().body() == null) {
             throw TransitProviderClientException.protocol(provider(), OPERATION, null);
+        }
+        Body body = response.response().body();
+
+        Integer totalCount = body.totalCount();
+
+        int itemCount = body.items() == null || body.items().item() == null
+                ? 0
+                : body.items().item().size();
+
+        if (totalCount == null || totalCount < 0 || totalCount != itemCount) {
+            throw TransitProviderClientException.protocol(
+                    provider(),
+                    OPERATION,
+                    new IllegalStateException(
+                            "TAGO response count mismatch: totalCount="
+                            + totalCount + ", itemCount=" + itemCount
+                    )
+            );
         }
     }
 }

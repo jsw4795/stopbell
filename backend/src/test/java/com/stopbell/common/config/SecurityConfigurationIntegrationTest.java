@@ -38,6 +38,11 @@ import org.springframework.web.bind.annotation.RestController;
 
 import static org.mockito.Mockito.mock;
 
+import com.stopbell.notification.repository.DeviceRepository;
+import com.stopbell.notification.repository.NotificationDeliveryRepository;
+import com.stopbell.notification.repository.NotificationEventRepository;
+import org.springframework.transaction.PlatformTransactionManager;
+
 @SpringBootTest(properties = "spring.autoconfigure.exclude="
         + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
         + "org.springframework.boot.hibernate.autoconfigure.HibernateJpaAutoConfiguration")
@@ -177,6 +182,26 @@ class SecurityConfigurationIntegrationTest {
         @Bean
         BusMetadataSyncStateRepository busMetadataSyncStateRepository() {
             return mock(BusMetadataSyncStateRepository.class);
+        }
+        
+        @Bean
+        DeviceRepository deviceRepository() {
+            return mock(DeviceRepository.class);
+        }
+
+        @Bean
+        NotificationDeliveryRepository notificationDeliveryRepository() {
+            return mock(NotificationDeliveryRepository.class);
+        }
+
+        @Bean
+        NotificationEventRepository notificationEventRepository() {
+            return mock(NotificationEventRepository.class);
+        }
+
+        @Bean
+        PlatformTransactionManager transactionManager() {
+            return mock(PlatformTransactionManager.class);
         }
     }
 

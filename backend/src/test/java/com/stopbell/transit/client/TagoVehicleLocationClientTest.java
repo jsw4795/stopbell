@@ -102,6 +102,34 @@ class TagoVehicleLocationClientTest {
 
         assertFailure(TransitProviderClientFailureKind.TRANSPORT, () -> client.fetchVehicleLocations(request()));
     }
+    
+    @Test
+    @DisplayName("TAGO 응답의 totalCount와 실제 item 개수가 다르면 PROTOCOL 예외를 발생시킨다")
+    void fetch_with_incomplete_response_throws_protocol_exception() {
+        expectRequest().andRespond(withSuccess("""
+                {
+                  "response": {
+                    "header": {"resultCode": "00"},
+                    "body": {
+                      "items": {
+                        "item": [
+                          {
+                            "vehicleno": "경기70바5770",
+                            "nodeord": 1
+                          }
+                        ]
+                      },
+                      "totalCount": 55
+                    }
+                  }
+                }
+                """, MediaType.APPLICATION_JSON));
+
+        assertFailure(
+                TransitProviderClientFailureKind.PROTOCOL,
+                () -> client.fetchVehicleLocations(request())
+        );
+    }
 
     private VehicleLocationRequest<TagoVehicleLocationRequestContext> request() {
         return new VehicleLocationRequest<>("GGB200000112", new TagoVehicleLocationRequestContext("31010"));
@@ -111,7 +139,7 @@ class TagoVehicleLocationClientTest {
         return server.expect(request -> {
             assertThat(request.getURI().getPath()).isEqualTo("/tago/getRouteAcctoBusLcList");
             assertThat(request.getURI().getQuery()).isEqualTo(
-                    "serviceKey=test-service-key&cityCode=31010&routeId=GGB200000112&_type=json"
+                    "serviceKey=test-service-key&cityCode=31010&routeId=GGB200000112&_type=json&pageNo=1&numOfRows=1000"
             );
         });
     }
