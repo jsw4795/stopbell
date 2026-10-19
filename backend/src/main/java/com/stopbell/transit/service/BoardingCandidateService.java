@@ -104,6 +104,85 @@ public class BoardingCandidateService {
         return new BoardingCandidatesResponse(roster.observedAt(), commonProviderTime, status, candidates);
     }
 
+    /** Reuses candidate mapping and identity checks without issuing/replacing screen references. */
+    public VerifiedCandidate revalidateSelected(BoardingCandidateReferenceStore.Snapshot original,
+            BoardingRouteSnapshot route, String confirmedNumber) {
+        if (!route.fingerprint().equals(original.metadataFingerprint())
+                || !route.targetOccurrenceId().equals(original.context().targetOccurrenceId())
+                || !java.util.Objects.equals(route.boardingOccurrenceId(), original.context().boardingOccurrenceId())
+                || !confirmedNumber.equals(original.rosterVehicle().number())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        if (route.provider() == TransitProvider.TAGO) {
+            throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        }
+        Instant validationTime = clock.instant();
+        Vehicle originalRoster = original.rosterVehicle();
+        if (timeIssue(originalRoster, validationTime) != null
+                || originalRoster.providerDataTime().isAfter(originalRoster.observedAt())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        Roster roster;
+        try {
+            roster = fetchRoster(route);
+        } catch (TransitProviderClientException exception) {
+            throw new ApiException(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE);
+        }
+        List<Vehicle> vehicles = roster.vehicles().stream().distinct().toList();
+        String selectedId = original.rosterVehicle().id();
+        Vehicle selected = vehicles.stream().filter(vehicle -> selectedId.equals(vehicle.id()))
+                .findFirst().orElseThrow(() -> new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED));
+        if (identityIssue(selected, conflictingIds(vehicles)) != null
+                || !confirmedNumber.equals(selected.number())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        Detail result = fetchDetail(selected);
+        if (result.issue() != null) {
+            throw new ApiException(switch (result.issue()) {
+                case DETAIL_HTTP_FAILURE, DETAIL_TRANSPORT_FAILURE, DETAIL_PROVIDER_FAILURE, DETAIL_PROTOCOL_FAILURE
+                        -> ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE;
+                default -> ErrorCode.BOARDING_CANDIDATE_CHANGED;
+            });
+        }
+        Vehicle detail = result.vehicle();
+        Instant now = clock.instant();
+        if (now.isAfter(original.expiresAt()) || timeIssue(selected, now) != null || timeIssue(detail, now) != null
+                || detail.providerDataTime().isAfter(detail.observedAt())
+                || selected.providerDataTime().isAfter(selected.observedAt())
+                || selected.providerDataTime().isBefore(original.rosterVehicle().providerDataTime())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        int current = progressIndex(route, detail);
+        if (current < 0) {
+            throw new ApiException(detail.stopId() == null || detail.order() == null
+                    ? ErrorCode.BOARDING_TRACKING_UNSUPPORTED : ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        if (current >= route.indexOf(route.targetOccurrenceId())) {
+            throw new ApiException(ErrorCode.BOARDING_TARGET_NOT_AHEAD);
+        }
+        // Moving detail semantics, order-only and repeated-stop/lap contexts are not verified.
+        // Do not promote candidate sorting evidence into supported alight tracking.
+        Vehicle previous = original.detailVehicle();
+        if (!Integer.valueOf(1).equals(detail.stopFlag()) || previous == null
+                || !Integer.valueOf(1).equals(previous.stopFlag()) || progressIndex(route, previous) < 0
+                || route.traversal().stream().map(BoardingRouteSnapshot.Occurrence::externalStopId)
+                    .distinct().count() != route.traversal().size()) {
+            throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        }
+        if (!detail.id().equals(previous.id()) || !detail.number().equals(previous.number())
+                || current < progressIndex(route, previous)
+                || detail.observedAt().isBefore(previous.observedAt())
+                || previous.providerDataTime() == null || previous.timeIssue() != null
+                || previous.providerDataTime().isAfter(previous.observedAt())
+                || detail.providerDataTime().isBefore(previous.providerDataTime())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        return new VerifiedCandidate(route, detail, current);
+    }
+
+    public record VerifiedCandidate(BoardingRouteSnapshot route, Vehicle vehicle, int progressIndex) {
+    }
+
     private Roster fetchRoster(BoardingRouteSnapshot route) {
         if (route.provider() == TransitProvider.TAGO) {
             var response = tagoClient.fetchVehicleLocations(new VehicleLocationRequest<>(route.externalRouteId(),

@@ -11,7 +11,7 @@ import com.stopbell.transit.domain.TransitProvider;
 /** Immutable, consistently read metadata; names are excluded from the structural fingerprint. */
 public record BoardingRouteSnapshot(
         Long routeId, TransitProvider provider, String externalRouteId, String cityCode,
-        Long targetOccurrenceId, Long boardingOccurrenceId, List<Occurrence> traversal
+        Long targetOccurrenceId, Long boardingOccurrenceId, List<Occurrence> traversal, String routeNumber
 ) {
     public BoardingRouteSnapshot {
         traversal = List.copyOf(traversal);

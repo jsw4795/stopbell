@@ -16,7 +16,7 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
     User
 
      ├── Alarm
-     ├── BoardingSession (TASK-903 후속 구현 계약)
+     ├── BoardingSession (TASK-905 1단계 Persistence, 추적·판정·복구는 후속)
      ├── RefreshToken
      └── Device
 
@@ -458,7 +458,7 @@ TASK-902에서 정의한 후보·화면 선택·사용자 확정은 서로 다�
 
 ## Purpose and Identity
 
-사용자가 전체 번호를 대조한 특정 차량만 목적 occurrence까지 추적하는 독립 aggregate다. 기존 Alarm/BusAlarmTarget/ACTIVE/FOLLOW_UP을 세션으로 재사용하지 않는다. TASK-903 설계이며 아직 Entity·Migration·API 구현은 없다. 결정 근거는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
+사용자가 전체 번호를 대조한 특정 차량만 목적 occurrence까지 추적하는 독립 aggregate다. 기존 Alarm/BusAlarmTarget/ACTIVE/FOLLOW_UP을 세션으로 재사용하지 않는다. TASK-905 1단계에서 Entity·V15·최초 checkpoint와 생성·조회·취소 API 경계를 구현했다. 실제 Provider 생성의 지원 보류는 [API](api.md#탑승-세션-api-task-903), 지속 추적·하차 판정·재시작 복구는 후속 단계에 남는다. 결정 근거는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
 
 소유자는 인증된 User다. TRACKING/SUSPENDED를 미종료로 보며 User당 최대 하나다. Provider·externalRouteId·vehicleTrackingId·전체 표시 번호·목적 occurrence는 한 세션 안에서 불변이다. TAGO vehicleno, 서울 vehId/plainNo 구분과 typed cityCode 문맥을 유지한다. 번호는 ID 누락·변경의 대체 identity가 아니다. 없는 direction/trip/lap 값을 만들지 않는다.
 

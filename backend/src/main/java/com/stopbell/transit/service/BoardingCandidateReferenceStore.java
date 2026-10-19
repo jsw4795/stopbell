@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 /** Ephemeral references only. Resolution does not replace TASK-905's current-provider revalidation. */
 @Component
 public class BoardingCandidateReferenceStore {
-    static final Duration FRESHNESS = Duration.ofSeconds(60);
+    public static final Duration FRESHNESS = Duration.ofSeconds(60);
     private static final int MAX_REFERENCES = 10_000;
     private final Map<String, Snapshot> references = new LinkedHashMap<>();
     private final Clock clock;

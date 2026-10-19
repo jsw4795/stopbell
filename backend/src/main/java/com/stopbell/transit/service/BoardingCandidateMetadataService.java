@@ -41,7 +41,7 @@ public class BoardingCandidateMetadataService {
             validateOccurrence(boardingId, traversal);
         }
         return new BoardingRouteSnapshot(routeId, route.getProvider(), route.getExternalRouteId(),
-                route.getCityCode(), targetId, boardingId, traversal);
+                route.getCityCode(), targetId, boardingId, traversal, route.getRouteNumber());
     }
 
     private void validateOccurrence(Long id, List<BoardingRouteSnapshot.Occurrence> traversal) {

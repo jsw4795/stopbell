@@ -186,7 +186,12 @@ class FcmProviderClientTest {
             try (var body = exchange.getResponseBody()) {
                 body.write('{');
                 body.flush();
-                release.await(3, TimeUnit.SECONDS);
+                // Keep the body progressing so the overall budget, rather than an idle
+                // socket timeout clamped to the same deadline, is the condition under test.
+                for (int chunk = 0; chunk < 60 && !release.await(50, TimeUnit.MILLISECONDS); chunk++) {
+                    body.write(' ');
+                    body.flush();
+                }
                 body.write("\"name\":\"projects/stopbell/messages/late\"}".getBytes(StandardCharsets.UTF_8));
                 body.flush();
             } catch (Exception ignored) {

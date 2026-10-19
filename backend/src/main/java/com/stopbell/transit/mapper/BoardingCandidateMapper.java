@@ -64,6 +64,6 @@ public final class BoardingCandidateMapper {
     }
 
     private static String text(String value) {
-        return value == null || value.isBlank() ? null : value.strip();
+        return value == null || value.isBlank() ? null : value;
     }
 }

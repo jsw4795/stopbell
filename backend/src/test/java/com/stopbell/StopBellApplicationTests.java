@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.stopbell.boarding.repository.BoardingSessionRepository;
 import com.stopbell.user.repository.UserRepository;
 import com.stopbell.user.repository.RefreshTokenRepository;
 import com.stopbell.alarm.repository.AlarmRepository;
@@ -60,6 +61,11 @@ class StopBellApplicationTests {
         @Bean
         UserRepository userRepository() {
             return mock(UserRepository.class);
+        }
+
+        @Bean
+        BoardingSessionRepository boardingSessionRepository() {
+            return mock(BoardingSessionRepository.class);
         }
 
         @Bean

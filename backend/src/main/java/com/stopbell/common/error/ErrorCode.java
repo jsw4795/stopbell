@@ -16,6 +16,13 @@ public enum ErrorCode {
     DEVICE_REVISION_CONFLICT(HttpStatus.CONFLICT, "Device registration revision conflicts."),
     DEVICE_PUSH_TARGET_CONFLICT(HttpStatus.CONFLICT, "Push target is already registered."),
     TRANSIT_TEMPORARILY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Transit is temporarily unavailable."),
+    BOARDING_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "Boarding session was not found."),
+    BOARDING_CANDIDATE_CHANGED(HttpStatus.CONFLICT, "Boarding candidate has changed. Refresh candidates."),
+    BOARDING_SESSION_CONFLICT(HttpStatus.CONFLICT, "An open boarding session already exists."),
+    BOARDING_REQUEST_CONFLICT(HttpStatus.CONFLICT, "Boarding request conflicts with the original request."),
+    BOARDING_REVISION_CONFLICT(HttpStatus.CONFLICT, "Boarding session revision has changed."),
+    BOARDING_TARGET_NOT_AHEAD(HttpStatus.CONFLICT, "Boarding target cannot be verified ahead."),
+    BOARDING_TRACKING_UNSUPPORTED(HttpStatus.CONFLICT, "Boarding tracking is not supported by verified evidence."),
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "Request is invalid.");
 
     private final HttpStatus httpStatus;

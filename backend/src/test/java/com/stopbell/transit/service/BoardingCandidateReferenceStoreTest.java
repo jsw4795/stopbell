@@ -86,13 +86,13 @@ class BoardingCandidateReferenceStoreTest {
     void structural_fingerprint() {
         var renamed = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "external-route", "31010", 14L, 12L,
                 route.traversal().stream().map(item -> new BoardingRouteSnapshot.Occurrence(
-                        item.id(), item.externalStopId(), item.order(), "새 이름")).toList());
+                        item.id(), item.externalStopId(), item.order(), "새 이름")).toList(), "7000");
         assertThat(renamed.fingerprint()).isEqualTo(route.fingerprint());
         var changed = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "external-route", "31010", 14L, 12L,
-                List.of(new BoardingRouteSnapshot.Occurrence(11L, "other-stop", 10, "첫 정류장")));
+                List.of(new BoardingRouteSnapshot.Occurrence(11L, "other-stop", 10, "첫 정류장")), "7000");
         assertThat(changed.fingerprint()).isNotEqualTo(route.fingerprint());
         var changedRoute = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "other-route", "31010", 14L, 12L,
-                route.traversal());
+                route.traversal(), "7000");
         assertThat(changedRoute.fingerprint()).isNotEqualTo(route.fingerprint());
     }
 

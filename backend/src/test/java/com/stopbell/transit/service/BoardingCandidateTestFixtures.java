@@ -24,7 +24,7 @@ final class BoardingCandidateTestFixtures {
                 new BoardingRouteSnapshot.Occurrence(11L, "s1", 10, "첫 정류장"),
                 new BoardingRouteSnapshot.Occurrence(12L, "s2", 20, "승차 정류장"),
                 new BoardingRouteSnapshot.Occurrence(13L, "s3", 30, "다음 정류장"),
-                new BoardingRouteSnapshot.Occurrence(14L, "s4", 40, "목적지")));
+                new BoardingRouteSnapshot.Occurrence(14L, "s4", 40, "목적지")), "7000");
     }
 
     static TagoVehicleLocationItem tago(String number, String stop, Integer order) {

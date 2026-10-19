@@ -46,6 +46,6 @@ class NotificationMigrationIntegrationTest {
         assertThat(jdbc.queryForList("select * from notification_history")).isEqualTo(originalHistory);
         jdbc.update("delete from alarms where id=?", alarmId);
         assertThat(jdbc.queryForList("select * from notification_history")).isEqualTo(originalHistory);
-        assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class)).isEqualTo("14");
+        assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class)).isEqualTo("15");
     }
 }

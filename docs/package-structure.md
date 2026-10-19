@@ -18,11 +18,12 @@ backend/
     ├── common
     ├── user
     ├── alarm
+    ├── boarding
     ├── transit
     └── notification
 ```
 
-`user`, `alarm`, `transit`, `notification`은 `architecture.md`에 정의한 논리적 Backend 경계와 일치한다. 이 경계는 별도 서비스가 아니라 하나의 Spring Boot application 내부의 Package 경계이다.
+`user`, `alarm`, `boarding`, `transit`, `notification`은 `architecture.md`에 정의한 논리적 Backend 경계와 일치한다. 이 경계는 별도 서비스가 아니라 하나의 Spring Boot application 내부의 Package 경계이다.
 
 ## Suggested Structure
 
@@ -46,6 +47,13 @@ backend/
     │   └── entity/
     │
     ├── alarm/
+    │   ├── controller/
+    │   ├── service/
+    │   ├── repository/
+    │   ├── entity/
+    │   └── dto/
+    │
+    ├── boarding/
     │   ├── controller/
     │   ├── service/
     │   ├── repository/
@@ -122,6 +130,10 @@ Alarm 설정, 상태 전이, 활성화/비활성화 책임을 둔다.
 Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기 설정은 같은 aggregate의 공유 PK `BusAlarmTarget` Entity로 분리한다. `AdjacentStopSnapshot`은 Target 생성 시 option과 필요한 predecessor/successor occurrence를 함께 표현한다. Alarm Evaluation은 scheduler에 묻지 않는다. provider-neutral `TransitObservation`과 Alarm Transit Target을 받아 위치 관계 및 `TransitEvent` 후보를 판단하는 Domain/비즈니스 로직은 `alarm`의 책임으로 둔다. Scheduler/orchestration은 같은 Route polling response를 여러 Alarm에 공유하고, Provider failure를 Event 없는 UNKNOWN으로 전달하며, lifecycle 변경과 stale polling 결과의 race를 조정한다.
 
 `BusAlarmPollingService`는 monitoring 대상 BUS `ACTIVE`/`FOLLOW_UP` Alarm을 `AlarmRepository`에서 `BusAlarmTarget`과 함께 조회해 provider route polling key별로 묶는다. 이 내부 grouping 경로는 target 또는 provider request context 불변 조건이 깨진 Alarm을 조용히 제외하지 않는다. `BusAlarmMonitoringScheduler`는 enabled일 때 synchronous fixed-delay cycle에서 group별 Provider 조회·Observation 변환·Evaluation을 실행하고, `BusAlarmLifecycleService`가 짧은 Alarm `PESSIMISTIC_WRITE` transaction에서 stale result 검증과 lifecycle/Event/최초 recipient Delivery를 원자적으로 결정하고 `BusAlarmDecisionResult`를 반환한다. Provider I/O는 transaction 밖에서 실행하며 memory evaluation state는 `(alarmId, activationGeneration)`별로 보관한다.
+
+### boarding
+
+독립 BoardingSession aggregate의 불변 snapshot·checkpoint·수명·revision과 생성·조회·취소 API를 소유한다. `service`의 확정 검증은 기존 `transit` 후보 reference·metadata·Provider 재검증을 재사용하고, 검증 입력과 저장 transaction을 분리한다. 기존 Alarm lifecycle과 Notification persistence는 변경하지 않는다. TASK-905 1단계의 실제 지원 경계는 [API](api.md#탑승-세션-api-task-903), 후속 polling·판정·복구 및 Notification 연결은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
 
 ### transit
 

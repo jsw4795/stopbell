@@ -66,6 +66,7 @@ Spring Boot
 │   ├── RefreshToken
 │   ├── Alarm
 │   ├── BusAlarmTarget
+│   ├── BoardingSession
 │   ├── BusRoute / BusStop / BusRouteStopOccurrence
 │   ├── Device
 │   ├── NotificationEvent
@@ -75,7 +76,7 @@ Spring Boot
       MySQL
 ```
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `RefreshToken`, `Alarm`, `BusAlarmTarget`, `Device`, `NotificationEvent`, `NotificationDelivery`, Bus static metadata는 Repository 기반으로 관리한다. Bus-specific Target은 공통 Alarm table의 nullable column으로 펼치지 않고 Alarm과 공유 PK를 갖는 별도 Entity/table로 관리하며 Alarm aggregate의 persist/remove lifecycle을 따른다. Bus metadata는 source-neutral route snapshot을 한 Route씩 diff sync한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 사용한다. `User`, `RefreshToken`, `Alarm`, `BusAlarmTarget`, `BoardingSession`, `Device`, `NotificationEvent`, `NotificationDelivery`, Bus static metadata는 Repository 기반으로 관리한다. Bus-specific Target은 공통 Alarm table의 nullable column으로 펼치지 않고 Alarm과 공유 PK를 갖는 별도 Entity/table로 관리하며 Alarm aggregate의 persist/remove lifecycle을 따른다. Bus metadata는 source-neutral route snapshot을 한 Route씩 diff sync한다.
 
 현재 구현된 Query는 JPA로 충분하며 MyBatis Mapper, Mapper XML, 전용 production 설정과 starter를 유지하지 않는다. Route/Stop 검색, Alarm grouping, 집계 또는 성능 최적화에서 명시적 SQL 제어의 실제 필요가 확인되면 MyBatis 도입을 다시 결정한다.
 
@@ -128,6 +129,7 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 ```text
 user
 alarm
+boarding
 transit
 notification
 common
@@ -143,6 +145,10 @@ common
 
 알림 설정과 알림 생명주기를 담당한다. Alarm Evaluation은 provider-neutral `TransitObservation`을 입력으로 받아 target과 차량 진행을 판단한다. Provider raw field나 외부 호출 실패를 scheduler에 직접 섞지 않는다.
 
+### boarding
+
+독립 BoardingSession의 snapshot·checkpoint·수명·revision 및 생성·조회·취소를 담당한다. Transit 후보 검증을 재사용하고 기존 Alarm 생명주기는 유지한다. 현재 구현과 후속 추적·판정·복구의 경계는 [탑승 세션 실행](#탑승-세션-실행과-notification-연계-task-903)을 따른다.
+
 ### transit
 
 외부 교통 데이터 제공자와의 통신을 담당하고, 필요할 때 제공자별 데이터를 정규화한다.
@@ -155,7 +161,7 @@ TASK-503은 Spring `RestClient`와 JDK HTTP client로 TAGO `getRouteAcctoBusLcLi
 
 현재 TAGO realtime Client는 `pageNo=1`, `numOfRows=1000`을 명시하고 `totalCount`가 없거나 음수이거나 실제 item 수와 다르면 `PROTOCOL` 실패로 전달한다. 추가 페이지 수집 구현은 아니며, 성공 코드의 empty도 `totalCount=0`과 실제 0건이 일치해야 한다. 개수 검증을 item별 식별·진행 정보의 유효성 보장으로 확대하지 않는다.
 
-TASK-902의 후보 생성·추천과 사용자 번호 확인 경계는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. TASK-904의 `BoardingCandidateService`는 기존 Transit Client/DTO와 DB metadata를 사용하며, 별도 `BoardingCandidateMapper`에서 서울 vehId/plainNo를 함께 보존하고 요청/응답 ID·roster/detail 번호 대응을 검증한다. 기존 Alarm용 Mapper/Observation/Evaluator는 변경하지 않는다. `BoardingCandidateMetadataService`는 read-only transaction에서 불변 traversal을 읽고 Provider I/O는 transaction 밖에서 수행한다. Flutter의 번호 대조·사용자 명시적 확정과 실제 세션 시작은 TASK-905/907에 남는다.
+TASK-902의 후보 생성·추천과 사용자 번호 확인 경계는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. TASK-904의 `BoardingCandidateService`는 기존 Transit Client/DTO와 DB metadata를 사용하며, 별도 `BoardingCandidateMapper`에서 서울 vehId/plainNo를 함께 보존하고 요청/응답 ID·roster/detail 번호 대응을 검증한다. 기존 Alarm용 Mapper/Observation/Evaluator는 변경하지 않는다. `BoardingCandidateMetadataService`는 read-only transaction에서 불변 traversal을 읽고 Provider I/O는 transaction 밖에서 수행한다. TASK-905 1단계의 세션 API는 이 검증 경로를 재사용하며 실제 지원 보류 범위는 [세션 API](api.md#탑승-세션-api-task-903)를 따른다. 지속 추적과 Flutter 번호 대조 화면은 후속 단계에 남는다.
 
 후보 조회는 기존 Alarm lifecycle·Evaluation·Notification 결정을 변경하지 않는다. 정상 응답의 최신 가용 데이터 수용과 물리 위치 시각 보장은 구분하며, 원본 시각 부재만으로 TAGO 추천을 차단하지 않는다. 기존 Polling/Freshness·timeout/retry 설정을 유지한다. 세션·후보 reference의 경계는 아래 TASK-903 계약을 따르며 후보 API 구현을 세션/Flutter 구현 완료로 취급하지 않는다.
 
@@ -274,7 +280,7 @@ Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Eve
 
 ### 탑승 세션 실행과 Notification 연계 (TASK-903)
 
-이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 후속 구현 계약이다. 현재 코드·Schema가 이미 이를 지원한다는 뜻이 아니다. Domain·복구 판정은 [BoardingSession](domain-model.md#boardingsession), 필드·제약·조회는 [Database](database.md#phase-9-boarding-persistence-contract-task-903), HTTP는 [API](api.md#탑승-세션-api-task-903)가 소유한다.
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. TASK-905 1단계는 Session Persistence·확정 검증/저장 경계·조회·취소를 구현했다. 지속 polling·판정·재시작 복구·Notification 연계는 후속 구현이며 아래 계약 전체가 실행 중이라는 뜻이 아니다. Domain·복구 판정은 [BoardingSession](domain-model.md#boardingsession), 필드·제약·조회는 [Database](database.md#phase-9-boarding-persistence-contract-task-903), HTTP는 [API](api.md#탑승-세션-api-task-903)가 소유한다.
 
 #### 확정과 평가 transaction
 
@@ -285,6 +291,8 @@ Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Eve
 생성은 User PESSIMISTIC_WRITE 뒤 중복 요청·미종료 세션을 current read로 확인하고 Session을 저장한다. 기존 세션의 API mutation/평가/복구는 Session PESSIMISTIC_WRITE로 원래 status/revision·차량·수명·checkpoint를 다시 검증한다. checkpoint·상태·필요한 Event·최초 recipient Delivery를 한 transaction으로 commit한다. 알려진 UNIQUE 충돌·commit 응답 유실은 전체 rollback/새 persistence context에서 원래 요청/후보로 제한 재확인하며 blind upsert·Event만 별도 commit은 금지한다. commit 확인 전 memory next-state나 전송 gate를 열지 않는다.
 
 후속 polling은 기존 Route 요청 공유 개념과 selected 차량 detail 합집합을 활용하되 기존 Alarm의 다중 차량 선택·baseline·lifecycle을 세션에 복제하지 않는다. 세션 snapshot/checkpoint는 전체 raw history나 event sourcing이 아니다.
+
+1단계의 `BoardingSessionStartValidator`는 ephemeral reference를 복원하고 기존 `BoardingCandidateService`의 최신 선택 차량 검증을 재사용한다. 검증된 입력만 `VerifiedBoardingStart`로 `BoardingSessionService`의 짧은 저장 transaction 경계에 전달한다. 현재 Provider 지원 차단은 [API](api.md#탑승-세션-api-task-903)를 따른다. 생성의 중복 확인은 reference 조회 전에 수행하고, 실패한 저장은 원래 요청/검증 입력으로 새 transaction에서 최대 한 번 재확인한다. 지원하지 않는 임의 제약 실패를 UNIQUE 재시도로 숨기지 않는다. 조회·취소는 Session lock 아래 수명을 확인하며, Provider I/O나 후속 Worker를 실행하지 않는다.
 
 #### Boarding 초기 설정과 만료
 

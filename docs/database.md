@@ -363,7 +363,7 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 
 ### Phase 9 Boarding persistence contract (TASK-903)
 
-이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 **후속 Schema 계약**이다. 현재 DB·V1~V14·JPA는 수정하지 않는다. `boarding_sessions`는 TASK-905, Notification source 확장은 TASK-906에서 새 Migration과 함께 구현·검증한다. 기존 Alarm/BusAlarmTarget에는 column·FK·lifecycle 변경이 없다.
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했다. V1~V14와 기존 Alarm/BusAlarmTarget·Notification table은 변경하지 않는다. Notification source 확장은 TASK-906의 후속 구현이다.
 
 #### boarding_sessions
 
@@ -396,6 +396,8 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 
 `traversal_snapshot`은 version·ordered occurrences·targetIndex와 대상의 하차 가능/불가/미확인 분류를 갖는 고정 스키마다. occurrence에는 실제 external Stop ID/order와 반복·회차 판단에 필요한 **검증된** 문맥만 둔다. 전체 Route 구조가 필요하면 포함하되 GPS·raw response·일반 Map provider context·모든 표시 metadata는 복제하지 않는다. 분류 근거가 없으면 UNKNOWN이며 ALIGHT 지원을 추측하지 않는다. 현재 TASK-903은 PREPARE_ALIGHT만 지원 계약으로 두고 검증 안 된 접근/통과 알림을 Schema로 선행 구현하지 않는다.
 
+V15의 JSON version 1은 `version`, `provider`, `externalRouteId`, nullable `cityCode`, ordered `occurrences`(`occurrenceId`, `externalStopId`, `order`), `targetIndex`, `targetAlightAvailability`(`ALLOWED`/`PROHIBITED`/`UNKNOWN`), nullable `targetClassificationEvidence`를 저장한다. 표시 이름은 JSON에 넣지 않는다. 알려진 분류에는 검증 근거가 필요하고 UNKNOWN의 근거는 NULL이다. 현재 metadata는 하차 가능 분류를 제공하지 않아 UNKNOWN이며, 실제 생성의 지원 차단은 [API의 1단계 구현 경계](api.md#탑승-세션-api-task-903)를 따른다. Entity는 검증된 ALLOWED 목적지와 목적지 이전의 checkpoint만 최초 TRACKING으로 저장할 수 있다.
+
 fingerprint는 provider/Route·typed request context·순서화한 occurrence ID/order·target 의미·판단에 사용하는 분류/검증 문맥의 canonical 직렬화로 계산한다. 표시 이름·조회 시각·단순 sync 완료 시각은 구조 hash에 넣지 않는다. SHA-256 hash만 저장하는 것으로 실제 snapshot을 대체하지 않는다. metadata Entity FK 없이 선택 당시 snapshot을 보존하고 sync로 덮어쓰지 않는다.
 
 제약·query 계약:
@@ -405,7 +407,7 @@ fingerprint는 provider/Route·typed request context·순서화한 occurrence ID
 - CHECK: provider·status·reason/evidence allowlist, non-empty required reference/번호, revision/index 0 이상·order 양수, TAGO cityCode/서울 NULL, expiresAt>createdAt, terminal에서 endedAt 필수/미종료에서 NULL. nullable CHECK는 UNKNOWN 통과를 피하도록 명시
 - JSON 구조/version·target/index 범위·checkpoint 대응·분류 근거·시간 일관성은 Domain에서 검증. 조회가 필요 없는 JSON 내부에 speculative index를 추가하지 않음
 - `INDEX(status, id)`: 미종료 polling/복구의 bounded 조회. current User 조회는 open_user_id UNIQUE, 요청 복구는 request UNIQUE 사용
-- Session/ID/번호/hash 비교는 대소문자·공백을 임의로 합치지 않는 opaque semantics를 유지하고 UUID만 canonical 형식 검증. 정확한 collation과 CHECK SQL은 후속 MySQL 검증에서 확인
+- Session/ID/번호/hash 비교는 대소문자·공백을 임의로 합치지 않는 opaque semantics를 유지하고 UUID만 canonical 형식 검증. V15는 opaque reference/번호에 `utf8mb4_0900_bin`(NO PAD), UUID/hash/enum에 `ascii_bin`을 사용하고 MySQL 8.4 통합 테스트로 CHECK와 UNIQUE를 검증
 
 기존 row의 mutation은 Session PESSIMISTIC_WRITE와 semantic revision을 사용한다. 생성만 User lock을 먼저 얻어 current 미종료 조회와 직렬화하며 UNIQUE가 최종 경계다. @Version·별도 CAS framework·tracking/event-history table·prepareNotified boolean은 없다. checkpoint 한 개를 overwrite하되 소실/역행 등 알려진 연속성 상실 사유는 영속한다. Session 수명과 준비 Event 기한은 [Architecture](architecture.md#boarding-초기-설정과-만료), 상태 의미는 [Domain](domain-model.md#boardingsession)을 따른다.
 
