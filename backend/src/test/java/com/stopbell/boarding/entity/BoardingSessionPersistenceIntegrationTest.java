@@ -53,7 +53,7 @@ class BoardingSessionPersistenceIntegrationTest {
         assertThat(loaded.getCreatedAt()).isEqualTo(UTC_NOW);
         assertThat(loaded.getUpdatedAt()).isEqualTo(UTC_NOW);
         assertThat(loaded.getExpiresAt()).isEqualTo(UTC_NOW.plusHours(4));
-        assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class)).isEqualTo("15");
+        assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class)).isEqualTo("16");
         assertThat(jdbc.queryForObject("select open_user_id from boarding_sessions where id=?", Long.class, saved.getId()))
                 .isEqualTo(saved.getUser().getId());
         assertThat(jdbc.queryForObject("select json_type(traversal_snapshot) from boarding_sessions where id=?", String.class, saved.getId())).isEqualTo("OBJECT");

@@ -13,6 +13,9 @@ import com.stopbell.alarm.entity.AdjacentStopSnapshot;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.service.AlarmService;
+import com.stopbell.boarding.BoardingSessionFixtures;
+import com.stopbell.boarding.entity.BoardingSession;
+import com.stopbell.boarding.entity.BoardingStateReason;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import com.stopbell.notification.repository.NotificationEventRepository;
 import com.stopbell.transit.domain.TransitEvent;
@@ -23,6 +26,8 @@ import com.stopbell.user.entity.User;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -62,6 +67,137 @@ class NotificationPersistenceIntegrationTest {
     private AlarmService alarmService;
     @Autowired
     private PlatformTransactionManager transactionManager;
+
+    @ParameterizedTest
+    @EnumSource(TransitEventType.class)
+    @DisplayName("V16은 기존 네 Alarm type과 source별 NULL 필드 및 identity 조회를 보존한다")
+    void preserve_all_alarm_types(TransitEventType type) {
+        Alarm alarm = alarm();
+        NotificationEvent saved = event(alarm, CYCLE, type);
+        entityManager.clear();
+        NotificationEvent found = events.findByAlarmIdAndActivationGenerationAndTrackingCycleIdAndEventType(
+                alarm.getId(), 1, CYCLE.toString(), type).orElseThrow();
+        assertThat(found.getId()).isEqualTo(saved.getId());
+        assertThat(found.getSourceType()).isEqualTo(NotificationSourceType.ALARM);
+        assertThat(found.getBoardingSessionId()).isNull();
+        assertThat(found.getBoardingEventType()).isNull();
+        assertThat(found.getExpiresAt()).isNull();
+        assertThat(events.findByBoardingSessionIdAndBoardingEventType(alarm.getId(),
+                BoardingNotificationEventType.PREPARE_ALIGHT)).isEmpty();
+        for (String assignment : List.of("boarding_session_id=1", "boarding_event_type='PREPARE_ALIGHT'",
+                "expires_at=observed_at + interval 30 second", "source_type='BOARDING_SESSION'",
+                "alarm_id=null, activation_generation=null, tracking_cycle_id=null, event_type=null")) {
+            assertThatThrownBy(() -> jdbc.update("update notification_events set " + assignment + " where id=?", found.getId()))
+                    .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_notification_events_source_identity");
+        }
+    }
+
+    @Test
+    @DisplayName("Session Event와 Delivery는 기존 모델로 저장되며 Session revision 변경 후에도 Event 중복을 차단한다")
+    void persist_session_event_and_delivery_without_revision_identity() {
+        User user = new User(AuthProvider.GOOGLE, UUID.randomUUID().toString());
+        entityManager.persist(user);
+        BoardingSession session = BoardingSessionFixtures.session(user);
+        entityManager.persist(session);
+        NotificationEvent saved = events.saveAndFlush(sessionEvent(session.getId(), user));
+        Device device = device(user);
+        User other = new User(AuthProvider.GOOGLE, UUID.randomUUID().toString());
+        entityManager.persist(other);
+        device.transferOwnership(other, "other-fid", 1, BoardingSessionFixtures.UTC_NOW);
+        device.transferOwnership(user, "returned-fid", 2, BoardingSessionFixtures.UTC_NOW);
+        NotificationDelivery delivery = deliveries.saveAndFlush(new NotificationDelivery(saved, device,
+                device.getOwnershipGeneration(), saved.getExpiresAt(), saved.getCreatedAt()));
+        session.suspend(0, BoardingStateReason.VEHICLE_MISSING, BoardingSessionFixtures.UTC_NOW.plusSeconds(1));
+        entityManager.flush();
+        entityManager.clear();
+        NotificationEvent found = events.findByBoardingSessionIdAndBoardingEventType(session.getId(),
+                BoardingNotificationEventType.PREPARE_ALIGHT).orElseThrow();
+        assertThat(found.getId()).isEqualTo(saved.getId());
+        assertThat(found.getSourceType()).isEqualTo(NotificationSourceType.BOARDING_SESSION);
+        assertThat(found.getUser().getId()).isEqualTo(user.getId());
+        assertThat(found.getAlarmId()).isNull();
+        assertThat(found.getActivationGeneration()).isNull();
+        assertThat(found.getTrackingCycleId()).isNull();
+        assertThat(found.getEventType()).isNull();
+        assertThat(found.getObservedAt()).isEqualTo(BoardingSessionFixtures.UTC_NOW);
+        assertThat(found.getEventDetectedAt()).isEqualTo(saved.getEventDetectedAt());
+        assertThat(found.getCreatedAt()).isEqualTo(saved.getCreatedAt());
+        assertThat(found.getExpiresAt()).isEqualTo(saved.getExpiresAt());
+        assertThat(found.getCurrentStopExternalId()).isEqualTo("s1");
+        assertThat(found.getCurrentStopOrder()).isEqualTo(10);
+        assertThat(found.getProviderDataTime()).isEqualTo(BoardingSessionFixtures.UTC_NOW.minusSeconds(1));
+        assertThat(entityManager.find(BoardingSession.class, session.getId()).getRevision()).isOne();
+        assertThatThrownBy(() -> jdbc.update("""
+                insert into notification_events (source_type, boarding_session_id, boarding_event_type, user_id,
+                    observed_at, event_detected_at, created_at, expires_at)
+                select source_type, boarding_session_id, boarding_event_type, user_id,
+                    observed_at, event_detected_at, created_at, expires_at from notification_events where id=?
+                """, found.getId())).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("uk_notification_events_boarding_identity");
+        NotificationDelivery loaded = deliveries.findById(delivery.getId()).orElseThrow();
+        assertThat(loaded.getExpiresAt()).isEqualTo(found.getExpiresAt());
+        assertThat(loaded.getRecipientOwnershipGeneration()).isEqualTo(2);
+        assertThat(loaded.getAttemptCount()).isZero();
+        assertThat(loaded.getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+        assertThatThrownBy(() -> jdbc.update("""
+                insert into notification_deliveries (notification_event_id, device_id, recipient_ownership_generation,
+                    status, next_attempt_at, expires_at, created_at, updated_at)
+                select notification_event_id, device_id, recipient_ownership_generation,
+                    status, next_attempt_at, expires_at, created_at, updated_at from notification_deliveries where id=?
+                """, delivery.getId())).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("uk_notification_deliveries_event_device");
+        assertThat(events.findByAlarmIdAndActivationGenerationAndTrackingCycleIdAndEventType(
+                session.getId(), 0, CYCLE.toString(), TransitEventType.ARRIVED)).isEmpty();
+        assertThat(deliveries.findPendingByAlarmIdForUpdate(session.getId())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("recipient 없는 서로 다른 Session Event도 보존하며 Session ID는 live FK 없이 불변 reference로 저장한다")
+    void preserve_no_recipient_events_and_source_references() {
+        User user = new User(AuthProvider.GOOGLE, UUID.randomUUID().toString());
+        entityManager.persist(user);
+        NotificationEvent first = events.saveAndFlush(sessionEvent(Long.MAX_VALUE, user));
+        NotificationEvent second = events.saveAndFlush(sessionEvent(Long.MAX_VALUE - 1, user));
+        entityManager.clear();
+        assertThat(events.findByBoardingSessionIdAndBoardingEventType(Long.MAX_VALUE,
+                BoardingNotificationEventType.PREPARE_ALIGHT).orElseThrow().getId()).isEqualTo(first.getId());
+        assertThat(events.findById(second.getId())).isPresent();
+        assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(first.getId())).isEmpty();
+        assertThat(jdbc.queryForObject("""
+                select count(*) from information_schema.KEY_COLUMN_USAGE
+                where table_schema=database() and table_name='notification_events'
+                  and column_name='boarding_session_id' and referenced_table_name is not null
+                """, Integer.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("Session source CHECK는 NULL UNKNOWN 우회와 혼합 identity 및 잘못된 type과 기한을 거부한다")
+    void reject_invalid_session_field_combinations() {
+        User user = new User(AuthProvider.GOOGLE, UUID.randomUUID().toString());
+        entityManager.persist(user);
+        NotificationEvent event = events.saveAndFlush(sessionEvent(123L, user));
+        for (String assignment : List.of(
+                "alarm_id=1", "activation_generation=0", "tracking_cycle_id='" + CYCLE + "'", "event_type='ARRIVED'",
+                "alarm_id=1, activation_generation=0, tracking_cycle_id='" + CYCLE + "', event_type='ARRIVED'",
+                "boarding_session_id=null", "boarding_session_id=0", "boarding_session_id=-1",
+                "boarding_event_type=null", "boarding_event_type='ARRIVED'", "boarding_event_type='prepare_alight'",
+                "expires_at=null", "expires_at=observed_at", "expires_at=observed_at - interval 1 microsecond",
+                "boarding_session_id=null, boarding_event_type=null, expires_at=null", "source_type='ALARM'")) {
+            assertThatThrownBy(() -> jdbc.update("update notification_events set " + assignment + " where id=?", event.getId()))
+                    .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_notification_events_source_identity");
+        }
+        for (String assignment : List.of("source_type=null", "source_type='OTHER'", "source_type='alarm'", "user_id=null")) {
+            assertThatThrownBy(() -> jdbc.update("update notification_events set " + assignment + " where id=?", event.getId()))
+                    .isInstanceOf(DataAccessException.class);
+        }
+        assertThatThrownBy(() -> jdbc.update("update notification_events set user_id=? where id=?", Long.MAX_VALUE, event.getId()))
+                .isInstanceOf(DataAccessException.class).hasMessageContaining("fk_notification_events_user_id");
+        assertThatThrownBy(() -> jdbc.update("""
+                insert into notification_events (user_id, alarm_id, activation_generation, tracking_cycle_id, event_type,
+                    observed_at, event_detected_at, created_at) values (?, 1, 0, ?, 'ARRIVED', ?, ?, ?)
+                """, user.getId(), CYCLE.toString(), NOW, NOW, NOW)).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("source_type");
+    }
 
     @Test
     @DisplayName("V14의 Event와 Delivery를 매핑하고 두 identity UNIQUE 및 FK를 강제한다")
@@ -263,6 +399,13 @@ class NotificationPersistenceIntegrationTest {
     }
 
     private void copyEvent(Long id) {
-        jdbc.update("insert into notification_events (alarm_id, user_id, activation_generation, tracking_cycle_id, event_type, observed_at, event_detected_at, created_at) select alarm_id, user_id, activation_generation, tracking_cycle_id, event_type, observed_at, event_detected_at, created_at from notification_events where id = ?", id);
+        jdbc.update("insert into notification_events (source_type, alarm_id, user_id, activation_generation, tracking_cycle_id, event_type, observed_at, event_detected_at, created_at) select source_type, alarm_id, user_id, activation_generation, tracking_cycle_id, event_type, observed_at, event_detected_at, created_at from notification_events where id = ?", id);
+    }
+
+    private NotificationEvent sessionEvent(Long sessionId, User user) {
+        LocalDateTime observed = BoardingSessionFixtures.UTC_NOW;
+        return NotificationEvent.forBoardingSession(sessionId, user, BoardingNotificationEventType.PREPARE_ALIGHT,
+                BoardingSessionFixtures.verified(BoardingSessionFixtures.metadata()).checkpoint(),
+                observed, observed, observed.plusSeconds(30));
     }
 }

@@ -6,6 +6,7 @@ import java.time.temporal.ChronoUnit;
 import java.time.ZoneOffset;
 import java.util.UUID;
 
+import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.transit.domain.TransitEvent;
 import com.stopbell.transit.domain.TransitEventType;
 import com.stopbell.user.entity.User;
@@ -30,21 +31,35 @@ public class NotificationEvent {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "alarm_id", nullable = false, updatable = false)
+    @Enumerated(EnumType.STRING)
+    @Column(name = "source_type", nullable = false, updatable = false, length = 24)
+    private NotificationSourceType sourceType;
+
+    @Column(name = "boarding_session_id", updatable = false)
+    private Long boardingSessionId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "boarding_event_type", updatable = false, length = 20)
+    private BoardingNotificationEventType boardingEventType;
+
+    @Column(name = "expires_at", updatable = false)
+    private LocalDateTime expiresAt;
+
+    @Column(name = "alarm_id", updatable = false)
     private Long alarmId;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false, updatable = false)
     private User user;
 
-    @Column(name = "activation_generation", nullable = false, updatable = false)
-    private long activationGeneration;
+    @Column(name = "activation_generation", updatable = false)
+    private Long activationGeneration;
 
-    @Column(name = "tracking_cycle_id", nullable = false, updatable = false, length = 36)
+    @Column(name = "tracking_cycle_id", updatable = false, length = 36)
     private String trackingCycleId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "event_type", nullable = false, updatable = false, length = 20)
+    @Column(name = "event_type", updatable = false, length = 20)
     private TransitEventType eventType;
 
     @Column(name = "observed_at", nullable = false, updatable = false)
@@ -96,6 +111,7 @@ public class NotificationEvent {
                 || (event.currentStopName() != null && event.currentStopName().length() > 255)) {
             throw new IllegalArgumentException("Stop evidence exceeds maximum length 255");
         }
+        this.sourceType = NotificationSourceType.ALARM;
         this.alarmId = alarmId;
         this.user = user;
         this.activationGeneration = activationGeneration;
@@ -114,6 +130,42 @@ public class NotificationEvent {
         this.stopsPastTarget = event.stopsPastTarget();
     }
 
+    /** Persistence input only; current Session validation and atomic fan-out belong to TASK-906 step 2. */
+    public static NotificationEvent forBoardingSession(
+            Long boardingSessionId, User user, BoardingNotificationEventType eventType, BoardingCheckpoint checkpoint,
+            LocalDateTime eventDetectedAt, LocalDateTime createdAt, LocalDateTime expiresAt
+    ) {
+        if (boardingSessionId == null || boardingSessionId <= 0 || user == null
+                || eventType != BoardingNotificationEventType.PREPARE_ALIGHT || checkpoint == null) {
+            throw new IllegalArgumentException("Boarding Event identity, owner and evidence must be valid");
+        }
+        NotificationEvent event = new NotificationEvent();
+        event.sourceType = NotificationSourceType.BOARDING_SESSION;
+        event.boardingSessionId = boardingSessionId;
+        event.boardingEventType = eventType;
+        event.user = user;
+        event.observedAt = time(checkpoint.getObservedAt());
+        event.eventDetectedAt = time(eventDetectedAt);
+        event.createdAt = time(createdAt);
+        event.expiresAt = time(expiresAt);
+        if (event.eventDetectedAt.isBefore(event.observedAt) || event.createdAt.isBefore(event.eventDetectedAt)
+                || !event.expiresAt.isAfter(event.observedAt)) {
+            throw new IllegalArgumentException("Boarding Event timestamps must preserve order and freshness window");
+        }
+        // Copy only validated progress evidence; no invented Stop ID/name, GPS or Provider time.
+        event.currentStopExternalId = checkpoint.getStopExternalId();
+        event.currentStopOrder = checkpoint.getStopOrder();
+        event.providerDataTime = checkpoint.getProviderDataTime();
+        return event;
+    }
+
+    private static LocalDateTime time(LocalDateTime value) {
+        if (value == null || value.getYear() < 1000 || value.getYear() > 9999) {
+            throw new IllegalArgumentException("UTC timestamp must fit DATETIME(6)");
+        }
+        return value.truncatedTo(ChronoUnit.MICROS);
+    }
+
     public Long getId() {
         return id;
     }
@@ -126,12 +178,28 @@ public class NotificationEvent {
         return user;
     }
 
-    public long getActivationGeneration() {
+    public NotificationSourceType getSourceType() {
+        return sourceType;
+    }
+
+    public Long getBoardingSessionId() {
+        return boardingSessionId;
+    }
+
+    public BoardingNotificationEventType getBoardingEventType() {
+        return boardingEventType;
+    }
+
+    public LocalDateTime getExpiresAt() {
+        return expiresAt;
+    }
+
+    public Long getActivationGeneration() {
         return activationGeneration;
     }
 
     public UUID getTrackingCycleId() {
-        return UUID.fromString(trackingCycleId);
+        return trackingCycleId == null ? null : UUID.fromString(trackingCycleId);
     }
 
     public TransitEventType getEventType() {

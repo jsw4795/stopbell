@@ -539,7 +539,7 @@ Payload는 `type`, `alarmId`, `eventType`, `notificationEventId` 수준의 navig
 
 ### TASK-903 세션 source의 후속 확장 (2026-10-19)
 
-[ADR-012](ADR-012-boarding-session-and-alight-notification-contract.md)는 기존 ALARM 계약을 유지하고 BOARDING_SESSION의 PREPARE_ALIGHT만 별도 source로 추가한다. 현재 NotificationEvent/DispatchTarget/SendRequest/FCM은 Alarm 기반이며 실제 source 확장·복구 gate·공정한 due 조회·Session current status/revision 검증은 TASK-906에 남는다. 가짜 alarmId를 사용하지 않는다. 상세 실행은 [Architecture](../architecture.md#탑승-세션-실행과-notification-연계-task-903), 분기 CHECK/UNIQUE는 [Database](../database.md#notification-source-확장-task-906-구현-예정)가 소유한다.
+[ADR-012](ADR-012-boarding-session-and-alight-notification-contract.md)는 기존 ALARM 계약을 유지하고 BOARDING_SESSION의 PREPARE_ALIGHT만 별도 source로 추가한다. TASK-906 1단계에서 Event source 영속성과 기존 Alarm batch 보호를 구현했다. DispatchTarget/SendRequest/FCM은 계속 Alarm 기반이며 원자 생성·Session 복구 gate·source별 due 조회·current status/revision 검증은 후속 단계에 남는다. 가짜 alarmId를 사용하지 않는다. 상세 실행은 [Architecture](../architecture.md#탑승-세션-실행과-notification-연계-task-903), 분기 CHECK/UNIQUE는 [Database](../database.md#notification-source-확장-task-906-1단계)가 소유한다.
 
 위 Freshness의 만료된 최초 Event 보존은 **기존 ALARM 정책**이다. PREPARE_ALIGHT만 최초 INSERT 시 이미 원래 observedAt 기반 기한이 지났으면 Event/Delivery를 생성하지 않아 다음 새 관측의 기회를 남긴다. 이미 저장된 세션 Event는 만료·실패·recipient 없음으로 재생성하지 않는다. 기존 Device·Delivery·recipient 고정·bounded attempt·외부 접수/표시 한계는 바꾸지 않는다. 이 차이를 기존 Alarm 정책에 소급 적용하지 않는다.
 

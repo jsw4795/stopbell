@@ -666,7 +666,9 @@ TASK-708 평가기는 FOLLOW_UP memory가 없을 때 `followUpTrackingCycleId`�
 
 ## Conceptual Identity
 
-다음 네 값과 만료된 최초 Event 보존 규칙은 기존 ALARM source 계약이다. TASK-903의 BOARDING_SESSION source는 위 BoardingSession identity·TTL 예외를 적용하며, 필드 분기는 [후속 Notification Schema](database.md#notification-source-확장-task-906-구현-예정)를 따른다. 현재 구현은 아직 ALARM만 지원한다.
+다음 네 값과 만료된 최초 Event 보존 규칙은 기존 ALARM source 계약이다. TASK-906 1단계에서 `NotificationSourceType`의 ALARM/BOARDING_SESSION 분기와 두 source 영속성을 구현했다. BOARDING_SESSION은 위 BoardingSession identity·TTL 예외를 적용하며, 필드 분기는 [Notification Schema](database.md#notification-source-확장-task-906-1단계)를 따른다. 실제 준비 후보 연결·원자 생성·전송은 후속 단계다.
+
+source·owner·identity·근거·시각은 생성 뒤 불변이다. 기존 Alarm 생성자는 그대로 유지하고 Session factory는 양수 boardingSessionId, non-null User, `BoardingNotificationEventType.PREPARE_ALIGHT`, 검증된 checkpoint와 observed≤detected≤created 및 observed<expires의 UTC microsecond 시각을 요구한다. checkpoint의 실제 Stop ID/order·관측/Provider 시각만 복사하며 누락 ID·GPS·Provider 시각을 합성하지 않는다. Session에는 alarmId·activationGeneration·trackingCycleId·TransitEventType이 모두 NULL이다. generation은 nullable Long으로, UUID getter는 Session에서 NULL로 표현하며 두 source를 다루는 호출자는 먼저 source를 확인한다. Session revision은 Event identity에 포함하지 않는다.
 
 ```text
 alarmId
@@ -697,6 +699,8 @@ Current Alarm lifecycle/activation generation 검증, lifecycle transition, Noti
     Device 1 : N NotificationDelivery
 
 각 `NotificationEvent × Device` 조합은 Database 기준 하나다. Provider request는 bounded retry로 여러 번 발생할 수 있지만 모든 attempt를 append-only row로 영속할 필요는 없다.
+
+TASK-906 1단계는 별도 Delivery type/table 없이 Session Event도 같은 모델로 참조한다. Session Delivery의 불변 expiresAt은 부모 Event expiresAt과 UTC microsecond 단위로 같아야 하며 생성 시 불일치를 거부한다. 기존 Alarm의 Type별 Delivery TTL과 recipient ownership generation 검증은 유지한다. Session Event만 저장하고 Delivery를 0개로 둘 수 있으나 실제 recipient set 고정과 원자 생성은 2단계에 남는다.
 
 Event와 recipient Device identity는 필수·불변이며 [Delivery UNIQUE](database.md#notification_deliveries-identity)를 따른다. 최초 decision transaction에서 선정한 recipient set만 Delivery를 가지며, 나중 Device 등록이나 동일 Event 재제출로 set을 확대하지 않는다. 0개 recipient는 Event만 존재하는 정상 결정으로 Provider failure나 성공 Delivery가 아니다. Alarm 삭제 후 기록/Delivery 처리의 후속 제약은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#alarm-삭제에-대한-후속-결정-제약)을 따른다.
 

@@ -3,6 +3,7 @@ package com.stopbell.notification.service;
 import com.stopbell.notification.entity.Device;
 import com.stopbell.notification.entity.NotificationDelivery;
 import com.stopbell.notification.entity.NotificationEvent;
+import com.stopbell.notification.entity.NotificationSourceType;
 import com.stopbell.notification.repository.DeviceRepository;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -23,8 +24,11 @@ public class NotificationRecipientPreflight {
         if (!TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Recipient preflight requires a Delivery transaction");
         }
-        Device device = devices.findByIdForUpdate(delivery.getDevice().getId()).orElse(null);
         NotificationEvent event = delivery.getNotificationEvent();
+        if (event.getSourceType() != NotificationSourceType.ALARM) {
+            throw new IllegalStateException("Recipient preflight currently supports ALARM only");
+        }
+        Device device = devices.findByIdForUpdate(delivery.getDevice().getId()).orElse(null);
         if (device == null) {
             return rejected(Rejection.DEVICE_MISSING);
         }

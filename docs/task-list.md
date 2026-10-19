@@ -429,6 +429,8 @@ Future Consideration:
   - 선행 관계: TASK-903/904 완료 후 수행한다. Notification 전송 연결은 TASK-906에서 수행한다.
 
 - [ ] TASK-906 기존 Notification 시스템과 하차 알림 연동
+  - 1단계 구현: V16의 기존 데이터 보존 source 확장, ALARM/BOARDING_SESSION Event 모델·Session identity Repository·공통 Delivery 기한 검증, LIMIT 이전 ALARM 조회와 직접 attempt 진입 차단을 구현했다. 실제 준비 후보 연결·Event/Delivery 원자 저장·recipient 고정·lifecycle 종료는 2단계, source-aware payload·Session gate·Worker 전송/모든 source 만료 정리는 3단계에 남는다. 하차 FCM과 실제 Provider 지원은 활성화하지 않으며 Task는 미완료로 유지한다.
+  - 1단계 검증: MySQL 8.4.11 Testcontainers로 V14/V15 기존 Event·네 Delivery 상태·Session 보존, source별 CHECK/UNIQUE·recipient 없는 저장·Delivery 기한·Alarm batch 보호와 Session 미발송을 확인했다. 기존 733개와 신규 32개를 포함한 전체 Gradle 765개 테스트가 실패·오류·skip 없이 통과했다. API/FCM payload·Dependency 변경과 실제 외부 Provider 호출은 없다.
   - 목적: 하차 알림 후보를 기존 Notification 인프라로 전달하면서 기존 알림의 correctness를 보존한다.
   - 완료 기준:
     - TASK-903에서 확정한 최소 확장으로 logical Event·Event 시점 recipient Delivery·세션 상태 변경의 원자성 및 중복 방지를 연결한다. 기존 Device 소유권/registration, durable dispatch, FCM, retry/expiry 경로를 재사용한다.

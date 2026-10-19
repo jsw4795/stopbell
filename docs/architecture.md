@@ -197,6 +197,7 @@ Notification persistence는 다음 책임으로 분리한다.
 NotificationEvent
 - durable logical notification decision
 - alarmId + activation generation + trackingCycleId + eventType dedup identity
+- BOARDING_SESSION: boardingSessionId + PREPARE_ALIGHT dedup identity (TASK-906 1단계 persistence)
 - Event 시점 recipient Delivery들의 logical source
 
 NotificationDelivery
@@ -244,7 +245,7 @@ AlarmService.delete는 기존 인증/소유권 검증과 Alarm PESSIMISTIC_WRITE
 
 #### Notification dispatch worker 구현 (TASK-706)
 
-`notification.service.NotificationDispatchWorker`는 기존 `findDuePendingIds(now, PageRequest.of(0, batchSize))`를 사용해 `nextAttemptAt ASC, id ASC`의 PENDING ID만 제한 조회하고 순차 처리한다. expired/capped PENDING을 조회에서 제외하지 않으며 recipient fan-out, 새 Event/Delivery 생성, Alarm lifecycle 변경을 수행하지 않는다. MySQL이 pending source이고 memory queue, 별도 thread pool, worker sleep/retry loop는 없다.
+`notification.service.NotificationDispatchWorker`는 기존 `findDuePendingIds(now, PageRequest.of(0, batchSize))`를 사용해 `nextAttemptAt ASC, id ASC`의 ALARM source PENDING ID만 제한 조회하고 순차 처리한다. TASK-906 1단계의 source 제한은 LIMIT 전에 적용한다. Alarm의 expired/capped PENDING을 조회에서 제외하지 않으며 recipient fan-out, 새 Event/Delivery 생성, Alarm lifecycle 변경을 수행하지 않는다. MySQL이 pending source이고 memory queue, 별도 thread pool, worker sleep/retry loop는 없다.
 
 `notification.dispatch.enabled=false`가 기본이다. FCM provider의 `notification.fcm.enabled` 및 명시적 local Smoke와 독립된 설정이다. `batch-size=50`, `fixed-delay=PT1S`는 provisional 개발값이며 운영 확정값이 아니다. TASK-709에서는 batch 1~1,000, delay 1ms~1분으로 유한 범위를 검증한다. 기존 Spring scheduling의 fixed-delay와 Worker의 `AtomicBoolean.compareAndSet` guard로 동일 인스턴스의 실행 중첩을 막는다. context close 뒤 새 cycle/후속 후보는 시작하지 않는다. 다중 Backend 안전성을 제공하지 않는다.
 
@@ -318,14 +319,18 @@ Event 저장이 가능한 경우 eligible Device를 ID 순서 current lock으로
 
 #### Notification source와 전송 모델 확장
 
-현재 `NotificationDispatchTarget`·`NotificationSendRequest`는 primitive alarmId와 TransitEventType을 필수로 받고 FCM payload도 ALARM_EVENT로 고정한다. TASK-906은 두 source만 갖는 작은 typed source hint로 최소 확장한다. 공통 FID/Event ID/expiresAt 및 DispatchTarget의 Delivery/Device/owner/generation/revision 정보는 유지한다.
+TASK-906 1단계는 V16, 두 source의 Event Entity와 identity Repository, 공통 Delivery의 Session 기한 일치 검증까지 구현했다. `NotificationEvent.forBoardingSession`은 검증된 `BoardingCheckpoint`에서 Stop ID/order·observedAt·실제 providerDataTime만 복사하는 영속성 입력 경로다. 실제 `BoardingTrackingDecision` 연결·Event/recipient Delivery 원자 생성·lifecycle pending 종료는 2단계에 남는다. Provider 지원 제한은 유지한다.
+
+1단계의 임시 전송 경계는 `NotificationDeliveryRepository.findDuePendingIds`/`findExpiredPendingIds`의 ALARM predicate와 `NotificationDispatchAttemptService.beginAttempt`의 handler/recipient 이전 ALARM 검사다. Session backlog는 두 조회의 LIMIT을 점유하지 않고 직접 Session Delivery ID가 입력돼도 attempt·예약·결과를 변경하지 않는다. `NotificationRecipientPreflight`도 ALARM 이외 입력을 Device 조회 전에 거부해 nullable alarmId의 unboxing을 막는다. 별도 Worker는 추가하지 않는다. 3단계에서 이 query/attempt/preflight 경계를 아래 source-aware 조회·Session 선행 lock/gate·전송 모델로 확장해야 하며 단순 차단 해제만으로 전송을 활성화하면 안 된다. 모든 source 만료 sweep도 3단계에 남는다.
+
+현재 `NotificationDispatchTarget`·`NotificationSendRequest`는 primitive alarmId와 TransitEventType을 필수로 받고 FCM payload도 ALARM_EVENT로 고정한다. 3단계는 두 source만 갖는 작은 typed source hint로 최소 확장한다. 공통 FID/Event ID/expiresAt 및 DispatchTarget의 Delivery/Device/owner/generation/revision 정보는 유지한다.
 
 | source hint | 필수값 | 금지값 |
 | --- | --- | --- |
 | ALARM | 양수 alarmId, 기존 TransitEventType | boardingSessionId/boardingEventType |
 | BOARDING_SESSION | 양수 boardingSessionId, PREPARE_ALIGHT | alarmId/TransitEventType |
 
-공통 constructor/validation·`request()`·payload builder는 이 두 분기만 지원하며 가짜 alarmId, 0 sentinel, 범용 plugin/provider framework를 추가하지 않는다. DispatchTarget의 세션 attempt에는 전송 검증 당시 current Session revision을 담고 gate 재검증에 사용한다. 이는 Event의 불변 identity나 SendRequest의 공개 payload가 아니다. 기존 Alarm constructor 의미·네 type·ALARM_EVENT payload를 보존한다. Notification DB source 분기는 [Schema](database.md#notification-source-확장-task-906-구현-예정), payload는 [API](api.md#탑승-세션-push와-tap)가 소유한다.
+후속 공통 constructor/validation·`request()`·payload builder는 이 두 분기만 지원하며 가짜 alarmId, 0 sentinel, 범용 plugin/provider framework를 추가하지 않는다. DispatchTarget의 세션 attempt에는 전송 검증 당시 current Session revision을 담고 gate 재검증에 사용한다. 이는 Event의 불변 identity나 SendRequest의 공개 payload가 아니다. 기존 Alarm constructor 의미·네 type·ALARM_EVENT payload를 보존한다. Notification DB source 분기는 [Schema](database.md#notification-source-확장-task-906-1단계), payload는 [API](api.md#탑승-세션-push와-tap)가 소유한다.
 
 #### 복구 gate와 Worker 공정성
 

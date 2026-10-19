@@ -84,6 +84,10 @@ public class NotificationDelivery {
                 || !expiresAt.isAfter(notificationEvent.getObservedAt())) {
             throw new IllegalArgumentException("Delivery must preserve Event time and a positive freshness window");
         }
+        if (notificationEvent.getSourceType() == NotificationSourceType.BOARDING_SESSION
+                && !expiresAt.truncatedTo(ChronoUnit.MICROS).equals(notificationEvent.getExpiresAt())) {
+            throw new IllegalArgumentException("Boarding Delivery must preserve its Event expiry");
+        }
         this.notificationEvent = notificationEvent;
         this.device = device;
         this.recipientOwnershipGeneration = recipientOwnershipGeneration;

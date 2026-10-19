@@ -22,14 +22,17 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select delivery from NotificationDelivery delivery
-            where delivery.notificationEvent.alarmId = :alarmId and delivery.status = 'PENDING'
+            where delivery.notificationEvent.sourceType = 'ALARM'
+              and delivery.notificationEvent.alarmId = :alarmId and delivery.status = 'PENDING'
             order by delivery.id
             """)
     List<NotificationDelivery> findPendingByAlarmIdForUpdate(Long alarmId);
 
+    /** TASK-906 step 1: exclude Session rows before LIMIT until source-aware dispatch is implemented. */
     @Query("""
             select delivery.id from NotificationDelivery delivery
-            where delivery.status = 'PENDING' and delivery.nextAttemptAt <= :now
+            where delivery.notificationEvent.sourceType = 'ALARM'
+              and delivery.status = 'PENDING' and delivery.nextAttemptAt <= :now
             order by delivery.nextAttemptAt, delivery.id
             """)
     List<Long> findDuePendingIds(LocalDateTime now, Pageable pageable);
@@ -37,7 +40,8 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
     /** Avoid starvation behind preserved fresh rows while configuration blocks new attempts. */
     @Query("""
             select delivery.id from NotificationDelivery delivery
-            where delivery.status = 'PENDING' and delivery.nextAttemptAt <= :now and delivery.expiresAt <= :now
+            where delivery.notificationEvent.sourceType = 'ALARM'
+              and delivery.status = 'PENDING' and delivery.nextAttemptAt <= :now and delivery.expiresAt <= :now
             order by delivery.nextAttemptAt, delivery.id
             """)
     List<Long> findExpiredPendingIds(LocalDateTime now, Pageable pageable);

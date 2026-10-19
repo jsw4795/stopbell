@@ -10,6 +10,7 @@ import java.util.Optional;
 import com.stopbell.notification.client.NotificationSendResult;
 import com.stopbell.notification.entity.NotificationDelivery;
 import com.stopbell.notification.entity.NotificationDeliveryStatus;
+import com.stopbell.notification.entity.NotificationSourceType;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +48,10 @@ public class NotificationDispatchAttemptService {
             if (delivery == null || delivery.getStatus() != NotificationDeliveryStatus.PENDING
                     || delivery.getNextAttemptAt() == null || delivery.getNextAttemptAt().isAfter(now)) {
                 log.debug("Notification dispatch skipped: deliveryId={}, reason=NOT_DUE_PENDING", id);
+                return Optional.empty();
+            }
+            // TASK-906 step 3 replaces this boundary with Session-first locks and current Session/gate validation.
+            if (delivery.getNotificationEvent().getSourceType() != NotificationSourceType.ALARM) {
                 return Optional.empty();
             }
             if (!handler.checkEligibility(delivery, now)) {

@@ -161,12 +161,14 @@ Device registration lifecycle, durable logical Notification, per-Device delivery
 - `service`: Device 권한·revision·ownership/transaction 처리, NotificationEvent와 Event 시점 recipient Delivery 생성 orchestration, 기존 pending Delivery worker와 전달 결과 처리
 - `client`: TASK-705의 `FcmProviderClient`, 전송 입력/정규화 결과, `FcmFailureMapper`, invocation transport/budget, FCM 설정 및 local CLI `FcmSmokeRunner`. HTTP v1 선택·인증/제어 gate는 ADR-010, 실행은 local-development.md를 참조한다
 - `repository`: Device, NotificationEvent, NotificationDelivery JPA Repository
-- `entity`: Device, NotificationEvent, NotificationDelivery JPA Entity
+- `entity`: Device, NotificationEvent, NotificationDelivery JPA Entity와 `NotificationSourceType`, `BoardingNotificationEventType`
 - `dto`: Device registration, Push 요청/응답, 최소 payload와 Notification DTO
 
 `NotificationDecisionTtlPolicy`는 notification.service에 두고 최초 Delivery freshness 설정을 소유한다. Lifecycle/Event/fan-out의 단일 결정 경계는 기존 alarm.service의 `BusAlarmLifecycleService`가 조율한다. 구체 Package/Class 이름은 구현 시 필요한 책임에 맞게 정하며 generic multi-provider framework, generic retry framework, Device subtype hierarchy, 별도 Notification microservice를 만들지 않는다. 기존 `NotificationHistory` 코드는 TASK-707에서 Event/Delivery로 대체했고 legacy table의 조건부 보존은 database.md를 따른다.
 
 TASK-706의 `NotificationDispatchConfiguration`/`NotificationDispatchProperties`, `NotificationDispatchWorker`, `NotificationDispatchAttemptService`, `NotificationRecipientPreflight`, `NotificationDispatchTarget`/`NotificationAttemptSnapshot`과 후속 `NotificationAttemptHandler` 계약은 notification.service에 둔다. 실행 경계와 기본 비활성화/handler 활성화 gate는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. `DurableNotificationAttemptHandler`는 실제 caller-owned attempt/result/expiry/cleanup 정책을, `NotificationRetryPolicy`/`NotificationRetryProperties`는 bounded DB 예약과 설정 검증을 같은 package에서 소유한다. 새 retry framework/package는 없다.
+
+TASK-906 1단계는 기존 `NotificationEvent`에 Session factory를 추가해 `boarding.entity.BoardingCheckpoint`의 검증된 최소 근거만 복사하고, 기존 Repository에 source별 identity 조회를 둔다. 전송 임시 차단은 같은 Repository의 ALARM due/expired 조회와 기존 AttemptService/Preflight에 둔다. 실제 Boarding 판정 연결·원자 생성은 2단계, DispatchTarget/SendRequest·FCM·Session gate 확장은 3단계이며 별도 Event framework나 Worker/package는 추가하지 않는다.
 
 ## Persistence Location
 

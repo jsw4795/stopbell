@@ -307,20 +307,22 @@ Nullable enum/acceptance 조건은 MySQL CHECK의 UNKNOWN 통과를 피하도록
 V1의 제한 조회는 expired/capped PENDING도 빠짐없이 종료해야 한다. NotificationDeliveryRepository.findDuePendingIds(now, Pageable)는 다음 SQL과 같은 predicate/정렬의 bounded ID 조회를 구현한다.
 
 ```sql
-SELECT id
-FROM notification_deliveries
-WHERE status = 'PENDING' AND next_attempt_at <= :now
-ORDER BY next_attempt_at, id
+SELECT delivery.id
+FROM notification_deliveries delivery
+JOIN notification_events event ON event.id = delivery.notification_event_id
+WHERE event.source_type = 'ALARM'
+  AND delivery.status = 'PENDING' AND delivery.next_attempt_at <= :now
+ORDER BY delivery.next_attempt_at, delivery.id
 LIMIT :batchSize;
 ```
 
-JPA도 동일 predicate/정렬과 bounded Pageable을 사용한다. 조회 결과는 dispatch 후보이며 재검증 transaction에서 먼저 `now >= expiresAt`이면 EXPIRED, 그 다음 count>=maxAttempts면 FAILED, 그 다음 recipient/local lifecycle 조건을 적용한다. 실제 전송 자격은 `status=PENDING AND nextAttemptAt<=now AND expiresAt>now AND attemptCount<maxAttempts` 및 current Device 검증이다. SELECT/후속 검증만으로 multi-worker exclusion을 보장하지 않으며 단일 worker 계약에 의존한다.
+JPA도 동일 predicate/정렬과 bounded Pageable을 사용한다. TASK-906 1단계에서 source predicate를 LIMIT 이전에 추가했으며 Session row는 Alarm batch를 점유하지 않는다. 조회 결과는 dispatch 후보이며 재검증 transaction에서 먼저 `now >= expiresAt`이면 EXPIRED, 그 다음 count>=maxAttempts면 FAILED, 그 다음 recipient/local lifecycle 조건을 적용한다. 실제 전송 자격은 `status=PENDING AND nextAttemptAt<=now AND expiresAt>now AND attemptCount<maxAttempts` 및 current Device 검증이다. SELECT/후속 검증만으로 multi-worker exclusion을 보장하지 않으며 단일 worker 계약에 의존한다.
 
 `idx_notification_deliveries_pending_due (status, next_attempt_at, id)` 하나를 추가한다. equality status → due range/정렬 next_attempt_at → tie-break PK 순서다. expiresAt은 row recheck/filter로 처리한다. 두 range column을 앞에 나란히 넣어 모두 range scan된다고 가정하지 않고 별도 expiry/status/attemptCount index를 추가하지 않는다. InnoDB의 PK suffix가 id를 이미 포함하더라도 별도 id index를 만들지 않는다. 기존 Event×Device UNIQUE와 device_id FK index도 유지한다. [MySQL multiple-column index](https://dev.mysql.com/doc/refman/8.4/en/multiple-column-indexes.html)를 기준으로 TASK-707 MySQL 테스트에서 실제 due SQL/EXPLAIN과 index 목록을 검증한다.
 
 모든 PENDING 예약은 nextAttemptAt<=expiresAt이다. retry/recovery 가능 시각이 기한 이상이면 nextAttemptAt=expiresAt으로 저장하여 기한 도래 때 위 조회로 local 종료하고 그 예약으로 FCM을 호출하지 않는다. 이미 만료된 초기 row는 EXPIRED로 생성하므로 조회되지 않는다. 이 규칙은 미래 Retry-After와 오랜 restart 때문에 expired row가 due query에서 영구 누락되는 것을 막는다.
 
-TASK-709의 runtime CONFIGURATION 차단 중에는 `findExpiredPendingIds(now, Pageable)`가 위 due predicate/정렬에 `expires_at <= :now`를 추가해 만료 PENDING만 제한 조회한다. 미만료 row를 보존해도 그 row 뒤의 만료 후보가 batch에서 누락되지 않게 하며 기존 due index를 사용한다. V14 column/CHECK/UNIQUE/index와 Migration은 변경하지 않는다.
+TASK-709의 runtime CONFIGURATION 차단 중에는 `findExpiredPendingIds(now, Pageable)`가 위 due predicate/정렬에 `delivery.expires_at <= :now`를 추가해 만료 PENDING만 제한 조회한다. TASK-906 1단계는 이 조회도 ALARM source로 제한한다. 미만료 row를 보존해도 그 row 뒤의 만료 후보가 batch에서 누락되지 않게 하며 기존 due index를 유지한다. V14 Migration은 수정하지 않는다.
 
 ### bus_routes, bus_stops, bus_route_stop_occurrences
 
@@ -363,7 +365,7 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 
 ### Phase 9 Boarding persistence contract (TASK-903)
 
-이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했다. V1~V14와 기존 Alarm/BusAlarmTarget·Notification table은 변경하지 않는다. Notification source 확장은 TASK-906의 후속 구현이다.
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했고 TASK-906 1단계에서 Notification source를 V16으로 확장했다. 기존 V1~V15 Migration과 Alarm/BusAlarmTarget Schema는 수정하지 않는다.
 
 #### boarding_sessions
 
@@ -411,11 +413,11 @@ fingerprint는 provider/Route·typed request context·순서화한 occurrence ID
 
 기존 row의 mutation은 Session PESSIMISTIC_WRITE와 semantic revision을 사용한다. 생성만 User lock을 먼저 얻어 current 미종료 조회와 직렬화하며 UNIQUE가 최종 경계다. @Version·별도 CAS framework·tracking/event-history table·prepareNotified boolean은 없다. 2단계 polling도 V15의 마지막 검증 checkpoint 한 개만 overwrite하며 새 table/column은 추가하지 않는다. 새 checkpoint 또는 상태 의미 변경 때 revision을 증가시키고 반복 Provider 데이터와 같은 보류 사유의 반복은 갱신하지 않는다. 소실/역행 등 알려진 연속성 상실 사유는 영속한다. Provider I/O 없이 짧은 row-lock transaction에서 status/revision/identity/snapshot을 재확인한다. Session 수명과 준비 Event 기한은 [Architecture](architecture.md#boarding-초기-설정과-만료), 상태 의미는 [Domain](domain-model.md#boardingsession)을 따른다.
 
-#### Notification source 확장 (TASK-906 구현 예정)
+#### Notification source 확장 (TASK-906 1단계)
 
-기존 notification_events에 다음 분기를 추가하고 Delivery operational Schema와 Event×Device UNIQUE는 유지한다. 기존 V14를 수정하지 않으며 새 Migration으로 기존 row를 ALARM source로 보존한다.
+V16 `extend_notification_event_sources`는 기존 notification_events에 다음 분기를 추가하고 Delivery operational Schema와 Event×Device UNIQUE를 유지한다. source_type의 일시 DEFAULT 'ALARM'으로 기존 row를 backfill한 뒤 DEFAULT를 제거해 이후 writer의 명시적 source 입력을 요구한다. 기존 Event ID·identity·근거·시각과 Delivery의 PENDING/ACCEPTED/FAILED/EXPIRED·attempt/result를 삭제하거나 초기화하지 않는다.
 
-| Field | 후속 계약 |
+| Field | 구현 계약 |
 | --- | --- |
 | `source_type` | VARCHAR(24) ascii_bin NOT NULL. ALARM / BOARDING_SESSION |
 | 기존 `alarm_id`, `activation_generation`, `tracking_cycle_id`, `event_type` | 세션 분기를 위해 physical NULL 허용으로 변경하되 ALARM branch CHECK에서 기존 네 값 모두 필수·기존 값 범위 강제 |
@@ -423,15 +425,17 @@ fingerprint는 provider/Route·typed request context·순서화한 occurrence ID
 | `boarding_event_type` | VARCHAR(20) ascii_bin NULL. BOARDING_SESSION이면 PREPARE_ALIGHT 필수 |
 | `expires_at` | DATETIME(6) NULL. BOARDING_SESSION이면 observedAt보다 뒤인 불변 기한 필수. ALARM은 기존 Delivery 기한 정책 유지 |
 
-Source CHECK는 ALARM일 때 boarding 세 필드가 모두 NULL이고 기존 네 값은 유효, BOARDING_SESSION일 때 기존 네 값은 모두 NULL이고 boarding 세 필드는 모두 유효하도록 IS NULL/IS NOT NULL을 명시한다. 기존 enum/UUID/generation CHECK도 이 분기에 맞추되 Alarm 값 집합을 넓히지 않는다. 가짜 Alarm ID·generation·cycle을 만들지 않는다.
+`ck_notification_events_source`는 두 source만 허용하고, `ck_notification_events_source_identity`는 ALARM일 때 boarding 세 필드가 모두 NULL이고 기존 네 값은 필수, BOARDING_SESSION일 때 기존 네 값은 모두 NULL이고 boarding 세 필드는 모두 유효하도록 IS NULL/IS NOT NULL을 명시한다. 기존 enum/UUID/generation CHECK는 원문 그대로 유지해 ALARM의 네 type·canonical UUID·0 이상 generation 범위를 넓히지 않는다. 가짜 Alarm ID·generation·cycle을 만들지 않는다.
 
 기존 `UNIQUE(alarm_id, activation_generation, tracking_cycle_id, event_type)`는 유지한다. nullable column으로 바뀌어도 ALARM branch는 전부 NOT NULL이므로 기존 atomic identity가 보존된다. 세션에는 `UNIQUE(boarding_session_id, boarding_event_type)`를 추가하며 해당 branch의 두 값은 CHECK로 필수다. revision을 dedup key에 넣지 않는다. Event source/owner/evidence/시각/세션 expiresAt은 생성 후 불변이다.
 
-Session ID는 Alarm 원본 ID처럼 불변 source reference로 보존하며 live resource cascade FK나 임의 hard-delete API를 추가하지 않는다. 세션 Event의 expiresAt은 recipient가 0개여도 Event 기한을 보존하기 위한 최소 필드다. 최초 각 Delivery는 같은 기한을 복사하며 raw FID는 여전히 저장하지 않는다. Session 부재는 전송 허용 근거가 아니고 fail closed한다.
+Session ID는 Alarm 원본 ID처럼 불변 source reference로 보존하며 live resource cascade FK나 임의 hard-delete API를 추가하지 않는다. 세션 Event의 expiresAt은 recipient가 0개여도 Event 기한을 보존하기 위한 최소 필드다. 최초 각 Delivery는 같은 기한을 복사하며 Entity 생성자가 UTC microsecond 기한 불일치를 거부한다. 이 cross-row invariant는 CHECK로 구현하지 않는다. raw FID는 여전히 저장하지 않는다. Session 부재는 전송 허용 근거가 아니고 fail closed한다.
 
-최초 PREPARE_ALIGHT 저장 전 만료는 Event/Delivery를 INSERT하지 않는 application invariant다. 이미 존재하는 Event/Delivery는 만료·실패·재확인으로 삭제/재생성하지 않는다. 기존 ALARM의 만료된 Event+EXPIRED Delivery 생성은 유지한다. Task-906은 branch CHECK/UNIQUE·migration backfill·rollback·no-recipient·expired-candidate 재판단을 검증한다.
+최초 PREPARE_ALIGHT 저장 전 만료는 Event/Delivery를 INSERT하지 않는 application invariant로 2단계에서 연결한다. 1단계의 Entity factory는 영속성 입력만 검증하며 current Session/lifecycle/recipient 결정이나 최초 INSERT 직전 기한 검증을 대신하지 않는다. 이미 존재하는 Event/Delivery는 만료·실패·재확인으로 삭제/재생성하지 않는다. 기존 ALARM의 만료된 Event+EXPIRED Delivery 생성은 유지한다. 1단계는 branch CHECK/UNIQUE·V14/V15 데이터 보존·no-recipient 저장을 검증하며 atomic rollback·expired-candidate 재판단은 2단계에 남는다.
 
 #### 세션 Worker 조회 계약
+
+현재 1단계는 `findDuePendingIds`와 `findExpiredPendingIds` 모두 ALARM만 LIMIT 이전에 조회한다. Session Event/Delivery를 수동 저장해도 기존 Worker가 attempt를 소비하거나 전송하지 않는다. 아래 모든 source 만료 정리와 ready Session 조회는 3단계의 후속 계약이며 아직 구현하지 않았다.
 
 기존 due index/Device FK/Delivery UNIQUE를 재사용하고 새 claim/lease/status/attempt table을 추가하지 않는다. 단일 Worker의 각 cycle은 독립 bounded 조회로 (1) 모든 source의 expired PENDING 정리, (2) ALARM due, (3) ready BOARDING_SESSION due를 처리한다. 각 조회는 기존 batch-size 상한을 적용해 세션 대기가 Alarm 예산을 점유하지 않는다.
 

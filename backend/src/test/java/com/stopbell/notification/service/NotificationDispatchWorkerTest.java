@@ -21,6 +21,7 @@ import com.stopbell.notification.entity.NotificationProviderResult;
 import com.stopbell.notification.entity.Device;
 import com.stopbell.notification.entity.NotificationDelivery;
 import com.stopbell.notification.entity.NotificationEvent;
+import com.stopbell.notification.entity.NotificationSourceType;
 import com.stopbell.notification.repository.DeviceRepository;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import com.stopbell.transit.domain.TransitEventType;
@@ -194,6 +195,7 @@ class NotificationDispatchWorkerTest {
         when(device.isEnabled()).thenReturn(true);
         when(delivery.getDevice()).thenReturn(device);
         when(delivery.getNotificationEvent()).thenReturn(event);
+        when(event.getSourceType()).thenReturn(NotificationSourceType.ALARM);
         when(event.getUser()).thenReturn(owner);
         when(devices.findByIdForUpdate(2L)).thenReturn(Optional.of(device));
         NotificationRecipientPreflight preflight = new NotificationRecipientPreflight(devices);

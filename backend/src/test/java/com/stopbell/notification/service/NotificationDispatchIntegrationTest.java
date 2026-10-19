@@ -18,8 +18,10 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.service.AlarmService;
+import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.notification.client.FcmProviderClient;
 import com.stopbell.notification.client.NotificationSendResult;
+import com.stopbell.notification.client.NotificationSendRequest;
 import com.stopbell.notification.entity.*;
 import com.stopbell.notification.repository.DeviceRepository;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
@@ -82,6 +84,61 @@ class NotificationDispatchIntegrationTest {
         worker = worker(attempts, 50);
         when(provider.send(any())).thenReturn(new NotificationSendResult(
                 NotificationProviderResult.ACCEPTED, null, null, CLOCK.instant(), 1, true));
+    }
+
+    @Test
+    @DisplayName("Session backlog는 LIMIT 전에 제외되어 Alarm batch와 기존 FCM payload를 보존한다")
+    void exclude_session_backlog_before_alarm_limit() {
+        List<Long> sessionIds = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            sessionIds.add(sessionFixture());
+        }
+        // Even expired Session rows cannot occupy the Alarm configuration-blocked sweep budget.
+        jdbc.update("update notification_deliveries set next_attempt_at=?, expires_at=? where id=?",
+                NOW.minusSeconds(1), NOW.minusSeconds(1), sessionIds.getFirst());
+        Fixture alarm = fixture();
+        var before = jdbc.queryForList("""
+                select delivery.* from notification_deliveries delivery join notification_events event
+                    on event.id=delivery.notification_event_id where event.source_type='BOARDING_SESSION' order by delivery.id
+                """);
+        assertThat(deliveries.findDuePendingIds(NOW, PageRequest.of(0, 1))).containsExactly(alarm.deliveryId());
+        assertThat(deliveries.findExpiredPendingIds(NOW, PageRequest.of(0, 1))).isEmpty();
+        jdbc.update("update notification_deliveries set next_attempt_at=?, expires_at=? where id=?", NOW, NOW, alarm.deliveryId());
+        assertThat(deliveries.findExpiredPendingIds(NOW, PageRequest.of(0, 1))).containsExactly(alarm.deliveryId());
+        jdbc.update("update notification_deliveries set expires_at=? where id=?", NOW.plusSeconds(60), alarm.deliveryId());
+        worker(attempts, 1).dispatchPending();
+        assertThat(handler.eligibilityIds).containsExactly(alarm.deliveryId());
+        var sent = org.mockito.ArgumentCaptor.forClass(NotificationSendRequest.class);
+        verify(provider).send(sent.capture());
+        assertThat(sent.getValue().alarmId()).isEqualTo(alarm.alarmId());
+        assertThat(sent.getValue().eventType()).isEqualTo(TransitEventType.ARRIVED);
+        assertThat(sent.getValue().notificationEventId()).isEqualTo(alarm.eventId());
+        assertThat(sent.getValue().expiresAt()).isEqualTo(NOW.plusSeconds(60).toInstant(ZoneOffset.UTC));
+        assertThat(jdbc.queryForList("""
+                select delivery.* from notification_deliveries delivery join notification_events event
+                    on event.id=delivery.notification_event_id where event.source_type='BOARDING_SESSION' order by delivery.id
+                """)).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("Session Delivery ID를 직접 전달해도 attempt와 recipient 및 Provider 결과를 소비하지 않는다")
+    void block_direct_session_attempt_before_recipient_and_handler() {
+        long id = sessionFixture();
+        var before = jdbc.queryForMap("select * from notification_deliveries where id=?", id);
+        assertThat(attempts.beginAttempt(id)).isEmpty();
+        worker.dispatchPending();
+        assertThat(handler.eligibilityIds).isEmpty();
+        assertThat(handler.completed).isEmpty();
+        assertThat(handler.rejections).isEmpty();
+        verifyNoInteractions(provider);
+        assertThat(jdbc.queryForMap("select * from notification_deliveries where id=?", id)).isEqualTo(before);
+        tx().executeWithoutResult(status -> {
+            DeviceRepository unusedDevices = mock(DeviceRepository.class);
+            NotificationDelivery delivery = deliveries.findByIdForUpdate(id).orElseThrow();
+            assertThatThrownBy(() -> new NotificationRecipientPreflight(unusedDevices).check(delivery))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("ALARM only");
+            verifyNoInteractions(unusedDevices);
+        });
     }
 
     @Test
@@ -300,6 +357,25 @@ class NotificationDispatchIntegrationTest {
             entityManager.persist(delivery);
             entityManager.flush();
             return new Fixture(user.getId(), alarm.getId(), event.getId(), device.getId(), delivery.getId());
+        });
+    }
+
+    private long sessionFixture() {
+        return tx().execute(status -> {
+            User user = new User(AuthProvider.GOOGLE, UUID.randomUUID().toString());
+            entityManager.persist(user);
+            Device device = device(user);
+            entityManager.persist(device);
+            var checkpoint = new BoardingCheckpoint("stop", 20, 1, BoardingCheckpoint.Evidence.ID_ORDER,
+                    null, NOW.minusSeconds(2), null);
+            NotificationEvent event = NotificationEvent.forBoardingSession(user.getId(), user,
+                    BoardingNotificationEventType.PREPARE_ALIGHT, checkpoint, NOW.minusSeconds(2),
+                    NOW.minusSeconds(2), NOW.plusSeconds(28));
+            entityManager.persist(event);
+            NotificationDelivery delivery = new NotificationDelivery(event, device, 0, event.getExpiresAt(), event.getCreatedAt());
+            entityManager.persist(delivery);
+            entityManager.flush();
+            return delivery.getId();
         });
     }
 
