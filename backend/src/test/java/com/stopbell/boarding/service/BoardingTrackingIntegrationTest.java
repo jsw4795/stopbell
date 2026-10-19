@@ -30,6 +30,12 @@ import com.stopbell.transit.service.VehiclePollingCycle;
 import com.stopbell.transit.mapper.SeoulBusTransitObservationMapper;
 import com.stopbell.transit.mapper.TagoTransitObservationMapper;
 import com.stopbell.user.entity.*;
+import com.stopbell.notification.entity.*;
+import com.stopbell.notification.repository.*;
+import com.stopbell.transit.service.BoardingRouteSnapshot;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.junit.jupiter.params.provider.*;
 import com.stopbell.user.repository.UserRepository;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -52,6 +58,13 @@ import org.testcontainers.mysql.MySQLContainer;
 class BoardingTrackingIntegrationTest {
     @Container @ServiceConnection
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    @Autowired private jakarta.persistence.EntityManager entityManager;
+    @Autowired private BoardingNotificationService notifications;
+    @MockitoSpyBean private NotificationEventRepository events;
+    @MockitoSpyBean private NotificationDeliveryRepository deliveries;
+    @Autowired private DeviceRepository devices;
+    @Autowired private com.stopbell.alarm.repository.AlarmRepository alarms;
+    @MockitoBean private BoardingSessionStartValidator validator;
     @Autowired private BoardingTrackingStore store;
     @Autowired private BoardingSessionPollingService polling;
     @Autowired private BoardingTrackingRuntime runtime;
@@ -78,6 +91,10 @@ class BoardingTrackingIntegrationTest {
     @BeforeEach
     void set_up() {
         runtime.admittedIds().forEach(runtime::forget);
+        deliveries.deleteAll();
+        events.deleteAll();
+        alarms.deleteAll();
+        devices.deleteAll();
         sessions.deleteAll();
         occurrences.deleteAll();
         routes.deleteAll();
@@ -109,7 +126,8 @@ class BoardingTrackingIntegrationTest {
         var snapshot = new BoardingTraversalSnapshot(1, TransitProvider.SEOUL_BUS, "route-id", null, traversal,
                 3, BoardingTraversalSnapshot.AlightAvailability.ALLOWED, "controlled-test-evidence");
         var checkpoint = new BoardingCheckpoint("s0", 10, 0, BoardingCheckpoint.Evidence.ID_ORDER, null, UTC_NOW, UTC_NOW.minusSeconds(1));
-        var saved = sessions.saveAndFlush(new BoardingSession(user, UUID.randomUUID().toString(), "a".repeat(64),
+        var request = new com.stopbell.boarding.dto.CreateBoardingSessionRequest(UUID.randomUUID().toString(), "ref", NUMBER);
+        var saved = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(), request.fingerprint(),
                 "vehicle-id", NUMBER, "7000", "목적지", snapshot, checkpoint, UTC_NOW, UTC_NOW.plusHours(4)));
         runtime.admitCreated(saved.getId());
         return saved;
@@ -195,7 +213,7 @@ class BoardingTrackingIntegrationTest {
         assertThat(new BoardingTrackingRuntime().response(loaded, utc()).evaluationStatus()).isEqualTo(EvaluationStatus.RECOVERY_PENDING);
         time.set(NOW.plusSeconds(81));
         assertThat(api.find(session.getUser().getId(), session.getId()).remainingOccurrenceGap()).isNull();
-        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(2);
     }
 
     @Test
@@ -228,6 +246,10 @@ class BoardingTrackingIntegrationTest {
     @Test
     @DisplayName("등록 세션이 없으면 외부 Provider 호출 없이 반환한다")
     void no_session_no_io() {
+        deliveries.deleteAll();
+        events.deleteAll();
+        alarms.deleteAll();
+        devices.deleteAll();
         sessions.deleteAll();
         assertThat(polling.poll(cycle())).isEmpty();
         verifyNoInteractions(seoul, detail, tago);
@@ -385,7 +407,7 @@ class BoardingTrackingIntegrationTest {
             }
             public void rollback(TransactionStatus status) { manager.rollback(status); }
         };
-        var tested = new BoardingTrackingStore(sessions, metadata, runtime, failing, clock);
+        var tested = new BoardingTrackingStore(sessions, metadata, runtime, failing, clock, notifications);
         assertThatThrownBy(() -> tested.apply(expected, decision(expected, 1))).isInstanceOf(TransactionSystemException.class);
         var current = sessions.findById(session.getId()).orElseThrow();
         assertThat(current.getRevision()).isEqualTo(committed ? 1 : 0);
@@ -423,7 +445,7 @@ class BoardingTrackingIntegrationTest {
             }
             public void rollback(TransactionStatus status) { manager.rollback(status); }
         };
-        var tested = new BoardingTrackingStore(sessions, metadata, runtime, delayed, clock);
+        var tested = new BoardingTrackingStore(sessions, metadata, runtime, delayed, clock, notifications);
         var result = tested.apply(expected, decision(expected, 1));
         assertThat(result.accepted()).isTrue();
         assertThat(result.decision().outcome()).isEqualTo(Outcome.EXPIRED_CANDIDATE);
@@ -521,7 +543,7 @@ class BoardingTrackingIntegrationTest {
             }
             public void rollback(TransactionStatus status) { manager.rollback(status); }
         };
-        var tested = new BoardingTrackingStore(sessions, metadata, runtime, uncertain, clock);
+        var tested = new BoardingTrackingStore(sessions, metadata, runtime, uncertain, clock, notifications);
         var result = tested.apply(expected, decision(expected, 1));
         assertThat(result.accepted()).isEqualTo(persisted);
         assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus())
@@ -543,7 +565,7 @@ class BoardingTrackingIntegrationTest {
             }
             public void rollback(TransactionStatus status) { manager.rollback(status); }
         };
-        var result = new BoardingTrackingStore(sessions, metadata, runtime, delayed, clock).apply(expected, decision(expected, 1));
+        var result = new BoardingTrackingStore(sessions, metadata, runtime, delayed, clock, notifications).apply(expected, decision(expected, 1));
         assertThat(result.accepted()).isFalse();
         assertThat(result.decision()).isNull();
         var current = sessions.findById(session.getId()).orElseThrow();
@@ -649,11 +671,659 @@ class BoardingTrackingIntegrationTest {
             }
             public void rollback(TransactionStatus status) { manager.rollback(status); }
         };
-        var result = new BoardingTrackingStore(sessions, metadata, runtime, delayed, clock).apply(expected, decision(expected, 1));
+        var result = new BoardingTrackingStore(sessions, metadata, runtime, delayed, clock, notifications).apply(expected, decision(expected, 1));
         assertThat(result.accepted()).isFalse();
         assertThat(result.decision()).isNull();
         assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.IDENTITY_CONFLICT);
         assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.HELD);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    @DisplayName("새 gap 2 또는 1 관측은 Session checkpoint와 소유자·실제 시각을 보존한 Event·Delivery를 원자 저장한다")
+    void persist_prepare_with_recipients(int index) {
+        var first = device(session.getUser());
+        var second = device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        var decision = decision(expected, index);
+        var result = store.apply(expected, decision);
+        assertThat(result.accepted()).isTrue();
+        var event = onlyEvent();
+        assertThat(event.getBoardingSessionId()).isEqualTo(session.getId());
+        assertThat(event.getUser().getId()).isEqualTo(session.getUser().getId());
+        assertThat(event.getSourceType()).isEqualTo(NotificationSourceType.BOARDING_SESSION);
+        assertThat(event.getBoardingEventType()).isEqualTo(BoardingNotificationEventType.PREPARE_ALIGHT);
+        assertThat(event.getAlarmId()).isNull();
+        assertThat(event.getActivationGeneration()).isNull();
+        assertThat(event.getTrackingCycleId()).isNull();
+        assertThat(event.getEventType()).isNull();
+        assertThat(event.getObservedAt()).isEqualTo(decision.checkpoint().getObservedAt());
+        assertThat(event.getEventDetectedAt()).isEqualTo(decision.eventDetectedAt());
+        assertThat(event.getCreatedAt()).isEqualTo(utc());
+        assertThat(event.getExpiresAt()).isEqualTo(decision.observedAt().plusSeconds(30));
+        assertThat(event.getCurrentStopExternalId()).isEqualTo(decision.checkpoint().getStopExternalId());
+        assertThat(event.getCurrentStopOrder()).isEqualTo(decision.checkpoint().getStopOrder());
+        assertThat(event.getProviderDataTime()).isEqualTo(decision.checkpoint().getProviderDataTime());
+        assertThat(event.getLatitude()).isNull();
+        assertThat(event.getLongitude()).isNull();
+        assertThat(event.getObservedAt().getNano() % 1000).isZero();
+        assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(event.getId()))
+                .extracting(value -> value.getDevice().getId()).containsExactly(first.getId(), second.getId());
+        assertThat(deliveries.findAll()).allSatisfy(value -> {
+            assertThat(value.getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+            assertThat(value.getAttemptCount()).isZero();
+            assertThat(value.getExpiresAt()).isEqualTo(event.getExpiresAt());
+        });
+        assertThat(sessions.findById(session.getId()).orElseThrow().getCheckpoint()).isEqualTo(decision.checkpoint());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 3})
+    @DisplayName("Event 시점 recipient 수는 고정되며 새 Device·다음 revision·재시작·반복 후보가 fan-out을 늘리지 않는다")
+    void fixed_recipients_and_deduplication(int count) {
+        for (int i = 0; i < count; i++) { device(session.getUser()); }
+        var expected = store.findOpen().getFirst();
+        var candidate = decision(expected, 1);
+        store.apply(expected, candidate);
+        var original = onlyEvent();
+        var originalIds = deliveries.findAll().stream().map(NotificationDelivery::getId).toList();
+        device(session.getUser());
+        assertThat(store.apply(expected, candidate).accepted()).isFalse();
+        runtime.forget(session.getId());
+        var latest = store.findOpen().getFirst();
+        time.set(NOW.plusSeconds(40));
+        var next = evaluator.evaluate(latest, BoardingProgressEvaluatorTest.observation(latest, 2,
+                Meaning.VERIFIED_REFERENCE, 40), utc());
+        assertThat(store.apply(latest, next).accepted()).isTrue();
+        assertThat(onlyEvent()).usingRecursiveComparison().isEqualTo(original);
+        assertThat(deliveries.findAll()).extracting(NotificationDelivery::getId).containsExactlyElementsOf(originalIds);
+        assertThat(deliveries.count()).isEqualTo(count);
+    }
+
+    @Test
+    @DisplayName("다른 owner·비활성·target 없는 Device는 제외하고 현재 ownership generation만 저장한다")
+    void recipient_eligibility_and_generation() {
+        var other = users.saveAndFlush(new User(AuthProvider.GOOGLE, UUID.randomUUID().toString()));
+        device(other);
+        var disabled = device(session.getUser());
+        disabled.disable(1);
+        devices.saveAndFlush(disabled);
+        var missing = device(session.getUser());
+        jdbc.update("update devices set current_push_target_id=null, enabled=false where id=?", missing.getId());
+        var transferred = device(other);
+        transferred.transferOwnership(session.getUser(), "returned-target", 1, utc());
+        devices.saveAndFlush(transferred);
+        store.apply(store.findOpen().getFirst(), decision(store.findOpen().getFirst(), 1));
+        assertThat(deliveries.findAll()).singleElement().satisfies(value -> {
+            assertThat(value.getDevice().getId()).isEqualTo(transferred.getId());
+            assertThat(value.getRecipientOwnershipGeneration()).isOne();
+        });
+        transferred.transferOwnership(other, "moved-target", 2, utc());
+        devices.saveAndFlush(transferred);
+        assertThat(onlyEvent().getUser().getId()).isEqualTo(session.getUser().getId());
+        assertThat(deliveries.findAll().getFirst().getRecipientOwnershipGeneration()).isOne();
+    }
+
+    @ParameterizedTest
+    @ValueSource(longs = {29999999, 30000000, 30000001})
+    @DisplayName("최초 INSERT 직전 TTL의 1 microsecond 이전만 Event를 저장하고 경계부터 기회를 소비하지 않는다")
+    void insert_ttl_boundary(long micros) {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        var candidate = decision(expected, 1);
+        time.set(NOW.plusSeconds(20).plusNanos(micros * 1000));
+        var result = store.apply(expected, candidate);
+        assertThat(result.accepted()).isTrue();
+        assertThat(events.count()).isEqualTo(micros < 30000000 ? 1 : 0);
+        assertThat(deliveries.count()).isEqualTo(events.count());
+        assertThat(store.findOpen().getFirst().checkpoint()).isEqualTo(candidate.checkpoint());
+        if (micros >= 30000000) {
+            time.set(NOW.plusSeconds(60));
+            var latest = store.findOpen().getFirst();
+            var fresh = evaluator.evaluate(latest, BoardingProgressEvaluatorTest.observation(latest, 2,
+                    Meaning.VERIFIED_REFERENCE, 60), utc());
+            store.apply(latest, fresh);
+            assertThat(onlyEvent().getObservedAt()).isEqualTo(UTC_NOW.plusSeconds(60));
+        }
+    }
+
+    @Test
+    @DisplayName("Session 수명은 준비 Event와 모든 Delivery의 기한 상한이며 조회 만료 시 함께 EXPIRED로 종료한다")
+    void session_lifetime_caps_event() {
+        jdbc.update("update boarding_sessions set expires_at=? where id=?", UTC_NOW.plusSeconds(35), session.getId());
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        assertThat(onlyEvent().getExpiresAt()).isEqualTo(UTC_NOW.plusSeconds(35));
+        time.set(NOW.plusSeconds(35));
+        assertThat(api.find(session.getUser().getId(), session.getId()).status()).isEqualTo(BoardingSessionStatus.EXPIRED);
+        assertThat(deliveries.findAll()).singleElement().satisfies(value -> {
+            assertThat(value.getExpiresAt()).isEqualTo(UTC_NOW.plusSeconds(35));
+            assertThat(value.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+            assertThat(value.getLastFailureCode()).isEqualTo("FRESHNESS_EXPIRED");
+        });
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = BoardingStateReason.class, names = {"VEHICLE_MISSING", "IDENTITY_CONFLICT",
+            "PROGRESS_REGRESSION", "TRAVERSAL_AMBIGUOUS", "CONTINUITY_GAP_EXCEEDED",
+            "TEMPORARY_PROVIDER_FAILURE", "STALE_PROGRESS", "METADATA_CHANGED"})
+    @DisplayName("연속성 상실은 PENDING을 종료하고 자동 재검증 가능한 일시 보류는 Event와 PENDING을 유지한다")
+    void suspension_delivery_policy(BoardingStateReason reason) {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        var event = onlyEvent();
+        var latest = store.findOpen().getFirst();
+        store.apply(latest, BoardingTrackingDecision.held(reason));
+        assertThat(deliveries.findAll()).singleElement().satisfies(value -> {
+            assertThat(value.getStatus()).isEqualTo(reason.allowsAutomaticRevalidation()
+                    ? NotificationDeliveryStatus.PENDING : NotificationDeliveryStatus.FAILED);
+            assertThat(value.getLastFailureCode()).isEqualTo(reason.allowsAutomaticRevalidation() ? null : "DISPATCH_NOT_ALLOWED");
+            assertThat(value.getAttemptCount()).isZero();
+        });
+        assertThat(onlyEvent().getId()).isEqualTo(event.getId());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3})
+    @DisplayName("취소·직접 도착·목적지 통과는 PENDING을 종료하며 기한이 지났다면 EXPIRED를 우선한다")
+    void lifecycle_ends_pending(int scenario) {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        time.set(NOW.plusSeconds(scenario == 3 ? 50 : 40));
+        var latest = store.findOpen().getFirst();
+        if (scenario == 0 || scenario == 3) {
+            api.cancel(session.getUser().getId(), session.getId(), latest.revision());
+        } else {
+            store.apply(latest, evaluator.evaluate(latest, BoardingProgressEvaluatorTest.observation(latest,
+                    scenario == 1 ? 3 : 4, scenario == 1 ? Meaning.DIRECT_ARRIVAL : Meaning.VERIFIED_REFERENCE, 40), utc()));
+        }
+        assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(
+                scenario == 0 || scenario == 3 ? BoardingSessionStatus.CANCELLED : BoardingSessionStatus.COMPLETED);
+        assertThat(deliveries.findAll()).singleElement().satisfies(value -> {
+            assertThat(value.getStatus()).isEqualTo(scenario == 3 ? NotificationDeliveryStatus.EXPIRED : NotificationDeliveryStatus.FAILED);
+            assertThat(value.getLastFailureCode()).isEqualTo(scenario == 3 ? "FRESHNESS_EXPIRED" : "DISPATCH_NOT_ALLOWED");
+        });
+        assertThat(events.count()).isOne();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3, 4, 5, 6})
+    @DisplayName("상세·current·요청조회·중복생성·취소·재확인·polling의 수명 만료는 Session과 PENDING을 함께 종료한다")
+    void expiration_in_every_entry_point(int path) {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        time.set(NOW.plusSeconds(14400));
+        switch (path) {
+            case 0 -> api.find(session.getUser().getId(), session.getId());
+            case 1 -> api.findCurrent(session.getUser().getId());
+            case 2 -> api.findRequest(session.getUser().getId(), session.getClientRequestId());
+            case 3 -> api.create(session.getUser().getId(),
+                    new com.stopbell.boarding.dto.CreateBoardingSessionRequest(session.getClientRequestId(), "ref", NUMBER));
+            case 4 -> api.cancel(session.getUser().getId(), session.getId(), 1);
+            case 5 -> assertThatThrownBy(() -> api.reconfirm(session.getUser().getId(), session.getId(),
+                    new com.stopbell.boarding.dto.ReconfirmBoardingSessionRequest(1, "ref", NUMBER)))
+                    .isInstanceOf(com.stopbell.common.error.ApiException.class);
+            case 6 -> store.expire(store.findOpen().getFirst());
+        }
+        assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.EXPIRED);
+        assertThat(deliveries.findAll()).singleElement().satisfies(value -> {
+            assertThat(value.getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+            assertThat(value.getLastFailureCode()).isEqualTo("FRESHNESS_EXPIRED");
+        });
+        var ended = sessions.findById(session.getId()).orElseThrow();
+        api.find(session.getUser().getId(), session.getId());
+        assertThat(sessions.findById(session.getId()).orElseThrow().getRevision()).isEqualTo(ended.getRevision());
+    }
+
+    @Test
+    @DisplayName("취소는 PENDING만 종료하고 terminal 상태와 기존 attempt·Provider 결과를 보존한다")
+    void preserve_terminal_and_attempt_details() {
+        for (int i = 0; i < 4; i++) { device(session.getUser()); }
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        new TransactionTemplate(manager).executeWithoutResult(status -> {
+            var values = deliveries.findAll();
+            for (var value : values) {
+                value.beginAttempt(7, utc(), utc().plusSeconds(10));
+            }
+            values.get(0).markAccepted(utc(), utc());
+            values.get(1).recordFailure(NotificationProviderResult.PERMANENT_REQUEST, "REJECTED");
+            values.get(1).markFailed("REJECTED", utc());
+            values.get(2).expire(UTC_NOW.plusSeconds(50));
+            values.get(3).recordFailure(NotificationProviderResult.RETRYABLE, "UNAVAILABLE");
+        });
+        var before = deliveries.findAll();
+        api.cancel(session.getUser().getId(), session.getId(), 1);
+        var after = deliveries.findAll();
+        for (int i = 0; i < 3; i++) {
+            assertThat(after.get(i)).usingRecursiveComparison().ignoringFields("notificationEvent", "device").isEqualTo(before.get(i));
+        }
+        var pending = after.get(3);
+        assertThat(pending.getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+        assertThat(pending.getAttemptCount()).isOne();
+        assertThat(pending.getLastProviderResult()).isEqualTo(NotificationProviderResult.RETRYABLE);
+        assertThat(pending.getLastAttemptRegistrationRevision()).isEqualTo(7);
+        assertThat(pending.getLastAttemptAt()).isEqualTo(utc());
+    }
+
+    @Test
+    @DisplayName("Session 준비 Event가 저장되어도 Worker LIMIT 전에 제외하고 직접 attempt 진입과 FCM은 차단한다")
+    void persisted_session_delivery_remains_unsendable() {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        var delivery = deliveries.findAll().getFirst();
+        assertThat(deliveries.findDuePendingIds(utc(), PageRequest.of(0, 1))).isEmpty();
+        var handler = mock(com.stopbell.notification.service.NotificationAttemptHandler.class);
+        var attempts = new com.stopbell.notification.service.NotificationDispatchAttemptService(deliveries,
+                new com.stopbell.notification.service.NotificationRecipientPreflight(devices), handler, manager, clock);
+        assertThat(attempts.beginAttempt(delivery.getId())).isEmpty();
+        verifyNoInteractions(handler);
+        assertThat(deliveries.findById(delivery.getId()).orElseThrow()).usingRecursiveComparison()
+                .ignoringFields("notificationEvent", "device").isEqualTo(delivery);
+        time.set(NOW.plusSeconds(50));
+        assertThat(deliveries.findExpiredPendingIds(utc(), PageRequest.of(0, 1))).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("Event 또는 두 번째 Delivery INSERT 실패는 실제 MySQL transaction의 checkpoint·Event·전체 fan-out을 rollback한다")
+    void atomic_rollback_on_insert_failure(boolean eventFailure) {
+        device(session.getUser());
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        if (eventFailure) {
+            doAnswer(invocation -> {
+                var event = (NotificationEvent) invocation.getArgument(0);
+                entityManager.persist(event);
+                entityManager.flush();
+                // An actual FK failure after the Event identity INSERT.
+                jdbc.update("update notification_events set user_id=-1 where id=?", event.getId());
+                return event;
+            }).when(events).saveAndFlush(any(NotificationEvent.class));
+        } else {
+            var first = new AtomicReference<NotificationDelivery>();
+            doAnswer(invocation -> {
+                var delivery = (NotificationDelivery) invocation.getArgument(0);
+                if (first.get() == null) {
+                    first.set(delivery);
+                    entityManager.persist(delivery);
+                    entityManager.flush();
+                    return delivery;
+                }
+                var duplicate = first.get();
+                // Force a real Event x Device UNIQUE violation on the second INSERT.
+                return deliveries.saveAndFlush(new NotificationDelivery(duplicate.getNotificationEvent(),
+                        duplicate.getDevice(), duplicate.getRecipientOwnershipGeneration(), duplicate.getExpiresAt(), utc()));
+            }).when(deliveries).save(any(NotificationDelivery.class));
+        }
+        assertThatThrownBy(() -> store.apply(expected, decision(expected, 1)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+        assertThat(sessions.findById(session.getId()).orElseThrow().getCheckpoint()).isEqualTo(expected.checkpoint());
+        assertThat(sessions.findById(session.getId()).orElseThrow().getRevision()).isEqualTo(expected.revision());
+        assertThat(runtime.isReady(expected, utc())).isFalse();
+    }
+
+    @Test
+    @DisplayName("알려진 Event UNIQUE 위반만 rollback 후 새 transaction에서 원래 identity를 확인하고 recipient를 다시 선정하지 않는다")
+    void unique_conflict_reconciliation() {
+        var expected = store.findOpen().getFirst();
+        var candidate = decision(expected, 1);
+        var original = new TransactionTemplate(manager).execute(status -> events.saveAndFlush(
+                NotificationEvent.forBoardingSession(session.getId(), session.getUser(),
+                        BoardingNotificationEventType.PREPARE_ALIGHT, candidate.checkpoint(), utc(), utc(), candidate.expiresAt())));
+        device(session.getUser());
+        // Model a writer racing a stale absence read. The ensuing UNIQUE is enforced by MySQL.
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        doAnswer(invocation -> reads.getAndIncrement() == 0 ? Optional.empty() : Optional.of(
+                entityManager.find(NotificationEvent.class, original.getId(), jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)))
+                .when(events).findByBoardingSessionIdAndBoardingEventType(session.getId(), BoardingNotificationEventType.PREPARE_ALIGHT);
+        assertThat(store.apply(expected, candidate).accepted()).isFalse();
+        assertThat(onlyEvent().getId()).isEqualTo(original.getId());
+        assertThat(deliveries.count()).isZero();
+        assertThat(reads.get()).isEqualTo(2);
+        assertThat(store.findOpen().getFirst()).isEqualTo(expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("commit 응답 유실은 새 transaction에서 정확한 checkpoint와 Event ID를 확인하고 rollback이면 어떤 row도 재생성하지 않는다")
+    void reconcile_event_after_commit_loss(boolean persisted) {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        var first = new java.util.concurrent.atomic.AtomicBoolean(true);
+        PlatformTransactionManager uncertain = new PlatformTransactionManager() {
+            public TransactionStatus getTransaction(TransactionDefinition definition) { return manager.getTransaction(definition); }
+            public void commit(TransactionStatus status) {
+                if (first.getAndSet(false)) {
+                    assertThat(runtime.isReady(expected, utc())).isFalse();
+                    if (persisted) { manager.commit(status); } else { manager.rollback(status); }
+                    throw new TransactionSystemException("controlled commit acknowledgement loss");
+                }
+                manager.commit(status);
+            }
+            public void rollback(TransactionStatus status) { manager.rollback(status); }
+        };
+        var tested = new BoardingTrackingStore(sessions, metadata, runtime, uncertain, clock, notifications);
+        assertThat(tested.apply(expected, decision(expected, 1)).accepted()).isEqualTo(persisted);
+        assertThat(events.count()).isEqualTo(persisted ? 1 : 0);
+        assertThat(deliveries.count()).isEqualTo(persisted ? 1 : 0);
+        if (persisted) {
+            var eventId = onlyEvent().getId();
+            device(session.getUser());
+            assertThat(tested.apply(expected, decision(expected, 1)).accepted()).isFalse();
+            assertThat(onlyEvent().getId()).isEqualTo(eventId);
+            assertThat(deliveries.count()).isOne();
+        } else {
+            var latest = store.findOpen().getFirst();
+            assertThat(runtime.isReady(latest, utc())).isFalse();
+            time.set(NOW.plusSeconds(40));
+            var fresh = evaluator.evaluate(latest, BoardingProgressEvaluatorTest.observation(latest, 2,
+                    Meaning.VERIFIED_REFERENCE, 40), utc());
+            store.apply(latest, fresh);
+            assertThat(events.count()).isOne();
+            assertThat(deliveries.count()).isOne();
+        }
+    }
+
+    @Test
+    @DisplayName("유효 INSERT 후 commit 지연으로 TTL이 지나도 Event를 보존하며 새 recipient를 만들지 않는다")
+    void preserve_insert_after_delayed_commit() {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        PlatformTransactionManager delayed = new PlatformTransactionManager() {
+            public TransactionStatus getTransaction(TransactionDefinition definition) { return manager.getTransaction(definition); }
+            public void commit(TransactionStatus status) {
+                time.set(NOW.plusSeconds(51));
+                manager.commit(status);
+            }
+            public void rollback(TransactionStatus status) { manager.rollback(status); }
+        };
+        var tested = new BoardingTrackingStore(sessions, metadata, runtime, delayed, clock, notifications);
+        tested.apply(expected, decision(expected, 1));
+        assertThat(onlyEvent().getExpiresAt()).isEqualTo(UTC_NOW.plusSeconds(50));
+        assertThat(deliveries.findAll().getFirst().getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("Session lock 대기 중 취소 또는 TTL 경과는 늦은 Event INSERT를 막고 유효 checkpoint 반영 여부를 구분한다")
+    void session_lock_wait_and_expiry(boolean cancel) throws Exception {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        var candidate = decision(expected, 1);
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var holder = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(status -> {
+                var current = sessions.findForUpdate(session.getId()).orElseThrow();
+                locked.countDown();
+                await(release);
+                if (cancel) { current.cancel(current.getRevision(), utc()); }
+            }));
+            assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+            var pending = pool.submit(() -> store.apply(expected, candidate));
+            // The lock is held in a separate actual MySQL connection.
+            assertThatThrownBy(() -> pending.get(200, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            if (!cancel) { time.set(NOW.plusSeconds(50)); }
+            release.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+            var result = pending.get(10, TimeUnit.SECONDS);
+            assertThat(result.accepted()).isEqualTo(!cancel);
+            assertThat(events.count()).isZero();
+            assertThat(deliveries.count()).isZero();
+            assertThat(sessions.findById(session.getId()).orElseThrow().getCheckpoint())
+                    .isEqualTo(cancel ? expected.checkpoint() : candidate.checkpoint());
+        } finally { release.countDown(); }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("Device lock을 기다리는 Event 결정은 현재 소유권·enabled를 읽고 lifecycle 취소는 결정 commit 뒤 PENDING을 함께 종료한다")
+    void device_registration_and_cancel_race(boolean transfer) throws Exception {
+        var recipient = device(session.getUser());
+        var other = users.saveAndFlush(new User(AuthProvider.GOOGLE, UUID.randomUUID().toString()));
+        var expected = store.findOpen().getFirst();
+        var candidate = decision(expected, 1);
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var eventInserted = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            NotificationEvent event = invocation.getArgument(0);
+            entityManager.persist(event);
+            entityManager.flush();
+            eventInserted.countDown();
+            return event;
+        }).when(events).saveAndFlush(any(NotificationEvent.class));
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var registration = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(status -> {
+                var current = devices.findByIdForUpdate(recipient.getId()).orElseThrow();
+                locked.countDown();
+                await(release);
+                if (transfer) { current.transferOwnership(other, "moved-target", 1, utc()); }
+                else { current.disable(1); }
+            }));
+            assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+            var pending = pool.submit(() -> store.apply(expected, candidate));
+            assertThat(eventInserted.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> pending.get(200, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            release.countDown();
+            boolean registrationRolledBack = false;
+            try {
+                registration.get(10, TimeUnit.SECONDS);
+            } catch (ExecutionException exception) {
+                assertThat(exception.getCause()).isInstanceOf(org.springframework.dao.CannotAcquireLockException.class);
+                registrationRolledBack = true;
+            }
+            boolean eventRolledBack = false;
+            try {
+                pending.get(10, TimeUnit.SECONDS);
+            } catch (ExecutionException exception) {
+                assertThat(exception.getCause()).isInstanceOf(org.springframework.dao.CannotAcquireLockException.class);
+                eventRolledBack = true;
+            }
+            assertThat(registrationRolledBack && eventRolledBack).isFalse();
+            if (eventRolledBack) {
+                assertThat(events.count()).isZero();
+                assertThat(deliveries.count()).isZero();
+                assertThat(store.findOpen().getFirst()).isEqualTo(expected);
+            } else if (registrationRolledBack) {
+                assertThat(events.count()).isOne();
+                assertThat(devices.findById(recipient.getId()).orElseThrow().getUser().getId())
+                        .isEqualTo(session.getUser().getId());
+                assertThat(deliveries.count()).isOne();
+            } else {
+                assertThat(events.count()).isOne();
+                assertThat(deliveries.count()).isZero();
+            }
+            var current = sessions.findById(session.getId()).orElseThrow();
+            api.cancel(session.getUser().getId(), session.getId(), current.getRevision());
+            assertThat(deliveries.findAll()).allSatisfy(value ->
+                    assertThat(value.getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED));
+            assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.CANCELLED);
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    @DisplayName("연속성 상실 후 동일 차량 재확인은 기존 Event·recipient·기한과 terminal Delivery를 유지한다")
+    void reconfirm_preserves_consumed_event() {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        var original = onlyEvent();
+        store.apply(store.findOpen().getFirst(), BoardingTrackingDecision.held(BoardingStateReason.VEHICLE_MISSING));
+        device(session.getUser());
+        time.set(NOW.plusSeconds(40));
+        var metadataSnapshot = new BoardingRouteSnapshot(route.getId(), TransitProvider.SEOUL_BUS, "route-id", null,
+                traversal.get(3).occurrenceId(), null, traversal.stream().map(item -> new BoardingRouteSnapshot.Occurrence(
+                        item.occurrenceId(), item.externalStopId(), item.order(), "정류장")).toList(), "7000");
+        var held = store.findOpen().getFirst();
+        var baseline = BoardingProgressEvaluatorTest.observation(held, 2, Meaning.VERIFIED_REFERENCE, 40).vehicle();
+        var checkpoint = new BoardingCheckpoint(baseline.stopId(), baseline.order(), 2, BoardingCheckpoint.Evidence.ID_ORDER,
+                null, UTC_NOW.plusSeconds(40), UTC_NOW.plusSeconds(39));
+        when(validator.validate(anyLong(), anyString(), anyString())).thenReturn(new VerifiedBoardingStart(metadataSnapshot,
+                expected.traversal(), checkpoint, NOW.plusSeconds(100), expected.vehicleId(), NUMBER, "7000", "목적지"));
+        api.reconfirm(session.getUser().getId(), session.getId(),
+                new com.stopbell.boarding.dto.ReconfirmBoardingSessionRequest(held.revision(), "new-ref", NUMBER));
+        time.set(NOW.plusSeconds(45));
+        var current = store.findOpen().getFirst();
+        store.apply(current, evaluator.evaluate(current, BoardingProgressEvaluatorTest.observation(current, 2,
+                Meaning.VERIFIED_REFERENCE, 45), utc()));
+        assertThat(onlyEvent()).usingRecursiveComparison().isEqualTo(original);
+        assertThat(deliveries.count()).isOne();
+        assertThat(deliveries.findAll().getFirst().getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("Event 결정이 Session lock을 먼저 얻으면 취소·수명 만료는 commit까지 기다린 뒤 생성된 PENDING을 종료한다")
+    void lifecycle_waits_for_event_commit(boolean expire) throws Exception {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        var candidate = decision(expected, 1);
+        var inserted = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            NotificationEvent event = invocation.getArgument(0);
+            entityManager.persist(event);
+            entityManager.flush();
+            inserted.countDown();
+            await(release);
+            return event;
+        }).when(events).saveAndFlush(any(NotificationEvent.class));
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var pending = pool.submit(() -> store.apply(expected, candidate));
+            assertThat(inserted.await(5, TimeUnit.SECONDS)).isTrue();
+            // Uncommitted Event, Session checkpoint and recipients are invisible on another connection.
+            assertThat(events.count()).isZero();
+            assertThat(sessions.findById(session.getId()).orElseThrow().getRevision()).isZero();
+            var terminal = pool.submit(() -> {
+                if (expire) { store.expire(expected); }
+                else { api.cancel(session.getUser().getId(), session.getId(), 1); }
+            });
+            assertThatThrownBy(() -> terminal.get(200, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+            if (expire) { time.set(NOW.plusSeconds(14400)); }
+            release.countDown();
+            pending.get(10, TimeUnit.SECONDS);
+            terminal.get(10, TimeUnit.SECONDS);
+            assertThat(events.count()).isOne();
+            assertThat(deliveries.findAll()).singleElement().satisfies(value -> assertThat(value.getStatus())
+                    .isEqualTo(expire ? NotificationDeliveryStatus.EXPIRED : NotificationDeliveryStatus.FAILED));
+            assertThat(sessions.findById(session.getId()).orElseThrow().getStatus())
+                    .isEqualTo(expire ? BoardingSessionStatus.EXPIRED : BoardingSessionStatus.CANCELLED);
+        } finally { release.countDown(); }
+    }
+
+    @Test
+    @DisplayName("lifecycle의 Delivery 종료 쓰기 실패는 취소 상태까지 rollback하고 기존 PENDING·Event를 유지한다")
+    void rollback_lifecycle_with_delivery_failure() {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        var before = store.findOpen().getFirst();
+        doAnswer(invocation -> {
+            var id = jdbc.queryForObject("select id from notification_deliveries limit 1", Long.class);
+            jdbc.update("update notification_deliveries set device_id=-1 where id=?", id);
+            return List.of();
+        }).when(deliveries).findPendingByBoardingEventIdForUpdate(anyLong());
+        assertThatThrownBy(() -> api.cancel(session.getUser().getId(), session.getId(), before.revision()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(store.findOpen().getFirst()).isEqualTo(before);
+        assertThat(events.count()).isOne();
+        assertThat(deliveries.findAll().getFirst().getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("order-only 준비 Event는 실제로 없는 Stop ID·제공시각·GPS를 합성하지 않는다")
+    void preserve_order_only_evidence() {
+        var expected = store.findOpen().getFirst();
+        var observation = BoardingProgressEvaluatorTest.observation(expected, 1, Meaning.VERIFIED_REFERENCE, 20);
+        var vehicle = observation.vehicle();
+        var orderOnly = new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), vehicle.number(),
+                null, vehicle.order(), 0, vehicle.observedAt(), vehicle.providerDataTime(), null, null);
+        var verified = new BoardingProgressObservation(observation.provider(), observation.routeId(), observation.cityCode(),
+                orderOnly, Meaning.VERIFIED_REFERENCE, true, null, false);
+        store.apply(expected, evaluator.evaluate(expected, verified, utc()));
+        assertThat(onlyEvent().getCurrentStopExternalId()).isNull();
+        assertThat(onlyEvent().getCurrentStopOrder()).isEqualTo(vehicle.order());
+        assertThat(onlyEvent().getCurrentStopName()).isNull();
+        assertThat(onlyEvent().getLatitude()).isNull();
+        assertThat(onlyEvent().getLongitude()).isNull();
+    }
+
+    @Test
+    @DisplayName("새 생성 요청의 기존 current 세션 만료도 이전 Session·Delivery를 함께 종료하고 새 Session과 Event를 혼동하지 않는다")
+    void new_creation_expires_previous_session() {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        var original = onlyEvent();
+        time.set(NOW.plusSeconds(14400));
+        var metadataSnapshot = new BoardingRouteSnapshot(route.getId(), TransitProvider.SEOUL_BUS, "route-id", null,
+                traversal.get(3).occurrenceId(), null, traversal.stream().map(item -> new BoardingRouteSnapshot.Occurrence(
+                        item.occurrenceId(), item.externalStopId(), item.order(), "정류장")).toList(), "7000");
+        var checkpoint = new BoardingCheckpoint("s2", traversal.get(2).order(), 2, BoardingCheckpoint.Evidence.ID_ORDER,
+                null, utc(), utc().minusSeconds(1));
+        when(validator.validate(anyLong(), anyString(), anyString())).thenReturn(new VerifiedBoardingStart(metadataSnapshot,
+                expected.traversal(), checkpoint, time.get().plusSeconds(60), expected.vehicleId(), NUMBER, "7000", "목적지"));
+        var created = api.create(session.getUser().getId(), new com.stopbell.boarding.dto.CreateBoardingSessionRequest(
+                UUID.randomUUID().toString(), "new-ref", NUMBER));
+        assertThat(created.created()).isTrue();
+        assertThat(created.response().id()).isNotEqualTo(session.getId());
+        assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.EXPIRED);
+        assertThat(deliveries.findAll().getFirst().getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
+        assertThat(onlyEvent().getId()).isEqualTo(original.getId());
+    }
+
+    @Test
+    @DisplayName("Session 취소는 같은 User의 Alarm Event·PENDING·TTL·attempt를 변경하지 않고 Alarm의 LIMIT 조회도 보존한다")
+    void session_lifecycle_preserves_alarm_delivery() {
+        var recipient = device(session.getUser());
+        var alarmDelivery = new TransactionTemplate(manager).execute(status -> {
+            var alarm = new Alarm(session.getUser(), new BusAlarmTarget(TransitProvider.SEOUL_BUS, "route-id", "s3", 90,
+                    "7000", "목적지", null, null, null, null, null));
+            alarm.activate();
+            entityManager.persist(alarm);
+            entityManager.flush();
+            var evidence = new com.stopbell.transit.domain.TransitEvent(com.stopbell.transit.domain.TransitEventType.ARRIVED,
+                    "vehicle-id", UUID.randomUUID(), time.get(), "s3", "목적지", 90, null, null, null, null);
+            var event = events.saveAndFlush(new NotificationEvent(alarm.getId(), session.getUser(), 1, evidence, utc(), utc()));
+            return deliveries.saveAndFlush(new NotificationDelivery(event, recipient, 0, utc().plusSeconds(60), utc()));
+        });
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        assertThat(deliveries.findDuePendingIds(utc(), PageRequest.of(0, 1))).containsExactly(alarmDelivery.getId());
+        api.cancel(session.getUser().getId(), session.getId(), 1);
+        assertThat(deliveries.findById(alarmDelivery.getId()).orElseThrow()).usingRecursiveComparison()
+                .ignoringFields("notificationEvent", "device").isEqualTo(alarmDelivery);
+        assertThat(events.findById(alarmDelivery.getNotificationEvent().getId()).orElseThrow().getSourceType())
+                .isEqualTo(NotificationSourceType.ALARM);
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) { throw new IllegalStateException("Controlled lock timeout"); }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private Device device(User owner) {
+        return devices.saveAndFlush(new Device(owner, UUID.randomUUID().toString(), "a".repeat(64),
+                DevicePlatform.IOS, "target-" + UUID.randomUUID(), 0, utc()));
+    }
+
+    private NotificationEvent onlyEvent() {
+        assertThat(events.findAll()).hasSize(1);
+        return events.findAll().getFirst();
     }
 
     private BoardingTrackingDecision decision(BoardingTrackingSnapshot expected, int index) {

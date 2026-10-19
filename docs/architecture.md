@@ -281,7 +281,7 @@ Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Eve
 
 ### 탑승 세션 실행과 Notification 연계 (TASK-903)
 
-이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. TASK-905 1단계는 Session Persistence·확정 검증/저장 경계·조회·취소를, 2단계는 특정 차량 polling·checkpoint/준비 후보·종료 판정을 구현했다. 3단계는 checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API를 구현했다. 실제 Provider 생성·재확인 지원 보류는 유지하며 Notification 연계는 TASK-906에 남는다. 아래 계약 전체가 실행 중이라는 뜻이 아니다. Domain·복구 판정은 [BoardingSession](domain-model.md#boardingsession), 필드·제약·조회는 [Database](database.md#phase-9-boarding-persistence-contract-task-903), HTTP는 [API](api.md#탑승-세션-api-task-903)가 소유한다.
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. TASK-905 1단계는 Session Persistence·확정 검증/저장 경계·조회·취소를, 2단계는 특정 차량 polling·checkpoint/준비 후보·종료 판정을 구현했다. 3단계는 checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API를 구현했다. TASK-906 2단계는 준비 Event·최초 recipient Delivery와 Session checkpoint/상태의 원자 저장 및 lifecycle PENDING 종료를 연결했다. 실제 Provider 생성·재확인 지원 보류와 Session FCM 차단은 유지하며 전송 연결은 TASK-906 3단계에 남는다. 아래 계약 전체가 실행 중이라는 뜻이 아니다. Domain·복구 판정은 [BoardingSession](domain-model.md#boardingsession), 필드·제약·조회는 [Database](database.md#phase-9-boarding-persistence-contract-task-903), HTTP는 [API](api.md#탑승-세션-api-task-903)가 소유한다.
 
 #### 확정과 평가 transaction
 
@@ -299,7 +299,7 @@ Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Eve
 
 보류·취소·만료·완료는 commit 확인 뒤 허용을 닫고 revision watermark를 남긴다. `committed(..., false)`는 이전 허용 revision을 유지하지 않으며 더 낮거나 이미 닫힌 같은 revision의 늦은 callback은 열지 못한다. freshness가 끝난 checkpoint도 닫으며 새 검증 revision이 필요하다. 목록 조회 정리는 조회 중 새로 생성된 세션을 제거하지 않는다. 미복구 세션의 만료도 외부 호출 없이 반영한다. 재확인이 필요한 알려진 연속성 상실은 DB 사유와 마지막 checkpoint를 보존한다. 자동 재검증 실패가 이어져 checkpoint 이후 공백 상한을 넘으면 CONTINUITY_GAP_EXCEEDED로 보류한다.
 
-세션은 Alarm의 다중 차량 선택·baseline·lifecycle을 재사용하지 않는다. snapshot/checkpoint는 전체 raw history나 event sourcing이 아니며 준비 후보는 Event 저장 전 여러 cycle에서 다시 계산될 수 있다. TASK-906의 UNIQUE와 atomic Notification 연결 전에는 durable 중복 억제나 FCM 성공을 주장하지 않는다.
+세션은 Alarm의 다중 차량 선택·baseline·lifecycle을 재사용하지 않는다. snapshot/checkpoint는 전체 raw history나 event sourcing이 아니며 준비 후보는 Event 저장 전 여러 cycle에서 다시 계산될 수 있다. TASK-906 2단계는 Session identity UNIQUE와 atomic Notification 저장으로 durable 중복을 억제하며 FCM 성공을 뜻하지 않는다.
 
 1단계의 `BoardingSessionStartValidator`는 ephemeral reference를 복원하고 기존 `BoardingCandidateService`의 최신 선택 차량 검증을 재사용한다. 검증된 입력만 `VerifiedBoardingStart`로 `BoardingSessionService`의 짧은 저장 transaction 경계에 전달한다. 현재 Provider 지원 차단은 [API](api.md#탑승-세션-api-task-903)를 따른다. 생성의 중복 확인은 reference 조회 전에 수행하고, 실패한 저장은 원래 요청/검증 입력으로 새 transaction에서 최대 한 번 재확인한다. 지원하지 않는 임의 제약 실패를 UNIQUE 재시도로 숨기지 않는다. 조회·취소는 Session lock 아래 수명을 확인하며, Provider I/O나 후속 Worker를 실행하지 않는다. 재확인은 먼저 owner·상태/revision을 읽고 같은 validator로 transaction 밖에서 최신 후보를 재검증한다. 저장 transaction은 원래 불변 차량/traversal과 최신 metadata·revision·기한을 확인해 같은 세션의 새 baseline만 저장한다. 불확실 구간의 연속성을 주장하거나 수명을 연장하지 않으며 상세 충돌/응답 유실 계약은 API 문서를 따른다.
 
@@ -319,7 +319,11 @@ Event 저장이 가능한 경우 eligible Device를 ID 순서 current lock으로
 
 #### Notification source와 전송 모델 확장
 
-TASK-906 1단계는 V16, 두 source의 Event Entity와 identity Repository, 공통 Delivery의 Session 기한 일치 검증까지 구현했다. `NotificationEvent.forBoardingSession`은 검증된 `BoardingCheckpoint`에서 Stop ID/order·observedAt·실제 providerDataTime만 복사하는 영속성 입력 경로다. 실제 `BoardingTrackingDecision` 연결·Event/recipient Delivery 원자 생성·lifecycle pending 종료는 2단계에 남는다. Provider 지원 제한은 유지한다.
+TASK-906 1단계는 V16, 두 source의 Event Entity와 identity Repository, 공통 Delivery의 Session 기한 일치 검증까지 구현했다. `NotificationEvent.forBoardingSession`은 검증된 `BoardingCheckpoint`에서 Stop ID/order·observedAt·실제 providerDataTime만 복사하는 영속성 입력 경로다. 2단계의 `boarding.service.BoardingNotificationService`는 `Propagation.MANDATORY`로 기존 Session transaction에 참여하며 `BoardingTrackingStore.apply()` 안에서만 검증된 새 checkpoint의 준비 결정을 저장한다. `BoardingTrackingDecision.eventDetectedAt`은 transaction 밖 평가 시각이며 lock 대기나 재확인으로 바꾸지 않는다. 원래 status/revision·차량·snapshot·현재 metadata·checkpoint 검증과 Session flush 뒤 Event identity를 current lock으로 확인하고, 기존 Event가 없고 최초 INSERT 직전 기한이 유효할 때만 Event를 INSERT한다. 이어 기존 `DeviceRepository.findEligibleByUserIdForUpdate`로 현재 eligible recipient를 ID 순서로 고정해 generation과 부모 기한을 복사한다. Device lock 대기로 기한이 지나도 이미 INSERT한 Event는 보존하며 그 뒤 생성하는 Delivery는 현재 시각에 따라 EXPIRED일 수 있다. 0 recipients log는 commit 뒤 안전한 outcome/type만 남긴다. flush/commit 실패는 Session/Event/모든 Delivery를 rollback한다.
+
+알려진 `uk_notification_events_boarding_identity`의 MySQL 1062만 전체 rollback 후 새 persistence context에서 Session과 원래 Event identity를 한 번 확인하며 checkpoint나 recipient를 재적용하지 않는다. 다른 UNIQUE/FK/CHECK는 전파한다. commit 응답 유실은 원래 반영 결과의 정확한 Session snapshot과 Event ID를 새 transaction에서 확인한 경우만 runtime에 공개한다. rollback·최신 상태 변경·재확인 실패에서는 gate를 닫고 새 Event나 recipient를 생성하지 않는다. Device 변경 경합 등 MySQL deadlock도 결정 전체 rollback 경계를 유지하고 즉시 Provider 재호출·blind replay 없이 다음 정상 cycle에서 새 snapshot/관측으로 판단한다.
+
+`BoardingSessionService`의 공통 expire 경계는 상세/current/clientRequestId 조회·기존 생성 요청/현재 세션 확인·취소·재확인을 모두 포함한다. 취소와 `BoardingTrackingStore`의 만료·완료·재확인이 필요한 연속성 상실도 같은 transaction에서 Session source PENDING만 종료한다. TEMPORARY_PROVIDER_FAILURE/STALE_PROGRESS 및 기존 자동 재검증 사유 METADATA_CHANGED는 PENDING을 유지하며 후속 전송 gate가 판단한다. terminal/attempt/result를 보존하고 실제 기한 만료를 명시 종료보다 우선한다. lifecycle은 Session → exact Session Event current lock → Event ID별 PENDING Delivery current lock 순서다. Event와 Delivery를 분리 조회해 API 인증이 먼저 연 REPEATABLE READ snapshot 때문에 새로 commit된 Event를 join에서 놓치지 않으며, 기존 Alarm lock/query는 변경하지 않는다. Provider 지원 제한은 유지한다.
 
 1단계의 임시 전송 경계는 `NotificationDeliveryRepository.findDuePendingIds`/`findExpiredPendingIds`의 ALARM predicate와 `NotificationDispatchAttemptService.beginAttempt`의 handler/recipient 이전 ALARM 검사다. Session backlog는 두 조회의 LIMIT을 점유하지 않고 직접 Session Delivery ID가 입력돼도 attempt·예약·결과를 변경하지 않는다. `NotificationRecipientPreflight`도 ALARM 이외 입력을 Device 조회 전에 거부해 nullable alarmId의 unboxing을 막는다. 별도 Worker는 추가하지 않는다. 3단계에서 이 query/attempt/preflight 경계를 아래 source-aware 조회·Session 선행 lock/gate·전송 모델로 확장해야 하며 단순 차단 해제만으로 전송을 활성화하면 안 된다. 모든 source 만료 sweep도 3단계에 남는다.
 

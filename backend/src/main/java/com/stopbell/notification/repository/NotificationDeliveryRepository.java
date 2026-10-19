@@ -28,6 +28,15 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
             """)
     List<NotificationDelivery> findPendingByAlarmIdForUpdate(Long alarmId);
 
+    /** Caller first locks the exact Session Event; keep this current read free of Event joins. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select delivery from NotificationDelivery delivery
+            where delivery.notificationEvent.id = :eventId and delivery.status = 'PENDING'
+            order by delivery.id
+            """)
+    List<NotificationDelivery> findPendingByBoardingEventIdForUpdate(Long eventId);
+
     /** TASK-906 step 1: exclude Session rows before LIMIT until source-aware dispatch is implemented. */
     @Query("""
             select delivery.id from NotificationDelivery delivery

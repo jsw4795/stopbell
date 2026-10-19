@@ -73,6 +73,7 @@ import tools.jackson.databind.json.JsonMapper;
 class BoardingSessionApiIntegrationTest {
     @Container @ServiceConnection
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    @Autowired private com.stopbell.boarding.service.BoardingNotificationService notifications;
     @Autowired private MockMvc mvc;
     @Autowired private JwtTokenService jwt;
     @Autowired private UserRepository users;
@@ -383,7 +384,7 @@ class BoardingSessionApiIntegrationTest {
                 }
                 public void rollback(TransactionStatus status) { manager.rollback(status); }
             };
-            var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, failing, clock, new com.stopbell.boarding.service.BoardingTrackingRuntime());
+            var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, failing, clock, new com.stopbell.boarding.service.BoardingTrackingRuntime(), notifications);
             var result = tested.create(owner.getId(), request(REQUEST_ID, "ref"));
             assertThat(sessions.count()).isEqualTo(1);
             assertThat(result.created()).isEqualTo(!committed);
@@ -566,7 +567,7 @@ class BoardingSessionApiIntegrationTest {
             }
             public void rollback(TransactionStatus status) { manager.rollback(status); }
         };
-        var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, uncertain, clock, runtime);
+        var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, uncertain, clock, runtime, notifications);
         var request = new ReconfirmBoardingSessionRequest(1, "ref", NUMBER);
         if (persisted) {
             assertThat(tested.reconfirm(owner.getId(), id, request).evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);

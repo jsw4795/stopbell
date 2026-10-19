@@ -13,6 +13,7 @@ import com.stopbell.boarding.entity.BoardingSessionStatus;
 import com.stopbell.boarding.entity.BoardingSession;
 import com.stopbell.boarding.entity.BoardingStateReason;
 import com.stopbell.boarding.repository.BoardingSessionRepository;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DataAccessException;
@@ -30,14 +31,16 @@ public class BoardingTrackingStore {
     private final BoardingTrackingRuntime runtime;
     private final TransactionTemplate transaction;
     private final Clock clock;
+    private final BoardingNotificationService notifications;
 
     public BoardingTrackingStore(BoardingSessionRepository sessions, BoardingTrackingMetadata metadata,
             BoardingTrackingRuntime runtime, PlatformTransactionManager manager,
-            @Qualifier("transitMetadataClock") Clock clock) {
+            @Qualifier("transitMetadataClock") Clock clock, BoardingNotificationService notifications) {
         this.sessions = sessions;
         this.metadata = metadata;
         this.runtime = runtime;
         this.clock = clock;
+        this.notifications = notifications;
         transaction = new TransactionTemplate(manager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -48,7 +51,7 @@ public class BoardingTrackingStore {
                 .map(BoardingTrackingSnapshot::from).toList());
     }
 
-    private record Commit(Applied result, BoardingTrackingSnapshot snapshot) { }
+    private record Commit(Applied result, BoardingTrackingSnapshot snapshot, Long eventId) { }
 
     public Applied apply(BoardingTrackingSnapshot expected, BoardingTrackingDecision decision) {
         var attempted = new AtomicReference<Commit>();
@@ -60,8 +63,23 @@ public class BoardingTrackingStore {
                 return result;
             });
         } catch (DataAccessException | TransactionException exception) {
-            if (exception instanceof DataIntegrityViolationException || attempted.get() == null
-                    || !attempted.get().result().accepted()) {
+            // Uncertain persistence must never leave an old readiness grant usable.
+            runtime.committed(expected.id(), expected.revision(), false);
+            if (exception instanceof DataIntegrityViolationException integrity) {
+                if (!isEventIdentityConflict(integrity)) {
+                    throw exception;
+                }
+                // Whole failed transaction is gone. Confirm only the exact logical identity;
+                // never replay checkpoint/Event/fan-out after a UNIQUE failure.
+                return transaction.execute(status -> {
+                    var current = sessions.findForUpdate(expected.id()).orElse(null);
+                    if (current == null || !notifications.exists(expected.id(), null)) {
+                        throw exception;
+                    }
+                    return rejected(current).result();
+                });
+            }
+            if (attempted.get() == null || !attempted.get().result().accepted()) {
                 throw exception;
             }
             // Commit acknowledgement may be lost. Read exact original result once in a fresh
@@ -70,10 +88,11 @@ public class BoardingTrackingStore {
                 var current = sessions.findForUpdate(expected.id()).orElse(null);
                 var original = attempted.get();
                 if (current != null && original.snapshot().matches(current)
+                        && (original.eventId() == null || notifications.exists(expected.id(), original.eventId()))
                         && (!current.getStatus().isOpen() || metadata.matches(original.snapshot()))) {
                     return original;
                 }
-                return current == null ? new Commit(new Applied(expected.id(), false, -1, null, null), null)
+                return current == null ? new Commit(new Applied(expected.id(), false, -1, null, null), null, null)
                         : rejected(current);
             });
         }
@@ -95,24 +114,25 @@ public class BoardingTrackingStore {
             var current = result.decision();
             result = new Applied(result.sessionId(), true, result.revision(), result.status(),
                     new BoardingTrackingDecision(Outcome.EXPIRED_CANDIDATE, current.checkpoint(), null,
-                            current.remainingOccurrenceGap(), current.observedAt(), current.expiresAt()));
+                            current.remainingOccurrenceGap(), current.observedAt(), current.expiresAt(), current.eventDetectedAt()));
         }
         return result;
     }
 
     private Commit rejected(BoardingSession session) {
         return new Commit(new Applied(session.getId(), false, session.getRevision(), session.getStatus(), null),
-                BoardingTrackingSnapshot.from(session));
+                BoardingTrackingSnapshot.from(session), null);
     }
 
     private Commit applyLocked(BoardingTrackingSnapshot expected, BoardingTrackingDecision decision) {
         var session = sessions.findForUpdate(expected.id()).orElse(null);
         if (session == null) {
-            return new Commit(new Applied(expected.id(), false, -1, null, null), null);
+            return new Commit(new Applied(expected.id(), false, -1, null, null), null, null);
         }
         LocalDateTime now = now();
         session.expire(now);
         if (!session.getStatus().isOpen() || !expected.matches(session)) {
+            notifications.terminatePending(session);
             return rejected(session);
         }
         // Current structure is checked again under the short apply transaction. Sync is not locked globally.
@@ -135,13 +155,17 @@ public class BoardingTrackingStore {
             }
         }
         sessions.flush();
+        Long eventId = notifications.prepare(session, expected, current);
+        notifications.terminatePending(session);
+        sessions.flush();
         return new Commit(new Applied(expected.id(), true, session.getRevision(), session.getStatus(), current),
-                BoardingTrackingSnapshot.from(session));
+                BoardingTrackingSnapshot.from(session), eventId);
     }
 
     public void expire(BoardingTrackingSnapshot expected) {
         var ended = transaction.execute(status -> sessions.findForUpdate(expected.id()).map(session -> {
             session.expire(now());
+            notifications.terminatePending(session);
             return BoardingTrackingSnapshot.from(session);
         }).orElse(null));
         if (ended != null && !ended.status().isOpen()) {
@@ -151,5 +175,16 @@ public class BoardingTrackingStore {
 
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).truncatedTo(ChronoUnit.MICROS);
+    }
+
+    private static boolean isEventIdentityConflict(DataIntegrityViolationException exception) {
+        String expected = "uk_notification_events_boarding_identity";
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation && violation.getSQLException().getErrorCode() == 1062) {
+                String name = violation.getConstraintName();
+                return expected.equals(name) || (name != null && name.endsWith("." + expected));
+            }
+        }
+        return false;
     }
 }

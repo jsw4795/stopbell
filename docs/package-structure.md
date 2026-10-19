@@ -134,7 +134,7 @@ Alarm은 `AlarmStatus`와 FOLLOW_UP runtime을 소유하고, Bus-specific 장기
 
 ### boarding
 
-독립 BoardingSession aggregate의 불변 snapshot·checkpoint·수명·revision과 생성·조회·취소·동일 차량 재확인 API를 소유한다. `service`의 확정 검증은 기존 `transit` 후보 reference·metadata·Provider 재검증을 재사용하고, 검증 입력과 저장 transaction을 분리한다. 기존 Alarm lifecycle과 Notification persistence는 변경하지 않는다. `domain`은 detached 추적 입력과 관측·판정 결과를, `service`는 polling·Provider 검증·순수 진행 판정·짧은 저장 transaction·프로세스 runtime readiness를 소유한다. 2단계는 기존 Scheduler의 cycle 한정 원본 응답 공유를 사용한다. 실제 지원 경계는 [API](api.md#탑승-세션-api-task-903), 현재 polling·복구와 후속 Notification 연결은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
+독립 BoardingSession aggregate의 불변 snapshot·checkpoint·수명·revision과 생성·조회·취소·동일 차량 재확인 API를 소유한다. `service`의 확정 검증은 기존 `transit` 후보 reference·metadata·Provider 재검증을 재사용하고, 검증 입력과 저장 transaction을 분리한다. 기존 Alarm lifecycle은 유지하며 TASK-906 2단계는 기존 Notification persistence를 세션 결정에 재사용한다. `domain`은 detached 추적 입력과 관측·판정 결과를, `service`는 polling·Provider 검증·순수 진행 판정·짧은 저장 transaction·프로세스 runtime readiness를 소유한다. 2단계는 기존 Scheduler의 cycle 한정 원본 응답 공유를 사용한다. 실제 지원 경계는 [API](api.md#탑승-세션-api-task-903), 현재 polling·복구와 후속 Notification 연결은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
 
 ### transit
 
@@ -168,7 +168,7 @@ Device registration lifecycle, durable logical Notification, per-Device delivery
 
 TASK-706의 `NotificationDispatchConfiguration`/`NotificationDispatchProperties`, `NotificationDispatchWorker`, `NotificationDispatchAttemptService`, `NotificationRecipientPreflight`, `NotificationDispatchTarget`/`NotificationAttemptSnapshot`과 후속 `NotificationAttemptHandler` 계약은 notification.service에 둔다. 실행 경계와 기본 비활성화/handler 활성화 gate는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. `DurableNotificationAttemptHandler`는 실제 caller-owned attempt/result/expiry/cleanup 정책을, `NotificationRetryPolicy`/`NotificationRetryProperties`는 bounded DB 예약과 설정 검증을 같은 package에서 소유한다. 새 retry framework/package는 없다.
 
-TASK-906 1단계는 기존 `NotificationEvent`에 Session factory를 추가해 `boarding.entity.BoardingCheckpoint`의 검증된 최소 근거만 복사하고, 기존 Repository에 source별 identity 조회를 둔다. 전송 임시 차단은 같은 Repository의 ALARM due/expired 조회와 기존 AttemptService/Preflight에 둔다. 실제 Boarding 판정 연결·원자 생성은 2단계, DispatchTarget/SendRequest·FCM·Session gate 확장은 3단계이며 별도 Event framework나 Worker/package는 추가하지 않는다.
+TASK-906 1단계는 기존 `NotificationEvent`에 Session factory를 추가해 `boarding.entity.BoardingCheckpoint`의 검증된 최소 근거만 복사하고, 기존 Repository에 source별 identity 조회를 둔다. 전송 임시 차단은 같은 Repository의 ALARM due/expired 조회와 기존 AttemptService/Preflight에 둔다. `boarding.service.BoardingNotificationService`는 2단계의 Session transaction 참여·Event/최초 recipient 저장·PENDING 종료를 소유하고 기존 Event/Delivery/Device Repository를 사용한다. `BoardingTrackingStore`는 checkpoint/상태와 원자 저장·commit 재확인을, `BoardingSessionService`는 API 만료/취소 경계를 조율한다. DispatchTarget/SendRequest·FCM·Session gate 확장은 3단계이며 별도 Event framework나 Worker/package는 추가하지 않는다.
 
 ## Persistence Location
 

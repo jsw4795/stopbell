@@ -431,11 +431,11 @@ V16 `extend_notification_event_sources`는 기존 notification_events에 다음 
 
 Session ID는 Alarm 원본 ID처럼 불변 source reference로 보존하며 live resource cascade FK나 임의 hard-delete API를 추가하지 않는다. 세션 Event의 expiresAt은 recipient가 0개여도 Event 기한을 보존하기 위한 최소 필드다. 최초 각 Delivery는 같은 기한을 복사하며 Entity 생성자가 UTC microsecond 기한 불일치를 거부한다. 이 cross-row invariant는 CHECK로 구현하지 않는다. raw FID는 여전히 저장하지 않는다. Session 부재는 전송 허용 근거가 아니고 fail closed한다.
 
-최초 PREPARE_ALIGHT 저장 전 만료는 Event/Delivery를 INSERT하지 않는 application invariant로 2단계에서 연결한다. 1단계의 Entity factory는 영속성 입력만 검증하며 current Session/lifecycle/recipient 결정이나 최초 INSERT 직전 기한 검증을 대신하지 않는다. 이미 존재하는 Event/Delivery는 만료·실패·재확인으로 삭제/재생성하지 않는다. 기존 ALARM의 만료된 Event+EXPIRED Delivery 생성은 유지한다. 1단계는 branch CHECK/UNIQUE·V14/V15 데이터 보존·no-recipient 저장을 검증하며 atomic rollback·expired-candidate 재판단은 2단계에 남는다.
+TASK-906 2단계는 최초 PREPARE_ALIGHT 저장 전 만료 시 Event/Delivery를 INSERT하지 않는 application invariant와 Session/checkpoint·최초 recipient의 원자 저장을 연결했다. 1단계의 Entity factory는 영속성 입력만 검증하며 current Session/lifecycle/recipient 결정이나 최초 INSERT 직전 기한 검증을 대신하지 않는다. 이미 존재하는 Event/Delivery는 만료·실패·재확인으로 삭제/재생성하지 않는다. 기존 ALARM의 만료된 Event+EXPIRED Delivery 생성은 유지한다. 1단계는 branch CHECK/UNIQUE·V14/V15 데이터 보존·no-recipient 저장을 검증했고 2단계는 기존 V16으로 atomic rollback·expired-candidate 재판단·Session lifecycle PENDING 종료를 검증한다. lifecycle 조회는 exact Session Event를 current lock으로 확인한 뒤 그 Event ID의 PENDING Delivery만 ID 순서로 current lock하며 join의 이전 REPEATABLE READ snapshot에 의존하지 않는다. 추가 Migration·index·table·column은 없다.
 
 #### 세션 Worker 조회 계약
 
-현재 1단계는 `findDuePendingIds`와 `findExpiredPendingIds` 모두 ALARM만 LIMIT 이전에 조회한다. Session Event/Delivery를 수동 저장해도 기존 Worker가 attempt를 소비하거나 전송하지 않는다. 아래 모든 source 만료 정리와 ready Session 조회는 3단계의 후속 계약이며 아직 구현하지 않았다.
+현재 1단계는 `findDuePendingIds`와 `findExpiredPendingIds` 모두 ALARM만 LIMIT 이전에 조회한다. 2단계에서 준비 Event/Delivery를 원자 저장해도 기존 Worker가 Session attempt를 소비하거나 전송하지 않는다. 아래 모든 source 만료 정리와 ready Session 조회는 3단계의 후속 계약이며 아직 구현하지 않았다.
 
 기존 due index/Device FK/Delivery UNIQUE를 재사용하고 새 claim/lease/status/attempt table을 추가하지 않는다. 단일 Worker의 각 cycle은 독립 bounded 조회로 (1) 모든 source의 expired PENDING 정리, (2) ALARM due, (3) ready BOARDING_SESSION due를 처리한다. 각 조회는 기존 batch-size 상한을 적용해 세션 대기가 Alarm 예산을 점유하지 않는다.
 

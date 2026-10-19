@@ -44,11 +44,13 @@ public class BoardingSessionService {
     private final Clock clock;
     private final TransactionTemplate transaction;
     private final BoardingTrackingRuntime runtime;
+    private final BoardingNotificationService notifications;
 
     public BoardingSessionService(BoardingSessionRepository sessions, UserRepository users,
             BoardingSessionStartValidator validator, BoardingCandidateMetadataService metadata,
             BoardingSessionProperties properties, PlatformTransactionManager manager,
-            @Qualifier("transitMetadataClock") Clock clock, BoardingTrackingRuntime runtime) {
+            @Qualifier("transitMetadataClock") Clock clock, BoardingTrackingRuntime runtime,
+            BoardingNotificationService notifications) {
         this.sessions = sessions;
         this.users = users;
         this.validator = validator;
@@ -56,6 +58,7 @@ public class BoardingSessionService {
         this.properties = properties;
         this.clock = clock;
         this.runtime = runtime;
+        this.notifications = notifications;
         transaction = new TransactionTemplate(manager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -191,8 +194,8 @@ public class BoardingSessionService {
             if (session.getStatus().isOpen() && session.getRevision() != expectedRevision) {
                 throw new ApiException(ErrorCode.BOARDING_REVISION_CONFLICT);
             }
-            // TASK-906 can terminate this aggregate's PENDING deliveries in this transaction.
             session.cancel(expectedRevision, now);
+            notifications.terminatePending(session);
             sessions.flush();
             return response(session);
         });
@@ -293,6 +296,7 @@ public class BoardingSessionService {
 
     private void expire(BoardingSession session) {
         session.expire(now());
+        notifications.terminatePending(session);
         closeAfterCommit(session);
     }
 
