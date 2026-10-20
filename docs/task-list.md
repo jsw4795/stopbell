@@ -442,13 +442,13 @@ Future Consideration:
     - 중복 후보, recipient 없음, Device/계정 변경, 취소·만료·stale 결과, 전송 실패/retry·restart recovery 및 기존 도착 알림의 회귀를 검증한다. 별도 전송 인프라는 도입하지 않는다.
   - 선행 관계: TASK-905 및 기존 Notification TASK-701~711 완료 후 수행한다. TASK-710/711의 미완료 검증을 이 Task로 대체하거나 완료로 간주하지 않는다.
 
-- [ ] TASK-907 Flutter 하차 알림 UI 구현
+- [x] TASK-907 Flutter 하차 알림 UI 구현
   - 목적: 사용자가 탑승 차량을 직접 확인하고 목적 정류장을 선택한 뒤 하차 알림의 상태와 한계를 이해할 수 있게 한다.
-  - 진행: 1·2단계 구현·자동 검증 완료. 1단계 전체 Flutter 테스트 204개에 2단계 신규 120개를 추가해 전체 324개가 실패·오류·skip 없이 통과했다. 변경 Dart 파일 format 검사, `flutter analyze --no-pub`, `flutter test --no-pub` 및 diff 검사를 통과했다. 2단계는 전체 번호 원문 대조, Session API/모델·UUID/pending intent·응답 유실/재시작 복구, 현재 세션/상태·취소·동일 차량 재확인, Auth Session/epoch/revision 보호를 구현했다. 성공 경로는 Fake/Mock으로 검증했고 실제 Provider/iPhone 실행은 수행하지 않았다. 3단계와 TASK-908 실측은 미완료이며 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 차단을 유지한다.
+  - 완료 (2026-10-21): 1·2·3단계 구현·자동 검증 완료. 기존 324개를 보존하고 신규 106개를 추가한 전체 Flutter 테스트 430개가 실패·오류·skip 없이 통과했다. 변경 Dart 파일 format 검사, `flutter analyze --no-pub`, `flutter test --no-pub` 및 diff 검사를 통과했다. 전체 번호 대조·Session 생성/복구/관리와 함께 source-aware payload, foreground 안내/사용자 선택, background tap·terminated initial callback, 정확한 Session ID 읽기 전용 상세, Auth generation·User/login identity·navigation epoch 보호, bounded logical dedupe 및 확정 전 Push 권한/Device 준비를 연결했다. 통신 실패·404·terminal/보류·JWT refresh·Firebase 초기화 재시도·계정 전환/늦은 응답·후보 만료·원래 UUID/body 보존을 Mock/Fake로 검증했다. 실제 Firebase/iPhone/OS terminated 실행·버스 E2E는 수행하지 않았으며 TASK-908 및 기존 TASK-710/711에 남는다. 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 차단을 유지하며 새 Dependency·Migration·Backend API 변경은 없다. 상세 경계는 [Architecture](architecture.md#flutter-세션-알림-수신과-상세-이동-task-907-3단계)를 따른다.
   - 단계 범위:
     - 1단계: 별도 하차 알림 진입점, 기존 노선 검색/정류장 조회 재사용, 목적·선택 승차 occurrence 선택, 후보 API/모델과 비교·제한 안내 UI 구현. AVAILABLE/EMPTY/PARTIAL·오류/재조회, Auth generation·늦은 응답 보호와 Flutter 테스트 포함. 실제 Session POST와 추적 지원 활성화는 포함하지 않는다.
     - 2단계 (완료): 사용자 전체 차량번호 대조·확정, Session 상태/취소/재확인 연결. pending 생성 intent를 전송 전에 Secure Storage에 보존하고 같은 User/login Session에서 UUID 조회를 우선하며 자동 재전송·새 UUID 대체를 차단한다. 문맥이 없으면 Route/occurrence를 재선택하고 최신 후보·번호를 다시 대조한다.
-    - 3단계: 세션 FCM 수신/tap 이동 및 인증/전체 회귀 최종 검증. 1·2단계만으로 TASK-907을 완료 처리하지 않는다.
+    - 3단계 (완료): 세션 FCM 세 수신 경로·사용자 선택/정확한 ID 상세·인증/중복/경쟁 보호와 확정 전 Push 준비를 연결하고 기존 Alarm·Flutter 전체 회귀를 검증했다. 자동화 callback 검증은 실제 Provider/iPhone 수신 성공을 뜻하지 않는다.
   - 완료 기준:
     - 목적 occurrence 문맥의 후보 조회·추천 근거 표시→사용자 차량번호 확인·확정과 즉시 추적→상태 조회/취소 흐름을 연결한다. 별도 Start 버튼은 제공하지 않으며 추천과 확정을 구분하고 기존 버스 도착 알림 UI를 보존한다.
     - loading/empty/error/retry, 복수 후보·식별 불가·stale 후보·차량 소실·재확인/종료 상태를 표시한다. 불확실한 차량을 자동 선택/확정하거나 추적 차량을 자동 교체하지 않으며 위치 권한/GPS를 요구하지 않는다.

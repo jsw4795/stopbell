@@ -14,6 +14,7 @@ import 'package:stopbell/features/transit/bus_route_stop_client.dart';
 import 'package:stopbell/main.dart';
 
 import 'boarding_test_fakes.dart';
+import 'boarding_session_test_fakes.dart' show sessionAuth, sessionJwt;
 
 void main() {
   late List<http.Request> requests;
@@ -35,7 +36,7 @@ void main() {
           return http.Response('', 204);
         case '/auth/refresh':
           return boardingJson({
-            'accessToken': 'rotated',
+            'accessToken': sessionJwt('1', 'refreshed'),
             'refreshToken': 'rotated-refresh',
           });
         case '/api/v1/alarms':
@@ -78,7 +79,7 @@ void main() {
       }
     });
     addTearDown(transport.close);
-    auth = await boardingAuth(transport);
+    auth = await sessionAuth(transport);
     notifications = NotificationLifecycle(auth);
     final api = AuthenticatedApiClient(
       apiBaseUrl: boardingBaseUrl,
@@ -126,7 +127,9 @@ void main() {
         expect(request.url.queryParameters, {'targetStopOccurrenceId': '22'});
         expect(
           request.headers['authorization'],
-          calls == 0 ? 'Bearer access-a' : 'Bearer rotated',
+          calls == 0
+              ? 'Bearer ${sessionJwt('1')}'
+              : 'Bearer ${sessionJwt('1', 'refreshed')}',
         );
         return calls++ == 0
             ? boardingJson({}, 401)

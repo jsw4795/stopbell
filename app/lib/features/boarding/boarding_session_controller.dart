@@ -137,13 +137,37 @@ class BoardingSessionController extends ChangeNotifier {
   Future<void> create(
     BoardingCandidate candidate,
     String number,
-    BoardingSelectionContext context,
-  ) async {
+    BoardingSelectionContext context, {
+    Future<bool> Function()? preparePush,
+  }) async {
     if (!canCreate) return;
     if (!validCandidate(candidate, number)) {
       message = '전체 차량번호가 일치하지 않거나 후보가 오래됐어요. 후보를 다시 조회해 주세요.';
       _emit();
       return;
+    }
+    if (preparePush != null) {
+      busy = true;
+      message = null;
+      _emit();
+      bool allowed = false;
+      try {
+        allowed = await preparePush();
+      } catch (_) {
+        if (current) message = '알림 수신 준비를 확인하지 못했어요. 다시 시도해 주세요.';
+      } finally {
+        if (current) {
+          busy = false;
+          _emit();
+        }
+      }
+      if (!current || !allowed) return;
+      // Permission/registration may outlive candidate freshness. No UUID exists yet.
+      if (!validCandidate(candidate, number)) {
+        message = '알림 준비 중 후보 정보가 오래됐어요. 후보를 다시 조회해 주세요.';
+        _emit();
+        return;
+      }
     }
     final intent = BoardingCreationIntent(
       clientRequestId: newBoardingRequestId(),

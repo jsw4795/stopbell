@@ -164,6 +164,7 @@ void main() {
             : boardingJson(sessionJson(revision: 7), 201);
       };
       await tap(tester, '탑승 차량 확정');
+      await tap(tester, '알림 없이 계속');
       expect(find.byType(BoardingSessionView), findsOneWidget);
       final posts = requests
           .where(
@@ -207,6 +208,7 @@ void main() {
       sessionResponse = (_) async =>
           throw http.ClientException('response lost');
       await tap(tester, '탑승 차량 확정');
+      await tap(tester, '알림 없이 계속');
       final original = storage.records.values.single;
       sessionResponse = (request) async {
         expect(request.method, 'GET');
@@ -237,6 +239,7 @@ void main() {
       final result = Completer<http.Response>();
       sessionResponse = (_) => result.future;
       await tap(tester, '탑승 차량 확정');
+      await tap(tester, '알림 없이 계속');
       await tap(tester, '로그아웃');
       result.complete(boardingJson(sessionJson(), 201));
       await tester.pumpAndSettle();

@@ -63,6 +63,8 @@ void main() {
             onBack: () {},
             sessionClient: api,
             intentStorage: storage,
+            beforeCreate: (_) async =>
+                true, // Fake successful device readiness.
           ),
         ),
       ),

@@ -128,7 +128,7 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 
 `BoardingCandidateClient`는 기존 `AuthenticatedApiClient`/Auth Session refresh와 generation을 사용한다. 화면의 Route ID·목적/승차 occurrence 변경, 재조회, 화면 폐기에는 요청 epoch를 무효화하며 logout 시작/계정 세대 변경에는 후보·선택 문맥을 제거한다. 미전송 후보 reference는 화면 메모리에만 두고 서버 추천 순서와 관측 시각을 보존한다. 2단계 생성 요청의 원래 reference 보존은 아래 pending intent 경계를 따른다. 후보 상태·불확실성의 의미는 [후보 API](api.md#후보-조회)를 따르며 unknown enum은 미확인 상태로 표시한다.
 
-1단계의 후보 조회·비교와 2단계의 확정·세션 관리가 구현됐다. 차량번호 대조 가능과 추적 지원을 구분하고 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 제한을 안내한다. 세션 FCM 수신/tap과 인증/전체 회귀 최종 검증은 3단계에 남는다. 새 Dependency, GPS/위치 권한, polling이나 후보 목록의 영속 저장은 추가하지 않는다.
+1단계의 후보 조회·비교와 2단계의 확정·세션 관리가 구현됐다. 차량번호 대조 가능과 추적 지원을 구분하고 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 제한을 안내한다. 3단계의 세션 FCM 수신/tap 구현과 검증 경계는 아래 별도 절을 따른다. 새 Dependency, GPS/위치 권한, polling이나 후보 목록의 영속 저장은 추가하지 않는다.
 
 ### Flutter 탑승 확정과 세션 관리 (TASK-907 2단계)
 
@@ -141,6 +141,18 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 진입 시 pending 복구를 우선하고, 없으면 `scope=current`로 미종료 세션을 복원한다. 조회 오류는 세션 없음이 아니며 재조회 전 생성을 차단한다. 상세는 명시적 새로고침만 제공하고 주기 polling을 추가하지 않는다. READY인 TRACKING에서만 검증 간격을 표시하며 나머지 상태나 변경 결과 불확실 중에는 과거 gap을 숨긴다. 취소는 사용자 확인 뒤 현재 revision으로 요청하고, 실제 반환된 terminal 상태를 보존한다. mutation 응답 유실/충돌은 상세 GET으로 확인하며 재조회도 실패하면 추가 mutation을 막는다. 조회 epoch와 mutation 전후 무효화, revision·Session ID·전체 차량번호·terminal 검증으로 늦은 GET이 새 상태를 되돌리지 않게 한다.
 
 재확인은 같은 Session에서 새 후보 조회와 빈 번호 입력으로 시작한다. 같은 Auth Session 안에 정확한 선택 ID가 남아 있으면 그 문맥으로 조회하고, 없거나 다시 선택이 필요하면 사용자가 Route/occurrence를 재선택한다. response의 routeNumber/targetName/order로 내부 ID를 추측하지 않는다. 다른 차량 번호는 Client에서도 거부하며 같은 차량/경로/운행의 최종 검증은 Backend가 수행한다. 모든 비동기 반영과 늦은 401 refresh/replay는 Auth generation·login/User identity·화면 수명으로 보호한다. 성공 경로는 Fake/Mock으로 검증하며 실제 Provider 지원 보류를 해제하지 않는다.
+
+### Flutter 세션 알림 수신과 상세 이동 (TASK-907 3단계)
+
+앱에 하나인 `NotificationLifecycle`이 기존 Firebase `onMessage`/`onMessageOpenedApp`/`getInitialMessage`를 소유한다. `AlarmNotification`과 `BoardingSessionNotification`은 [기존 payload](api.md#탑승-세션-push와-tap)를 source별로 검증하며 다른 source ID 필드가 함께 있으면 거부한다. source·대상 ID·eventType·notificationEventId와 foreground/tap 목적을 조합해 최근 64개 키만 메모리에 보존한다. messageId만으로 중복을 판단하지 않으며 foreground 안내 뒤 명시적 상세 선택은 허용한다. User/login Session 변경에는 pending hint와 dedupe를 지운다. 영속 inbox는 추가하지 않는다.
+
+Foreground는 source에 맞는 작은 안내와 상세 보기 선택만 제공한다. 수신만으로 이동하지 않는다. Background tap과 terminated initial은 현재 인증 문맥에서 상세로 연결한다. 초기 메시지 Future는 한 번 조회해 초기화 timeout 재시도에도 재사용하며 listener를 중복 등록하지 않는다. Secure 설치본 bootstrap → Auth 복원 → Firebase 초기화 → 수신 연결 순서를 유지한다. initial이 먼저 준비됐으면 진행 중인 Auth 복원이 끝나기를 기다리되 최초 복원된 User/login Session에만 연결한다. 미인증 시작이나 이후 로그인·로그아웃·A→B→A에는 이전 initial/tap을 이전하지 않는다. 기존 Alarm의 로그인 전 tap 보류도 이 fail-closed 경계로 강화했다. 화면이 늦게 구성되면 같은 인증 문맥의 pending tap을 첫 frame 뒤 소비한다.
+
+`AlarmHome`이 두 source의 navigation epoch와 인증 generation·User/login identity를 확인한다. `BoardingNotificationScreen`은 `BoardingSessionApiClient`/`AuthenticatedApiClient`로 정확한 `GET /api/v1/boarding-sessions/{id}`만 호출한다. `scope=current`나 생성 복구를 호출하지 않아 다른 open Session을 대신 표시하지 않으며 Secure pending intent를 읽거나 삭제하지 않는다. 응답 ID를 재검증하고 `BoardingSessionDetails`의 서버 상태 표현을 관리 화면과 공유한다. 종료·취소·만료도 표시하고 READY가 아닌 과거 gap은 숨긴다. 이 진입점은 읽기 전용이며 create/cancel/reconfirm을 실행하지 않는다. 404는 부재/다른 owner를 구분하지 않고, 통신·파싱 오류에는 같은 ID 재조회를 제공한다. 다른 알림 선택·홈 복귀·dispose·로그아웃에는 늦은 응답을 폐기하고 이전 로그인 Snackbar도 정리한다. Backend가 실제 owner를 검증하며 payload 자체는 인증/추적 근거가 아니다.
+
+탑승 확정은 전체 번호 대조 뒤 기존 `PushRegistrationService`/permission/Device 등록을 준비하고 UUID 생성·Secure intent 저장·POST보다 먼저 사용자 선택을 마친다. 미결정 권한은 설명 후 요청하며 거부·등록 실패·미지원 환경은 수신 불가 가능성과 과거 Event recipient가 나중에 늘어나지 않는다는 점을 안내하고 명시적인 `알림 없이 계속`만 허용한다. 준비 성공도 실제 표시나 추적 지원 성공은 아니다. 준비 중에는 중복 확정을 막고 종료 뒤 후보 freshness/Auth/화면 수명을 재검증한다. 준비 실패·이탈은 새 UUID/POST를 만들지 않으며, 이미 불확실한 POST 복구·재시도는 Push 준비와 분리해 원래 UUID/body를 보존한다. 기존 Alarm 활성화 정책은 유지한다.
+
+Fake 수신 callback과 Mock/Fake API로 자동 검증한다. 실제 OS terminated 실행·Firebase/iPhone 표시·실제 버스 E2E는 이 검증의 보장 범위가 아니며 TASK-908과 기존 TASK-710/711에 남는다. 실제 Provider의 `BOARDING_TRACKING_UNSUPPORTED` 제한, OS 표시 중복/지연·접수 후 회수 불가 한계를 유지한다.
 
 ## 6. 초기 백엔드 경계
 
@@ -301,7 +313,7 @@ Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Eve
 
 ### 탑승 세션 실행과 Notification 연계 (TASK-903)
 
-이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. TASK-905 1단계는 Session Persistence·확정 검증/저장 경계·조회·취소를, 2단계는 특정 차량 polling·checkpoint/준비 후보·종료 판정을 구현했다. 3단계는 checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API를 구현했다. TASK-906 2단계는 준비 Event·최초 recipient Delivery와 Session checkpoint/상태의 원자 저장 및 lifecycle PENDING 종료를 연결했다. 실제 Provider 생성·재확인 지원 보류와 Session FCM 차단은 유지하며 전송 연결은 TASK-906 3단계에 남는다. 아래 계약 전체가 실행 중이라는 뜻이 아니다. Domain·복구 판정은 [BoardingSession](domain-model.md#boardingsession), 필드·제약·조회는 [Database](database.md#phase-9-boarding-persistence-contract-task-903), HTTP는 [API](api.md#탑승-세션-api-task-903)가 소유한다.
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. TASK-905 1단계는 Session Persistence·확정 검증/저장 경계·조회·취소를, 2단계는 특정 차량 polling·checkpoint/준비 후보·종료 판정을 구현했다. 3단계는 checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API를 구현했다. TASK-906 2단계는 준비 Event·최초 recipient Delivery와 Session checkpoint/상태의 원자 저장 및 lifecycle PENDING 종료를 연결했다. TASK-906 3단계는 source-aware 전송과 Session current gate를 연결했다. 실제 Provider 생성·재확인 지원 보류는 유지하며 실제 기기 표시 검증과 구분한다. Domain·복구 판정은 [BoardingSession](domain-model.md#boardingsession), 필드·제약·조회는 [Database](database.md#phase-9-boarding-persistence-contract-task-903), HTTP는 [API](api.md#탑승-세션-api-task-903)가 소유한다.
 
 #### 확정과 평가 transaction
 
@@ -378,7 +390,7 @@ Session source는 expiry를 우선 처리한 뒤 current status=TRACKING, 미만
 
 취소 및 polling checkpoint/보류/종료 변경은 Session lock 아래 mutation 전에 이전 revision의 gate를 닫는다. 새 검증 checkpoint는 commit 확인 후만 공개한다. 세션 취소·만료·목적지 도달·연속성 상실은 pending을 원자 종료하며 늦은 결과로 되살리지 않는다. gate 사전 차단 뒤 DB rollback이면 보수적으로 다음 재검증까지 닫힌 상태를 유지할 수 있다. 마지막 메모리 검증과 `FcmProviderClient.send`/실제 HTTP 시작 사이에는 원자성이 없다. 그 사이 취소 commit·Device 변경이 발생하거나 이미 요청이 시작/접수됐다면 회수 또는 새 호출의 완전 차단을 보장하지 않는다. 네트워크 동안 DB lock을 유지하지 않는 기존 한계다. DB 장애/commit 불확실 중에는 gate를 열거나 새 외부 요청을 시작하지 않는다.
 
-TASK-905는 checkpoint/복구와 lifecycle 판단을, TASK-906은 위 atomic Notification 연결·source·gate·fair query·전송 검증을 구현한다. TASK-906의 Backend dispatch 구현과 실제 Provider 지원/기기 표시 검증은 구분한다. 실제 세션 생성·재확인은 BOARDING_TRACKING_UNSUPPORTED를 유지하며 Flutter와 실차 검증은 TASK-907/908 및 기존 TASK-710/711에 남는다.
+TASK-905는 checkpoint/복구와 lifecycle 판단을, TASK-906은 위 atomic Notification 연결·source·gate·fair query·전송 검증을 구현한다. TASK-906의 Backend dispatch 구현과 실제 Provider 지원/기기 표시 검증은 구분한다. 실제 세션 생성·재확인은 BOARDING_TRACKING_UNSUPPORTED를 유지한다. Flutter 수신·상세는 위 TASK-907 3단계를 따르며 실차/기기 실측은 TASK-908 및 기존 TASK-710/711에 남는다.
 
 ### common
 

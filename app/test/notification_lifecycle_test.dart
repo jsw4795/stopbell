@@ -74,15 +74,17 @@ void main() {
       expect(AlarmNotification.parse(bad), isNull);
     }
   });
-  test('로그인 전 tap을 대기하고 initial/opened 중복은 제거한다', () async {
+  test('로그인 전 tap은 폐기하고 인증 후 logical event 중복은 제거한다', () async {
     final f = PushFixture();
     await f.initialize(login: false);
     final lifecycle = NotificationLifecycle(f.auth);
     lifecycle.receive(valid, messageId: 'same');
     expect(lifecycle.takeTap(), isNull);
     await f.auth.login();
-    expect(lifecycle.takeTap()?.alarmId, 15);
+    expect(lifecycle.takeTap(), isNull);
     lifecycle.receive(valid, messageId: 'same');
+    expect((lifecycle.takeTap() as AlarmNotification?)?.alarmId, 15);
+    lifecycle.receive(valid, messageId: 'another');
     expect(lifecycle.takeTap(), isNull);
     lifecycle.dispose();
   });
@@ -255,7 +257,7 @@ void main() {
     lifecycle.receive(valid, inForeground: true);
     await tester.pumpAndSettle();
     expect(client.lookups, 0);
-    expect(find.text('하차 알림이 도착했습니다.'), findsOneWidget);
+    expect(find.text('버스 도착 알림이 도착했습니다.'), findsOneWidget);
     await tester.tap(find.text('알람 보기'));
     await tester.pumpAndSettle();
     expect(client.lookups, 1);

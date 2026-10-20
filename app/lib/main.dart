@@ -105,6 +105,7 @@ class _StopBellApplicationState extends State<StopBellApplication>
   bool _initialized = false;
   int? _syncedGeneration;
   bool _hadAuthenticatedSession = false;
+  (int, String?, String?)? _visibleIdentity;
 
   Future<void> _initialize() async {
     try {
@@ -173,11 +174,15 @@ class _StopBellApplicationState extends State<StopBellApplication>
   void _authChanged() {
     final auth = widget.authSession;
     if (!mounted) return;
+    final identity = (auth.generation, auth.userIdentity, auth.sessionIdentity);
     if (_hadAuthenticatedSession &&
-        (auth.isLoggingOut || auth.state != AuthState.authenticated)) {
+        (auth.isLoggingOut ||
+            auth.state != AuthState.authenticated ||
+            identity != _visibleIdentity)) {
       _messengerKey.currentState?.clearSnackBars();
       _navigatorKey.currentState?.popUntil((route) => route.isFirst);
     }
+    _visibleIdentity = identity;
     _hadAuthenticatedSession =
         auth.state == AuthState.authenticated && !auth.isLoggingOut;
     if (_initialized &&
@@ -349,6 +354,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     key: ValueKey(widget.authSession.generation),
                     client: widget.alarmClient,
                     notifications: widget.notifications,
+                    beforeBoardingCreate: (context) =>
+                        prepareBoardingPush(context, widget.push),
                     beforeActivate: widget.push == null
                         ? null
                         : (context) => prepareAlarmPush(context, widget.push!),

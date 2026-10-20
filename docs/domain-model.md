@@ -530,7 +530,7 @@ TRACKING의 stateReason은 NULL, SUSPENDED는 보류 사유, terminal은 해당 
 
 ## Ownership and Notification Boundary
 
-다른 계정은 세션을 조회·취소·재확인할 수 없다. 계정 변경은 세션 owner를 이전하거나 자동 취소하지 않는다. 이전 세션 종료가 필요하면 해당 User로 취소하며 offline 즉시 반영은 보장하지 않는다. Flutter는 Auth generation으로 이전 요청·화면·tap을 분리하고 현재 계정으로 재조회한다.
+다른 계정은 세션을 조회·취소·재확인할 수 없다. 계정 변경은 세션 owner를 이전하거나 자동 취소하지 않는다. 이전 세션 종료가 필요하면 해당 User로 취소하며 offline 즉시 반영은 보장하지 않는다. Flutter는 Auth generation·User/login session identity로 이전 요청·화면·tap을 분리하고 현재 계정으로 알림 대상의 정확한 Session ID를 재조회한다. Push hint나 현재 open Session을 원래 대상의 권한/상태 근거로 사용하지 않는다. terminal도 현재 상태 그대로 표시하며, 알림 수신으로 Session을 생성·재확인·재활성화하지 않는다. 읽기 전용 상세·initial/foreground/tap 경계는 [Architecture](architecture.md#flutter-세션-알림-수신과-상세-이동-task-907-3단계)를 따른다.
 
 NotificationEvent owner·Device generation·Event 시점 recipient 고정은 기존과 같다. 세션 revision은 결정/전송의 current 검증 값이며 과거 Event를 새 revision의 Event로 복제하지 않는다. 기존 Alarm identity·만료된 Event 보존·Device/Delivery lifecycle은 아래 기존 계약을 유지한다. 세션 전용 TTL 예외와 전송 경계는 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903), Schema는 [Database](database.md#phase-9-boarding-persistence-contract-task-903)를 따른다.
 

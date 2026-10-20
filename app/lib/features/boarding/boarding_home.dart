@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth/auth_session.dart';
+import '../notification/push_activation_prompt.dart';
 import '../transit/bus_route.dart';
 import '../transit/bus_route_search_screen.dart';
 import '../transit/bus_route_stop_occurrence.dart';
@@ -24,6 +25,7 @@ class BoardingHome extends StatefulWidget {
     required this.onBack,
     this.sessionClient,
     this.intentStorage,
+    this.beforeCreate,
   });
   final AuthSession authSession;
   final Future<List<BusRoute>> Function(String) searchRoutes;
@@ -32,6 +34,7 @@ class BoardingHome extends StatefulWidget {
   final VoidCallback onBack;
   final BoardingSessionClient? sessionClient;
   final BoardingIntentStorage? intentStorage;
+  final Future<bool> Function(BuildContext)? beforeCreate;
   @override
   State<BoardingHome> createState() => _BoardingHomeState();
 }
@@ -112,7 +115,14 @@ class _BoardingHomeState extends State<BoardingHome> {
     if (_reconfirm) {
       await c.reconfirm(draft.candidate, number, draft.selection);
     } else {
-      await c.create(draft.candidate, number, draft.selection);
+      await c.create(
+        draft.candidate,
+        number,
+        draft.selection,
+        preparePush: () =>
+            widget.beforeCreate?.call(context) ??
+            prepareBoardingPush(context, null),
+      );
     }
     if (_current) {
       setState(() {
