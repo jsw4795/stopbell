@@ -13,6 +13,7 @@ import 'features/notification/push_activation_prompt.dart';
 import 'features/notification/notification_lifecycle.dart';
 import 'features/alarm/alarm_api_client.dart';
 import 'features/alarm/alarm_home.dart';
+import 'features/boarding/boarding_candidate_client.dart';
 import 'features/auth/backend_auth_client.dart';
 import 'features/auth/auth_session.dart';
 import 'features/auth/google_auth_service.dart';
@@ -60,6 +61,7 @@ void main() {
       searchRoutes: routeSearch.search,
       findStops: routeStops.findStops,
       alarmClient: alarms,
+      findBoardingCandidates: BoardingCandidateClient(apiClient).find,
     ),
   );
 }
@@ -73,6 +75,7 @@ class StopBellApplication extends StatefulWidget {
     required this.alarmClient,
     this.push,
     this.notifications,
+    this.findBoardingCandidates,
   });
 
   final AuthSession authSession;
@@ -81,6 +84,7 @@ class StopBellApplication extends StatefulWidget {
   final Future<List<BusRoute>> Function(String query) searchRoutes;
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
   final AlarmClient alarmClient;
+  final FindBoardingCandidates? findBoardingCandidates;
 
   @override
   State<StopBellApplication> createState() => _StopBellApplicationState();
@@ -224,6 +228,7 @@ class _StopBellApplicationState extends State<StopBellApplication>
               searchRoutes: widget.searchRoutes,
               findStops: widget.findStops,
               alarmClient: widget.alarmClient,
+              findBoardingCandidates: widget.findBoardingCandidates,
             ),
     );
   }
@@ -238,6 +243,7 @@ class LoginScreen extends StatefulWidget {
     required this.alarmClient,
     this.push,
     this.notifications,
+    this.findBoardingCandidates,
   });
 
   final AuthSession authSession;
@@ -246,6 +252,7 @@ class LoginScreen extends StatefulWidget {
   final Future<List<BusRoute>> Function(String query) searchRoutes;
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
   final AlarmClient alarmClient;
+  final FindBoardingCandidates? findBoardingCandidates;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -334,6 +341,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     authSession: widget.authSession,
                     searchRoutes: widget.searchRoutes,
                     findStops: widget.findStops,
+                    findBoardingCandidates: widget.findBoardingCandidates,
                   ),
                 ),
                 if (_isLoading) const Text('로그아웃 중...'),

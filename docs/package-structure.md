@@ -243,6 +243,7 @@ app/
     ├── features/
     │   ├── auth/
     │   ├── alarm/
+    │   ├── boarding/
     │   ├── transit/
     │   └── notification/
     ├── shared/
@@ -263,6 +264,7 @@ V1은 필요한 수준의 Auth API, Transit API, Alarm API, Auth Session 관리,
 
 - `auth`: Google Login, Token Pair Secure Storage, startup 상태 복구, refresh 및 logout을 포함한 Auth Session
 - `alarm`: `INACTIVE`/`ACTIVE`/`FOLLOW_UP` 상태를 보존하는 Alarm 생성·조회·활성화/비활성화 화면과 Alarm ID 기반 navigation 진입점
+- `boarding`: TASK-907 1단계의 `BoardingHome` 노선 선택, `BoardingStopScreen` 목적/선택 승차 occurrence 선택, `BoardingCandidateClient` 인증 후보 조회, `BoardingCandidates` 응답 파싱과 `BoardingCandidatesView` 비교·제한 안내. 기존 transit 검색 화면/Client를 재사용하며 Session 확정·상태·tap은 후속 단계
 - `transit`: Bus Route 검색과 Bus Stop 선택 화면. Stop response의 `canNotifyOneStopBefore`/`canNotifyOneStopAfter`로 option을 제어하며 stale occurrence 생성 `404`에서는 Stop 재선택 흐름으로 복구
 - `notification`: TASK-704의 `installation_storage.dart`가 secure 설치본/intent와 native marker를, `device_api_client.dart`가 세 Device API를, `push_permission_service.dart`가 Firebase/native readiness를, `push_registration_service.dart`가 serial session/ownership 동기화를 소유한다. `push_activation_prompt.dart`와 `notification_lifecycle.dart`는 activation permission 안내와 최소 tap/foreground hint를 기존 AlarmHome에 연결한다. 상세 저장·복구 계약은 ADR-010을 따른다.
 

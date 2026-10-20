@@ -5,13 +5,15 @@ import '../transit/bus_route_search_screen.dart';
 import '../transit/bus_route_stop_occurrence.dart';
 import '../transit/bus_route_stop_screen.dart';
 import '../auth/auth_session.dart';
+import '../boarding/boarding_candidate_client.dart';
+import '../boarding/boarding_home.dart';
 import '../notification/notification_lifecycle.dart';
 import 'alarm.dart';
 import 'alarm_api_client.dart';
 import 'alarm_detail_screen.dart';
 import 'alarm_list_screen.dart';
 
-enum _Page { list, search, stops, detail }
+enum _Page { list, search, stops, detail, boarding }
 
 class AlarmHome extends StatefulWidget {
   const AlarmHome({
@@ -22,12 +24,14 @@ class AlarmHome extends StatefulWidget {
     required this.findStops,
     this.notifications,
     this.beforeActivate,
+    this.findBoardingCandidates,
   });
 
   final AlarmClient client;
   final NotificationLifecycle? notifications;
   final Future<bool> Function(BuildContext)? beforeActivate;
   final AuthSession authSession;
+  final FindBoardingCandidates? findBoardingCandidates;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
 
@@ -122,25 +126,54 @@ class _AlarmHomeState extends State<AlarmHome> {
 
   @override
   Widget build(BuildContext context) => switch (_page) {
-    _Page.list => AlarmListScreen(
-      findAll: widget.client.findAll,
-      onSelect: (id) {
-        if (!_current) return;
-        setState(() {
-          _navigationEpoch++;
-          _alarmId = id;
-          _createdAlarm = null;
-          _page = _Page.detail;
-        });
-      },
-      onCreate: () {
-        if (_current) {
-          setState(() {
-            _navigationEpoch++;
-            _page = _Page.search;
-          });
-        }
-      },
+    _Page.list => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.findBoardingCandidates != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: OutlinedButton(
+              onPressed: () {
+                if (!_current) return;
+                setState(() {
+                  _navigationEpoch++;
+                  _page = _Page.boarding;
+                });
+              },
+              child: const Text('하차 알림 · 차량 후보 찾기'),
+            ),
+          ),
+        const Text('버스 도착 알림', textAlign: TextAlign.center),
+        Expanded(
+          child: AlarmListScreen(
+            findAll: widget.client.findAll,
+            onSelect: (id) {
+              if (!_current) return;
+              setState(() {
+                _navigationEpoch++;
+                _alarmId = id;
+                _createdAlarm = null;
+                _page = _Page.detail;
+              });
+            },
+            onCreate: () {
+              if (_current) {
+                setState(() {
+                  _navigationEpoch++;
+                  _page = _Page.search;
+                });
+              }
+            },
+          ),
+        ),
+      ],
+    ),
+    _Page.boarding => BoardingHome(
+      authSession: widget.authSession,
+      searchRoutes: widget.searchRoutes,
+      findStops: widget.findStops,
+      findCandidates: widget.findBoardingCandidates!,
+      onBack: _showList,
     ),
     _Page.search => Column(
       children: [

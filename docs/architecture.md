@@ -122,6 +122,14 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 
 세부 결정과 재검토 조건은 `adr/ADR-005-authentication-and-user-identity-strategy.md`를 따른다.
 
+### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
+
+로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 목적·선택 승차 지점을 선택한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.
+
+`BoardingCandidateClient`는 기존 `AuthenticatedApiClient`/Auth Session refresh와 generation을 사용한다. 화면의 Route ID·목적/승차 occurrence 변경, 재조회, 화면 폐기에는 요청 epoch를 무효화하며 logout 시작/계정 세대 변경에는 후보·선택 문맥을 제거한다. reference는 화면 메모리에만 두고 서버 추천 순서와 관측 시각을 보존한다. 후보 상태·불확실성의 의미는 [후보 API](api.md#후보-조회)를 따르며 unknown enum은 미확인 상태로 표시한다.
+
+1단계는 후보 조회·비교까지만 제공한다. 차량번호 대조 가능과 추적 지원을 구분하고 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 제한을 안내한다. Session 생성 POST·확정·상태/취소/재확인은 2단계, 세션 FCM 수신/tap과 인증/전체 회귀 최종 검증은 3단계에 남는다. 새 Dependency, GPS/위치 권한, polling이나 영속 후보 저장은 추가하지 않는다.
+
 ## 6. 초기 백엔드 경계
 
 권장하는 논리적 모듈/패키지:
