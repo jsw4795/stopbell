@@ -7,6 +7,8 @@ import '../transit/bus_route_stop_screen.dart';
 import '../auth/auth_session.dart';
 import '../boarding/boarding_candidate_client.dart';
 import '../boarding/boarding_home.dart';
+import '../boarding/boarding_session_client.dart';
+import '../boarding/boarding_creation_intent.dart';
 import '../notification/notification_lifecycle.dart';
 import 'alarm.dart';
 import 'alarm_api_client.dart';
@@ -25,6 +27,8 @@ class AlarmHome extends StatefulWidget {
     this.notifications,
     this.beforeActivate,
     this.findBoardingCandidates,
+    this.boardingSessionClient,
+    this.boardingIntentStorage,
   });
 
   final AlarmClient client;
@@ -32,6 +36,8 @@ class AlarmHome extends StatefulWidget {
   final Future<bool> Function(BuildContext)? beforeActivate;
   final AuthSession authSession;
   final FindBoardingCandidates? findBoardingCandidates;
+  final BoardingSessionClient? boardingSessionClient;
+  final BoardingIntentStorage? boardingIntentStorage;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
 
@@ -174,6 +180,8 @@ class _AlarmHomeState extends State<AlarmHome> {
       findStops: widget.findStops,
       findCandidates: widget.findBoardingCandidates!,
       onBack: _showList,
+      sessionClient: widget.boardingSessionClient,
+      intentStorage: widget.boardingIntentStorage,
     ),
     _Page.search => Column(
       children: [

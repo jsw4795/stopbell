@@ -14,6 +14,8 @@ import 'features/notification/notification_lifecycle.dart';
 import 'features/alarm/alarm_api_client.dart';
 import 'features/alarm/alarm_home.dart';
 import 'features/boarding/boarding_candidate_client.dart';
+import 'features/boarding/boarding_session_client.dart';
+import 'features/boarding/boarding_creation_intent.dart';
 import 'features/auth/backend_auth_client.dart';
 import 'features/auth/auth_session.dart';
 import 'features/auth/google_auth_service.dart';
@@ -62,6 +64,8 @@ void main() {
       findStops: routeStops.findStops,
       alarmClient: alarms,
       findBoardingCandidates: BoardingCandidateClient(apiClient).find,
+      boardingSessionClient: BoardingSessionApiClient(apiClient),
+      boardingIntentStorage: const SecureBoardingIntentStorage(),
     ),
   );
 }
@@ -76,6 +80,8 @@ class StopBellApplication extends StatefulWidget {
     this.push,
     this.notifications,
     this.findBoardingCandidates,
+    this.boardingSessionClient,
+    this.boardingIntentStorage,
   });
 
   final AuthSession authSession;
@@ -85,6 +91,8 @@ class StopBellApplication extends StatefulWidget {
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
   final AlarmClient alarmClient;
   final FindBoardingCandidates? findBoardingCandidates;
+  final BoardingSessionClient? boardingSessionClient;
+  final BoardingIntentStorage? boardingIntentStorage;
 
   @override
   State<StopBellApplication> createState() => _StopBellApplicationState();
@@ -229,6 +237,8 @@ class _StopBellApplicationState extends State<StopBellApplication>
               findStops: widget.findStops,
               alarmClient: widget.alarmClient,
               findBoardingCandidates: widget.findBoardingCandidates,
+              boardingSessionClient: widget.boardingSessionClient,
+              boardingIntentStorage: widget.boardingIntentStorage,
             ),
     );
   }
@@ -244,6 +254,8 @@ class LoginScreen extends StatefulWidget {
     this.push,
     this.notifications,
     this.findBoardingCandidates,
+    this.boardingSessionClient,
+    this.boardingIntentStorage,
   });
 
   final AuthSession authSession;
@@ -253,6 +265,8 @@ class LoginScreen extends StatefulWidget {
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
   final AlarmClient alarmClient;
   final FindBoardingCandidates? findBoardingCandidates;
+  final BoardingSessionClient? boardingSessionClient;
+  final BoardingIntentStorage? boardingIntentStorage;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -342,6 +356,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     searchRoutes: widget.searchRoutes,
                     findStops: widget.findStops,
                     findBoardingCandidates: widget.findBoardingCandidates,
+                    boardingSessionClient: widget.boardingSessionClient,
+                    boardingIntentStorage: widget.boardingIntentStorage,
                   ),
                 ),
                 if (_isLoading) const Text('로그아웃 중...'),

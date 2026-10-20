@@ -14,9 +14,11 @@ class BoardingCandidatesView extends StatelessWidget {
     super.key,
     required this.result,
     required this.receivedAt,
+    this.onSelect,
   });
   final BoardingCandidates result;
   final DateTime receivedAt;
+  final ValueChanged<BoardingCandidate>? onSelect;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -40,13 +42,24 @@ class BoardingCandidatesView extends StatelessWidget {
         '진행 정보는 정확한 현재 위치·실제 정차·탑승 사실을 보장하지 않아요. 원본 갱신 시각이 없거나 정보가 지연될 수 있어요.',
       ),
       for (var index = 0; index < result.candidates.length; index++)
-        _CandidateCard(candidate: result.candidates[index], index: index),
+        _CandidateCard(
+          candidate: result.candidates[index],
+          index: index,
+          onSelect: result.candidateSetStatus == CandidateSetStatus.unknown
+              ? null
+              : onSelect,
+        ),
     ],
   );
 }
 
 class _CandidateCard extends StatelessWidget {
-  const _CandidateCard({required this.candidate, required this.index});
+  const _CandidateCard({
+    required this.candidate,
+    required this.index,
+    this.onSelect,
+  });
+  final ValueChanged<BoardingCandidate>? onSelect;
   final BoardingCandidate candidate;
   final int index;
 
@@ -111,6 +124,18 @@ class _CandidateCard extends StatelessWidget {
             Text(
               'Provider 제공 시각: ${item.providerDataTime == null ? '알 수 없음' : boardingTime(item.providerDataTime!)}',
             ),
+            if (onSelect != null)
+              OutlinedButton(
+                key: ValueKey('select-${item.candidateRef ?? index}'),
+                onPressed: canConfirmBoardingCandidate(item)
+                    ? () => onSelect!(item)
+                    : null,
+                child: Text(
+                  canConfirmBoardingCandidate(item)
+                      ? '이 차량 번호 직접 대조'
+                      : '확정 불가 · 차량 정보 또는 추적 지원 확인 보류',
+                ),
+              ),
             for (final reason in reasons) Text('• ${_reasonMessage(reason)}'),
           ],
         ),
@@ -142,3 +167,6 @@ String _reasonMessage(String code) => switch (code) {
   'REVALIDATION_REQUIRED' => '차량 확인 시 최신 정보를 다시 검증해야 해요.',
   _ => '해석할 수 없는 제한 사유가 있어요. 지원 여부를 확인할 수 없어요.',
 };
+
+bool canConfirmBoardingCandidate(BoardingCandidate item) =>
+    item.canRequestConfirmation;

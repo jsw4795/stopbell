@@ -9,7 +9,7 @@ enum ProgressKind { routeProgress, arrivalObserved, movingReference, unknown }
 class BoardingCandidates {
   BoardingCandidates.fromJson(Object? value) {
     final json = _object(value);
-    observedAt = _instant(json['observedAt']);
+    observedAt = boardingInstant(json['observedAt']);
     providerDataTime = _optionalInstant(json['providerDataTime']);
     candidateSetStatus = switch (_text(json['candidateSetStatus'])) {
       'AVAILABLE' => CandidateSetStatus.available,
@@ -51,7 +51,7 @@ class BoardingCandidate {
     final gap = json['boardingOccurrenceGap'];
     if (gap != null && (gap is! int || gap < 0)) throw const FormatException();
     boardingOccurrenceGap = gap as int?;
-    observedAt = _instant(json['observedAt']);
+    observedAt = boardingInstant(json['observedAt']);
     providerDataTime = _optionalInstant(json['providerDataTime']);
     trackingSupport = switch (_text(json['trackingSupport'])) {
       'CONDITIONAL' => TrackingSupport.conditional,
@@ -75,6 +75,22 @@ class BoardingCandidate {
   late final TrackingSupport trackingSupport;
   late final String? trackingReasonCode;
   late final List<String> limitations;
+
+  /// CONDITIONAL permits server revalidation, never tracking success.
+  bool get canRequestConfirmation =>
+      confirmationStatus == ConfirmationStatus.available &&
+      trackingSupport == TrackingSupport.conditional &&
+      candidateRef?.trim().isNotEmpty == true &&
+      vehicleNumber?.trim().isNotEmpty == true &&
+      ![reasonCode, ...limitations].any(
+        (reason) => const {
+          'IDENTITY_CONFLICT',
+          'DETAIL_ID_MISMATCH',
+          'DETAIL_NUMBER_MISMATCH',
+          'STALE_OBSERVATION',
+          'FUTURE_OBSERVATION',
+        }.contains(reason),
+      );
 }
 
 class BoardingProgress {
@@ -115,9 +131,9 @@ int _positiveInt(Object? value) {
 }
 
 DateTime? _optionalInstant(Object? value) =>
-    value == null ? null : _instant(value);
+    value == null ? null : boardingInstant(value);
 
-DateTime _instant(Object? value) {
+DateTime boardingInstant(Object? value) {
   final text = _text(value);
   final match = RegExp(
     r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$',

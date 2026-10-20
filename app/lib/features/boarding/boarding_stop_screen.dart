@@ -6,6 +6,7 @@ import '../transit/bus_route_stop_occurrence.dart';
 import 'boarding_candidate_client.dart';
 import 'boarding_candidates.dart';
 import 'boarding_candidates_view.dart';
+import 'boarding_creation_intent.dart';
 
 enum _StopsState { loading, success, empty, error }
 
@@ -19,12 +20,15 @@ class BoardingStopScreen extends StatefulWidget {
     required this.findStops,
     required this.findCandidates,
     required this.onBack,
+    this.onSelectCandidate,
   });
   final BusRoute route;
   final AuthSession authSession;
   final Future<List<BusRouteStopOccurrence>> Function(int) findStops;
   final FindBoardingCandidates findCandidates;
   final VoidCallback onBack;
+  final void Function(BoardingCandidate, BoardingSelectionContext, String)?
+  onSelectCandidate;
 
   @override
   State<BoardingStopScreen> createState() => _BoardingStopScreenState();
@@ -203,7 +207,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         ),
         Text(widget.route.regionName),
         const Text(
-          '현재는 차량 후보 조회와 비교만 제공해요. 실제 하차 추적은 아직 지원되지 않아요. 차량번호 대조 가능 표시도 추적 시작을 뜻하지 않아요.',
+          '차량 후보 조회와 번호 대조·확정을 제공해요. 실제 하차 추적은 아직 지원되지 않아요. 차량번호 대조 가능 표시도 추적 시작을 뜻하지 않아요.',
         ),
         const SizedBox(height: 12),
         if (_state == _StopsState.loading) ...[
@@ -283,7 +287,28 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
               child: const Text('정류장 목록 다시 선택'),
             ),
           if (_result != null)
-            BoardingCandidatesView(result: _result!, receivedAt: _receivedAt!),
+            BoardingCandidatesView(
+              result: _result!,
+              receivedAt: _receivedAt!,
+              onSelect: widget.onSelectCandidate == null
+                  ? null
+                  : (candidate) {
+                      if (!_current ||
+                          _target == null ||
+                          !_result!.candidates.contains(candidate)) {
+                        return;
+                      }
+                      widget.onSelectCandidate!(
+                        candidate,
+                        BoardingSelectionContext(
+                          routeId: widget.route.id,
+                          targetId: _target!.id,
+                          boardingId: _boarding?.id,
+                        ),
+                        _stopLabel(_target!),
+                      );
+                    },
+            ),
         ],
       ],
     );

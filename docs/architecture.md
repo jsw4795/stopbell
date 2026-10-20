@@ -126,9 +126,21 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 
 로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 목적·선택 승차 지점을 선택한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.
 
-`BoardingCandidateClient`는 기존 `AuthenticatedApiClient`/Auth Session refresh와 generation을 사용한다. 화면의 Route ID·목적/승차 occurrence 변경, 재조회, 화면 폐기에는 요청 epoch를 무효화하며 logout 시작/계정 세대 변경에는 후보·선택 문맥을 제거한다. reference는 화면 메모리에만 두고 서버 추천 순서와 관측 시각을 보존한다. 후보 상태·불확실성의 의미는 [후보 API](api.md#후보-조회)를 따르며 unknown enum은 미확인 상태로 표시한다.
+`BoardingCandidateClient`는 기존 `AuthenticatedApiClient`/Auth Session refresh와 generation을 사용한다. 화면의 Route ID·목적/승차 occurrence 변경, 재조회, 화면 폐기에는 요청 epoch를 무효화하며 logout 시작/계정 세대 변경에는 후보·선택 문맥을 제거한다. 미전송 후보 reference는 화면 메모리에만 두고 서버 추천 순서와 관측 시각을 보존한다. 2단계 생성 요청의 원래 reference 보존은 아래 pending intent 경계를 따른다. 후보 상태·불확실성의 의미는 [후보 API](api.md#후보-조회)를 따르며 unknown enum은 미확인 상태로 표시한다.
 
-1단계는 후보 조회·비교까지만 제공한다. 차량번호 대조 가능과 추적 지원을 구분하고 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 제한을 안내한다. Session 생성 POST·확정·상태/취소/재확인은 2단계, 세션 FCM 수신/tap과 인증/전체 회귀 최종 검증은 3단계에 남는다. 새 Dependency, GPS/위치 권한, polling이나 영속 후보 저장은 추가하지 않는다.
+1단계의 후보 조회·비교와 2단계의 확정·세션 관리가 구현됐다. 차량번호 대조 가능과 추적 지원을 구분하고 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 제한을 안내한다. 세션 FCM 수신/tap과 인증/전체 회귀 최종 검증은 3단계에 남는다. 새 Dependency, GPS/위치 권한, polling이나 후보 목록의 영속 저장은 추가하지 않는다.
+
+### Flutter 탑승 확정과 세션 관리 (TASK-907 2단계)
+
+`BoardingHome`의 화면별 `BoardingSessionController`가 기존 Auth Session과 `BoardingSessionApiClient`를 사용해 생성·복구·현재 세션·상세·취소·재확인을 조율한다. 후보 선택은 POST가 아니며 전체 번호 직접 대조와 명시적 요청 뒤 성공 응답의 실제 status/evaluationStatus를 표시한다. 후보 문맥 변경·재조회·화면 이탈에는 미전송 초안을 폐기하고 최초 전송 전에는 저장 대기까지 포함해 원래 관측의 60초 freshness를 재확인한다. 최신 Provider/목적/운행 검증과 지원 여부의 최종 책임은 Backend에 있다.
+
+생성 의도마다 `Random.secure` 기반 UUID v4를 한 번 발급한다. `SecureBoardingIntentStorage`는 기존 flutter_secure_storage에 원래 UUID·candidateRef·전체 대조 번호·User/login session identity·정확한 Route/목적/선택 승차 ID·관측 시각만 저장한다. Token·FID·Provider raw response는 복제하지 않는다. login session별 key를 사용해 이전 비동기 정리가 다른 로그인 레코드를 삭제하지 않게 한다. 같은 key의 저장·조회·삭제는 화면 instance 간에도 직렬화해 저장 도중 이탈한 화면의 요청을 재진입 화면이 놓치지 않게 한다. write 완료 전에는 POST하지 않으며 저장 실패는 미전송 오류다. 이는 생성 응답 유실 복구용 최소 레코드이며 범용 offline queue가 아니다.
+
+생성 상태는 미시작/전송 중/결과 불확실/해결됨을 구분한다. timeout·통신·파싱·5xx 또는 해석할 수 없는 응답은 원래 identity를 보존한다. 새 UUID/body로 대체하지 않고 `clientRequestId` GET으로 먼저 복구한다. 재진입·프로세스 재시작도 같은 User/login session인 레코드만 조회하며 자동 POST는 하지 않는다. 조회 0개는 처리 중일 수 있으므로 불확실 상태를 유지하고, 사용자의 명시적 재시도만 동일 UUID/body로 허용한다. 불확실했던 재시도의 4xx도 이전 POST 실패의 증거로 사용하지 않는다. 정상 응답 또는 UUID 조회로 terminal을 포함한 세션을 확인한 뒤 레코드를 정리하며 정리 실패 중에는 새 생성 의도를 막는다. 이전 로그인 레코드가 Keychain에 남아도 새 로그인에서는 복구·재전송·표시하지 않는다.
+
+진입 시 pending 복구를 우선하고, 없으면 `scope=current`로 미종료 세션을 복원한다. 조회 오류는 세션 없음이 아니며 재조회 전 생성을 차단한다. 상세는 명시적 새로고침만 제공하고 주기 polling을 추가하지 않는다. READY인 TRACKING에서만 검증 간격을 표시하며 나머지 상태나 변경 결과 불확실 중에는 과거 gap을 숨긴다. 취소는 사용자 확인 뒤 현재 revision으로 요청하고, 실제 반환된 terminal 상태를 보존한다. mutation 응답 유실/충돌은 상세 GET으로 확인하며 재조회도 실패하면 추가 mutation을 막는다. 조회 epoch와 mutation 전후 무효화, revision·Session ID·전체 차량번호·terminal 검증으로 늦은 GET이 새 상태를 되돌리지 않게 한다.
+
+재확인은 같은 Session에서 새 후보 조회와 빈 번호 입력으로 시작한다. 같은 Auth Session 안에 정확한 선택 ID가 남아 있으면 그 문맥으로 조회하고, 없거나 다시 선택이 필요하면 사용자가 Route/occurrence를 재선택한다. response의 routeNumber/targetName/order로 내부 ID를 추측하지 않는다. 다른 차량 번호는 Client에서도 거부하며 같은 차량/경로/운행의 최종 검증은 Backend가 수행한다. 모든 비동기 반영과 늦은 401 refresh/replay는 Auth generation·login/User identity·화면 수명으로 보호한다. 성공 경로는 Fake/Mock으로 검증하며 실제 Provider 지원 보류를 해제하지 않는다.
 
 ## 6. 초기 백엔드 경계
 
