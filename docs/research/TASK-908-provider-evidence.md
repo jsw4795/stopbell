@@ -1,5 +1,7 @@
 # TASK-908 사전 검증 1단계: Provider 차량·진행·하차 가능성 증거
 
+§1~17은 Phase A 기록을 보존한다. **Phase B의 신규 사전검증·미실행 결과는 §18**에 구분한다.
+
 ## 1. 목적과 실행 범위
 
 - 조사일: **2026-10-21, Asia/Seoul**
@@ -231,7 +233,7 @@ ALLOWED 하드코딩·일반 정류장 일괄 허용·stopFlag0 직접 도착·n
 
 ## 13. 독립 수집 도구와 오프라인 검증
 
-추가 파일: [probe](../../tools/provider_evidence_probe.py), [synthetic 테스트](../../tools/test_provider_evidence_probe.py). Python 표준 라이브러리와 기존 `/usr/bin/curl`만 사용하며 Backend import/DB/FCM 연동이 없다. **기본 dry-run은 Credential/승인 파일도 읽지 않고 HTTP 0건**이다.
+로컬 일회성 도구: `tools/provider_evidence_probe.py`, `tools/test_provider_evidence_probe.py`. 두 파일은 Git에 포함하지 않으며 실측·후속 분석 후 사용자 정리 대상이다. 이 문서는 파일 링크에 의존하지 않고 실행 명령과 핵심 정책을 보존한다. Python 표준 라이브러리와 기존 `/usr/bin/curl`만 사용하며 Backend import/DB/FCM 연동이 없다. **기본 dry-run은 Credential/승인 파일도 읽지 않고 HTTP 0건**이다.
 
 ```sh
 python3 -B tools/provider_evidence_probe.py
@@ -335,3 +337,158 @@ curl은 첫 옵션 `--disable`로 개인 `.curlrc`의 trace/redirect/retry 설�
 | Q12 E2E 전 추가 근거 | occurrence 이용 계약·현재 metadata·같은 차량 전환/시각·운행 경계·현장 번호 대응 (§16) |
 | Q13 기존 기능 영향 | Production/Dependency/API/DB/Alarm/Notification/Flutter 변경·실행 없음 (§1·17) |
 | Q14 TASK-908 | **`[ ]` 유지**, TASK-901~907·710/711 상태 보존 (§1·17) |
+
+## 18. Phase B: 제한 실측 사전검증 — 신규 라이브 미실행
+
+### 18.1 환경과 이번 범위
+
+- 점검일: **2026-10-21, Asia/Seoul**. branch `main`, HEAD `a9710a0` (`docs: TASK-908 Provider 실측 사전 조사 및 검증 도구 준비`)
+- 시작 시 `git branch --show-current`, `git status --short`, `git log -3 --oneline` 확인. 기존 변경은 위 Python 도구 2개의 Untracked 상태뿐이며 보존했다
+- **신규 승인 없음 / 실제 계정 잔여 Quota 미확인 / 현재 프로세스의 `PUBLIC_DATA_SERVICE_KEY` 환경변수 없음**. Credential 값·`.env`는 읽지 않았다
+- 이번 Phase B의 **서울 0회, TAGO 0회, metadata 0회, FCM 0회**. 실제 호출 시작·종료 시각과 live 소요 기간은 해당 없음이다. 정상·실패 HTTP 응답도 각각 0건이며 인증/TLS/Quota 오류를 경험한 것으로 기록하지 않는다
+- Backend/Application/Scheduler/DB/Flutter/Alarm/FCM을 실행하거나 수정하지 않았다. Production·Dependency·API·Schema·ADR·Owner 설계·devlog·`.gitignore` 변경 없음
+- TASK-901~907 `[x]`, TASK-908 `[ ]`, TASK-710/711 기존 상태 유지. 이번 사전검증은 Phase B 실측 완료·실제 탑승 E2E·Phase 9 종료 감사가 아니다
+
+### 18.2 도구 실행 계약 대조와 최소 보강
+
+두 Python 소스를 읽고 §12~13과 대조했다. CLI는 기본 dry-run, `--replay`, `--live`, `--approval-file`이며 `--live`와 `--replay`는 함께 사용할 수 없다. 기본 실행은 승인 파일/환경 Credential을 읽거나 transport를 만들지 않는다. 승인 없는 live 거절은 mock 기반 테스트로 검증했고 실제 `--live` 실행은 하지 않았다.
+
+| 안전 경계 | 소스·오프라인 검증 결과 |
+| --- | --- |
+| 승인 | `--live`와 승인 파일 필수, 신규 인간 승인 참조·timezone 포함 기간·Provider/Route/operation/city 정확 일치·Quota 확인 true·유한한 수치 상한 검사. 파일 내용만으로 인간 승인·실제 Quota를 인증하지는 않음 |
+| 요청 예산 | 서울12/TAGO6/전체18 이하, 6라운드·150초 이하. transport 전에 시도 선계수, 실패/timeout도 포함. 다음 요청 timeout+cleanup 예산까지 승인 기간/전체 deadline에 확보하지 못하면 중단 |
+| 간격 | 모든 HTTP 시작 간 최소2초, **각 Provider의 실제 라운드 시작 간 최소20초**. 대기 후에도 요청 직전 예산 재검사 |
+| transport | connect2초, request 최대5초, subprocess timeout은 request+1초로 최대6초. curl `--disable`, retry0, redirect 추적0, HTTPS만, proxy 우회. TLS 실패 시 HTTP·별칭 endpoint fallback 없음 |
+| 범위 | 고정 §12 노선/operation만, 서울 roster→선정 차량 detail→TAGO 순서. TAGO page1/1000 고정. metadata/추가 page/다른 노선/다른 차량 대체 없음 |
+| 실패 | HTTP/Provider/Quota/parse/pagination/identity/필수 진행/시각·진행 모순에서 전체 호출 중단. 예상 밖 실행 오류도 상수 `INTERNAL_SAFETY_ERROR`로 중단 |
+| 기록 | raw 응답·ID·전체 번호·GPS·인증 URL 저장 없음. 원본은 메모리 내 비교만, stdout 허용 필드와 실행별 HMAC 별칭만. curl URL은 stdin, argv·stderr·외부 예외 원문 출력 없음 |
+| freshness | 서울 제공시각/수신시각 분리, age·역행·동일 source time 검사. detail이 roster보다 오래되면 중단하는 연구용 보수 정책 유지. TAGO 원본 시각 합성 없음 |
+
+기존 39개 테스트는 수정 전에 전부 통과했다. 추가 synthetic 회귀검사에서 다음 공백을 재현하고 로컬 도구만 보강했다. 이것은 실제 Provider 장애/관측 결과가 아니다.
+
+1. **Provider별 라운드 간격:** 전체 라운드 기준 대기만으로는 서울의 요청 시간이 변할 때 TAGO 시작 간격이 synthetic 사례에서 14초까지 줄었다. 각 Provider 첫 HTTP의 실제 선계수 시점을 따로 보존하고 대기하도록 수정했다. 대기+다음 요청 예산이 기간 안에 들어가지 않으면 대기/호출 전에 중단한다
+2. **TAGO 전체 item 순번 검증:** 선택되지 않은 item의 `nodeord=0`/음수를 놓칠 수 있었다. 목록 전체의 양수가 아닌 순번을 검사해 `MISSING_OR_INVALID_PROGRESS`로 전체 실행을 중단한다. 기존 null/누락 검사는 유지한다
+3. **내부 예외 보호:** 예상 밖 transport 예외가 외부 메시지를 포함한 traceback으로 전파될 수 있었다. 요청을 이미 선계수한 상태로 상수 오류 원장·중단 요약을 남기고 추가 호출하지 않도록 보강했다. CLI의 예상 밖 오류도 원문을 출력하지 않는다
+
+회귀 테스트 5개를 추가해 **44개 전부 통과, failure/error/skip 0**. 새 Dependency는 없다. 모든 transport는 mock/fake이며 실제 호출은 0건이다. 원본 Python 파일은 문서에 복제하지 않으며 삭제하지 않았다.
+
+### 18.3 승인·Quota·Credential의 남은 선행 조건
+
+이 사용자 요청은 **사전 점검·준비 승인**이며 새 라이브 승인이 아니다. 과거 TASK-901의 Quota 생략 예외도 재사용하지 않는다. 실제 계정 상태를 읽는 연결 도구나 현재 잔여량 증거를 확보하지 못했으므로 아래를 미확인으로 유지한다. 공개 Portal의 신청 가능 트래픽과 과거 성공 응답은 대체 증거가 아니다.
+
+| 서비스별 계정 확인 항목 | 서울 버스위치 / TAGO 위치 |
+| --- | --- |
+| 현재 활용승인·서비스 권한 | 양쪽 미확인 |
+| 계정 일일 한도·실제 사용량·잔여량 | 양쪽 미확인 |
+| 같은 Key의 서비스/operation별 집계 단위 | 미확인 |
+| reset 기준·시각 | 미확인 |
+| 다른 프로세스/사용자와 공유 여부·병행 소비 | 미확인. 이번 작업에서 Backend를 실행하지 않은 사실만으로 다른 소비자가 없다고 보장 못함 |
+
+라이브를 재개하려면 다음을 함께 확인해야 한다. **승인 파일은 작성하지 않았고 `quotaConfirmed=true`도 설정하지 않았다.**
+
+- 신규 인간 승인: §12의 정확한 Provider·Route·endpoint, 서울 roster6/detail6 이하 총12·TAGO6 이하·전체18 이하와 150초 이하, 6라운드 이하·20초/2초 최소 간격·connect2/request5/cleanup 포함6초·retry0·전체 중단 정책
+- 실제 계정 확인 결과: 두 서비스의 승인 상태·한도·사용량·잔여량·공유 집계·reset·병행 소비 위험을 확인한 근거와 확인 시각. Key 문자열은 공유하지 않는다
+- timezone을 포함한 실행 시작/종료 허용 window. 최대치만으로 실행 시각을 임의 확정하지 않는다
+- 비식별 stdout 요약 정책의 명시적 승인. 파일 보관을 원하면 저장소 밖 정확한 임시 경로와 삭제 시점을 추가 승인해야 한다. 경로/삭제 정책이 없으면 파일로 redirect하지 않는다
+- 실행 프로세스에 기존 Key를 안전하게 주입. 승인 파일 생성·Credential 존재만으로 라이브 승인이 생기지 않는다
+
+현재 환경변수가 없으므로 사용자가 실행할 로컬 zsh의 비표시 입력 절차는 아래와 같다. **이번에 이 입력·export를 실행하지 않았다.** Key를 command argument·채팅·보고서에 붙이지 않고, `.env` 자동 로딩을 추가하지 않는다.
+
+```sh
+set +x
+read -rs 'PUBLIC_DATA_SERVICE_KEY?기존 인증키 입력(표시 안 됨): '
+print
+export PUBLIC_DATA_SERVICE_KEY
+# 승인·Quota·window·기록 정책 확인 및 승인 파일 검토 후에만:
+# python3 -B tools/provider_evidence_probe.py --live --approval-file /private/tmp/task908-approval.json
+# 실행·분석 후 해당 shell에서 unset PUBLIC_DATA_SERVICE_KEY
+```
+
+### 18.4 이번 실제 관측과 한계
+
+| 항목 | SEOUL_BUS 7016 | TAGO 수원7000 |
+| --- | --- | --- |
+| HTTP 시도 / 정상 / 실패 | **0 / 0 / 0** | **0 / 0 / 0** |
+| live 시작·종료·관측 기간 | 해당 없음 | 해당 없음 |
+| 미실행 이유 | 신규 승인·계정 Quota 증거·환경 Credential 미확보 | 동일 |
+| identity·차량 소실/재등장 | 신규 관측 없음 | 신규 관측 없음 |
+| roster/detail ID·번호·시간 대응 | 미관측, 일치/불일치 판단 불가 | 별도 detail 없음 |
+| 진행 변화 | stId/stOrd/stopFlag/sectOrd/sectionId 미관측 | nodeid/nodeord·번호 변화 미관측 |
+| pagination·필수 필드 | 미관측 | pageNo/numOfRows/totalCount/item 수·nodeid/nodeord 누락 재현 여부 모두 미확인 |
+| 제공시각·수신시각 | 실제 dataTm/수신 원장 없음. 두 시각의 구분 로직만 synthetic 검사 | 이번 원장 없음. 기존 명세의 원본 시각 부재 한계는 유지 |
+
+실행 전 보류이므로 실패한 HTTP 시도 번호·추가 호출은 해당 없음/0회다. 실제 응답을 수집하지 않아 신규 관측 원장 파일을 만들지 않았다. “변화 없음”은 같은 차량을 반복 관측한 결과에만 쓰며 이번에는 **미관측**이다. 과거 2026-10-16 TAGO nodeid 문제나 2026-09-09 서울 flag 전환을 이번 재현으로 합치지 않는다.
+
+현재 metadata API/DB 조회가 없으므로 과거 metadata와 현재 실시간 진행의 exact 대응을 주장하지 않는다. 실제 탑승·물리 번호 대조·실제 정차/하차를 수행하지 않았으며, 제한 API 관측을 하더라도 이 현장 검증을 대체하지 않는다.
+
+### 18.5 Backend 요구와 이번 증거 비교
+
+§4~11의 코드 분석과 현재 아래 7개 클래스를 다시 대조했다. **모든 행에서 이번 실제 Provider 증거는 0건**이며, 코드를 읽거나 synthetic 도구 테스트를 통과한 것을 실측 증거로 승격하지 않는다.
+
+| 조건 / 현재 요구·담당 코드 | 이번 확보 근거 | 미검증 입력과 실패 위험 | 추가 검증 |
+| --- | --- | --- | --- |
+| candidate identity / `BoardingCandidateService` | 원래 reference·최신 roster/detail 검증 코드 재확인 | 실제 ID 충돌·소실·재사용, 다른 운행 오연결 | ID/번호 연속 관측·기관 ID 수명 정책 필요 |
+| vehicleNumber / Service·`BoardingVehicleTracker` | 서울 요청 ID/응답 ID·roster/detail 전체 번호 검사 재확인 | 실제 pair/차체 번호 대응, 번호가 같은 다른 ID | pair 실측과 현장 직접 대조 필요 |
+| providerDataTime / `BoardingCandidateMapper` | 서울 strict KST 파싱, TAGO null 코드 확인 | 실제 source timestamp 반복·역행·정확한 생성 의미 | 서울 dataTm/기관 설명, TAGO source age 근거 필요 |
+| observedAt / Service·Mapper | 성공 응답 수신 직후 시각 전달 확인 | 요청 시작/물리 도착과 혼동, 지연 원인 미상 | 실제 요청 시작·수신·제공·현장 시각 분리 필요 |
+| source freshness / `BoardingProgressEvaluator`·Tracker | 60초·future/역행·중복·PT2M 공백 검사 확인 | TAGO 원본 age 부재, 제공시각이 실제 발생시각인지 불명 | freshness·중복·공백 실측 필요 |
+| directionContext / Tracker·Evaluator | adapter null, 이전 문맥과 일치 검사 | null 일치가 같은 방향/운행을 입증하지 않음 | 방향·trip·turn 경계 독립 근거 필요 |
+| traversalAmbiguous / Tracker·Evaluator | adapter false, 명시 ambiguity는 보류 | false를 lap 검증 완료로 오인할 위험 | 반복 Stop·분기·회차·lap 별도 검증 필요 |
+| orderOnlyVerified / Tracker·Evaluator | false, exact ID/order 대응 우선 | TAGO 누락 nodeid의 order만으로 가짜 Stop 합성 위험 | 노선별 order 체계 독립 검증 전 비활성 유지 |
+| meaning / Tracker·Evaluator | 서울 exact flag1만 DIRECT_ARRIVAL, 그 외 UNVERIFIED | flag0을 출발/접근으로 해석, TAGO order를 도착으로 오인 | moving 전환 관측과 기관 의미 근거 필요 |
+| targetAlightAvailability / `BoardingSessionStartValidator` | 최신 후보 검증 후 항상 미지원 throw, ALLOWED 공급 경로 없음 | 일반 Stop/진행 성공을 목적 하차 허용으로 승격할 위험 | occurrence별 이용 허용 source·유효 범위·분류 근거 먼저 확보 |
+| metadata / `BoardingTrackingMetadata` | Route/city·전체 occurrence ID/Stop/order snapshot 비교 | 저장 구조 일치가 upstream 현재 운행·이용 정책 증명은 아님 | 최신 source 대응 및 분류 연결 검증 필요 |
+| occurrence gap2/1 / Evaluator | targetIndex-progressIndex, 검증 meaning·ALLOWED·freshness 선행 | 숫자 계산 성공을 실제 적시 준비 알림으로 오인 | 모든 선행 근거 확보 후 현장 gap/표시 지연 검증 필요 |
+| runtime / `BoardingTrackingRuntime` | commit된 revision/checkpoint·freshness 일치 때만 READY | gate를 열어도 Provider 의미가 새로 입증되지는 않음 | 공급 근거 검증·commit/gate 영향 테스트 후 판단 |
+
+Provider 연속 관측이 성공하더라도 **ALLOWED는 자동 공급되지 않는다**. 이번 연구용 `detail >= roster` 시각 정책을 기존 운영 계약으로 승격하지 않는다. 기존 반복 Stop 시작 검증의 보수적 차단과 Domain의 관측 쌍 기반 계약 차이는 §9에 기록된 기존 지원 경계이며 이번에 설계를 변경하지 않는다.
+
+### 18.6 증거 등급·지원 판정과 다음 최소 작업
+
+| 판단 대상 | TAGO | SEOUL_BUS |
+| --- | --- | --- |
+| 이번 신규 실제 응답 가용성 | **UNAVAILABLE** | **UNAVAILABLE** |
+| 이번 identity/progress/freshness 의미 검증 | **UNVERIFIED** | **UNVERIFIED** |
+| 과거 제한 표본의 ID/진행 일부 | PARTIALLY_VERIFIED, §2·10의 과거 범위만 | PARTIALLY_VERIFIED, 과거 다른 노선 표본을 7016로 확대하지 않음 |
+| 모든 item의 nodeid가 항상 유효하다는 가정 | 과거 결과에 의해 CONTRADICTED, 이번 재현 아님 | 해당 없음 |
+| 목적 ALLOWED·반복 occurrence·회차/lap·물리 하차 | UNVERIFIED | UNVERIFIED |
+| 현재 실제 하차 Session/gap2/1 제품 지원 | **UNSUPPORTED** | **UNSUPPORTED** |
+| 향후 기술 가능성 | UNDETERMINED | CONDITIONAL_NOT_ENABLED |
+
+이번에 VERIFIED로 승격한 Provider 항목과 `SUPPORTED_FOR_DEFINED_SCOPE`인 새 하차 지원 범위는 없다. 승인/Quota 부재를 Provider 자체 기능 부재의 증거로 해석하지 않는다. `BOARDING_TRACKING_UNSUPPORTED`를 유지한다.
+
+다음 순서는 §15~16을 유지한다. 우선 기관의 **노선×방향×occurrence별 정차/하차 허용 정의·코드표·유효기간/예외**를 확보하고, 서울 moving 기준점/전환과 dataTm 생성 의미, 양 Provider identity 수명·노선 변경·회차 정책을 확인한다. 기관에 연락하는 작업은 이번에 수행하지 않았다. 승인·계정 Quota·환경이 갖춰지면 §12의 좁은 실측만 수행해 변화/실패/미관측을 분리한다. 회차·lap까지 확인하지 못하면 별도 검증으로 남긴다.
+
+Backend 최소 변경 후보는 **근거 확보 후** metadata snapshot→validator의 검증된 하차 분류 전달, 근거가 확인된 범위의 pair 시각·moving meaning·traversal 입력 공급 검토다. 저장/만료/정책·Schema 필요 여부는 별도 개발자 판단 사항이며 지금 구현하지 않는다. 이후 UNKNOWN/PROHIBITED·근거 만료·방향 불일치·source 반복/역행·소실·lap·commit/gate 테스트를 수행한 뒤 명시적 지원 판단과 실제 버스/iPhone E2E로 진행한다. E2E는 현장 번호/정차/하차, Event/전송/기기 표시·tap 시각, foreground/background/terminated, 취소/재시작·기존 Alarm 병행과 TASK-710/711 검증을 포함한다.
+
+### 18.7 이번 요청의 완료 질문 Q1~Q17
+
+| 질문 | 답 |
+| --- | --- |
+| Q1 실제 HTTP 수 | 서울0 / TAGO0 |
+| Q2 정상·실패 종류 | 양쪽 정상0·실패0. 실행 전 보류이며 HTTP/auth/TLS 실패로 분류하지 않음 |
+| Q3 서울 동일 vehId/plainNo 연속 | 미관측 |
+| Q4 서울 stId/stOrd/stopFlag 변화 | 미관측. 변화 없음으로 단정 불가 |
+| Q5 flag0 이동 의미 | 이번 추가 검증 없음. §3·7의 기존 문서상 운행 중 정의만, 출발/접근 의미 UNVERIFIED |
+| Q6 roster/detail ID·번호 일치 | 이번 미관측, 검사 코드·인공 테스트만 확인 |
+| Q7 TAGO 누락 재발 | 요청0이므로 미확인. 2026-10-16의 문제는 과거 근거로 보존 |
+| Q8 TAGO 동일 번호 진행 변화 | 이번 미관측 |
+| Q9 제공/수신 시각 구분 | 구분 로직·synthetic 검사는 수행. 실제 시각쌍 분석은 미실행, TAGO source time 합성 없음 |
+| Q10 반복 Stop·회차·lap 입증 | 불가, UNVERIFIED |
+| Q11 목적 occurrence 하차 허용 | 입증 불가. 현재 ALLOWED 공급 source 없음 |
+| Q12 GPS 없이 gap2/1 활성화 | 안전하다고 판단할 근거 부족, 비활성 유지 |
+| Q13 미지원 유지 | `BOARDING_TRACKING_UNSUPPORTED` 유지, Production 변경 없음 |
+| Q14 우선 공백 | occurrence별 하차 허용 근거와 공급 경로, moving/운행 연속성·freshness·traversal 증거 |
+| Q15 E2E 전 남은 작업 | 신규 승인·계정 Quota·Credential, 제한 실측/공식 의미·최신 metadata 대응, 근거 공급 최소 구현/검증과 지원 판단, 현장/FCM/iPhone 준비 |
+| Q16 보호 위반 | 이번 실제 HTTP·raw 수집/저장·Credential 값 읽기/출력0. 확인한 실행 범위에서 위반 없음. 계정 잔여량이나 live 안전성 검증 완료 주장은 아님 |
+| Q17 두 Python Git 추가 | 추가하지 않음. 둘 다 Untracked로 보존, 사용자 후속 정리 대상 |
+
+### 18.8 검증·문서·Git 상태
+
+- `python3 -B -m unittest discover -s tools -p 'test_provider_evidence_probe.py' -v`: **44개 통과**, 모두 offline synthetic/mock/fake. 기본 dry-run은 `totalAttempts=0`, `supportEnabled=false`
+- 승인 scope/Quota false/기간/시간·횟수·간격/실패 후 추가 호출0, retry0/redirect0/HTTPS, 원장·argv 비식별 및 외부 예외 원문 비노출 회귀 검사 수행. 실제 endpoint·권한·TLS 성공은 검증하지 않음
+- 보고서의 Git 미포함 도구 Markdown 링크 제거, 실행 명령·연구 정책·Phase A의 39개 테스트 기록 보존. 이번 Phase B는 44개로 별도 기록
+- 관련 요구사항·Architecture·Domain·API·ADR-006/011/012와 코드 대조. 새 설계 결정이 없어 Owner 문서 변경 없음. `task-list.md`에는 이번 준비 범위만 추가하고 TASK-908 `[ ]` 유지
+- 문서 상대 파일 참조·Task checkbox 보존, Python AST/별도 공백 검사, `git diff --check`와 최종 `git status --short` 검사 수행. Backend/Flutter 전체 suite는 Production 변경이 없어 미실행
+- **git add/commit/push·브랜치/Worktree 생성·checkout/switch/reset/clean/stash 미실행**. 두 도구는 삭제/스테이징하지 않는다
+- 향후 문서만 커밋할 때의 제안 제목: `docs: TASK-908 Phase B 실측 사전검증 및 미실행 조건 기록`. 실제 실측 결과를 확보한 것처럼 표현하지 않는다
