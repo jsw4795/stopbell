@@ -1,5 +1,6 @@
 package com.stopbell.transit.client;
 
+import java.net.URI;
 import java.time.Duration;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -35,6 +36,13 @@ public record TransitClientProperties(
 
         public Seoul {
             requireNotBlank(baseUrl, "Seoul bus base URL");
+            URI uri = URI.create(baseUrl);
+            if (!"http".equals(uri.getScheme()) || !"ws.bus.go.kr".equals(uri.getHost())
+                    || uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null
+                    || (uri.getPort() != -1 && uri.getPort() != 80)
+                    || !(uri.getRawPath().isEmpty() || "/".equals(uri.getRawPath()))) {
+                throw new IllegalArgumentException("Seoul bus base URL must be the official HTTP ws.bus.go.kr origin");
+            }
             requireNotBlank(serviceKey, "Seoul bus service key");
         }
     }

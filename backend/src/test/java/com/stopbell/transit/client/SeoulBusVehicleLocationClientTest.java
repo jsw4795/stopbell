@@ -28,7 +28,7 @@ class SeoulBusVehicleLocationClientTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         client = new SeoulBusVehicleLocationClient(builder.build(), new TransitClientProperties.Seoul(
-                "https://provider.test/seoul", "test-service-key"
+                "http://ws.bus.go.kr", "test-service-key"
         ));
     }
 
@@ -98,11 +98,92 @@ class SeoulBusVehicleLocationClientTest {
     }
 
     @Test
+    @DisplayName("서울 상류 HTTP 401은 인증된 StopBell API의 상태와 구분하고 기능명은 유지한다")
+    void fetch_with_upstream_unauthorized_preserves_origin() {
+        expectRequest().andRespond(withStatus(HttpStatus.UNAUTHORIZED)
+                .body("<error>upstream-body-secret</error>").contentType(MediaType.APPLICATION_XML));
+
+        assertThatThrownBy(() -> client.fetchVehicleLocations(request()))
+                .isInstanceOfSatisfying(TransitProviderClientException.class, exception -> {
+                    assertThat(exception.failureKind()).isEqualTo(TransitProviderClientFailureKind.HTTP);
+                    assertThat(exception.httpStatus()).isEqualTo(401);
+                    assertThat(exception.operation()).isEqualTo("getBusPosByRtidList");
+                    assertThat(exception.getMessage()).doesNotContain("test-service-key", "upstream-body-secret");
+                });
+        server.verify();
+    }
+
+    @Test
     @DisplayName("서울 roster transport failure는 TRANSPORT 예외로 구분한다")
     void fetch_with_transport_failure_throws_transport_exception() {
         expectRequest().andRespond(withException(new IOException("offline")));
 
         assertFailure(TransitProviderClientFailureKind.TRANSPORT, () -> client.fetchVehicleLocations(request()));
+    }
+
+
+    @Test
+    @DisplayName("공식 HTTP roster XML의 반복 차량과 핵심 필드를 파싱한다")
+    void parse_xml_roster() {
+        expectRequest().andRespond(withSuccess("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <ServiceResult><msgHeader><headerCd>0</headerCd></msgHeader><msgBody>
+                <itemList><vehId>vehicle-a</vehId><plainNo>서울70사1234</plainNo><sectOrd>21</sectOrd>
+                <stopFlag>0</stopFlag><dataTm>20261028160000</dataTm><unknown>ignored</unknown></itemList>
+                <itemList><vehId>vehicle-b</vehId><plainNo>서울70사5678</plainNo><sectOrd>22</sectOrd>
+                <stopFlag>1</stopFlag><dataTm>20261028160001</dataTm></itemList>
+                </msgBody></ServiceResult>
+                """, MediaType.APPLICATION_XML));
+        var response = client.fetchVehicleLocations(request());
+        assertThat(response.header().headerCd()).isEqualTo("0");
+        assertThat(response.body().itemList()).hasSize(2).first().satisfies(item -> {
+            assertThat(item.vehId()).isEqualTo("vehicle-a");
+            assertThat(item.plainNo()).isEqualTo("서울70사1234");
+            assertThat(item.sectOrd()).isEqualTo(21);
+            assertThat(item.stopFlag()).isZero();
+            assertThat(item.dataTm()).isEqualTo("20261028160000");
+        });
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("서울 XML 결과 없음과 논리 오류를 구분한다")
+    void xml_empty_and_provider_error() {
+        expectRequest().andRespond(withSuccess(
+                "<ServiceResult><msgHeader><headerCd>4</headerCd></msgHeader><msgBody/></ServiceResult>",
+                MediaType.APPLICATION_XML));
+        assertThat(client.fetchVehicleLocations(request()).body().itemList()).isEmpty();
+        server.verify();
+        server.reset();
+        expectRequest().andRespond(withSuccess(
+                "<ServiceResult><msgHeader><headerCd>7</headerCd></msgHeader></ServiceResult>",
+                MediaType.APPLICATION_XML));
+        assertFailure(TransitProviderClientFailureKind.PROVIDER, () -> client.fetchVehicleLocations(request()));
+    }
+
+    @Test
+    @DisplayName("서울 XML 외부 entity와 잘못된 숫자 및 envelope를 protocol 실패로 거부한다")
+    void reject_unsafe_or_malformed_xml() {
+        for (String xml : new String[] {
+                "<!DOCTYPE ServiceResult [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]><ServiceResult>&xxe;</ServiceResult>",
+                "<ServiceResult><msgHeader><headerCd>0</headerCd></msgHeader><msgBody><itemList><sectOrd>bad</sectOrd></itemList></msgBody></ServiceResult>",
+                "<html>not-provider-data</html>", "<ServiceResult>"}) {
+            server.reset();
+            expectRequest().andRespond(withSuccess(xml, MediaType.APPLICATION_XML));
+            assertFailure(TransitProviderClientFailureKind.PROTOCOL, () -> client.fetchVehicleLocations(request()));
+        }
+    }
+
+    @Test
+    @DisplayName("서울 redirect는 Location을 따라가지 않고 HTTP 실패로 반환한다")
+    void reject_redirect() {
+        expectRequest().andRespond(withStatus(HttpStatus.FOUND).header("Location", "http://evil.test/collect"));
+        assertThatThrownBy(() -> client.fetchVehicleLocations(request()))
+                .isInstanceOfSatisfying(TransitProviderClientException.class, e -> {
+                    assertThat(e.failureKind()).isEqualTo(TransitProviderClientFailureKind.HTTP);
+                    assertThat(e.httpStatus()).isEqualTo(302);
+                });
+        server.verify();
     }
 
     private VehicleLocationRequest<SeoulBusVehicleLocationRequestContext> request() {
@@ -111,7 +192,9 @@ class SeoulBusVehicleLocationClientTest {
 
     private ResponseActions expectRequest() {
         return server.expect(request -> {
-            assertThat(request.getURI().getPath()).isEqualTo("/seoul/getBusPosByRtidList");
+            assertThat(request.getURI().getScheme()).isEqualTo("http");
+            assertThat(request.getURI().getHost()).isEqualTo("ws.bus.go.kr");
+            assertThat(request.getURI().getPath()).isEqualTo("/api/rest/buspos/getBusPosByRtid");
             assertThat(request.getURI().getQuery())
                     .isEqualTo("serviceKey=test-service-key&busRouteId=100100118");
         });

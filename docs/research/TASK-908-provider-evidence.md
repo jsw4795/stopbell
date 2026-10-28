@@ -1,6 +1,6 @@
 # TASK-908 사전 검증 1단계: Provider 차량·진행·하차 가능성 증거
 
-§1~17은 Phase A 기록을 보존한다. **Phase B의 신규 사전검증·미실행 결과는 §18**에 구분한다.
+§1~17은 Phase A 기록을 보존한다. **Phase B의 사전검증은 §18, 최초 점검·보류는 §19, 실제 실행은 §20, 후속 인증 없는 연결 진단과 로컬 경로 수정은 §21**에 구분한다. 각 절의 승인·환경·호출 횟수는 해당 작업 시점의 기록이다. 누적 인증 데이터 요청 시도는 **서울1회/TAGO0회, 실제 데이터 확보0건**이며, §21의 **인증 없는 서울 HTTP 진단4회**는 별도다.
 
 ## 1. 목적과 실행 범위
 
@@ -492,3 +492,188 @@ Backend 최소 변경 후보는 **근거 확보 후** metadata snapshot→valida
 - 문서 상대 파일 참조·Task checkbox 보존, Python AST/별도 공백 검사, `git diff --check`와 최종 `git status --short` 검사 수행. Backend/Flutter 전체 suite는 Production 변경이 없어 미실행
 - **git add/commit/push·브랜치/Worktree 생성·checkout/switch/reset/clean/stash 미실행**. 두 도구는 삭제/스테이징하지 않는다
 - 향후 문서만 커밋할 때의 제안 제목: `docs: TASK-908 Phase B 실측 사전검증 및 미실행 조건 기록`. 실제 실측 결과를 확보한 것처럼 표현하지 않는다
+
+## 19. Phase B 실행 요청 — 계정 Quota 확인 불가로 live 보류 (2026-10-27)
+
+### 19.1 이번 승인과 실행 전 확인 결과
+
+- 사용자가 이번 요청에서 **실제 Provider 호출을 승인**했다. §18의 신규 승인 부재는 과거 기록이며 이번 보류 사유가 아니다
+- branch `main`, 기준 HEAD `f6b2bdd0f6eb64462758d6f766d333505ac13ca9`. 시작 시 변경은 기존 Python 도구 2개의 Untracked 상태뿐이었다. 도구·테스트 소스와 approval-file 계약을 확인했으며 수정하지 않았다
+- 승인 범위는 서울 7016 `busRouteId=100100447`의 roster/detail 합계 최대12회, TAGO 수원7000 `routeId=GGB200000112`, `cityCode=31010` 위치 최대6회다. 전체18 HTTP 시도·150초·Provider별6라운드 이하, 같은 Provider 라운드 시작 간20초·전체 HTTP 시작 간2초 이상, 자동 retry·추가 호출 금지를 유지했다
+- `python3 -m unittest discover -s tools -p 'test_provider_evidence_probe.py' -v`: **44개 통과, failure/error/skip 0**. 기존 mock/fake/synthetic 검증이며 실제 API 호출은 없다
+- `python3 -B tools/provider_evidence_probe.py`: 기존 도구를 기본 모드로 실행해 `DRY_RUN`, `totalAttempts=0`, `supportEnabled=false`를 확인했다. 이를 live 실행 성공으로 세지 않는다
+- **17:07:16 KST** Credential 존재 점검: 현재 프로세스의 `PUBLIC_DATA_SERVICE_KEY`는 없고, 로컬 `.env`의 해당 값은 비어 있지 않았다. 값은 메모리에서 존재 여부만 확인하고 출력·파일 복제·Git 기록하지 않았다. `.env` 전체를 shell로 실행하거나 다른 설정을 주입하지 않았다. 실제 인증 유효성·서비스별 권한은 미검증이다
+- 서울/TAGO 계정 승인·잔여량을 읽는 전용 연결 도구가 없어 기존 Chrome 공공데이터포털 탭을 확인했다. 기존 상세 화면은 데이터명·서비스·상세기능이 비어 있어 표시된 일반적인 `승인` 문구를 두 서비스의 승인 증거로 인정하지 않았다. 화면에 표시된 마이페이지 주소로 이동하자 **공공데이터포털 로그인·보안문자 화면으로 전환**됐다. 현재 세션에서는 계정 확인을 진행할 수 없었고 로그인·보안문자를 대신 수행하지 않았다
+- 위 계정 화면 확인은 **17:07~17:09 KST** 작업 중 수행했다. Portal HTML 열람은 아래 버스 데이터 API 시도 횟수에 포함하지 않는다. 공개 서비스의 신청 가능 트래픽이나 과거 성공 응답으로 실제 계정 잔여량을 대체하지 않았다
+
+| live 선행 조건 | 이번 확인 결과 |
+| --- | --- |
+| 사용자 실측 의사·호출 상한 | 이번 요청으로 확인 |
+| Credential 존재 | 로컬 `.env`에 비어 있지 않은 값 확인. 실행 환경 주입 전이며 실제 유효성 미확인 |
+| 서울 버스위치 서비스 현재 활용승인·operation 권한 | 로그인 필요, 확인 불가 |
+| TAGO 버스위치 서비스 현재 활용승인·operation 권한 | 로그인 필요, 확인 불가 |
+| 각 서비스 오늘 한도·실제 사용량·잔여량 | 확인 불가. 서울12/TAGO6 호출을 감당하는지 판정 불가 |
+| Key/서비스/operation별 공유 집계·reset 기준/시각·병행 소비 | 확인 불가 |
+| approval-file·live 실행 | **승인 파일 미작성, 실제 실행용 `quotaConfirmed=true` 설정 없음, `--live` 미실행** |
+
+오프라인 테스트의 synthetic 승인 fixture는 실제 계정 확인 증거가 아니다. 도구 계약을 우회하거나 인증/Quota 확인용 버스 API를 별도로 호출하지 않았다. live의 시작·종료 window와 150초 예산은 가동하지 않았고, 실제 실행 시작·종료 시각도 없다. 계정 확인 후 실행 시점에 유효한 window로 계약을 충족해야 한다.
+
+### 19.2 실제 호출과 분석 가능한 근거
+
+| 항목 | SEOUL_BUS 7016 | TAGO 수원7000 |
+| --- | --- | --- |
+| 실제 HTTP 시도 / 성공 / 실패 | **0 / 0 / 0** | **0 / 0 / 0** |
+| 실제 관측 기간·차량 표본 | 없음 | 없음 |
+| 동일 차량 식별·진행 변화 | vehId/plainNo 유지, roster/detail 일치, stId/stOrd 진행, stopFlag 0/1 전환 모두 **미관측** | 같은 차량번호의 nodeid/nodeord 진행 모두 **미관측** |
+| 필드·pagination | 신규 응답 없음 | nodeid/nodeord 누락 및 pageNo/numOfRows/totalCount/item 수 정합성 **미확인** |
+| 시각·신선도 | dataTm 갱신과 실제 수신시각 차 **분석 불가** | 신규 원본 응답 없음. 기존 원본 생성시각 부재 한계를 해소한 근거도 없음 |
+| 이번 발견한 Provider 장애 | 없음: 호출 전 보류이므로 정상/인증 실패/Quota 소진/TLS 실패 어느 쪽도 입증 안 됨 | 동일 |
+
+metadata API·FCM 호출도 각각0회다. 비식별 관측 원장·raw 응답 파일을 생성하지 않았다. **미관측을 변화 없음으로 표현하지 않으며**, 과거 TAGO 필드 누락이나 과거 서울 진행 변화를 이번 재현으로 계산하지 않는다. 이번 계정 로그인 필요는 실행 환경의 차단 조건이며 Provider 데이터 품질 문제의 증거가 아니다.
+
+### 19.3 사용자에게 필요한 조치와 후속 최소 범위
+
+1. 브라우저에 열린 공공데이터포털에서 직접 로그인한 뒤 계정 화면 확인을 재개할 수 있게 한다. Key·비밀번호·보안문자를 채팅이나 문서에 전달할 필요는 없다
+2. 서울 버스위치와 TAGO 버스위치 각각의 현재 활용승인·상세기능 권한, 오늘 한도·사용량·잔여량과 확인 시각, Key/서비스/operation별 집계 단위·초기화 기준/시각을 확인한다. 병행 소비 여부도 확인해 서울12/TAGO6·전체18회 예산을 확보한다. Portal에서 실제 사용량을 제공하지 않으면 기관/계정 사용량 근거가 필요하며 미확인을 true로 바꾸지 않는다
+3. 위 확인 후 기존 Key를 실행 프로세스 환경변수로만 안전하게 주입하고, 이번 승인 상한·유효 실행 window·비식별 stdout 정책을 반영한 approval-file로 기존 도구를 실행한다. 별도 관측 파일 보관 승인 없이 stdout을 파일로 redirect하지 않는 기존 계약을 유지한다
+
+이번에 새로 확보한 Provider 응답이 없으므로 하차 가능 정류장 분류, 서울 이동 reference 의미·TAGO 원본 신선도, 차량 물리 동일성·방향·회차/lap·최신 metadata exact 대응을 검증된 것으로 바꾸지 않는다. `BOARDING_TRACKING_UNSUPPORTED` 유지이며 실제 탑승·Backend/Flutter/FCM E2E도 미실행이다.
+
+**다음 Backend 수정에 이번 실행이 새로 요구하는 변경은 없다.** 기존 최소 후보(§11·18.6)는 근거 확보 후 metadata snapshot→validator에 검증된 occurrence 하차 분류/근거를 전달하고, 검증된 범위에서만 roster/detail pair·시각·진행 meaning을 공급하는 경로다. 현재 증거로 UNKNOWN→ALLOWED, 이동 meaning 승격, order-only 허용, 회차/lap 안전성 또는 지원 제한 해제를 정당화하지 않는다.
+
+### 19.4 문서·Git·검증 범위
+
+- 이번 변경은 이 절과 문서 상단의 시점 안내, `task-list.md`의 진행 기록뿐이다. 기존 Phase A/사전검증 기록은 보존하고 **TASK-908 `[ ]`** 및 다른 Task checkbox를 유지한다
+- Production·설정·Dependency·API·DB·Owner 설계·ADR·devlog 변경 없음. Backend/Flutter/FCM 실행 없음. Provider 실측이나 Phase 9 전체 감사·실차 E2E를 완료로 보고하지 않는다
+- branch/Worktree 생성·Git add/commit/push 없음. 두 Python 도구는 수정·스테이징하지 않고 Untracked로 유지한다
+- `git diff --check`, 문서 diff·status 검토, 전체 Task checkbox 보존, 두 Python 파일 SHA-256 불변·AST 검사, 실제 Key 원문/인코딩 변형의 문서 diff 비포함 검사를 통과했다. 테스트 실행으로 생긴 두 `.pyc`와 빈 `__pycache__`만 제거했다
+
+## 20. Phase B 실제 실행 — 첫 서울 요청 timeout으로 전체 중단 (2026-10-27)
+
+### 20.1 계정 확인과 이번 요청에 한정된 Quota 예외
+
+§19 이후 사용자가 로그인한 포털에서 계정 상세를 확인했다. 이는 공개 서비스의 일반 신청 가능량이 아닌 **현재 계정의 승인 상세 화면** 확인이다. 두 서비스 모두 개발계정 승인, 활용기간 `2026-09-09 ~ 2028-09-09`로 표시됐다.
+
+| 서비스 | 이번 직접 확인한 상세기능·일일 트래픽 | 확인하지 못한 내용 |
+| --- | --- | --- |
+| 서울특별시_버스위치정보조회 서비스 | `getBusPosByRtidList` 1,000회, `getBusPosByVehIdItem` 1,000회 | 오늘 사용량·실제 잔여량·reset 기준/시각·병행 소비 |
+| 국토교통부_(TAGO)_버스위치정보 | `getRouteAcctoBusLcList` 10,000회 | 동일 |
+
+사용자는 API별 별도 집계라고 설명했고, 후속 답변에서 **현재 잔여량은 확인 불가**, 오늘 사용하지 않아 전량 남았을 것이라고 설명했다. 후자는 사용자의 미사용 설명·잔여량 추정이며 실제 계정 잔여량 측정값이 아니다. 서울과 TAGO의 실측 대상 operation이 승인 목록에 있는 것은 확인했지만, quota 잔여량을 검증 완료로 승격하지 않는다.
+
+그 뒤 사용자가 **“`quotaConfirmed=true` 설정하고 할 수 있는거 모두 진행해”**라고 명시했다. 이번 실행에 한해 이전의 잔여량 확인 선행 조건을 생략하는 **사용자 승인 예외**로 반영했다. approval-file의 `quotaConfirmed=true`는 이 예외 승인에 따른 실행 허용 표시이며 실제 잔여량 확인 증거가 아니다. `approvalReference`에 예외 경위, 별도 `quotaEvidence`에 `remainingQuotaStatus=UNVERIFIED`와 명시적 사용자 예외를 함께 기록했다. 향후 실행의 일반 Quota 확인 계약을 완화하거나 과거 확인 기록을 변경한 것이 아니다.
+
+다른 실행 한도·operation·노선·실패 시 전체 중단 계약은 그대로 적용했다. 승인 파일은 저장소 밖 `/private/tmp`에 실행 직전 생성했으며 Key를 포함하지 않았다. UTC 허용 window는 **08:16:28.514851~08:18:58.514851**(KST **17:16:28.514851~17:18:58.514851**)로 150초였다. 실행 종료 시 승인 파일을 제거했다. 기존 `.env`의 해당 Key만 메모리에서 읽어 실행 프로세스 환경변수로 주입했으며, 도구 소스·테스트는 수정하지 않았다. 비식별 stdout만 사용하고 별도 응답/원장 파일은 저장하지 않았다.
+
+### 20.2 실제 실행과 비식별 관측 원장
+
+live 직전 `python3 -B -m unittest discover -s tools -p 'test_provider_evidence_probe.py' -v`를 다시 실행해 **44개 통과, failure/error/skip 0**을 확인했다. 기존 두 Python 소스의 SHA-256 불변과 `main` 유지도 확인했다. 기존 CLI 진입점에 `--live --approval-file`을 전달해 실행했다. HTTP 전송은 도구의 기존 `fetch`/curl 그대로이며 mock/fake나 replay가 아니다.
+
+| 항목 | 실제 기록 |
+| --- | --- |
+| Provider / operation / routeAlias | `SEOUL_BUS` / `getBusPosByRtidList` / `SEOUL_ROUTE_A` (승인된 7016) |
+| 요청 시작 | **2026-10-27T08:16:28.519677Z** / **17:16:28.519677 KST** |
+| transport 완료 기록 | **2026-10-27T08:16:30.555193Z** / **17:16:30.555193 KST** |
+| `elapsedMs` | **2035.594** |
+| `httpStatus` / `providerResultCode` / `itemCount` | 모두 `null` |
+| `errorKind` / `relation` / `provenance` | `TIMEOUT` / `UNOBSERVED` / `LIVE_OBSERVATION` |
+| 차량·정류장·진행·제공시각 | 별칭과 진행 모두 `null`, 실제 데이터 확보 없음 |
+| 실행 요약 | `mode=LIVE`, `totalAttempts=1`, `stopReason=TIMEOUT`, `supportEnabled=false`, `evidence=UNVERIFIED` |
+
+원장의 `responseReceivedAt`은 실패 시에도 transport가 끝난 시각을 담는 도구 필드명이다. **이번에는 정상 응답 수신시각이 아니며**, 제공시각/원본 데이터 age/실제 정차와의 지연 분석에 사용할 수 없다. 요청 시작~실패까지 약2.036초로 실행을 마쳤으며 허용 window 전체를 사용하지 않았다.
+
+| 시도·결과 | SEOUL_BUS | TAGO |
+| --- | --- | --- |
+| HTTP 시도 선계수 | **1** (roster1/detail0) | **0** |
+| HTTP 200·정상 데이터 확보 | **0** | **0** |
+| 실패 | **1: TIMEOUT** | **0: 미호출** |
+| 추가 라운드 / retry / 대체 endpoint | **0 / 0 / 0** | **0 / 0 / 0** |
+
+connect timeout2초·request timeout5초·retry0·redirect0·고정 HTTPS 계약으로 첫 서울 요청이 실패했다. 도구가 원문 transport 오류를 출력하지 않으므로 DNS/접속/TLS/서버 중 어느 단계가 원인인지 이번 원장만으로 구분할 수 없다. 서울 서버가 요청을 수신했는지, 실제 계정 Quota가 차감됐는지도 알 수 없다. 약2초 실패를 특정 원인의 확정 증거로 쓰지 않는다. HTTP/Provider 인증·Quota 오류 코드를 받은 것도 아니다.
+
+첫 실패에서 전체 실행을 중단하는 계약에 따라 detail·TAGO·추가 라운드를 호출하지 않았다. 남은 횟수는 추가 실행 허가나 실패 후 다른 Provider 계속 실행의 근거로 사용하지 않았다. HTTP·다른 경로 fallback, 추가 진단 호출도 없다. metadata API·Backend·Flutter·FCM·DB는 실행하지 않았다.
+
+### 20.3 분석 결과·지원 경계·다음 최소 작업
+
+- **서울:** vehId/plainNo 연속성, roster/detail 일치, stId/stOrd 변화, stopFlag 0/1 전환, dataTm 갱신·실제 수신시각 차 모두 미관측이다. 한 건의 transport 실패를 차량 소실/정상 empty/Provider 필드 문제로 해석하지 않는다
+- **TAGO:** 호출0회이므로 nodeid/nodeord 누락 재발 여부, 같은 번호의 진행, pagination 정합성을 판단할 수 없다. 기존 원본 생성시각 부재 한계를 해소하는 새 근거도 없다
+- **이번 새 문제:** 승인된 서울 HTTPS roster 요청의 timeout을 관측했다. 서울 API 전반 장애, HTTPS 미지원, 잘못된 경로, 인증 실패, Quota 소진 중 어느 것도 원인으로 확정하지 않는다. TAGO 장애를 관측한 것도 아니다
+- **남는 근거:** 하차 가능 occurrence 분류·이용 허용 source, moving reference 의미·freshness, 최신 metadata exact 대응, 차량 물리 동일성·같은 방향/운행·회차/lap은 모두 여전히 미검증이다. 실제 현장/하차·iPhone E2E를 수행하지 않았으며 `BOARDING_TRACKING_UNSUPPORTED`와 TASK-908 `[ ]`를 유지한다
+- **다음 Backend 최소 변경:** 이번 timeout만으로 Production 코드 변경을 정당화할 수 없다. 먼저 별도 실행에서 동일 endpoint의 접속/응답 가용성을 확인하고 제한 실측 데이터를 확보해야 한다. 이후 §11의 검증된 하차 분류 전달·pair/시각·진행 meaning 공급 경로만 근거에 맞춰 검토한다. timeout을 우회하기 위한 HTTP 전환·timeout 증대·자동 retry·지원 제한 해제는 이번 결과에 포함하지 않는다
+
+### 20.4 기록과 검증 범위
+
+- 로그인된 포털 마이페이지를 처음 열 때 **자동 화면 도구 출력에 인증키가 포함되는 실수**가 있었다. 사용자에게 알렸고, 이후 화면 출력은 인증 문자열을 제거한 뒤 표시했다. 키 원문·포털 화면 전체를 보고서나 Git 파일에 복제하지 않았다. 이 실수를 숨기고 이번 작업 전체를 Key 비노출 성공으로 보고하지 않는다
+- 실제 API 전송의 Key는 환경변수·curl stdin으로만 사용했고 argv·원문 stderr·응답 본문을 출력하지 않았다. 위 표는 기존 허용 필드의 비식별 stdout 기록만 옮겼다
+- 보고서와 `task-list.md` 진행 상태만 갱신했다. Production·Dependency·Owner 설계·ADR·devlog 및 도구 변경 없음. 브랜치/Worktree 생성·Git add/commit/push 없음
+- 문서 diff·`git status`·`git diff --check`, 도구 SHA-256 불변·AST, 전체 Task checkbox 보존·staging 비어 있음, 보고서 파일 참조·Key 원문/인코딩 변형의 diff 비포함 검사를 통과했다. 추가 HTTP 검증은 수행하지 않았다
+
+## 21. 서울 연결 원인 분리·공식 경로 반영 (2026-10-27)
+
+### 21.1 설정·공식 명세 대조
+
+| 구분 | base URL / 경로 / timeout |
+| --- | --- |
+| Backend `application.yml`·두 서울 Client | 기본 `http://ws.bus.go.kr/api/rest/buspos` + `getBusPosByRtidList` 또는 `getBusPosByVehIdItem`. connect `PT2S`, response `PT5S` |
+| 로컬 도구 수정 전 | `https://ws.bus.go.kr/api/rest/buspos/` + 같은 긴 이름. connect2초, request 전체 최대5초, subprocess 정리 포함 최대6초 |
+| 공식 활용가이드 | 상세기능 이름은 `getBusPosByRtidList`/`getBusPosByVehIdItem`, Call Back 경로는 **`getBusPosByRtid`/`getBusPosByVehId`**, scheme은 **HTTP** |
+| 로컬 도구 수정 후 | 논리 operation/승인 scope는 유지하고 실제 path만 공식 Call Back의 짧은 이름으로 고정 매핑. **HTTPS 전용 유지**, HTTP fallback 없음. timeout 변경 없음 |
+
+Backend는 JDK HttpClient connect timeout과 request factory read timeout을 설정하며, 도구의 curl `--max-time`은 연결까지 포함하는 전체 요청 제한이다. 두 response 제한을 완전히 동일한 타이머라고 간주하지 않는다. 현재 process environment·로컬 `.env`의 `SEOUL_BUS_BASE_URL` override는 없었다. Backend를 실행하지 않았으므로 다른 배포 환경의 실효 설정까지 검증한 것은 아니다.
+
+이번에 [공공데이터포털 공개 설명](https://www.data.go.kr/data/15000332/openapi.do)과 [공식 20230530 가이드](https://www.data.go.kr/cmm/cmm/fileDownload.do?atchFileId=FILE_000000003552007&fileDetailSn=1)를 확인했다. 공개 설명의 구간 조회 서비스 URL도 HTTP다. 가이드의 상세기능명과 실제 Call Back 경로를 구분해 확인했고, 예제 Key/query를 출력하지 않고 URL의 scheme/host/path만 추출했다. 첨부는 메모리에서만 읽었으며 SHA-256은 기존과 같은 `257e0778fb5036ae859fe67805a55361a5db1836a17083e5684517c713987f90`이다. 공식 자료에 HTTPS 지원을 확인할 근거는 이번에 확보하지 못했다.
+
+### 21.2 인증 없는 DNS·TCP·HTTP 진단
+
+진단 시작은 **17:26:22.327508 KST**다. Key·인증 query·차량 ID를 사용하지 않았다. 직접 socket으로 DNS/TCP를 분리했고, HTTP 진단은 curl 개인 설정 무시·proxy 우회·retry0·redirect0·connect2초·전체5초로 수행했다. 공식 가이드 다운로드의 HTTPS/TLS 검증은 성공했으므로 이 실행 환경의 모든 외부 HTTPS가 차단됐다는 증거는 아니다.
+
+| 단계 | 이번 실제 결과 | 판정 한계 |
+| --- | --- | --- |
+| DNS `ws.bus.go.kr` | `175.193.202.140`, **44.197ms** | 이번 DNS 실패 아님 |
+| TCP 80 | **10.599ms 연결 성공** | HTTP 연결 가능 |
+| TCP 443 | **2003.119ms 후 TimeoutError** | 2초 안에 연결되지 않음. listener 미지원/목적지 또는 중간 네트워크 차단/일시 장애를 서로 구분할 수 없음 |
+| TLS handshake | TCP443 연결 실패로 **미진입** | 인증서 오류·TLS 버전 오류·전역 HTTPS 미지원으로 확정 불가 |
+| 연결 후 응답 지연 | HTTP80에서는 아래401 응답 확보, HTTPS는 연결 전 실패 | 이전 약2.036초 TIMEOUT의 동일 연결 단계 실패를 재현. 이전 단일 요청의 모든 내부 단계를 소급 입증한 것은 아님 |
+
+아래는 **인증 없는 HTTP 진단**이며 실제 Provider 차량 데이터 호출 성공이 아니다. query parameter 없이 명시된 네 경로를 각각1회만 요청했다. 첫 HTTP 시작은 **17:27:13.842307 KST**, 마지막은 **17:27:19.858028 KST**, 시작 간 최소2.005초였다.
+
+| `/api/rest/buspos/` 뒤 경로 | HTTP | TCP 완료(초) | 첫 byte(초) | 전체(초) |
+| --- | --- | --- | --- | --- |
+| `getBusPosByRtidList` | 401 | 0.011801 | 0.018607 | 0.018625 |
+| `getBusPosByRtid` | 401 | 0.011602 | 0.020720 | 0.020767 |
+| `getBusPosByVehIdItem` | 401 | 0.011905 | 0.019765 | 0.019791 |
+| `getBusPosByVehId` | 401 | 0.013335 | 0.020046 | 0.020083 |
+
+네 응답은 모두93byte·비XML로 원문은 출력/저장하지 않았다. **401은 HTTP 수신 계층에 도달했다는 근거이며, 인증 후 해당 operation이 정상 처리된다는 근거가 아니다.** 인증 검사가 경로 판별보다 앞설 수 있어 긴 이름의 alias 지원/미지원도 이 결과로 판정하지 않는다. 공식 명세의 canonical path는 확인했지만 정상 차량 데이터가 반환되는 path를 실증한 것은 아니다. 경로를 바꿔도 TCP443 연결 문제를 해결하지 못한다.
+
+### 21.3 최소 로컬 수정·검증
+
+- `tools/provider_evidence_probe.py`: 논리 operation과 공식 callback path를 분리하는 고정 매핑2개 추가. `fetch`는 승인된 논리 operation 외 입력을 전송 전에 거절한다. 짧은 경로를 새 승인 operation으로 추가하지 않는다
+- `tools/test_provider_evidence_probe.py`: 공식 callback path·파라미터·HTTPS·기존 timeout/retry/redirect 제한 보존, 짧은 경로/임의 operation 직접 입력 시 전송0회 회귀 테스트2개 추가
+- `python3 -B -m unittest discover -s tools -p 'test_provider_evidence_probe.py' -v`: **기존44개+신규2개=46개 전부 통과, failure/error/skip 0**. 실제 네트워크가 없는 synthetic/mock 검증이다
+- 서울12/TAGO6/전체18·150초·6라운드·Provider 라운드20초·전체 요청2초 이상 제한, 실패 시 전체 중단, retry/redirect0·HTTPS 전용을 유지한다. timeout 증대·HTTP 전환·자동 URL 탐색/전환 기능을 추가하지 않았다
+
+### 21.4 인증 실측 보류와 호출 회계
+
+**안전하게 연결된 서울 HTTPS endpoint를 확보하지 못해 신규 인증 실측은0회**다. 인증키를 HTTP로 전송하면 중간 구간에서 Key와 요청/응답을 열람·변조할 위험이 있다. 기관이 지원하는 HTTPS 주소 또는 기관까지 보호되는 연결 대안이 먼저 필요하다. 앞단만 HTTPS인 임의 proxy는 마지막 HTTP 구간의 노출을 해결하지 못한다. 이번에 proxy·새 서비스·인프라를 도입하거나 인증 HTTP 전송을 승인된 것으로 해석하지 않았다.
+
+§20의 실행 window는 **17:18:58.514851 KST에 만료**됐고 Quota 예외도 해당 실행에 한정됐다. 재사용하거나 새 window/Quota 예외를 자동 생성하지 않았다. 안전한 경로 확인 후에도 신규 실행 window·호출/시간 예산·Quota 확인 또는 해당 실행의 명시적 예외가 필요하다. 이번 요청은 인증 없는 원인 분리와 명세에 따른 로컬 수정 범위로 수행했다.
+
+| 호출 종류 | 이전(§20) | 이번(§21) | 누적 |
+| --- | --- | --- | --- |
+| 서울 인증 데이터 요청 시도 | 1(timeout) | **0** | **1** |
+| TAGO 인증 데이터 요청 시도 | 0 | **0** | **0** |
+| 서울 인증 없는 HTTP 경로 진단 | 0 | **4(모두401)** | **4** |
+| 차량 데이터 확보 | 0 | **0** | **0** |
+
+실제 서울 호스트 HTTP 전송 시도는 인증 여부를 합쳐 누적5회다. 공개 공식 설명 페이지 조회·첨부 다운로드는 별도 문서 접근이며 위 데이터/경로 요청과 구분한다. DNS/TCP 테스트는 HTTP 요청이 아니다. 실제 Provider 데이터가 없으므로 서울 identity·stId/stOrd/flag/dataTm·roster/detail, TAGO nodeid/nodeord·번호 진행·pagination은 새로 분석할 수 없다.
+
+### 21.5 다음 Backend 작업과 남은 근거
+
+추가 실측 없이 준비 가능한 다음 Backend 수정 범위는 **두 서울 Client의 논리 `OPERATION`과 실제 요청 path 분리 및 공식 callback path를 사용하는 URI 계약 테스트**다. 이는 공식 명세와의 일치 작업이며, 기존 긴 이름이 운영에서 실패한다는 실증이나 timeout 해결이라고 표현하지 않는다. Production은 이번에 변경하지 않았다. Backend 기본 HTTP 사용은 Key 평문 전송 위험이 있으므로, 안전한 전송 경로·운영 사용 정책 판단을 먼저 해결해야 한다. 단순 HTTPS 치환·timeout 증대·경로 변경만으로 연결 가능성을 보장하지 않는다.
+
+기관의 **HTTPS 지원 host/port/path·접근 조건과 실제 callback alias 계약**이 연결 문제에 남는 공식 근거다. 하차 지원에는 기존 occurrence별 하차 허용 source, moving reference·제공시각 의미, ID 수명·같은 운행·회차/lap 근거도 여전히 필요하다. 이번에 이를 VERIFIED로 승격하지 않는다. `BOARDING_TRACKING_UNSUPPORTED`와 TASK-908 `[ ]`를 유지한다.
+
+이번에는 Credential을 전송·출력하지 않았고 브라우저 계정 화면·스크린샷을 사용하지 않았다. 기존 §20의 키 노출 기록을 삭제/수정하거나 없었다고 주장하지 않는다. Credential 재발급은 사용자의 후속 조치로 남기고 기존 값을 변경하지 않았다. 두 로컬 도구는 Untracked로 유지하며, 보고서와 `task-list.md` 진행 상태만 함께 갱신한다. 새 Dependency·Production·Flutter·FCM·devlog 변경이나 실행, 브랜치/Worktree 생성·Git add/commit/push는 없다.
+
+문서 diff·status·`git diff --check`, Python AST·공백 검사, 전체 Task checkbox 보존·staging 비어 있음·도구 Untracked, 관련 파일의 실제 Key 원문/인코딩 변형 비포함, 보고서 파일 참조 및 기존 노출 기록 보존 검사를 통과했다. Backend/Flutter 테스트는 Production 변경이 없어 실행하지 않았다.

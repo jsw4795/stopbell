@@ -133,6 +133,39 @@ void main() {
     });
   }
 
+  test(
+    'provider-mapped 503 keeps bearer auth and does not refresh or retry',
+    () async {
+      var calls = 0;
+      final (api, auth) = await client(
+        MockClient((request) async {
+          calls++;
+          expect(
+            request.url.path,
+            '/api/v1/bus-routes/754/boarding-candidates',
+          );
+          expect(request.headers['authorization'], 'Bearer access-a');
+          return boardingJson({'code': 'TRANSIT_TEMPORARILY_UNAVAILABLE'}, 503);
+        }),
+      );
+      await expectLater(
+        api.find(routeId: 754, targetStopOccurrenceId: 22),
+        throwsA(
+          isA<BoardingCandidateException>()
+              .having((e) => e.statusCode, 'Backend status', 503)
+              .having(
+                (e) => e.code,
+                'Backend code',
+                'TRANSIT_TEMPORARILY_UNAVAILABLE',
+              ),
+        ),
+      );
+      expect(calls, 1);
+      expect(auth.state, AuthState.authenticated);
+      expect(auth.accessToken, 'access-a');
+    },
+  );
+
   test('malformed error body still preserves HTTP status', () async {
     final (api, _) = await client(
       MockClient((_) async => http.Response('{', 503)),

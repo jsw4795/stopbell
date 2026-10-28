@@ -16,6 +16,8 @@ import org.springframework.web.util.UriUtils;
 public class SeoulBusVehicleDetailClient {
 
     static final String OPERATION = "getBusPosByVehIdItem";
+    // The guide distinguishes the operation name from its HTTP callback path.
+    static final String REQUEST_PATH = "/api/rest/buspos/getBusPosByVehId";
     private static final String NORMAL_EMPTY_HEADER_CODE = "4";
     private static final String SUCCESS_HEADER_CODE = "0";
 
@@ -33,11 +35,16 @@ public class SeoulBusVehicleDetailClient {
         }
 
         try {
-            SeoulBusVehicleDetailResponse response = restClient.get()
+            var entity = restClient.get()
                     .uri(buildUri(vehicleId))
-                    .accept(MediaType.APPLICATION_JSON)
+                    .accept(MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON)
                     .retrieve()
-                    .body(SeoulBusVehicleDetailResponse.class);
+                    .onStatus(status -> !status.is2xxSuccessful(), (httpRequest, response) -> {
+                        throw TransitProviderClientException.http(provider(), OPERATION,
+                                response.getStatusCode().value(), null);
+                    })
+                    .toEntity(byte[].class);
+            var response = SeoulBusResponseReader.detail(entity.getBody(), entity.getHeaders().getContentType());
             validate(response);
             return response;
         } catch (TransitProviderClientException exception) {
@@ -59,7 +66,7 @@ public class SeoulBusVehicleDetailClient {
 
     private URI buildUri(String vehicleId) {
         return UriComponentsBuilder.fromUriString(properties.baseUrl())
-                .pathSegment(OPERATION)
+                .replacePath(REQUEST_PATH)
                 .queryParam("serviceKey", properties.serviceKey())
                 .queryParam("vehId", UriUtils.encodeQueryParam(vehicleId, StandardCharsets.UTF_8))
                 .build(true)

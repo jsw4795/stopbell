@@ -17,6 +17,8 @@ public class SeoulBusVehicleLocationClient
         implements TransitProviderClient<SeoulBusVehicleLocationResponse, SeoulBusVehicleLocationRequestContext> {
 
     static final String OPERATION = "getBusPosByRtidList";
+    // The guide distinguishes the operation name from its HTTP callback path.
+    static final String REQUEST_PATH = "/api/rest/buspos/getBusPosByRtid";
     private static final String NORMAL_EMPTY_HEADER_CODE = "4";
     private static final String SUCCESS_HEADER_CODE = "0";
 
@@ -38,11 +40,16 @@ public class SeoulBusVehicleLocationClient
             VehicleLocationRequest<SeoulBusVehicleLocationRequestContext> request
     ) {
         try {
-            SeoulBusVehicleLocationResponse response = restClient.get()
+            var entity = restClient.get()
                     .uri(buildUri(request.externalRouteId()))
-                    .accept(MediaType.APPLICATION_JSON)
+                    .accept(MediaType.APPLICATION_XML, MediaType.APPLICATION_JSON)
                     .retrieve()
-                    .body(SeoulBusVehicleLocationResponse.class);
+                    .onStatus(status -> !status.is2xxSuccessful(), (httpRequest, response) -> {
+                        throw TransitProviderClientException.http(provider(), OPERATION,
+                                response.getStatusCode().value(), null);
+                    })
+                    .toEntity(byte[].class);
+            var response = SeoulBusResponseReader.location(entity.getBody(), entity.getHeaders().getContentType());
             validate(response);
             return response;
         } catch (TransitProviderClientException exception) {
@@ -60,7 +67,7 @@ public class SeoulBusVehicleLocationClient
 
     private URI buildUri(String externalRouteId) {
         return UriComponentsBuilder.fromUriString(properties.baseUrl())
-                .pathSegment(OPERATION)
+                .replacePath(REQUEST_PATH)
                 .queryParam("serviceKey", properties.serviceKey())
                 .queryParam("busRouteId", UriUtils.encodeQueryParam(externalRouteId, StandardCharsets.UTF_8))
                 .build(true)

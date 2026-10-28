@@ -22,8 +22,11 @@ import com.stopbell.user.auth.service.JwtTokenService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -132,6 +135,30 @@ class BoardingCandidateApiIntegrationTest {
         mvc.perform(auth(request())).andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.code").value("TRANSIT_TEMPORARILY_UNAVAILABLE"))
                 .andExpect(jsonPath("$.message").value("Transit is temporarily unavailable."));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("인증된 후보 요청의 서울 Provider 401은 Client 401이 아닌 503이며 안전한 발생 지점만 기록한다")
+    void upstream_unauthorized_is_not_client_unauthorized(CapturedOutput output) throws Exception {
+        route = routes.saveAndFlush(new BusRoute(TransitProvider.SEOUL_BUS, "seoul-route", "143", null));
+        target = occurrences.saveAndFlush(new BusRouteStopOccurrence(route,
+                stops.saveAndFlush(new BusStop(TransitProvider.SEOUL_BUS, "seoul-stop", "목적지", null, null)), 10));
+        when(seoul.fetchVehicleLocations(any())).thenThrow(TransitProviderClientException.http(
+                TransitProvider.SEOUL_BUS, "getBusPosByRtidList", 401,
+                new RuntimeException("serviceKey=upstream-key-secret upstream-body-secret")));
+        String token = jwt.createAccessToken(7L);
+
+        mvc.perform(request().header("Authorization", "Bearer " + token))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("TRANSIT_TEMPORARILY_UNAVAILABLE"))
+                .andExpect(jsonPath("$.message").value("Transit is temporarily unavailable."));
+
+        verify(seoul, times(1)).fetchVehicleLocations(any());
+        verifyNoInteractions(tago, detail);
+        assertThat(output.getAll()).contains("stage=provider-roster provider=SEOUL_BUS",
+                        "operation=getBusPosByRtidList kind=HTTP upstreamStatus=401 responseStatus=503")
+                .doesNotContain(token, "upstream-key-secret", "upstream-body-secret");
     }
 
     @Test

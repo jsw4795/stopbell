@@ -28,12 +28,12 @@ public class TransitClientConfiguration {
 
     @Bean
     SeoulBusVehicleLocationClient seoulBusVehicleLocationClient(TransitClientProperties properties) {
-        return new SeoulBusVehicleLocationClient(restClient(properties), properties.seoul());
+        return new SeoulBusVehicleLocationClient(seoulRestClient(properties), properties.seoul());
     }
 
     @Bean
     SeoulBusVehicleDetailClient seoulBusVehicleDetailClient(TransitClientProperties properties) {
-        return new SeoulBusVehicleDetailClient(restClient(properties), properties.seoul());
+        return new SeoulBusVehicleDetailClient(seoulRestClient(properties), properties.seoul());
     }
 
     @Bean
@@ -81,6 +81,16 @@ public class TransitClientConfiguration {
     @Bean
     SeoulBusTransitObservationMapper seoulBusTransitObservationMapper(Clock transitMetadataClock) {
         return new SeoulBusTransitObservationMapper(transitMetadataClock);
+    }
+
+    private RestClient seoulRestClient(TransitClientProperties properties) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(properties.connectTimeout())
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(properties.responseTimeout());
+        return RestClient.builder().requestFactory(factory).build();
     }
 
     private RestClient restClient(TransitClientProperties properties) {

@@ -51,7 +51,7 @@ transit:
       metadata-base-url: ${TAGO_METADATA_BASE_URL:https://apis.data.go.kr/1613000/BusRouteInfoInqireService}
       service-key: ${PUBLIC_DATA_SERVICE_KEY}
     seoul:
-      base-url: ${SEOUL_BUS_BASE_URL:http://ws.bus.go.kr/api/rest/buspos}
+      base-url: ${SEOUL_BUS_BASE_URL:http://ws.bus.go.kr}
       service-key: ${PUBLIC_DATA_SERVICE_KEY}
 
 management:

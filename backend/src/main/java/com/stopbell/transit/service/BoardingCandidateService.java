@@ -31,12 +31,15 @@ import com.stopbell.transit.dto.BoardingCandidatesResponse.TrackingSupport;
 import com.stopbell.transit.mapper.BoardingCandidateMapper;
 import com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle;
 import com.stopbell.transit.service.BoardingCandidateReferenceStore.Context;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /** Read-only orchestration. Provider I/O is outside the metadata transaction. */
 @Service
 public class BoardingCandidateService {
+    private static final Logger log = LoggerFactory.getLogger(BoardingCandidateService.class);
     private final BoardingCandidateMetadataService metadataService;
     private final TagoVehicleLocationClient tagoClient;
     private final SeoulBusVehicleLocationClient seoulClient;
@@ -64,6 +67,10 @@ public class BoardingCandidateService {
         try {
             roster = fetchRoster(route);
         } catch (TransitProviderClientException exception) {
+            // Do not log the cause, request URI or response body: they can contain service keys.
+            log.warn("Boarding candidate lookup failed: stage=provider-roster provider={} operation={} "
+                            + "kind={} upstreamStatus={} responseStatus=503",
+                    route.provider(), exception.operation(), exception.failureKind(), exception.httpStatus());
             throw new ApiException(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE);
         }
         List<Vehicle> vehicles = roster.vehicles().stream().distinct()

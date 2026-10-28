@@ -28,7 +28,7 @@ class SeoulBusVehicleDetailClientTest {
         RestClient.Builder builder = RestClient.builder();
         server = MockRestServiceServer.bindTo(builder).build();
         client = new SeoulBusVehicleDetailClient(builder.build(), new TransitClientProperties.Seoul(
-                "https://provider.test/seoul", "test-service-key"
+                "http://ws.bus.go.kr", "test-service-key"
         ));
     }
 
@@ -93,9 +93,33 @@ class SeoulBusVehicleDetailClientTest {
         assertFailure(TransitProviderClientFailureKind.TRANSPORT, () -> client.fetchVehicleDetail("111033668"));
     }
 
+
+    @Test
+    @DisplayName("서울 detail XML의 단일 차량과 빈 선택 field를 파싱한다")
+    void parse_xml_detail() {
+        expectRequest().andRespond(withSuccess("""
+                <ServiceResult><msgHeader><headerCd>0</headerCd></msgHeader><msgBody><itemList>
+                <vehId>111033668</vehId><plainNo>서울70사1234</plainNo><stId>stop-a</stId><stOrd>22</stOrd>
+                <stopFlag>1</stopFlag><dataTm>20261028160000</dataTm><tmX></tmX><tmY/>
+                </itemList></msgBody></ServiceResult>
+                """, MediaType.TEXT_XML));
+        assertThat(client.fetchVehicleDetail("111033668").body().itemList()).singleElement().satisfies(item -> {
+            assertThat(item.vehId()).isEqualTo("111033668");
+            assertThat(item.plainNo()).isEqualTo("서울70사1234");
+            assertThat(item.stId()).isEqualTo("stop-a");
+            assertThat(item.stOrd()).isEqualTo(22);
+            assertThat(item.stopFlag()).isOne();
+            assertThat(item.dataTm()).isEqualTo("20261028160000");
+            assertThat(item.tmX()).isNull();
+        });
+        server.verify();
+    }
+
     private ResponseActions expectRequest() {
         return server.expect(request -> {
-            assertThat(request.getURI().getPath()).isEqualTo("/seoul/getBusPosByVehIdItem");
+            assertThat(request.getURI().getScheme()).isEqualTo("http");
+            assertThat(request.getURI().getHost()).isEqualTo("ws.bus.go.kr");
+            assertThat(request.getURI().getPath()).isEqualTo("/api/rest/buspos/getBusPosByVehId");
             assertThat(request.getURI().getQuery()).isEqualTo("serviceKey=test-service-key&vehId=111033668");
         });
     }

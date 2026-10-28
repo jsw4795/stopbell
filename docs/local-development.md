@@ -336,13 +336,96 @@ TASK-706 Worker 구조와 집중 Fake Provider/MySQL Testcontainers 검증을 �
 - 백그라운드 알림 탭 후 알람 상세 화면 이동 성공
 - MySQL `NotificationDelivery`의 `ACCEPTED` 기록 확인
 
-미검증 항목:
+2026-10-16 당시 미검증 항목:
 
 - 완전 종료 상태에서 알림 탭 후 상세 화면 이동
 - 삭제되거나 유효하지 않은 알람의 알림 탭 처리
 - 계정 변경 및 소유권 불일치 시 접근 차단
 
 위 결과는 확인된 수신·화면 이동·DB 기록 범위에 한정하며 전체 수신/tap E2E 완료를 뜻하지 않는다. TASK-710과 최종 E2E/regression 보강 TASK-711은 모두 미완료로 유지한다.
+
+### 2026-10-28 USB 실기기 검증 결과
+
+- 환경 **PASS**: Xcode 27.0 (27A266a), Flutter 3.47.1 / Dart 3.13.1, iPhone 13 Pro Max / iOS 27.0.1. CoreDevice에서 `wired`, `paired`, Developer Mode `Enabled`를 확인했다. 기기명·UDID·credential은 기록하지 않는다.
+- 기존 Apple Team/Bundle ID `com.stopbell.stopbell`, Firebase Project `stopbell` 및 OAuth 설정을 유지했다. 기존 signing으로 debug 빌드가 성공했으며 embedded provisioning의 유효기간·해당 기기 포함·APNs entitlement를 확인했다. cold-start 검증용 release 빌드와 실제 iPhone 설치도 성공했다. Flutter run은 `build/ios/iphoneos/Runner.app` 경로를 찾지 못했으나 실제 산출물은 `app/build/ios/Release-iphoneos/Runner.app`에 있었다. 해당 bundle의 `codesign --verify --deep --strict` 통과 후 `xcrun devicectl device install app`으로 설치했다.
+- 연결 **PASS**: 기존 Cloudflare 임시 개발 주소는 DNS 해석 불가였다. 사용자 승인으로 같은 방식의 임시 HTTPS 터널을 시작하고 Git 제외 `app/config/local.json`의 API 주소만 갱신했다. 로컬/HTTPS `/actuator/health` 모두 200을 확인했다. 실제 release 앱 실행 뒤 사용자가 기존 A 계정의 알람 목록 정상 표시를 확인했다. 검증 종료 후 이번에 시작한 Backend·임시 터널을 종료하고 Git 제외 local API 주소를 테스트 전 값으로 원복했다. 설치된 release 앱에는 이번 임시 주소가 포함되므로 다음 연결 검증에는 유효한 개발 주소로 다시 빌드해야 한다.
+- 기존 Docker MySQL을 시작하고 Java 21 / Gradle Wrapper 8.14.3으로 Backend를 실행했다. 기존 Flyway V15·V16이 적용됐고 BoardingSession은 0건이다. `notification.fcm.enabled=false`, `notification.dispatch.enabled=false`, `transit.monitoring.enabled=false`로 자동 전송·polling을 차단했다. 실제 FCM은 매 전송 직전 별도 사용자 승인 후 실행한다.
+
+| 테스트 | 결과 | 실제 확인 범위 / 잔여 작업 |
+| --- | --- | --- |
+| A: terminated 알림 tap | PASS | 사용자 완전 종료·단일 전송 승인 후 Backend one-shot 1회 `ACCEPTED code=null`. 사용자가 실제 수신·tap 후 M2352(Alarm #7) 상세 정상 표시를 확인했다. 합성 navigation hint이며 Event/Delivery row 생성 없음 |
+| B: 삭제·유효하지 않은 Alarm | PASS | A 소유 임시 INACTIVE Alarm #12/Target을 로컬 DB에 복제하고 사용자 승인 one-shot 1회 `ACCEPTED` 후 임시 row만 삭제했고 이 시점에 잔여 0건·기존 #7/#8/#10 보존을 확인했다. 사용자가 알림 tap 후 접근 불가 안내 표시·상세 미노출을 확인했다. 삭제 API 자체 검증은 아님 |
+| C: 계정 변경·소유권 불일치 | PASS | 사용자 승인 one-shot 1회 `ACCEPTED` 및 실제 수신 후 B 로그인. DB에서 Device #1의 owner=B/enabled, Alarm #10의 owner=A를 확인했다. 사용자가 이전 A 알림 tap 후 접근 불가 안내·A 상세 미노출을 확인했다 |
+| D: 신규 Boarding UI | BLOCKED (일부 PASS) | 사용자 확인: 하차 알림 진입·TAGO 165 노선/목적 정류장 선택·실제 후보/차량번호 표시·하차 추적 지원 보류 안내·확정 불가 버튼 비활성은 PASS. 전체 차량번호 입력/Push 준비 UI는 진입하지 못했다. 서울 143 조회는 사용자가 “버스 정보를 일시적으로 불러올 수 없어요” 안내를 확인했다 |
+
+D 원인 분석: 현재 `SeoulBusVehicleLocationClient`와 동일 설정/timeout을 사용하는 임시 진단으로 서울 143 roster를 **1회** 추가 조회했고 `failureKind=HTTP`, `httpStatus=401` / `Unauthorized`를 확인했다. 제품 코드는 변경하지 않았고 URI·Key·응답 원문을 출력하지 않았다. 후보 service는 Provider 예외를 Backend 503으로 변환하므로 실기기 안내와 일치한다. 직접 Java 진단의 상류 HTTP 응답 401까지만 확인했으며 오류 body/header를 보존하지 않았다. 이를 실기기 요청 자체의 401이나 API/Endpoint 무효·Key 불량의 증거로 해석하지 않는다. 아래 후속 진단에서 응답 계층과 공식 Call Back 경로를 추가 확인했다. 기존 credential·Provider URL·지원 정책을 임의로 변경하지 않았다. 전체 차량번호 입력·Push 준비·생성 요청 뒤 `BOARDING_TRACKING_UNSUPPORTED` 응답 안내는 **NOT_TESTED**다. TAGO 후보의 지원 보류 안내 확인을 이 후속 경로의 성공으로 대체하지 않는다.
+
+이번 실제 FCM은 A/B/C 각각 사용자의 전송 직전 승인을 받은 기존 Backend one-shot **총 3회**이며 모두 Provider `ACCEPTED` 및 사용자 실수신 확인이다. 자동 dispatch·새 Event/Delivery 생성·실제 BoardingSession 생성/추적 성공을 주장하지 않는다. 자동 검증 suite는 코드 변경이 없어 재실행하지 않았으며 signed release build/install/launch, 실제 사용자 확인, DB 및 문서 diff 검증을 수행했다.
+
+최종 DB 점검: 임시 Alarm #12는 0건, BoardingSession은 0건, 기존 NotificationDelivery는 `ACCEPTED` 8건이었다. Alarm #7/#10은 INACTIVE로 남아 있고, B 계정 Alarm #8의 부재는 사용자가 이번 테스트 중 직접 삭제한 결과임을 확인했다. 사용자 삭제를 임의로 복원하지 않았다. 기기의 마지막 로그인/owner는 B다.
+
+실기기 미확인 결과를 성공으로 기록하지 않는다. `BOARDING_TRACKING_UNSUPPORTED` 및 TASK-710/TASK-908 `[ ]`를 유지하며, 기존 로컬 Provider 실측 도구 2개는 Untracked로 보존한다.
+
+### 2026-10-28 서울 HTTP 401 발생 지점 후속 진단
+
+사용자는 공공데이터포털에서 `getBusPosByRouteStList`와 `getBusPosByRtidList`의 실제 차량 XML 정상 반환을 확인했다. 따라서 API 자체나 기존 Endpoint의 무효를 전제하지 않는다. 사용자가 확인한 roster 성공 URL의 path는 `/api/rest/buspos/getBusPosByRtid`다. 인증 query는 기록하지 않으며 포털 Key와 로컬 `.env` Key가 동일한지는 미확인이다.
+
+| 경계 | 확인 결과와 증거 범위 |
+| --- | --- |
+| Flutter → StopBell | `GET /api/v1/bus-routes/{routeId}/boarding-candidates?targetStopOccurrenceId={id}[&boardingStopOccurrenceId={id}]`. `AuthenticatedApiClient`가 현재 세션의 `Authorization: Bearer`를 설정한다. 실제 이전 요청의 숫자 ID·JWT·access log는 보존하지 않았으므로 해당 원문을 복원했다고 주장하지 않는다 |
+| Backend Security | 이 API는 JWT 인증 필수다. 기존 미인증/잘못된 JWT 통합 테스트에서 401·Provider 호출 0회를 확인했다. 실기기에서 확인한 “버스 정보를 일시적으로 불러올 수 없어요”는 현재 Flutter 코드의 **Backend 503 분기**다. 실기기에서 StopBell 401을 직접 관측한 기록은 없다 |
+| Controller → Provider | metadata read 뒤 roster Client를 호출한다. Provider 예외는 `TRANSIT_TEMPORARILY_UNAVAILABLE` 503으로 변환한다. 유효한 실제 서명 fixture JWT + 서울 상류 401을 조합한 격리 통합 테스트에서 Provider 1회·Client 503을 확인했다. 이 테스트는 이전 실기기 요청의 네트워크 캡처를 대체하지 않는다 |
+| 앞선 직접 Java 진단 | Backend Security/Flutter를 거치지 않고 서울 Client가 받은 HTTP 401 / `Unauthorized`다. 따라서 이 **확인된 401은 StopBell Security가 만든 응답이 아니다**. 다만 raw response body/header가 없어 서울 origin/Gateway/중간 계층 중 정확한 응답자와 세부 거절 이유는 미확정이다 |
+| 안전한 오류 기록 | 후보 roster 실패에 `stage=provider-roster`, Provider, 논리 operation, failure kind, upstream HTTP status, Client response status만 WARN 기록하도록 보강했다. URI/query·Key·JWT·오류 원문·Throwable cause는 기록하지 않는다. 상류 401과 하류 503을 혼동하지 않도록 회귀 테스트에서 secret 비노출도 검증했다 |
+
+[공식 20230530 활용가이드](https://www.data.go.kr/cmm/cmm/fileDownload.do?atchFileId=FILE_000000003552007&fileDetailSn=1)에서 상세기능명과 실제 Call Back URL이 다름을 재확인했다(SHA-256 `257e0778fb5036ae859fe67805a55361a5db1836a17083e5684517c713987f90`). [현재 공개 서비스 페이지](https://www.data.go.kr/data/15000332/openapi.do?recommendDataYn=Y)도 구간 기능의 실제 URL을 `getBusPosByRouteSt`로 안내한다.
+
+| 상세기능명 | 공식 Call Back path | 수정 전 Client path | 이번 최소 수정 |
+| --- | --- | --- | --- |
+| `getBusPosByRtidList` | `/api/rest/buspos/getBusPosByRtid` | `/api/rest/buspos/getBusPosByRtidList` | roster `REQUEST_PATH`를 공식 path와 사용자 성공 path에 맞춤 |
+| `getBusPosByVehIdItem` | `/api/rest/buspos/getBusPosByVehId` | `/api/rest/buspos/getBusPosByVehIdItem` | 같은 서울 adapter의 detail path도 공식 명세에 맞춤 |
+
+논리 `OPERATION`은 기존 값을 유지하고 실제 HTTP path만 분리했다. Host/base URL, Key, Key 인코딩, 요청 parameter·DTO·Authentication 정책·지원 gate는 바꾸지 않았다. **확인된 결함은 기능명을 Call Back URL로 사용한 구성 차이**이며, 이전 401의 유일한 원인이었다거나 기존 path alias가 무효라고까지 확정하지 않는다. 포털에서 XML을 받았다는 사실만으로 현재 JSON 역직렬화 경로가 실응답에서 통과한다고 주장하지도 않는다.
+
+현재 local 설정은 `http://ws.bus.go.kr/api/rest/buspos`이며, 수정된 Client에 실제 설정을 넣되 transport 실행 전에 차단하는 임시 capture로 roster/detail의 공식 path, `serviceKey` 존재·설정의 encoded 값 유지 및 Provider로 StopBell Authorization header가 전달되지 않음을 확인했다. 외부 HTTP 실행은 **0회**다. 알려진 Mac→`ws.bus.go.kr:443` TCP timeout은 별도 transport 문제이며 이번에는 재측정하지 않았다. HTTP 평문 인증키 전송으로 우회하지 않았고 TLS 도달성/안전한 호출 경로를 확보하기 전 실제 Key를 사용한 재호출은 보류한다.
+
+검증: Java 21 / Gradle 8.14.3, 집중 Backend **62개**(서울 roster/detail Client, 후보 API/Security·service·revalidation / 격리 MySQL Testcontainers 포함), Flutter **43개**(Bearer 전달·401 refresh·503 무재시도·보류 UI)가 모두 통과했다. 변경 Flutter 테스트 analyze와 `git diff --check`도 수행했다. 테스트는 Mock Provider/fixture JWT를 사용하며 실제 Provider 데이터 요청·FCM·iPhone 재검증은 **0회**다. 새 Dependency/Migration·Git add/commit/push 없이 기존 사용자 변경사항·Untracked Provider 도구 2개를 보존했다. 수정 뒤 실응답 401 해소와 Boarding 후속 UI는 **NOT_TESTED**이며 `BOARDING_TRACKING_UNSUPPORTED`와 TASK-710/TASK-908 `[ ]`를 유지한다.
+
+### 2026-10-28 서울 공식 HTTP 개발·운영 공통 지원
+
+사용자 확정으로 서울 realtime은 개발·운영 모두 공식 `http://ws.bus.go.kr` origin을 직접 사용한다. 기존 HTTP 실호출 보류는 앞선 진단 당시의 실행 제한이며, 이번에는 HTTP service key 노출·변조 위험을 인정한 공통 지원 정책으로 변경했다. 영구 정책·보호 경계는 [Architecture의 transit 절](architecture.md#transit)이 소유한다. 앱→Backend HTTPS 정책·다른 Provider 설정·하차 추적 gate는 유지한다.
+
+- 공통 `application.yml`의 `transit.client.seoul.base-url` 기본값과 `.env.example`의 `SEOUL_BUS_BASE_URL`은 `http://ws.bus.go.kr`다. override도 공식 origin 형식이어야 하므로 예전 `/api/rest/buspos` 접미사를 붙인 값은 origin 값으로 교체한다. 개발 전용 HTTP opt-in/profile 제한·운영 차단·HTTPS→HTTP fallback은 없다.
+- roster `/api/rest/buspos/getBusPosByRtid`, detail `/api/rest/buspos/getBusPosByVehId`를 고정 적용한다. 다른 host, 임의 port, userinfo/query/fragment/path가 섞인 base URL은 거부하고 redirect도 따르지 않는다.
+- XML 우선 요청·기존 JSON 호환을 지원한다. XML 선언의 encoding을 byte input에서 읽고 반복/단일 `itemList`, 빈 optional 값과 기존 DTO 필드를 처리한다. JDK parser의 DTD/외부 entity/schema/XInclude를 차단했다. 정상 empty/Provider logical/HTTP/transport/protocol 분류와 기존 timeout은 유지한다. 새 Dependency는 없다.
+- 집중 오프라인 94개(개발·운영 context, 공식 host 제한, redirect, XML/JSON/오류, TAGO 및 후보/Mapper 회귀)가 통과했다. Backend 전체 suite 884개 중 883개 통과, 기존 `FcmProviderClientTest.budget_aborts_slow_body`의 서버 연결 종료 2초 대기 1개가 실패해 조건 변경 없이 해당 클래스 전체와 local/prod/production 설정 테스트를 분리 재검증하여 모두 통과했다. 최초 전체 실행을 모두 성공한 것으로 기록하지 않는다.
+- 사용자가 HTTP 평문 service key의 노출·변조 위험을 확인하고 최대 2회를 명시 승인한 뒤, 서울 143 `busRouteId=100100022` roster 직접 1회 + 로컬 Boarding Candidates API 경유 1회, **총 2회**를 실행했다. 승차 occurrence를 생략해 detail 0회이며 retry/대체 요청·FCM·자동 polling·BoardingSession 생성은 없다. 임시 진단은 저장소 밖에서 기존 production Client와 local Backend를 사용하고 종료 시 Backend를 닫았다. JWT는 메모리에서만 사용했으며 Key/전체 요청 URL/실제 차량 식별자·번호/원문 XML·API body는 출력·기록하지 않았다.
+
+| 실제 검증 | 결과 |
+| --- | --- |
+| 공식 roster HTTP | **PASS**: HTTP 200, `headerCd=0`, XML 차량 목록 44건 |
+| 핵심 field 파싱 | **PASS**: `vehId`/`plainNo` 존재 44/44, `sectOrd` 숫자 44/44, `stopFlag` 0/1 값 44/44, `dataTm` 14자리 형식 44/44 |
+| Boarding Candidates | **PASS (조회 계약)**: 실제 JWT가 통과하는 loopback HTTP API 요청에서 200, `candidateCount=44`, `candidateSetStatus=PARTIAL` |
+| 지원 gate·부작용 | BoardingSession 0건, FCM/dispatch/monitoring=false. 정상 조회를 실제 추적 지원/세션 생성/알림 성공으로 기록하지 않음 |
+
+Candidates의 `PARTIAL`은 실제 응답 상태다. 개별 reason code별 수량은 이번 요약에 저장하지 않았고, detail 생략/신뢰도·지원 보류 경계의 구체 항목을 모두 검증한 것으로 확대하지 않는다. 실제 조회 성공은 Mac의 local Backend에서 확인했으며 운영 서버 배포/실제 운영 망 검증 및 iPhone Boarding 후속 UI 재검증은 이번 범위에서 실행하지 않았다. 운영 지원 자체는 profile gate 없이 공통 설정에 적용하고 local/prod/production context로 검증했다. TASK-710/TASK-908 `[ ]`와 `BOARDING_TRACKING_UNSUPPORTED`를 유지한다.
+
+### 2026-10-28 서울 ws.bus.go.kr HTTP 설정 전수 정리
+
+Backend의 외부 요청 Client·설정·주입 경로와 서울 metadata source를 점검했다. 사용 중인 서울 REST Client는 아래 2개이며 공통 `transit.client.seoul` 설정과 redirect 차단 HTTP transport를 사용한다.
+
+| 기능 | 실제 구현 / 요청 path | 적용 상태 |
+| --- | --- | --- |
+| 노선 전체 차량 위치(roster) | `SeoulBusVehicleLocationClient` / `/api/rest/buspos/getBusPosByRtid` | 공통 HTTP origin 사용, 공식 Endpoint 유지 |
+| 특정 차량 위치(detail) | `SeoulBusVehicleDetailClient` / `/api/rest/buspos/getBusPosByVehId` | 같은 공통 HTTP origin 사용, 공식 Endpoint 유지 |
+| 노선·정류장 metadata | `SeoulCsvMetadataSource`의 T Data CSV 3종 | ws.bus.go.kr REST Client 없음. 다른 서울 도메인·Resource 입력은 변경하지 않음 |
+| 도착정보 및 기타 서울 REST API | 현재 Backend에 별도 Client/호출 없음 | 신규 Client/Endpoint를 추가하지 않음 |
+
+최종 정책에 맞춰 HTTPS를 허용하던 서울 설정 검증을 **공식 HTTP origin만 허용**하도록 바꾸고, `application-test.yml`의 중복 HTTPS Base URL을 제거했다. 테스트 profile도 공통 `application.yml`의 HTTP 기본값을 상속하며 운영 profile 차단은 없다. local/test/prod/production context와 두 서울 Client의 scheme·host·path·query URI 계약을 확인한다. TAGO의 test용 HTTPS override와 운영 기본 HTTPS URL은 그대로 유지한다. 보안 정책과 평문 전송 위험은 [Architecture](architecture.md#transit)를 따른다.
+
+현재 Backend의 실행 가능한 서울 HTTPS 설정은 남아 있지 않다. `https://ws.bus.go.kr` 문자열은 HTTPS 거부 테스트와 과거 문서 기록에 남는다. 별도로 사용자 요청에 따라 보존한 Untracked `tools/provider_evidence_probe.py`에는 기존 연구용 HTTPS 주소가 남아 있으며 Backend 실행 설정과 무관하다. 두 로컬 Provider 도구는 수정·실행·Git 포함하지 않았다. 로컬 `.env`와 process environment의 서울 URL override는 없음을 값 노출 없이 확인했다.
+
+이번 실제 Provider/FCM 호출은 **0회**이며 앞선 HTTP 200·44건·Candidates 200 결과를 반복하지 않았다. 새 Dependency·Migration·API 계약·FCM/Alarm 동작 변경은 없다. `BOARDING_TRACKING_UNSUPPORTED`, TASK-710/TASK-908 `[ ]` 및 main·기존 변경사항을 유지하고 Git add/commit/push는 수행하지 않는다. Java/Gradle JVM 21 및 Wrapper 8.14.3을 확인하고 관련 회귀 **105개**(Client URI·HTTP origin/profile·redirect/XML/오류·TAGO·후보·서울 Mapper·CSV source)를 실행하여 실패/오류/skip 없이 모두 통과했다. `git diff --check`도 통과했다. 첫 실행의 test profile TAGO 기대값을 기존 mock HTTPS override에 맞게 보정한 뒤 동일 suite 전체를 재통과했으며 제품 TAGO 설정은 변경하지 않았다.
 
 ## Backend Connection
 
