@@ -81,9 +81,11 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
             select delivery.id from NotificationDelivery delivery
             join delivery.notificationEvent event
             join BoardingSession session on session.id = event.boardingSessionId
-            where event.sourceType = 'BOARDING_SESSION' and event.boardingEventType = 'PREPARE_ALIGHT'
-              and event.boardingSessionId in :readyIds
-              and session.status = 'TRACKING' and session.expiresAt > :now
+            where event.sourceType = 'BOARDING_SESSION'
+              and ((event.boardingEventType = 'PREPARE_ALIGHT' and event.boardingSessionId in :readyIds
+                    and session.status = 'TRACKING' and session.prepareNotificationEnabled = true)
+                or (event.boardingEventType = 'DESTINATION_REACHED' and session.status = 'COMPLETED'))
+              and session.expiresAt > :now
               and session.user.id = event.user.id
               and delivery.status = 'PENDING' and delivery.nextAttemptAt <= :now and delivery.expiresAt > :now
             order by delivery.nextAttemptAt, delivery.id

@@ -11,7 +11,7 @@ public record NotificationSourceHint(NotificationSourceType sourceType, Long ala
         boolean valid = sourceType == NotificationSourceType.ALARM
                 ? alarmId != null && alarmId > 0 && eventType != null && boardingSessionId == null && boardingEventType == null
                 : sourceType == NotificationSourceType.BOARDING_SESSION && boardingSessionId != null && boardingSessionId > 0
-                    && boardingEventType == BoardingNotificationEventType.PREPARE_ALIGHT && alarmId == null && eventType == null;
+                    && boardingEventType != null && alarmId == null && eventType == null;
         if (!valid) {
             throw new IllegalArgumentException("Invalid notification source identity");
         }

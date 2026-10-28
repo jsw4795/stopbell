@@ -139,6 +139,7 @@ class BoardingSessionController extends ChangeNotifier {
     String number,
     BoardingSelectionContext context, {
     Future<bool> Function()? preparePush,
+    bool prepareNotificationEnabled = true,
   }) async {
     if (!canCreate) return;
     if (!validCandidate(candidate, number)) {
@@ -177,6 +178,7 @@ class BoardingSessionController extends ChangeNotifier {
       sessionIdentity: sessionIdentity!,
       context: context,
       observedAt: candidate.observedAt,
+      prepareNotificationEnabled: prepareNotificationEnabled,
     );
     busy = true;
     message = null;
@@ -227,7 +229,9 @@ class BoardingSessionController extends ChangeNotifier {
         current: () => current,
       );
       if (!current) return;
-      if (result.vehicleNumber != intent.confirmedVehicleNumber) {
+      if (result.vehicleNumber != intent.confirmedVehicleNumber ||
+          result.prepareNotificationEnabled !=
+              intent.prepareNotificationEnabled) {
         throw const BoardingSessionException(SessionFailure.parsing);
       }
       session = result;
@@ -304,7 +308,9 @@ class BoardingSessionController extends ChangeNotifier {
       creationState = BoardingCreationState.outcomeUnknown;
       message = '아직 생성 성공을 확인할 수 없어요. 서버 처리 중일 수 있어요. 새 요청을 만들지 않고 원래 결과를 다시 조회하거나 동일 요청만 재시도할 수 있어요.';
     } else {
-      if (result.vehicleNumber != pending!.confirmedVehicleNumber) {
+      if (result.vehicleNumber != pending!.confirmedVehicleNumber ||
+          result.prepareNotificationEnabled !=
+              pending!.prepareNotificationEnabled) {
         throw const BoardingSessionException(SessionFailure.parsing);
       }
       session = result;

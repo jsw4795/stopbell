@@ -8,7 +8,11 @@ import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
 import tools.jackson.databind.JsonNode;
 
-public record CreateBoardingSessionRequest(String clientRequestId, String candidateRef, String confirmedVehicleNumber) {
+public record CreateBoardingSessionRequest(String clientRequestId, String candidateRef, String confirmedVehicleNumber,
+        boolean prepareNotificationEnabled) {
+    public CreateBoardingSessionRequest(String clientRequestId, String candidateRef, String confirmedVehicleNumber) {
+        this(clientRequestId, candidateRef, confirmedVehicleNumber, true);
+    }
     public CreateBoardingSessionRequest {
         try {
             clientRequestId = BoardingSession.validateUuid(clientRequestId);
@@ -26,16 +30,22 @@ public record CreateBoardingSessionRequest(String clientRequestId, String candid
     public static CreateBoardingSessionRequest fromJson(
             @JsonProperty("clientRequestId") JsonNode clientRequestId,
             @JsonProperty("candidateRef") JsonNode candidateRef,
-            @JsonProperty("confirmedVehicleNumber") JsonNode confirmedVehicleNumber) {
+            @JsonProperty("confirmedVehicleNumber") JsonNode confirmedVehicleNumber,
+            @JsonProperty("prepareNotificationEnabled") JsonNode prepareNotificationEnabled) {
         if (clientRequestId == null || !clientRequestId.isString() || candidateRef == null || !candidateRef.isString()
                 || confirmedVehicleNumber == null || !confirmedVehicleNumber.isString()) {
             throw new ApiException(ErrorCode.INVALID_REQUEST);
         }
+        if (prepareNotificationEnabled != null && !prepareNotificationEnabled.isBoolean()) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST);
+        }
         return new CreateBoardingSessionRequest(clientRequestId.asString(), candidateRef.asString(),
-                confirmedVehicleNumber.asString());
+                confirmedVehicleNumber.asString(), prepareNotificationEnabled == null || prepareNotificationEnabled.asBoolean());
     }
 
     public String fingerprint() {
-        return BoardingFingerprint.hash(clientRequestId, candidateRef, confirmedVehicleNumber);
+        // Preserve retries of existing requests that predate the optional setting.
+        return prepareNotificationEnabled ? BoardingFingerprint.hash(clientRequestId, candidateRef, confirmedVehicleNumber)
+                : BoardingFingerprint.hash(clientRequestId, candidateRef, confirmedVehicleNumber, "false");
     }
 }

@@ -98,6 +98,7 @@ class _BoardingHomeState extends State<BoardingHome> {
     String target,
   ) {
     if (!_current || _controller!.busy || _controller!.needsRecovery) return;
+    _prepareNotificationEnabled = true;
     setState(
       () => _draft = (
         candidate: candidate,
@@ -107,6 +108,8 @@ class _BoardingHomeState extends State<BoardingHome> {
       ),
     );
   }
+
+  bool _prepareNotificationEnabled = true;
 
   Future<void> _confirm(String number) async {
     final draft = _draft;
@@ -119,6 +122,7 @@ class _BoardingHomeState extends State<BoardingHome> {
         draft.candidate,
         number,
         draft.selection,
+        prepareNotificationEnabled: _prepareNotificationEnabled,
         preparePush: () =>
             widget.beforeCreate?.call(context) ??
             prepareBoardingPush(context, null),
@@ -175,6 +179,8 @@ class _BoardingHomeState extends State<BoardingHome> {
                 routeNumber: draft.route,
                 targetName: draft.target,
                 onConfirm: _confirm,
+                onPrepareNotificationChanged: (value) =>
+                    _prepareNotificationEnabled = value,
                 onBack: () => setState(() => _draft = null),
                 busy: c.busy,
                 reconfirm: _reconfirm,

@@ -87,12 +87,11 @@ public class NotificationDispatchWorker {
                 var ready = runtime.readyWindow(readyCursor, properties.batchSize(),
                         LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
                 readyCursor = ready.cursor();
-                if (!ready.ids().isEmpty()) {
-                    var sessions = deliveries.findBoardingDuePendingIds(ready.ids(),
-                            LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC), page);
-                    candidates += sessions.size();
-                    processed += dispatchBatch(sessions);
-                }
+                // Durable completion notifications remain eligible across process restarts.
+                var sessions = deliveries.findBoardingDuePendingIds(ready.ids().isEmpty() ? List.of(-1L) : ready.ids(),
+                        LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC), page);
+                candidates += sessions.size();
+                processed += dispatchBatch(sessions);
             }
         } catch (RuntimeException exception) {
             log.warn("Notification dispatch cycle failed: exceptionType={}", exception.getClass().getSimpleName());

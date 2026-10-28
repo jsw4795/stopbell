@@ -12,7 +12,7 @@ public record BoardingSessionResponse(
         Long id, BoardingSessionStatus status, long revision, String routeNumber, String vehicleNumber,
         String targetName, int targetOrder, Integer remainingOccurrenceGap, Instant checkpointObservedAt,
         Instant providerDataTime, EvaluationStatus evaluationStatus, BoardingStateReason reasonCode,
-        Instant expiresAt, Instant endedAt
+        Instant expiresAt, Instant endedAt, boolean prepareNotificationEnabled
 ) {
     public enum EvaluationStatus { READY, RECOVERY_PENDING, HELD, ENDED }
 
@@ -30,7 +30,8 @@ public record BoardingSessionResponse(
                 traversal.occurrences().get(traversal.targetIndex()).order(),
                 evaluation == EvaluationStatus.READY ? verifiedGap : null,
                 instant(session.getCheckpoint().getObservedAt()), instant(session.getCheckpoint().getProviderDataTime()),
-                evaluation, session.getStateReason(), instant(session.getExpiresAt()), instant(session.getEndedAt()));
+                evaluation, session.getStateReason(), instant(session.getExpiresAt()), instant(session.getEndedAt()),
+                session.isPrepareNotificationEnabled());
     }
 
     private static Instant instant(LocalDateTime time) {

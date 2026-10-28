@@ -76,7 +76,17 @@ class BoardingSessionApiClient implements BoardingSessionClient {
     required int generation,
     required bool Function() current,
   }) async {
-    if (body.length != 3 ||
+    if ((body.length != 3 && body.length != 4) ||
+        (body.containsKey('prepareNotificationEnabled') &&
+            body['prepareNotificationEnabled'] is! bool) ||
+        body.keys.any(
+          (key) => !const {
+            'clientRequestId',
+            'candidateRef',
+            'confirmedVehicleNumber',
+            'prepareNotificationEnabled',
+          }.contains(key),
+        ) ||
         body['clientRequestId'] is! String ||
         !isBoardingUuid(body['clientRequestId'] as String)) {
       throw ArgumentError('clientRequestId');

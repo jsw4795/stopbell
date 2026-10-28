@@ -365,7 +365,7 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 
 ### Phase 9 Boarding persistence contract (TASK-903)
 
-이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했고 TASK-906 1단계에서 Notification source를 V16으로 확장했다. 기존 V1~V15 Migration과 Alarm/BusAlarmTarget Schema는 수정하지 않는다.
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했고 TASK-906 1단계에서 Notification source를 V16으로 확장했다. 2026-10-28 요구사항 정정은 V17로 사전 알림 선택과 목적지 Event를 확장한다. 기존 V1~V16 Migration과 Alarm/BusAlarmTarget Schema는 수정하지 않는다.
 
 #### boarding_sessions
 
@@ -381,6 +381,7 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 | `vehicle_number` | VARCHAR(255) NOT NULL | 사용자가 대조한 전체 번호, 서울 plainNo 별도 보존 |
 | `city_code` | VARCHAR(50) NULL | TAGO 필수, 서울 NULL |
 | `route_number`, `target_name` | VARCHAR(100), VARCHAR(255) NOT NULL | 최소 표시 snapshot |
+| `prepare_notification_enabled` | BOOLEAN NOT NULL DEFAULT TRUE | 불변 사전 알림 선택. 목적지 알림은 항상 활성 |
 | `traversal_snapshot` | JSON NOT NULL | 아래 고정 구조의 불변 순서 snapshot |
 | `traversal_fingerprint` | CHAR(64) ascii_bin NOT NULL | canonical 구조 hash |
 | `status` | VARCHAR(20) NOT NULL | TRACKING / SUSPENDED / COMPLETED / CANCELLED / EXPIRED |
@@ -396,9 +397,9 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 | `ended_at` | DATETIME(6) NULL | terminal에서만 필수 |
 | `open_user_id` | BIGINT generated nullable | TRACKING/SUSPENDED이면 user_id, 그 외 NULL |
 
-`traversal_snapshot`은 version·ordered occurrences·targetIndex와 대상의 하차 가능/불가/미확인 분류를 갖는 고정 스키마다. occurrence에는 실제 external Stop ID/order와 반복·회차 판단에 필요한 **검증된** 문맥만 둔다. 전체 Route 구조가 필요하면 포함하되 GPS·raw response·일반 Map provider context·모든 표시 metadata는 복제하지 않는다. 분류 근거가 없으면 UNKNOWN이며 ALIGHT 지원을 추측하지 않는다. 현재 TASK-903은 PREPARE_ALIGHT만 지원 계약으로 두고 검증 안 된 접근/통과 알림을 Schema로 선행 구현하지 않는다.
+`traversal_snapshot`은 version·ordered occurrences·targetIndex와 대상의 하차 가능/불가/미확인 분류를 갖는 고정 스키마다. occurrence에는 실제 external Stop ID/order와 반복·회차 판단에 필요한 **검증된** 문맥만 둔다. 전체 Route 구조가 필요하면 포함하되 GPS·raw response·일반 Map provider context·모든 표시 metadata는 복제하지 않는다. 분류 근거가 없으면 UNKNOWN을 보존한다. 이 분류는 승객 접근 부가 metadata이며 occurrence 추적을 차단하지 않는다. 목적지 도달·통과 근거는 별도의 차량 진행 검증이 소유한다.
 
-V15의 JSON version 1은 `version`, `provider`, `externalRouteId`, nullable `cityCode`, ordered `occurrences`(`occurrenceId`, `externalStopId`, `order`), `targetIndex`, `targetAlightAvailability`(`ALLOWED`/`PROHIBITED`/`UNKNOWN`), nullable `targetClassificationEvidence`를 저장한다. 표시 이름은 JSON에 넣지 않는다. 알려진 분류에는 검증 근거가 필요하고 UNKNOWN의 근거는 NULL이다. 현재 metadata는 하차 가능 분류를 제공하지 않아 UNKNOWN이며, 실제 생성의 지원 차단은 [API의 지원 경계](api.md#탑승-세션-api-task-903)를 따른다. Entity는 검증된 ALLOWED 목적지와 목적지 이전의 checkpoint만 최초 TRACKING으로 저장할 수 있다.
+V15의 JSON version 1은 `version`, `provider`, `externalRouteId`, nullable `cityCode`, ordered `occurrences`(`occurrenceId`, `externalStopId`, `order`), `targetIndex`, `targetAlightAvailability`(`ALLOWED`/`PROHIBITED`/`UNKNOWN`), nullable `targetClassificationEvidence`를 저장한다. 표시 이름은 JSON에 넣지 않는다. 알려진 분류에는 검증 근거가 필요하고 UNKNOWN의 근거는 NULL이다. 현재 metadata는 하차 가능 분류를 제공하지 않아 UNKNOWN을 저장한다. Entity는 분류와 무관하게 정확한 목적지 이전 checkpoint를 최초 TRACKING으로 저장하며 실제 차량 진행 검증은 [API의 지원 경계](api.md#탑승-세션-api-task-903)를 따른다.
 
 fingerprint는 provider/Route·typed request context·순서화한 occurrence ID/order·target 의미·판단에 사용하는 분류/검증 문맥의 canonical 직렬화로 계산한다. 표시 이름·조회 시각·단순 sync 완료 시각은 구조 hash에 넣지 않는다. SHA-256 hash만 저장하는 것으로 실제 snapshot을 대체하지 않는다. metadata Entity FK 없이 선택 당시 snapshot을 보존하고 sync로 덮어쓰지 않는다.
 
@@ -422,7 +423,7 @@ V16 `extend_notification_event_sources`는 기존 notification_events에 다음 
 | `source_type` | VARCHAR(24) ascii_bin NOT NULL. ALARM / BOARDING_SESSION |
 | 기존 `alarm_id`, `activation_generation`, `tracking_cycle_id`, `event_type` | 세션 분기를 위해 physical NULL 허용으로 변경하되 ALARM branch CHECK에서 기존 네 값 모두 필수·기존 값 범위 강제 |
 | `boarding_session_id` | BIGINT NULL. BOARDING_SESSION이면 양수 필수 |
-| `boarding_event_type` | VARCHAR(20) ascii_bin NULL. BOARDING_SESSION이면 PREPARE_ALIGHT 필수 |
+| `boarding_event_type` | VARCHAR(20) ascii_bin NULL. BOARDING_SESSION이면 PREPARE_ALIGHT 또는 DESTINATION_REACHED 필수 |
 | `expires_at` | DATETIME(6) NULL. BOARDING_SESSION이면 observedAt보다 뒤인 불변 기한 필수. ALARM은 기존 Delivery 기한 정책 유지 |
 
 `ck_notification_events_source`는 두 source만 허용하고, `ck_notification_events_source_identity`는 ALARM일 때 boarding 세 필드가 모두 NULL이고 기존 네 값은 필수, BOARDING_SESSION일 때 기존 네 값은 모두 NULL이고 boarding 세 필드는 모두 유효하도록 IS NULL/IS NOT NULL을 명시한다. 기존 enum/UUID/generation CHECK는 원문 그대로 유지해 ALARM의 네 type·canonical UUID·0 이상 generation 범위를 넓히지 않는다. 가짜 Alarm ID·generation·cycle을 만들지 않는다.
@@ -431,19 +432,19 @@ V16 `extend_notification_event_sources`는 기존 notification_events에 다음 
 
 Session ID는 Alarm 원본 ID처럼 불변 source reference로 보존하며 live resource cascade FK나 임의 hard-delete API를 추가하지 않는다. 세션 Event의 expiresAt은 recipient가 0개여도 Event 기한을 보존하기 위한 최소 필드다. 최초 각 Delivery는 같은 기한을 복사하며 Entity 생성자가 UTC microsecond 기한 불일치를 거부한다. 이 cross-row invariant는 CHECK로 구현하지 않는다. raw FID는 여전히 저장하지 않는다. Session 부재는 전송 허용 근거가 아니고 fail closed한다.
 
-TASK-906 2단계는 최초 PREPARE_ALIGHT 저장 전 만료 시 Event/Delivery를 INSERT하지 않는 application invariant와 Session/checkpoint·최초 recipient의 원자 저장을 연결했다. 1단계의 Entity factory는 영속성 입력만 검증하며 current Session/lifecycle/recipient 결정이나 최초 INSERT 직전 기한 검증을 대신하지 않는다. 이미 존재하는 Event/Delivery는 만료·실패·재확인으로 삭제/재생성하지 않는다. 기존 ALARM의 만료된 Event+EXPIRED Delivery 생성은 유지한다. 1단계는 branch CHECK/UNIQUE·V14/V15 데이터 보존·no-recipient 저장을 검증했고 2단계는 기존 V16으로 atomic rollback·expired-candidate 재판단·Session lifecycle PENDING 종료를 검증한다. lifecycle 조회는 exact Session Event를 current lock으로 확인한 뒤 그 Event ID의 PENDING Delivery만 ID 순서로 current lock하며 join의 이전 REPEATABLE READ snapshot에 의존하지 않는다. 추가 Migration·index·table·column은 없다.
+TASK-906 2단계는 최초 PREPARE_ALIGHT 저장 전 만료 시 Event/Delivery를 INSERT하지 않는 application invariant와 Session/checkpoint·최초 recipient의 원자 저장을 연결했다. 1단계의 Entity factory는 영속성 입력만 검증하며 current Session/lifecycle/recipient 결정이나 최초 INSERT 직전 기한 검증을 대신하지 않는다. 이미 존재하는 Event/Delivery는 만료·실패·재확인으로 삭제/재생성하지 않는다. 기존 ALARM의 만료된 Event+EXPIRED Delivery 생성은 유지한다. 1단계는 branch CHECK/UNIQUE·V14/V15 데이터 보존·no-recipient 저장을 검증했고 2단계는 기존 V16으로 atomic rollback·expired-candidate 재판단·Session lifecycle PENDING 종료를 검증한다. lifecycle 조회는 exact Session Event를 current lock으로 확인한 뒤 그 Event ID의 PENDING Delivery만 ID 순서로 current lock하며 join의 이전 REPEATABLE READ snapshot에 의존하지 않는다. 당시 V16 범위에는 추가 Migration·index·table·column이 없었다. V17은 기존 source별 NULL 계약과 `(boarding_session_id, boarding_event_type)` UNIQUE를 유지하며 Event type CHECK만 두 종류로 확장하고 사전 알림 boolean column을 추가한다. 기존 row는 true로 보존한다.
 
 #### 세션 Worker 조회 계약
 
 TASK-906 3단계는 `findDuePendingIds`의 ALARM 전용 예산을 유지하고 `findBoardingDuePendingIds`와 모든 source 만료 정리를 연결했다. Session 조회의 runtime ID 후보는 같은 runtime 내 검증 snapshot 인덱스의 bounded keyset window에서 얻으며, 미복구·보류 세션 전체를 DB에서 읽지 않는다.
 
-기존 due index/Device FK/Delivery UNIQUE를 재사용하고 새 claim/lease/status/attempt table을 추가하지 않는다. 단일 Worker의 각 cycle은 독립 bounded 조회로 (1) ALARM/BOARDING_SESSION 각각의 expired PENDING 정리, (2) ALARM due, (3) ready BOARDING_SESSION due를 처리한다. 각 조회는 기존 batch-size 상한을 적용해 세션 대기가 Alarm 예산을 점유하지 않는다.
+기존 due index/Device FK/Delivery UNIQUE를 재사용하고 새 claim/lease/status/attempt table을 추가하지 않는다. 단일 Worker의 각 cycle은 독립 bounded 조회로 (1) ALARM/BOARDING_SESSION 각각의 expired PENDING 정리, (2) ALARM due, (3) 준비 READY 또는 완료 목적지 BOARDING_SESSION due를 처리한다. 각 조회는 기존 batch-size 상한을 적용해 세션 대기가 Alarm 예산을 점유하지 않는다.
 
-세션 조회는 `PENDING AND next_attempt_at <= now AND expires_at > now`에 BOARDING_SESSION source, 현재 프로세스의 gate-ready Session ID 집합, current Session TRACKING/미만료 조건을 **LIMIT 전에** 적용하고 next_attempt_at/id 순서로 제한한다. ready 집합이 비면 세션 send 조회만 생략한다. 만료 조회는 `PENDING AND expires_at <= now`이며 gate와 nextAttemptAt을 요구하지 않는다. Worker는 source별 `findExpiredPendingIdsBySource`를 각각 batch-size로 제한하고 expiresAt/id로 정렬해 한 source의 backlog가 다른 source의 만료를 밀어내지 않게 한다. 공통 `findExpiredPendingIds`도 모든 source에 동일 만료 기준을 적용한다. 조회 결과는 권한이 아니고 current revision/상태/gate는 attempt transaction에서 재검증한다.
+세션 조회는 `PENDING AND next_attempt_at <= now AND expires_at > now`에 BOARDING_SESSION source와 owner/Session 미만료를 적용하고, `(PREPARE_ALIGHT AND gate-ready ID AND TRACKING AND 사전 알림 ON) OR (DESTINATION_REACHED AND COMPLETED)`를 **LIMIT 전에** 적용해 next_attempt_at/id 순서로 제한한다. ready 집합이 비어도 완료 목적지 조회는 수행한다. 만료 조회는 `PENDING AND expires_at <= now`이며 gate와 nextAttemptAt을 요구하지 않는다. Worker는 source별 `findExpiredPendingIdsBySource`를 각각 batch-size로 제한하고 expiresAt/id로 정렬해 한 source의 backlog가 다른 source의 만료를 밀어내지 않게 한다. 공통 `findExpiredPendingIds`도 모든 source에 동일 만료 기준을 적용한다. 조회 결과는 권한이 아니고 current revision/상태/gate는 attempt transaction에서 재검증한다.
 
 `findSourceIdentity`는 Delivery PK로 immutable Event ID/source/Session ID만 projection 조회한다. 실제 attempt는 별도 REQUIRES_NEW persistence context에서 Session→Delivery current lock과 Event identity 재확인 후 Device lock을 얻어 오래된 REPEATABLE READ snapshot을 자격으로 쓰지 않는다.
 
-Session due JPQL은 Event·Session·Delivery를 join하고 `event.boarding_session_id IN (:readyIds)`와 Session TRACKING/미만료/owner 일치, PENDING/due/미만료를 LIMIT 이전에 적용한다. IN과 결과 LIMIT은 각각 batch-size 이하이며 window 내 nextAttemptAt/id로 정렬한다. MySQL 8.4.11의 미복구/일시 보류 각 1,000개의 독립 Session·Event·Delivery와 추가 미복구/보류/READY/ALARM 혼합 fixture에서 동등한 Session SQL의 EXPLAIN은 Event Session UNIQUE `const`, Session PRIMARY `const`, Delivery Event×Device UNIQUE의 left prefix `ref`를 선택했고 due 정렬은 filesort였다. 같은 fixture의 ALARM 만료 SQL은 Event 2,004행을 `ALL`로 읽고 Delivery Event×Device UNIQUE `ref`와 temporary/filesort를 선택했다. 이는 해당 데이터 분포의 결과이며 대규모 전체 backlog에서의 비용/지연 보장은 아니다. 메모리 filtering 후 LIMIT, 반복 대기 row로 batch 소진, gate를 열기 위한 nextAttemptAt/TTL 연장은 허용하지 않는다. Session ID의 PK와 Event의 기존 Session UNIQUE, Delivery의 Event×Device UNIQUE/due index를 사용할 수 있다. 만료 조회는 전용 expiresAt index가 없어 status 후보 탐색과 expiresAt 필터/정렬 비용이 남는다. LIMIT이 scan row 수까지 제한한다는 뜻은 아니며 기존 index로 모든 부하의 성능이 검증됐다고 주장하지 않고 추측성 index 추가도 하지 않는다. 실행·lock 순서는 [Architecture](architecture.md#복구-gate와-worker-공정성)를 따른다.
+Session due JPQL은 Event·Session·Delivery를 join하고 위 두 Event 분기를 LIMIT 이전에 적용한다. 준비 분기에만 `event.boarding_session_id IN (:readyIds)`를 사용한다. IN과 결과 LIMIT은 각각 batch-size 이하이며 window 내 nextAttemptAt/id로 정렬한다. 다음 EXPLAIN은 TASK-906 당시 준비 전용 SQL의 측정 기록이며 V17의 완료 OR 분기의 실행계획을 검증한 것으로 확대하지 않는다. MySQL 8.4.11의 미복구/일시 보류 각 1,000개의 독립 Session·Event·Delivery와 추가 미복구/보류/READY/ALARM 혼합 fixture에서 동등한 Session SQL의 EXPLAIN은 Event Session UNIQUE `const`, Session PRIMARY `const`, Delivery Event×Device UNIQUE의 left prefix `ref`를 선택했고 due 정렬은 filesort였다. 같은 fixture의 ALARM 만료 SQL은 Event 2,004행을 `ALL`로 읽고 Delivery Event×Device UNIQUE `ref`와 temporary/filesort를 선택했다. 이는 해당 데이터 분포의 결과이며 대규모 전체 backlog에서의 비용/지연 보장은 아니다. 메모리 filtering 후 LIMIT, 반복 대기 row로 batch 소진, gate를 열기 위한 nextAttemptAt/TTL 연장은 허용하지 않는다. Session ID의 PK와 Event의 기존 Session UNIQUE, Delivery의 Event×Device UNIQUE/due index를 사용할 수 있다. 만료 조회는 전용 expiresAt index가 없어 status 후보 탐색과 expiresAt 필터/정렬 비용이 남는다. LIMIT이 scan row 수까지 제한한다는 뜻은 아니며 기존 index로 모든 부하의 성능이 검증됐다고 주장하지 않고 추측성 index 추가도 하지 않는다. 실행·lock 순서는 [Architecture](architecture.md#복구-gate와-worker-공정성)를 따른다.
 
 ## 7. 외부 교통 데이터
 

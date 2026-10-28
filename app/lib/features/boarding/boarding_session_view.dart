@@ -114,6 +114,9 @@ class BoardingSessionDetails extends StatelessWidget {
         Text('차량 ${s.vehicleNumber}'),
         Text('목적지 ${s.targetName} · 노선 순서 ${s.targetOrder}'),
         Text(
+          '사전 알림: ${s.prepareNotificationEnabled ? 'ON' : 'OFF'} · 목적지 알림: ON',
+        ),
+        Text(
           '상태: ${switch (s.status) {
             BoardingSessionStatus.tracking => 'TRACKING · 차량 진행 확인 중',
             BoardingSessionStatus.suspended => 'SUSPENDED · 추적 보류',
@@ -173,7 +176,7 @@ String _reason(BoardingReason reason) => switch (reason) {
   BoardingReason.traversalAmbiguous => '운행 경로·회차 불확실',
   BoardingReason.continuityGapExceeded => '진행 확인 공백 초과',
   BoardingReason.metadataChanged => '노선·정류장 정보 변경',
-  BoardingReason.arrivalObserved => '목적지 도착 근거 관측',
+  BoardingReason.arrivalObserved => '목적지 도달 근거 관측',
   BoardingReason.passedObserved => '목적지 이후 진행 근거 관측',
   BoardingReason.userCancelled => '사용자 취소',
   BoardingReason.sessionLifetimeExpired => '세션 수명 만료',

@@ -62,6 +62,31 @@ class BoardingProgressEvaluatorTest {
         assertThat(result.checkpoint().getObservedAt()).isEqualTo(UTC_NOW.plusSeconds(20));
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2, 3, 4})
+    @DisplayName("사전 알림 OFF는 준비만 생략하며 정차하지 않은 목적지의 도달·통과 판정을 유지한다")
+    void preparation_off_keeps_destination(int index) {
+        var base = snapshot(0);
+        var session = new BoardingTrackingSnapshot(base.id(), base.revision(), base.status(), base.reason(),
+                base.provider(), base.routeId(), base.cityCode(), base.vehicleId(), base.vehicleNumber(),
+                base.traversal(), base.checkpoint(), base.expiresAt(), false);
+        var result = evaluator.evaluate(session, observation(session, index, Meaning.VERIFIED_REACHED, 20), UTC_NOW.plusSeconds(20));
+        assertThat(result.outcome()).isEqualTo(index == 3 ? Outcome.ARRIVAL_OBSERVED
+                : index == 4 ? Outcome.PASSED_OBSERVED : Outcome.NO_CANDIDATE);
+        assertThat(result.checkpoint()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("정차 flag가 없어도 목적 occurrence에 도달한 의미가 별도로 검증되면 목적지 알림을 판정한다")
+    void reached_without_stopping() {
+        var session = snapshot(0);
+        var input = observation(session, 3, Meaning.VERIFIED_REACHED, 20);
+        assertThat(input.vehicle().stopFlag()).isZero();
+        var result = evaluator.evaluate(session, input, UTC_NOW.plusSeconds(20));
+        assertThat(result.outcome()).isEqualTo(Outcome.ARRIVAL_OBSERVED);
+        assertThat(result.expiresAt()).isEqualTo(UTC_NOW.plusSeconds(50));
+    }
+
     @Test
     @DisplayName("목적 occurrence의 직접 도착 근거로만 ARRIVAL_OBSERVED를 판정하며 준비 알림을 소급하지 않는다")
     void direct_arrival() {
@@ -69,6 +94,19 @@ class BoardingProgressEvaluatorTest {
         var result = evaluator.evaluate(session, observation(session, 3, Meaning.DIRECT_ARRIVAL, 20), UTC_NOW.plusSeconds(20));
         assertThat(result.outcome()).isEqualTo(Outcome.ARRIVAL_OBSERVED);
         assertThat(result.reason()).isEqualTo(BoardingStateReason.ARRIVAL_OBSERVED);
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = BoardingTraversalSnapshot.AlightAvailability.class, names = {"PROHIBITED", "UNKNOWN"})
+    @DisplayName("목적 occurrence의 하차가 금지되거나 미확정이어도 검증된 진행으로 준비 알림을 판정한다")
+    void track_regardless_of_alight_availability(BoardingTraversalSnapshot.AlightAvailability availability) {
+        var base = snapshot(0).traversal();
+        var traversal = new BoardingTraversalSnapshot(1, base.provider(), base.externalRouteId(), base.cityCode(),
+                base.occurrences(), base.targetIndex(), availability,
+                availability == BoardingTraversalSnapshot.AlightAvailability.UNKNOWN ? null : "controlled-test-prohibition");
+        var session = snapshot(traversal, 0, BoardingSessionStatus.TRACKING, null);
+        assertThat(evaluator.evaluate(session, observation(session, 1, Meaning.DIRECT_ARRIVAL, 20),
+                UTC_NOW.plusSeconds(20)).outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
     }
 
     @ParameterizedTest

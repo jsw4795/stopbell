@@ -20,6 +20,11 @@ public record BoardingRouteSnapshot(
     public record Occurrence(Long id, String externalStopId, int order, String stopName) {
     }
 
+    /** Only a structural check; this does not establish direction, trip or lap continuity. */
+    public boolean hasUniqueStopIds() {
+        return traversal.stream().map(Occurrence::externalStopId).distinct().count() == traversal.size();
+    }
+
     public int indexOf(Long occurrenceId) {
         for (int index = 0; index < traversal.size(); index++) {
             if (traversal.get(index).id().equals(occurrenceId)) {

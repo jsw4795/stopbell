@@ -112,7 +112,9 @@ class _AlarmHomeState extends State<AlarmHome> {
         SnackBar(
           content: Text(
             foreground is BoardingSessionNotification
-                ? '하차 준비 알림이 도착했어요.'
+                ? foreground.eventType == 'DESTINATION_REACHED'
+                      ? '선택한 정류장에 도달하거나 통과했어요.'
+                      : '하차 준비 알림이 도착했어요.'
                 : '버스 도착 알림이 도착했습니다.',
           ),
           action: SnackBarAction(

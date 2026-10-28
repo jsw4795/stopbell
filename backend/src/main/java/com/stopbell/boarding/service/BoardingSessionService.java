@@ -134,7 +134,8 @@ public class BoardingSessionService {
             }
             BoardingSession session = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(),
                     request.fingerprint(), start.vehicleTrackingId(), start.vehicleNumber(), start.routeNumber(),
-                    start.targetName(), start.traversal(), start.checkpoint(), now, now.plus(properties.getMaxLifetime())));
+                    start.targetName(), start.traversal(), start.checkpoint(), now, now.plus(properties.getMaxLifetime()),
+                    request.prepareNotificationEnabled()));
             return new CreationResult(response(session), true);
         });
     }
@@ -216,7 +217,7 @@ public class BoardingSessionService {
         });
         requireReconfirmation(expected, request.expectedRevision());
         // Reuse reference ownership/expiry, current metadata and selected vehicle validation.
-        // The production validator still refuses unsupported alighting evidence.
+        // Passenger access does not affect validation of vehicle progress.
         var start = validator.validate(userId, request.candidateRef(), request.confirmedVehicleNumber());
         if (start.traversal().provider() != expected.provider()
                 || !start.traversal().externalRouteId().equals(expected.routeId())
@@ -224,7 +225,7 @@ public class BoardingSessionService {
                 || !start.vehicleTrackingId().equals(expected.vehicleId())
                 || !start.vehicleNumber().equals(expected.vehicleNumber())
                 || !start.vehicleNumber().equals(request.confirmedVehicleNumber())
-                || !start.traversal().equals(expected.traversal())) {
+                || !start.traversal().sameTrackingPath(expected.traversal())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         var attempted = new AtomicReference<BoardingTrackingSnapshot>();

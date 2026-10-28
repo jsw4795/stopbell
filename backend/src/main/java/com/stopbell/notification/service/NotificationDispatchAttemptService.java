@@ -12,8 +12,11 @@ import com.stopbell.boarding.domain.BoardingTrackingSnapshot;
 import com.stopbell.boarding.entity.BoardingSessionStatus;
 import com.stopbell.boarding.repository.BoardingSessionRepository;
 import com.stopbell.boarding.service.BoardingTrackingRuntime;
+import com.stopbell.boarding.service.BoardingProgressEvaluator;
+import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.notification.entity.BoardingNotificationEventType;
 import com.stopbell.notification.entity.NotificationDelivery;
+import com.stopbell.notification.entity.NotificationEvent;
 import com.stopbell.notification.entity.NotificationDeliveryStatus;
 import com.stopbell.notification.entity.NotificationSourceType;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
@@ -72,7 +75,8 @@ public class NotificationDispatchAttemptService {
                 }
                 // Never load Delivery first. This current read precedes any consistent entity read.
                 var session = sessions.findForUpdate(identity.getBoardingSessionId()).orElse(null);
-                if (session == null || session.getStatus() != BoardingSessionStatus.TRACKING
+                if (session == null || (session.getStatus() != BoardingSessionStatus.TRACKING
+                            && session.getStatus() != BoardingSessionStatus.COMPLETED)
                         || !now().isBefore(session.getExpiresAt())) {
                     return Optional.empty();
                 }
@@ -96,10 +100,9 @@ public class NotificationDispatchAttemptService {
                 delivery.expire(now);
                 return Optional.empty();
             }
-            if (validated != null && (event.getBoardingEventType() != BoardingNotificationEventType.PREPARE_ALIGHT
+            if (validated != null && (!allowsSessionEvent(validated, event, now)
                     || !Objects.equals(event.getUser().getId(), sessionOwner)
-                    || !Objects.equals(event.getExpiresAt(), delivery.getExpiresAt())
-                    || !runtime.isReady(validated, now))) {
+                    || !Objects.equals(event.getExpiresAt(), delivery.getExpiresAt()))) {
                 return Optional.empty();
             }
             if (!handler.checkEligibility(delivery, now)) {
@@ -124,7 +127,7 @@ public class NotificationDispatchAttemptService {
                 log.debug("Notification dispatch skipped: deliveryId={}, reason={}", id, recipient.rejection());
                 return Optional.empty();
             }
-            if (validated != null && !runtime.isReady(validated, now)) {
+            if (validated != null && !allowsSessionEvent(validated, event, now)) {
                 return Optional.empty();
             }
             int previousCount = delivery.getAttemptCount();
@@ -148,7 +151,35 @@ public class NotificationDispatchAttemptService {
         return target.source().sourceType() == NotificationSourceType.ALARM
                 || (runtime != null && target.validatedSession() != null
                     && target.source().boardingSessionId().equals(target.validatedSession().id())
-                    && now().isBefore(target.expiresAt()) && runtime.isReady(target.validatedSession(), now()));
+                    && now().isBefore(target.expiresAt())
+                    && (target.source().boardingEventType() == BoardingNotificationEventType.DESTINATION_REACHED
+                        ? destinationReady(target.validatedSession(), now())
+                        : runtime.isReady(target.validatedSession(), now())));
+    }
+
+    private boolean allowsSessionEvent(BoardingTrackingSnapshot session,
+            NotificationEvent event, LocalDateTime now) {
+        if (event.getBoardingEventType() == BoardingNotificationEventType.DESTINATION_REACHED) {
+            var checkpoint = session.checkpoint();
+            return destinationReady(session, now)
+                    && checkpoint.getObservedAt().equals(event.getObservedAt())
+                    && Objects.equals(checkpoint.getProviderDataTime(), event.getProviderDataTime())
+                    && Objects.equals(checkpoint.getStopExternalId(), event.getCurrentStopExternalId())
+                    && Objects.equals(checkpoint.getStopOrder(), event.getCurrentStopOrder());
+        }
+        return event.getBoardingEventType() == BoardingNotificationEventType.PREPARE_ALIGHT
+                && session.prepareNotificationEnabled() && runtime.isReady(session, now);
+    }
+
+    private boolean destinationReady(BoardingTrackingSnapshot session, LocalDateTime now) {
+        var checkpoint = session.checkpoint();
+        var providerTime = checkpoint.getProviderDataTime();
+        return session.destinationReached() && now.isBefore(session.expiresAt())
+                && !checkpoint.getObservedAt().isAfter(now)
+                && !checkpoint.getObservedAt().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))
+                && (session.provider() != TransitProvider.SEOUL_BUS || providerTime != null)
+                && (providerTime == null || (!providerTime.isAfter(checkpoint.getObservedAt())
+                    && !providerTime.isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))));
     }
 
     public void completeAttempt(NotificationAttemptSnapshot snapshot, NotificationSendResult result) {

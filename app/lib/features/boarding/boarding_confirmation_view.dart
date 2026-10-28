@@ -13,11 +13,13 @@ class BoardingConfirmationView extends StatefulWidget {
     required this.onBack,
     this.busy = false,
     this.reconfirm = false,
+    this.onPrepareNotificationChanged,
   });
   final BoardingCandidate candidate;
   final String routeNumber, targetName;
   final Future<void> Function(String) onConfirm;
   final VoidCallback onBack;
+  final ValueChanged<bool>? onPrepareNotificationChanged;
   final bool busy, reconfirm;
   @override
   State<BoardingConfirmationView> createState() =>
@@ -28,6 +30,7 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
   final _number = TextEditingController();
   String? _error;
   bool _sending = false;
+  bool _prepareNotificationEnabled = true;
   @override
   void dispose() {
     _number.dispose();
@@ -83,8 +86,21 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
         '실제 탑승한 버스의 전체 차량번호를 직접 확인해 주세요. 공백도 원문 그대로 입력하며, 끝 네 자리만 대조하지 않아요.',
       ),
       const Text(
-        '추가 서버 검증이 필요해요. 번호 일치나 버튼 입력만으로 추적이 시작되지 않으며 현재 Provider의 실제 하차 추적은 아직 지원되지 않아요.',
+        '차량·경로·진행 검증에 성공하면 추적을 시작해요. 선택한 정류장에 도달하거나 통과하면 알리며, 실제 정차나 하차 가능 여부를 보장하지 않아요.',
       ),
+      if (!widget.reconfirm)
+        SwitchListTile(
+          key: const ValueKey('prepare-notification-enabled'),
+          title: const Text('사전 알림 받기'),
+          subtitle: const Text('2정거장 전 우선 · 놓치면 1정거장 전 한 번. 꺼도 목적지 알림은 받아요.'),
+          value: _prepareNotificationEnabled,
+          onChanged: widget.busy || _sending
+              ? null
+              : (value) {
+                  setState(() => _prepareNotificationEnabled = value);
+                  widget.onPrepareNotificationChanged?.call(value);
+                },
+        ),
       TextField(
         key: const ValueKey('confirmed-vehicle-number'),
         controller: _number,

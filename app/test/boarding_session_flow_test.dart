@@ -141,6 +141,35 @@ void main() {
   }
 
   testWidgets(
+    'preparation switch OFF reaches API and persisted session while destination remains enabled',
+    (tester) async {
+      await pump(tester);
+      await prepare(tester);
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('prepare-notification-enabled')),
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('prepare-notification-enabled')),
+      );
+      await tester.pumpAndSettle();
+      sessionResponse = (request) async {
+        expect(jsonDecode(request.body)['prepareNotificationEnabled'], isFalse);
+        expect(
+          storage.records.values.single.prepareNotificationEnabled,
+          isFalse,
+        );
+        return boardingJson({
+          ...sessionJson(),
+          'prepareNotificationEnabled': false,
+        }, 201);
+      };
+      await tap(tester, '탑승 차량 확정');
+      await tap(tester, '알림 없이 계속');
+      expect(find.text('사전 알림: OFF · 목적지 알림: ON'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'production wiring creates through JWT refresh then cancels with response revision',
     (tester) async {
       await pump(tester);

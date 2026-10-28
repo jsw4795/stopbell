@@ -1,5 +1,10 @@
 package com.stopbell.boarding.service;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+
+import com.stopbell.boarding.entity.BoardingCheckpoint;
+import com.stopbell.boarding.entity.BoardingTraversalSnapshot;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.service.BoardingCandidateMetadataService;
@@ -25,10 +30,19 @@ public class BoardingSessionStartValidator {
                 .orElseThrow(() -> new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED));
         var context = original.context();
         var current = metadata.read(context.routeId(), context.targetOccurrenceId(), context.boardingOccurrenceId());
-        candidates.revalidateSelected(original, current, confirmedVehicleNumber);
-        // Current metadata has no verified alightability classification. A direct arrival at
-        // the progress occurrence does not prove alighting is allowed at the selected target.
-        // Keep UNKNOWN unsupported until an approved evidence source supplies that classification.
-        throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        var verified = candidates.revalidateSelected(original, current, confirmedVehicleNumber);
+        var vehicle = verified.vehicle();
+        var checkpoint = new BoardingCheckpoint(vehicle.stopId(), vehicle.order(),
+                verified.progressIndex(), BoardingCheckpoint.Evidence.ID_ORDER, null,
+                LocalDateTime.ofInstant(vehicle.observedAt(), ZoneOffset.UTC),
+                LocalDateTime.ofInstant(vehicle.providerDataTime(), ZoneOffset.UTC));
+        // No passenger-access classification is required or inferred from stopFlag.
+        var traversal = new BoardingTraversalSnapshot(1, current.provider(), current.externalRouteId(), current.cityCode(),
+                current.traversal().stream().map(item -> new BoardingTraversalSnapshot.Occurrence(
+                        item.id(), item.externalStopId(), item.order())).toList(),
+                current.indexOf(current.targetOccurrenceId()), BoardingTraversalSnapshot.AlightAvailability.UNKNOWN, null);
+        return new VerifiedBoardingStart(current, traversal, checkpoint, original.expiresAt(),
+                vehicle.id(), vehicle.number(), current.routeNumber(),
+                current.traversal().get(current.indexOf(current.targetOccurrenceId())).stopName());
     }
 }

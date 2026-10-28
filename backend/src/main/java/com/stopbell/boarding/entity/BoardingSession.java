@@ -60,6 +60,9 @@ public class BoardingSession {
     @Column(name = "target_name", nullable = false, updatable = false, length = 255)
     private String targetName;
 
+    @Column(name = "prepare_notification_enabled", nullable = false, updatable = false)
+    private boolean prepareNotificationEnabled;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "traversal_snapshot", nullable = false, updatable = false)
     private String traversalSnapshot;
@@ -100,6 +103,15 @@ public class BoardingSession {
             String vehicleTrackingId, String vehicleNumber, String routeNumber, String targetName,
             BoardingTraversalSnapshot traversal, BoardingCheckpoint checkpoint,
             LocalDateTime createdAt, LocalDateTime expiresAt) {
+        this(user, clientRequestId, requestFingerprint, vehicleTrackingId, vehicleNumber, routeNumber, targetName,
+                traversal, checkpoint, createdAt, expiresAt, true);
+    }
+
+    public BoardingSession(User user, String clientRequestId, String requestFingerprint,
+            String vehicleTrackingId, String vehicleNumber, String routeNumber, String targetName,
+            BoardingTraversalSnapshot traversal, BoardingCheckpoint checkpoint,
+            LocalDateTime createdAt, LocalDateTime expiresAt, boolean prepareNotificationEnabled) {
+        this.prepareNotificationEnabled = prepareNotificationEnabled;
         if (user == null || traversal == null || checkpoint == null) {
             throw new IllegalArgumentException("Owner, traversal and checkpoint are required");
         }
@@ -112,9 +124,8 @@ public class BoardingSession {
         required(routeNumber, 100);
         required(targetName, 255);
         checkpoint.validateAgainst(traversal);
-        if (traversal.targetAlightAvailability() != BoardingTraversalSnapshot.AlightAvailability.ALLOWED
-                || checkpoint.getIndex() >= traversal.targetIndex()) {
-            throw new IllegalArgumentException("A verified alight target ahead is required");
+        if (checkpoint.getIndex() >= traversal.targetIndex()) {
+            throw new IllegalArgumentException("An exact target occurrence ahead is required");
         }
         this.createdAt = time(createdAt);
         this.expiresAt = time(expiresAt);
@@ -273,6 +284,8 @@ public class BoardingSession {
         }
         return snapshot;
     }
+
+    public boolean isPrepareNotificationEnabled() { return prepareNotificationEnabled; }
 
     public Long getId() {
         return id;

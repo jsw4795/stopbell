@@ -1,6 +1,8 @@
 # TASK-908 사전 검증 1단계: Provider 차량·진행·하차 가능성 증거
 
-§1~17은 Phase A 기록을 보존한다. **Phase B의 사전검증은 §18, 최초 점검·보류는 §19, 실제 실행은 §20, 후속 인증 없는 연결 진단과 로컬 경로 수정은 §21**에 구분한다. 각 절의 승인·환경·호출 횟수는 해당 작업 시점의 기록이다. 누적 인증 데이터 요청 시도는 **서울1회/TAGO0회, 실제 데이터 확보0건**이며, §21의 **인증 없는 서울 HTTP 진단4회**는 별도다.
+> **현행 요구사항 정정 (2026-10-28):** §1~22의 목적 occurrence 하차 허용 근거를 시작 조건으로 둔 해석은 철회한다. 하차 가능성 공식 근거 조사는 종료하며 현재 계약은 [요구사항](../requirements.md#phase-9-탑승-세션과-하차-준비-알림)과 [API 지원 경계](../api.md#탑승-세션-api-task-903)를 따른다. 아래 실측 횟수·미실행·과거 보류 기록은 당시 사실로 보존한다.
+
+§1~17은 Phase A 기록을 보존한다. **Phase B의 사전검증은 §18, 최초 점검·보류는 §19, 실제 실행은 §20, 후속 인증 없는 연결 진단과 로컬 경로 수정은 §21, HTTP 연결 완료 이후 Backend 안전 검증 보강은 §22**에 구분한다. 각 절의 승인·환경·호출 횟수는 해당 작업 시점의 기록이다. §21 종료 시점 누적 인증 데이터 요청 시도는 **서울1회/TAGO0회, 실제 데이터 확보0건**이며, §21의 **인증 없는 서울 HTTP 진단4회**는 별도다. 이후 서울 HTTP 성공 기록은 §22의 링크를 따른다.
 
 ## 1. 목적과 실행 범위
 
@@ -677,3 +679,63 @@ Backend는 JDK HttpClient connect timeout과 request factory read timeout을 설
 이번에는 Credential을 전송·출력하지 않았고 브라우저 계정 화면·스크린샷을 사용하지 않았다. 기존 §20의 키 노출 기록을 삭제/수정하거나 없었다고 주장하지 않는다. Credential 재발급은 사용자의 후속 조치로 남기고 기존 값을 변경하지 않았다. 두 로컬 도구는 Untracked로 유지하며, 보고서와 `task-list.md` 진행 상태만 함께 갱신한다. 새 Dependency·Production·Flutter·FCM·devlog 변경이나 실행, 브랜치/Worktree 생성·Git add/commit/push는 없다.
 
 문서 diff·status·`git diff --check`, Python AST·공백 검사, 전체 Task checkbox 보존·staging 비어 있음·도구 Untracked, 관련 파일의 실제 Key 원문/인코딩 변형 비포함, 보고서 파일 참조 및 기존 노출 기록 보존 검사를 통과했다. Backend/Flutter 테스트는 Production 변경이 없어 실행하지 않았다.
+
+## 22. HTTP 연결 완료 이후 Backend 안전 검증 보강 (2026-10-28)
+
+### 22.1 기준과 실제 시작 차단
+
+서울 HTTP 연결과 공식 roster/detail path 수정은 완료된 기준이다. [서울 HTTP 성공 기록](../local-development.md#2026-10-28-서울-공식-http-개발운영-공통-지원)의 143번 roster 44대·Candidates 200/PARTIAL을 재조사하거나 재호출하지 않았다. 해당 실측은 **detail 0회**이므로 동일 차량의 정류장 연속 진행까지 검증한 결과는 아니다. §1~21의 연결 보류·도구 상태는 과거 시점 기록이며, 삭제된 임시 도구를 복구하지 않았다.
+
+`BoardingSessionStartValidator.validate`는 reference 소유권·metadata와 `revalidateSelected`를 확인한 뒤 항상 `BOARDING_TRACKING_UNSUPPORTED`를 반환한다. `BoardingRouteSnapshot`과 현재 DB metadata에는 목적 occurrence의 하차 분류/근거가 없다. 따라서 `VerifiedBoardingStart` 및 `BoardingSession`이 요구하는 **근거가 있는 ALLOWED**를 만들 수 없다. 이 차단을 제거하거나 UNKNOWN을 ALLOWED로 승격하지 않았다.
+
+별도 선행 제한도 유지한다. 서울 이동 중/Stop ID 없는 detail, 이전 stopped detail 부재, 반복 Stop 포함 traversal은 현재 재검증에서 지원 보류다. 순번 역행·ID/order 모순·시각/identity 변경은 거부하고 다음 lap을 추측하지 않는다. 반복 Stop 전체 보류는 occurrence 구별을 허용하는 목표 Domain 계약보다 보수적인 현재 Provider 지원 제한이며, 구별 근거 없이 이번에 완화하지 않았다.
+
+### 22.2 현재 활용 범위와 필요한 근거
+
+| 항목 | 현재 구현으로 검사 가능한 범위 | 추가 근거·실제 운행 검증 |
+| --- | --- | --- |
+| 차량 | 선택 vehId·전체 plainNo와 roster/detail 대응, 충돌·변경 거부 | ID 수명·재사용/배차·노선 변경 정책, 실제 동일 차량 연속 관측 |
+| 정류장 occurrence | T Data CSV의 Route×Stop ID×순서와 detail stId/stOrd의 정확 대응 | roster sectOrd는 구간순번이며 stOrd와 동치 아님. 이동 중 stOrd 전환 의미와 실제 운행 대응 필요 |
+| 하차 가능 | UNKNOWN/PROHIBITED이면 시작/알림 차단 | 노선×방향×occurrence별 정차·하차 허용 정의, 예외·유효기간과 해당 source의 저장/갱신 계약 필요 |
+| 운행 경계 | 명시적 isrunyn=0 차단, 역행·소실·반복 Stop 보류 | isrunyn=1은 같은 trip/lap 증명이 아님. 회차·운행 경계를 구별하는 기관 계약과 실제 전후 관측 필요 |
+| 시각 | dataTm KST strict 파싱, 기존 60초 freshness·미래/역행·동일 제공시각 충돌 거부 | dataTm 생성/갱신·지연 보장, 현재 60초/2분/20초 설정의 현장 적합성 필요 |
+
+CSV 원본은 현재 workspace에 없으므로 재다운로드하지 않았다. 기존 `SeoulCsvMetadataSource`의 세 파일 header·join·scope와 ADR-009/이 보고서 §3·6의 공식 필드 계약을 대조했다. 노드·정류장유형·노선 포함 여부를 승객 하차 허용으로 바꾸지 않는다. 실제 정차 관측 하나도 정규 하차 정책의 대체 근거가 아니다.
+
+### 22.3 최소 수정과 검증 경계
+
+- 시작/재확인에서도 같은 제공/수신시각의 다른 occurrence를 거부하고, 같은 제공시각의 roster 구간 문맥 충돌을 거부하도록 보강했다. 기존 polling evaluator의 동일 source-time 규칙과 일치시키며 sectOrd로 위치를 합성하지 않는다
+- §3 O2에 이미 확인된 `isrunyn=0` 공식 의미만 사용한다. Boarding 전용 mapper에 명시적 종료 신호를 보존하고, 원래/최신 후보가 종료이면 시작·재확인을 차단한다. 추적 중에는 기존 `TRAVERSAL_AMBIGUOUS`로 영속 보류해 같은 ID 재등장에도 재확인 전 자동 연결하지 않는다. 누락/1을 운행 연속성 검증으로 승격하지 않는다
+- Session 생성·상태 관리, checkpoint/Notification 원자 저장, `(boardingSessionId, PREPARE_ALIGHT)` 중복 방지와 runtime/전송 직전 gate는 기존 구현을 재사용한다. 기존 Alarm·FCM 및 서울 HTTP 설정, Dependency·Migration·API 필드는 변경하지 않는다
+
+변경 파일은 다음과 같다.
+
+- 제품: [`BoardingCandidateMapper.java`](../../backend/src/main/java/com/stopbell/transit/mapper/BoardingCandidateMapper.java), [`BoardingCandidateService.java`](../../backend/src/main/java/com/stopbell/transit/service/BoardingCandidateService.java), [`BoardingVehicleTracker.java`](../../backend/src/main/java/com/stopbell/boarding/service/BoardingVehicleTracker.java)
+- 테스트: [`BoardingCandidateRevalidationTest.java`](../../backend/src/test/java/com/stopbell/transit/service/BoardingCandidateRevalidationTest.java), [`BoardingVehicleTrackerTest.java`](../../backend/src/test/java/com/stopbell/boarding/service/BoardingVehicleTrackerTest.java), [`BoardingProgressEvaluatorTest.java`](../../backend/src/test/java/com/stopbell/boarding/service/BoardingProgressEvaluatorTest.java), [`BoardingSessionApiIntegrationTest.java`](../../backend/src/test/java/com/stopbell/boarding/controller/BoardingSessionApiIntegrationTest.java), [`BoardingTrackingIntegrationTest.java`](../../backend/src/test/java/com/stopbell/boarding/service/BoardingTrackingIntegrationTest.java)
+- 문서: [Domain](../domain-model.md#snapshot-and-progress), [Task 상태](../task-list.md), 본 보고서
+
+Java/Gradle JVM 21·Wrapper 8.14.3에서 다음을 검증했다.
+
+- 수정 전 새 회귀 테스트에서 **5개 실패**로 동일 제공시각 충돌과 운행 종료 미반영을 재현했다. 수정 후 집중 **38개**가 모두 통과했다
+- `./gradlew test --tests 'com.stopbell.boarding.*' --tests 'com.stopbell.notification.*' --tests 'com.stopbell.transit.*' --tests 'com.stopbell.alarm.*'`: **59개 클래스·825개 테스트, 실패/오류/skip 0**, BUILD SUCCESSFUL. 전체 Backend suite라고 표현하지 않는다
+- 신규 **11개 실행 사례**와 기존 회귀로 정상 선택, 차량번호/vehId 불일치, stale/미래/역행, 정류장 ID/order 모순, 동일 제공시각 충돌, 명시적 운행 종료·영속 보류/재등장 차단, 회차 불명확, 하차 UNKNOWN/PROHIBITED, 세션·알림 미생성, 중복 Event 방지 및 기존 Notification/Alarm을 검증했다
+- `git diff --check`, Task checkbox 상태 보존과 최종 변경 범위를 확인했다. 테스트는 Mock Provider·격리 MySQL 8.4.11 Testcontainers·loopback HTTP를 사용했다. **실제 Provider API·FCM 호출은 이번 작업에서 각각 0회**이며 실제 버스/iPhone E2E 성공이 아니다
+
+현재 실제 BoardingSession 생성은 계속 불가능하다. 하차 허용 source 계약과 필요한 진행/운행 근거를 확보한 뒤 검증 성공 분기를 연결하고, 승인된 좁은 현장 범위에서 후보→확정→동일 차량 추적→준비 Event/FCM→iPhone foreground/background/terminated 표시·tap·중복/지연을 검증해야 한다. TASK-908은 `[ ]`이며 main·Git add/commit/push 금지를 유지한다.
+
+
+## 23. 도달·통과 요구사항 정정과 오프라인 구현 검증 (2026-10-28)
+
+사용자는 하차 가능 여부가 서비스의 판단 대상이 아님을 명시했다. §1~22의 하차 허용 근거 조사와 이를 이유로 둔 무조건적인 시작 차단을 현행 요구로 사용하지 않는다. 공식 하차 가능 정류장 근거를 추가 조사하지 않았다. 현재 계약은 Requirements·Domain·API·Database·Architecture와 ADR-012 정정을 따른다.
+
+- 시작 Validator의 무조건 UNSUPPORTED 반환과 VerifiedBoardingStart·Entity·Evaluator의 ALLOWED 필수 검증 제거. UNKNOWN/PROHIBITED도 추적 가능하며 승객 접근 분류는 부가 metadata로만 보존
+- 실제 production Validator·후보 재검증·격리 MySQL로 201 TRACKING 생성과 동일 차량 재확인 검증. Provider Client만 Mock이며 Validator 성공값을 주입한 테스트로 대체하지 않음
+- 사전 알림 선택을 API·불변 Session·생성 요청 fingerprint·Flutter Secure intent/재시도·UI에 연결. 목적지 알림은 OFF와 무관하게 도달·통과 완료 및 Event/recipient Delivery와 원자 저장
+- V17로 기존 row의 사전 알림 ON 보존 및 DESTINATION_REACHED CHECK 확장. Session/Event type UNIQUE와 기존 Alarm source·Delivery·recipient·bounded retry 경계 유지
+- 완료 목적지 전송은 원래 기한·freshness·owner·불변 완료 checkpoint와 Event 대응을 재검증하며, 재시작 후 새 Event를 만들지 않고 기존 PENDING만 처리. 준비 전송은 기존 runtime gate 유지
+
+최종 검증은 Java 21 / Gradle Wrapper 8.14.3 / MySQL 8.4.11 Testcontainers의 Backend 전체 **930개**, Flutter 전체 **437개**이며 실패/오류/skip은 0이다. `flutter analyze`와 `git diff --check`도 통과했다. 일반/하차 금지/미확정 목적지·사전 ON/OFF·2/1 준비·도달·목적지 정차 관측 없는 이후 진행·식별/시각/진행 불확실·중복 Event/정상 반복 Worker의 중복 FCM 억제·목적지 저장 실패 rollback·재시작 전송을 확인했다. 기존 network acceptance ambiguity의 OS exactly-once 비보장 계약은 바꾸지 않았다. 초기 실행의 Migration 최신 버전 고정값·변경 안내 문구·신규 테스트 transaction 경계는 수정 후 전체 재검증했다.
+
+실제 서울 이동 detail 의미는 여전히 UNVERIFIED다. `sectOrd`는 구간 문맥으로만 사용하며 occurrence order로 치환하지 않는다. 현재 서울 시작은 이전·최신 exact stopped detail과 번호/ID·freshness·단조 진행·목적지 이전·반복 Stop/회차 모호성 없는 경로를 요구한다. 이전 detail이 없는 승차 occurrence 생략 조회, 이동 의미·order-only·반복 Stop의 회차 문맥 미검증, 운행 종료는 하차 가능성과 무관한 실제 차단 조건이다. 추적 중 미검증 이동 관측은 보류·재확인을 요구하므로 실차 연속 추적 지원 완료를 주장하지 않는다. 목적지 정차 없이 이후의 검증된 정차 detail로 통과를 확인하는 테스트는 사이의 미검증 이동 관측을 VERIFIED 처리한 것이 아니다.
+
+이번 실제 Provider·FCM·iPhone 호출/검증은 **0회**다. 기존 서울 HTTP 설정을 유지하고 개발 DB에 V17을 적용하거나 실제 BoardingSession을 생성하지 않았다. 실제 버스/iPhone E2E와 TASK-710/TASK-908 `[ ]`는 남는다. main 유지, Git add/commit/push 없음, 새 Dependency·devlog 변경 없음이며 기존 작업 중 변경을 보존했다.

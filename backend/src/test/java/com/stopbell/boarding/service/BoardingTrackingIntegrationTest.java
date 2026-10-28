@@ -133,6 +133,50 @@ class BoardingTrackingIntegrationTest {
         return saved;
     }
 
+    @ParameterizedTest
+    @CsvSource({"ALLOWED,true,3", "PROHIBITED,true,3", "UNKNOWN,true,3", "ALLOWED,false,3", "PROHIBITED,false,3", "UNKNOWN,false,3",
+            "ALLOWED,true,4", "PROHIBITED,true,4", "UNKNOWN,true,4", "ALLOWED,false,4", "PROHIBITED,false,4", "UNKNOWN,false,4"})
+    @DisplayName("일반·미정차 목적지는 사전 알림 선택과 무관하게 실제 polling에서 도달·통과 Event를 한 번 저장한다")
+    void destination_is_independent_of_passenger_access(BoardingTraversalSnapshot.AlightAvailability availability,
+            boolean preparation, int endIndex) {
+        var base = session.getTraversal();
+        var snapshot = new BoardingTraversalSnapshot(1, base.provider(), base.externalRouteId(), base.cityCode(),
+                base.occurrences(), base.targetIndex(), availability,
+                availability == BoardingTraversalSnapshot.AlightAvailability.UNKNOWN ? null : "fixture-access");
+        jdbc.update("update boarding_sessions set traversal_snapshot=?, traversal_fingerprint=?, prepare_notification_enabled=? where id=?",
+                snapshot.toJson(), snapshot.fingerprint(), preparation, session.getId());
+        device(session.getUser());
+        polling.poll(cycle()); // index 1 = two occurrences before target
+        assertThat(events.count()).isEqualTo(preparation ? 1 : 0);
+        time.set(NOW.plusSeconds(40));
+        when(detail.fetchVehicleDetail(anyString())).thenReturn(detail(endIndex));
+        polling.poll(cycle()); // index 4 proves passage without observing a stop at target index 3
+        assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.COMPLETED);
+        var destination = new TransactionTemplate(manager).execute(status -> events.findByBoardingSessionIdAndBoardingEventType(
+                session.getId(), BoardingNotificationEventType.DESTINATION_REACHED).orElseThrow());
+        assertThat(destination.getCurrentStopOrder()).isEqualTo(traversal.get(endIndex).order());
+        assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(destination.getId())).singleElement()
+                .extracting(NotificationDelivery::getStatus).isEqualTo(NotificationDeliveryStatus.PENDING);
+        polling.poll(cycle());
+        assertThat(events.count()).isEqualTo(preparation ? 2 : 1);
+        assertThat(deliveries.count()).isEqualTo(events.count());
+    }
+
+    @Test
+    @DisplayName("목적지 Event 저장 실패는 완료 상태와 checkpoint까지 rollback한다")
+    void destination_insert_failure_rolls_back_completion() {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        var decision = evaluator.evaluate(expected, BoardingProgressEvaluatorTest.observation(expected, 4,
+                Meaning.VERIFIED_REFERENCE, 20), utc());
+        doThrow(new org.springframework.dao.DataIntegrityViolationException("synthetic-write-failure"))
+                .when(events).saveAndFlush(any(NotificationEvent.class));
+        assertThatThrownBy(() -> store.apply(expected, decision)).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(BoardingTrackingSnapshot.from(sessions.findById(session.getId()).orElseThrow())).isEqualTo(expected);
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+    }
+
     @Test
     @DisplayName("기존 Alarm과 탑승 세션이 같은 Scheduler cycle의 roster와 detail을 공유하며 중복 실행도 checkpoint를 덮어쓰지 않는다")
     void alarm_and_boarding_share_scheduler_cycle() throws Exception {
@@ -178,6 +222,32 @@ class BoardingTrackingIntegrationTest {
         stop.updateMetadata("새 표시 이름", null, null);
         stops.saveAndFlush(stop);
         assertThat(polling.poll(cycle()).getFirst().decision().outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
+    }
+
+    @Test
+    @DisplayName("명시적 운행 종료는 checkpoint를 보존해 영속 보류하며 운행 재등장에도 자동 복구하거나 알림을 만들지 않는다")
+    void known_run_end_requires_reconfirmation() {
+        when(seoul.fetchVehicleLocations(any())).thenReturn(new SeoulBusVehicleLocationResponse(
+                new SeoulBusVehicleLocationResponse.Header("0", null),
+                new SeoulBusVehicleLocationResponse.Body(List.of(new SeoulBusVehicleLocationItem(
+                        "vehicle-id", NUMBER, 1, "section", 1, dataTime(), null, null, null, "0", null)))));
+        var result = polling.poll(cycle()).getFirst();
+        assertThat(result.accepted()).isTrue();
+        assertThat(result.decision().reason()).isEqualTo(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        var saved = sessions.findById(session.getId()).orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo(BoardingSessionStatus.SUSPENDED);
+        assertThat(saved.getCheckpoint()).isEqualTo(session.getCheckpoint());
+        assertThat(runtime.isReady(BoardingTrackingSnapshot.from(saved), utc())).isFalse();
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster());
+        time.set(NOW.plusSeconds(40));
+        assertThat(polling.poll(cycle())).isEmpty();
+        saved = sessions.findById(session.getId()).orElseThrow();
+        assertThat(saved.getStateReason()).isEqualTo(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        assertThat(saved.getRevision()).isEqualTo(1);
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+        verify(seoul, times(1)).fetchVehicleLocations(any());
+        verifyNoInteractions(detail);
     }
 
     @ParameterizedTest
@@ -842,11 +912,19 @@ class BoardingTrackingIntegrationTest {
         }
         assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(
                 scenario == 0 || scenario == 3 ? BoardingSessionStatus.CANCELLED : BoardingSessionStatus.COMPLETED);
-        assertThat(deliveries.findAll()).singleElement().satisfies(value -> {
+        var preparationEvent = events.findAll().stream()
+                .filter(event -> event.getBoardingEventType() == BoardingNotificationEventType.PREPARE_ALIGHT).findFirst().orElseThrow();
+        assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(preparationEvent.getId())).singleElement().satisfies(value -> {
             assertThat(value.getStatus()).isEqualTo(scenario == 3 ? NotificationDeliveryStatus.EXPIRED : NotificationDeliveryStatus.FAILED);
             assertThat(value.getLastFailureCode()).isEqualTo(scenario == 3 ? "FRESHNESS_EXPIRED" : "DISPATCH_NOT_ALLOWED");
         });
-        assertThat(events.count()).isOne();
+        assertThat(events.count()).isEqualTo(scenario == 1 || scenario == 2 ? 2 : 1);
+        if (scenario == 1 || scenario == 2) {
+            var destination = events.findAll().stream().filter(event -> event.getBoardingEventType()
+                    == BoardingNotificationEventType.DESTINATION_REACHED).findFirst().orElseThrow();
+            assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(destination.getId())).singleElement()
+                    .extracting(NotificationDelivery::getStatus).isEqualTo(NotificationDeliveryStatus.PENDING);
+        }
     }
 
     @ParameterizedTest

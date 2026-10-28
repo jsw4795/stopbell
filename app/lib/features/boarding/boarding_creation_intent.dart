@@ -51,6 +51,7 @@ class BoardingCreationIntent {
     required this.sessionIdentity,
     required this.context,
     required this.observedAt,
+    this.prepareNotificationEnabled = true,
   });
   final String clientRequestId,
       candidateRef,
@@ -59,10 +60,12 @@ class BoardingCreationIntent {
       sessionIdentity;
   final BoardingSelectionContext context;
   final DateTime observedAt;
+  final bool prepareNotificationEnabled;
   Map<String, Object> get body => {
     'clientRequestId': clientRequestId,
     'candidateRef': candidateRef,
     'confirmedVehicleNumber': confirmedVehicleNumber,
+    if (!prepareNotificationEnabled) 'prepareNotificationEnabled': false,
   };
   Map<String, Object?> toJson() => {
     ...body,
@@ -73,6 +76,10 @@ class BoardingCreationIntent {
   };
   factory BoardingCreationIntent.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) throw const FormatException();
+    if (value.containsKey('prepareNotificationEnabled') &&
+        value['prepareNotificationEnabled'] is! bool) {
+      throw const FormatException();
+    }
     final uuid = boardingText(value['clientRequestId']);
     if (!isBoardingUuid(uuid)) throw const FormatException();
     return BoardingCreationIntent(
@@ -83,6 +90,8 @@ class BoardingCreationIntent {
       sessionIdentity: boardingText(value['sessionIdentity']),
       context: BoardingSelectionContext.fromJson(value['context']),
       observedAt: boardingInstant(value['observedAt']),
+      prepareNotificationEnabled:
+          value['prepareNotificationEnabled'] as bool? ?? true,
     );
   }
 }

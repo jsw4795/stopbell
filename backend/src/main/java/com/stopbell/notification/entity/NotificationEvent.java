@@ -136,7 +136,7 @@ public class NotificationEvent {
             LocalDateTime eventDetectedAt, LocalDateTime createdAt, LocalDateTime expiresAt
     ) {
         if (boardingSessionId == null || boardingSessionId <= 0 || user == null
-                || eventType != BoardingNotificationEventType.PREPARE_ALIGHT || checkpoint == null) {
+                || eventType == null || checkpoint == null) {
             throw new IllegalArgumentException("Boarding Event identity, owner and evidence must be valid");
         }
         NotificationEvent event = new NotificationEvent();

@@ -159,7 +159,7 @@ public class BoardingTrackingStore {
             }
         }
         sessions.flush();
-        Long eventId = notifications.prepare(session, expected, current);
+        Long eventId = notifications.recordDecision(session, expected, current);
         notifications.terminatePending(session);
         sessions.flush();
         return new Commit(new Applied(expected.id(), true, session.getRevision(), session.getStatus(), current),

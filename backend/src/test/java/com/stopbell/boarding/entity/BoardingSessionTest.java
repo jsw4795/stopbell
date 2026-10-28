@@ -15,6 +15,21 @@ import org.junit.jupiter.api.Test;
 class BoardingSessionTest {
     private final User user = new User(AuthProvider.GOOGLE, "owner");
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(BoardingTraversalSnapshot.AlightAvailability.class)
+    @DisplayName("일반·하차 금지·하차 미확정 목적 occurrence 모두 세션을 생성할 수 있다")
+    void access_classification_does_not_block_tracking(BoardingTraversalSnapshot.AlightAvailability availability) {
+        var start = verified(metadata());
+        var base = start.traversal();
+        var traversal = new BoardingTraversalSnapshot(1, base.provider(), base.externalRouteId(), base.cityCode(),
+                base.occurrences(), base.targetIndex(), availability,
+                availability == BoardingTraversalSnapshot.AlightAvailability.UNKNOWN ? null : "fixture-classification");
+        var session = new BoardingSession(user, REQUEST_ID, "a".repeat(64), "vehicle-id", NUMBER, "7000", "목적지",
+                traversal, start.checkpoint(), UTC_NOW, UTC_NOW.plusHours(4));
+        assertThat(session.getStatus()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(traversal.sameTrackingPath(base)).isTrue();
+    }
+
     @Test
     @DisplayName("세션은 최초 checkpoint와 고정 수명으로 TRACKING 상태에서 시작한다")
     void start_tracking() {

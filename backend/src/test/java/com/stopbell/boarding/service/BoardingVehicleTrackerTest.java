@@ -134,6 +134,18 @@ class BoardingVehicleTrackerTest {
     }
 
     @Test
+    @DisplayName("명시적 서울 운행 종료는 detail 조회나 준비 판단 없이 연속성 상실로 보류한다")
+    void known_run_end_blocks_tracking() {
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                "vehicle-id", NUMBER, 1, "section", 1, "20261020120019", null, null, null, "0", null)));
+        var input = tracker.observe(session, cycle());
+        assertThat(input.reason()).isEqualTo(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        assertThat(input.reason().allowsAutomaticRevalidation()).isFalse();
+        assertThat(input.observation()).isNull();
+        verifyNoInteractions(detail);
+    }
+
+    @Test
     @DisplayName("Provider 실패도 cycle 안에서 공유하며 다음 cycle에서만 다시 요청한다")
     void failure_is_shared_not_amplified() {
         var failure = TransitProviderClientException.protocol(TransitProvider.SEOUL_BUS, "roster", null);

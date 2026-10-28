@@ -66,9 +66,6 @@ public class BoardingProgressEvaluator {
             return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
         }
         var traversal = session.traversal();
-        if (traversal.targetAlightAvailability() != BoardingTraversalSnapshot.AlightAvailability.ALLOWED) {
-            return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
-        }
         int index = -1;
         if (vehicle.order() != null) {
             for (int i = 0; i < traversal.occurrences().size(); i++) {
@@ -106,18 +103,19 @@ public class BoardingProgressEvaluator {
                         : BoardingCheckpoint.Evidence.ID_ORDER,
                 observation.directionContext(), observedAt, providerTime);
         observedAt = checkpoint.getObservedAt();
-        if (gap == 0 && vehicle.stopId() != null
-                && observation.meaning() == BoardingProgressObservation.Meaning.DIRECT_ARRIVAL) {
+        LocalDateTime expiry = Duration.between(observedAt, session.expiresAt()).compareTo(prepareTtl) <= 0
+                ? session.expiresAt() : observedAt.plus(prepareTtl);
+        if (gap == 0 && (observation.meaning() == BoardingProgressObservation.Meaning.VERIFIED_REACHED
+                || (vehicle.stopId() != null
+                    && observation.meaning() == BoardingProgressObservation.Meaning.DIRECT_ARRIVAL))) {
             return new BoardingTrackingDecision(Outcome.ARRIVAL_OBSERVED, checkpoint,
-                    BoardingStateReason.ARRIVAL_OBSERVED, gap, observedAt, null, now);
+                    BoardingStateReason.ARRIVAL_OBSERVED, gap, observedAt, expiry, now);
         }
         if (gap < 0 && previous.getIndex() <= traversal.targetIndex()) {
             return new BoardingTrackingDecision(Outcome.PASSED_OBSERVED, checkpoint,
-                    BoardingStateReason.PASSED_OBSERVED, gap, observedAt, null, now);
+                    BoardingStateReason.PASSED_OBSERVED, gap, observedAt, expiry, now);
         }
-        LocalDateTime expiry = Duration.between(observedAt, session.expiresAt()).compareTo(prepareTtl) <= 0
-                ? session.expiresAt() : observedAt.plus(prepareTtl);
-        Outcome outcome = gap == 1 || gap == 2
+        Outcome outcome = session.prepareNotificationEnabled() && (gap == 1 || gap == 2)
                 ? now.isBefore(expiry) ? Outcome.PREPARE_ALIGHT : Outcome.EXPIRED_CANDIDATE
                 : Outcome.NO_CANDIDATE;
         return new BoardingTrackingDecision(outcome, checkpoint, null, gap, observedAt, expiry, now);

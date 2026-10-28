@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import com.stopbell.boarding.dto.CreateBoardingSessionRequest;
 import com.stopbell.boarding.dto.ReconfirmBoardingSessionRequest;
 import com.stopbell.boarding.dto.BoardingSessionResponse;
+import com.stopbell.boarding.entity.BoardingSession;
 import com.stopbell.boarding.entity.BoardingCheckpoint;
+import com.stopbell.boarding.entity.BoardingTraversalSnapshot;
 import com.stopbell.boarding.entity.BoardingSessionStatus;
 import com.stopbell.boarding.service.VerifiedBoardingStart;
 import com.stopbell.boarding.service.BoardingTrackingRuntime;
@@ -125,6 +127,31 @@ class BoardingSessionApiIntegrationTest {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             return progress("s1", 10, 1);
         });
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("실제 Validator의 생성은 사전 알림 선택을 저장하고 같은 UUID로 선택을 바꾸면 충돌한다")
+    void real_creation_preserves_notification_choice(boolean enabled) throws Exception {
+        String ref = candidateRef();
+        String content = body(REQUEST_ID, ref).replace("}", ",\"prepareNotificationEnabled\":" + enabled + "}");
+        mvc.perform(auth(postSession(REQUEST_ID, ref).content(content), owner)).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.prepareNotificationEnabled").value(enabled));
+        assertThat(sessions.findAll()).singleElement().extracting(BoardingSession::isPrepareNotificationEnabled)
+                .isEqualTo(enabled);
+        mvc.perform(auth(postSession(REQUEST_ID, ref).content(content), owner)).andExpect(status().isOk());
+        mvc.perform(auth(postSession(REQUEST_ID, ref).content(content.replace(":" + enabled + "}", ":" + !enabled + "}")), owner))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BOARDING_REQUEST_CONFLICT"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "0", "\"false\"", "{}"})
+    @DisplayName("사전 알림 선택은 생략 또는 boolean만 허용한다")
+    void reject_invalid_preparation_choice(String value) throws Exception {
+        mvc.perform(auth(postSession(REQUEST_ID, "ref").content(body(REQUEST_ID, "ref")
+                .replace("}", ",\"prepareNotificationEnabled\":" + value + "}")), owner))
+                .andExpect(status().isBadRequest());
+        assertThat(sessions.count()).isZero();
     }
 
     @Test
@@ -279,12 +306,39 @@ class BoardingSessionApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("서울의 exact direct 도착 진행도 목적지의 하차 가능 근거 없이는 지원 성공으로 바꾸지 않는다")
-    void real_validator_preserves_unsupported_boundary() throws Exception {
+    @DisplayName("실제 Validator는 하차 가능 근거 없이도 검증된 서울 차량과 정확한 목적 occurrence의 세션을 생성한다")
+    void real_validator_creates_session_with_unknown_access() throws Exception {
         String reference = candidateRef();
-        mvc.perform(auth(postSession(REQUEST_ID, reference), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_TRACKING_UNSUPPORTED"));
+        mvc.perform(auth(postSession(REQUEST_ID, reference), owner)).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("TRACKING"));
+        assertThat(sessions.findAll()).singleElement().satisfies(value -> {
+            assertThat(value.getTraversal().targetAlightAvailability()).isEqualTo(BoardingTraversalSnapshot.AlightAvailability.UNKNOWN);
+            assertThat(value.getTraversal().occurrences().get(value.getTraversal().targetIndex()).occurrenceId()).isEqualTo(target.getId());
+        });
+    }
+
+    @Test
+    @DisplayName("같은 제공시각의 occurrence 변경은 실제 시작 검증에서 세션과 알림을 저장하지 않는다")
+    void conflicting_progress_does_not_create_session() throws Exception {
+        String reference = candidateRef();
+        time.set(NOW.plusSeconds(1));
+        doReturn(progress("s2", 20, 1)).when(detail).fetchVehicleDetail("vehicle-id");
+        expectError(reference, "BOARDING_CANDIDATE_CHANGED", 409);
         assertThat(sessions.count()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("최신 roster가 운행 종료를 명시하면 실제 시작 검증에서 세션과 알림을 저장하지 않는다")
+    void known_run_end_does_not_create_session() throws Exception {
+        String reference = candidateRef();
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                "vehicle-id", NUMBER, 999, "coarse", 1, "20261020120000", null, null, "unused-coarse-stop", "0", null)));
+        expectError(reference, "BOARDING_TRACKING_UNSUPPORTED", 409);
+        assertThat(sessions.count()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
     }
 
     @Test
@@ -429,13 +483,13 @@ class BoardingSessionApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("실제 Provider의 미검증 하차 가능 근거는 재확인에서도 성공으로 우회하지 않는다")
-    void reconfirm_real_provider_remains_unsupported() throws Exception {
+    @DisplayName("실제 Validator의 재확인은 하차 분류와 무관하게 같은 차량과 경로의 검증된 기준점으로 재개한다")
+    void reconfirm_real_validator_without_access_gate() throws Exception {
         long id = suspendedFixture();
         doCallRealMethod().when(validator).validate(anyLong(), anyString(), anyString());
-        mvc.perform(auth(reconfirmRequest(id, 1, candidateRef()), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_TRACKING_UNSUPPORTED"));
-        assertThat(sessions.findById(id).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.SUSPENDED);
+        mvc.perform(auth(reconfirmRequest(id, 1, candidateRef()), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("TRACKING"));
+        assertThat(sessions.findById(id).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.TRACKING);
     }
 
     @Test

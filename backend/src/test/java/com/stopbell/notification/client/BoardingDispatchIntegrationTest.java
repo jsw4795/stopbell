@@ -81,6 +81,45 @@ class BoardingDispatchIntegrationTest {
         when(provider.send(any())).thenAnswer(call -> result(NotificationProviderResult.ACCEPTED));
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("완료와 원자 저장된 목적지 알림은 재시작 후에도 검증된 완료 근거로 한 번만 전송한다")
+    void destination_dispatch_survives_restart(boolean restart) {
+        var fixture = fixture(false);
+        time.set(NOW.plusSeconds(1));
+        Long destinationId = completeDestination(fixture);
+        var gate = restart ? new BoardingTrackingRuntime() : runtime;
+        var service = service(manager, gate);
+        var dispatch = new NotificationDispatchWorker(new NotificationDispatchProperties(true, 5, Duration.ofSeconds(1)),
+                deliveries, service, provider, clock, gate);
+        dispatch.dispatchPending();
+        dispatch.dispatchPending();
+        verify(provider, times(1)).send(argThat(request -> request.source().boardingEventType() == BoardingNotificationEventType.DESTINATION_REACHED));
+        assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(destinationId)).singleElement()
+                .extracting(NotificationDelivery::getStatus).isEqualTo(NotificationDeliveryStatus.ACCEPTED);
+        assertThat(row(fixture).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3, 4})
+    @DisplayName("완료 목적지 알림도 기한·관측 freshness·Event 대응·완료 상태가 틀리면 FCM을 호출하지 않는다")
+    void reject_invalid_destination_evidence(int scenario) {
+        var fixture = fixture(false);
+        time.set(NOW.plusSeconds(1));
+        Long eventId = completeDestination(fixture);
+        switch (scenario) {
+            case 0 -> time.set(NOW.plusSeconds(31));
+            case 1 -> jdbc.update("update notification_events set current_stop_order=999 where id=?", eventId);
+            case 2 -> jdbc.update("update boarding_sessions set checkpoint_provider_data_time=? where id=?", UTC_NOW.minusSeconds(61), fixture.sessionId());
+            case 3 -> jdbc.update("update notification_events set provider_data_time=? where id=?", UTC_NOW.minusSeconds(1), eventId);
+            case 4 -> jdbc.update("update boarding_sessions set checkpoint_index=0 where id=?", fixture.sessionId());
+        }
+        worker(attempts, provider, 5).dispatchPending();
+        verifyNoInteractions(provider);
+        assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(eventId)).singleElement()
+                .extracting(NotificationDelivery::getAttemptCount).isEqualTo(0);
+    }
+
     @Test
     @DisplayName("검증된 fixture는 실제 Worker·commit·HTTP v1을 거쳐 원래 Session payload와 기한으로 ACCEPTED를 저장한다")
     void worker_to_loopback_fcm() throws Exception {
@@ -716,6 +755,23 @@ class BoardingDispatchIntegrationTest {
             runtime.verified(snapshot(fixture));
         }
         return fixture;
+    }
+
+    private Long completeDestination(Fixture fixture) {
+        return tx().execute(status -> {
+            var current = sessions.findForUpdate(fixture.sessionId()).orElseThrow();
+            var expected = BoardingTrackingSnapshot.from(current);
+            var target = current.getTraversal().occurrences().get(current.getTraversal().targetIndex());
+            var checkpoint = new BoardingCheckpoint(target.externalStopId(), target.order(), current.getTraversal().targetIndex(),
+                    BoardingCheckpoint.Evidence.ID_ORDER, null, utc(), utc());
+            current.track(current.getRevision(), checkpoint, BoardingStateReason.ARRIVAL_OBSERVED, utc());
+            sessions.flush();
+            Long eventId = notifications.recordDecision(current, expected, new com.stopbell.boarding.domain.BoardingTrackingDecision(
+                    com.stopbell.boarding.domain.BoardingTrackingDecision.Outcome.ARRIVAL_OBSERVED, checkpoint,
+                    BoardingStateReason.ARRIVAL_OBSERVED, 0, utc(), utc().plusSeconds(30), utc()));
+            notifications.terminatePending(current);
+            return eventId;
+        });
     }
 
     private BoardingTrackingSnapshot snapshot(Fixture fixture) {

@@ -23,7 +23,7 @@ class NotificationSourceMigrationIntegrationTest {
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
 
     @Test
-    @DisplayName("V16은 실제 V14 Event와 네 Delivery 상태 및 V15 Session을 손실 없이 보존하고 두 기존 UNIQUE를 유지한다")
+    @DisplayName("V16과 V17은 기존 Event·Delivery·Session을 보존하고 사전 알림 기본값과 UNIQUE를 유지한다")
     void preserve_existing_events_deliveries_and_sessions() {
         var dataSource = new DriverManagerDataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword());
         Flyway.configure().dataSource(dataSource).target("14").load().migrate();
@@ -87,11 +87,11 @@ class NotificationSourceMigrationIntegrationTest {
         var oldSessions = jdbc.queryForList("select * from boarding_sessions");
 
         var latest = Flyway.configure().dataSource(dataSource).load();
-        assertThat(latest.migrate().migrationsExecuted).isOne();
+        assertThat(latest.migrate().migrationsExecuted).isEqualTo(2);
         latest.validate();
         assertThat(latest.migrate().migrationsExecuted).isZero();
         assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class))
-                .isEqualTo("16");
+                .isEqualTo("17");
         var migratedEvents = jdbc.queryForList("select * from notification_events order by id");
         assertThat(migratedEvents).hasSameSizeAs(oldEvents);
         for (int i = 0; i < oldEvents.size(); i++) {
@@ -106,7 +106,9 @@ class NotificationSourceMigrationIntegrationTest {
                 .containsExactly("PENDING", "ACCEPTED", "FAILED", "EXPIRED");
         assertThat(jdbc.queryForList("select * from devices order by id")).isEqualTo(oldDevices);
         assertThat(jdbc.queryForList("select * from alarms order by id")).isEqualTo(oldAlarms);
-        assertThat(jdbc.queryForList("select * from boarding_sessions")).isEqualTo(oldSessions);
+        assertThat(jdbc.queryForList("select * from boarding_sessions")).singleElement()
+                .satisfies(row -> assertThat(row).containsAllEntriesOf(oldSessions.getFirst()));
+        assertThat(jdbc.queryForObject("select prepare_notification_enabled from boarding_sessions", Boolean.class)).isTrue();
         assertThatThrownBy(() -> jdbc.update("""
                 insert into notification_events (source_type, alarm_id, user_id, activation_generation, tracking_cycle_id,
                     event_type, observed_at, event_detected_at, created_at)

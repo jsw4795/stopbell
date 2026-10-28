@@ -108,7 +108,7 @@ void main() {
       expect(find.byType(BoardingConfirmationView), findsNothing);
       await select(tester);
       expect(api.creations, isEmpty);
-      expect(find.textContaining('추가 서버 검증'), findsOneWidget);
+      expect(find.textContaining('차량·경로·진행 검증에 성공하면'), findsOneWidget);
       for (final number in ['1234', '서울70사1234 ']) {
         await tester.enterText(
           find.byKey(const ValueKey('confirmed-vehicle-number')),

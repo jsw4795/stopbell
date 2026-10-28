@@ -57,6 +57,11 @@ public class BoardingVehicleTracker {
         if (stale(vehicle, clock.instant())) {
             return Input.held(BoardingStateReason.STALE_PROGRESS);
         }
+        if (vehicle.runEnded()) {
+            // isrunyn=0 is explicit negative continuity evidence. Neither missing
+            // values nor isrunyn=1 prove the same trip/lap or permit automatic recovery.
+            return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        }
         if (session.provider() == TransitProvider.SEOUL_BUS) {
             var received = cycle.detail(session.vehicleId());
             var response = received.response();

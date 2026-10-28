@@ -43,6 +43,37 @@ void main() {
     transport.close();
   });
   test(
+    'preparation OFF survives durable storage and exact uncertain retries',
+    () async {
+      await start();
+      api.onCreate = () async =>
+          throw const BoardingSessionException(SessionFailure.timeout);
+      await c.create(
+        sessionCandidate(),
+        '서울70사1234',
+        sessionContext,
+        prepareNotificationEnabled: false,
+      );
+      expect(api.creations.single['prepareNotificationEnabled'], isFalse);
+      final original = storage.records.values.single;
+      expect(
+        BoardingCreationIntent.fromJson(original.toJson())
+            .prepareNotificationEnabled,
+        isFalse,
+      );
+      expect(c.pending!.prepareNotificationEnabled, isFalse);
+      final body = Map.of(api.creations.single);
+      api.onCreate = () async => BoardingSession.fromJson({
+        ...sessionJson(),
+        'prepareNotificationEnabled': false,
+      });
+      await c.retryCreation();
+      expect(api.creations.last, body);
+      expect(c.session!.prepareNotificationEnabled, isFalse);
+      expect(storage.records, isEmpty);
+    },
+  );
+  test(
     'startup restores current open session without assuming READY or IDs',
     () async {
       api.currentSession = sessionFixture(

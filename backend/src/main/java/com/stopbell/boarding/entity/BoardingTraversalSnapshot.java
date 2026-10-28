@@ -14,6 +14,7 @@ public record BoardingTraversalSnapshot(
 ) {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
+    /** Optional passenger-access metadata only; never a tracking eligibility condition. */
     public enum AlightAvailability { ALLOWED, PROHIBITED, UNKNOWN }
 
     public record Occurrence(long occurrenceId, String externalStopId, int order) {
@@ -47,6 +48,12 @@ public record BoardingTraversalSnapshot(
             }
             previousOrder = occurrence.order();
         }
+    }
+
+    public boolean sameTrackingPath(BoardingTraversalSnapshot other) {
+        return other != null && provider == other.provider && externalRouteId.equals(other.externalRouteId)
+                && java.util.Objects.equals(cityCode, other.cityCode) && targetIndex == other.targetIndex
+                && occurrences.equals(other.occurrences);
     }
 
     public String toJson() {

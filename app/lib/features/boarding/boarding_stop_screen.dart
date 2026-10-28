@@ -207,7 +207,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         ),
         Text(widget.route.regionName),
         const Text(
-          '차량 후보 조회와 번호 대조·확정을 제공해요. 실제 하차 추적은 아직 지원되지 않아요. 차량번호 대조 가능 표시도 추적 시작을 뜻하지 않아요.',
+          '선택한 정류장에 도달하거나 통과하면 알리는 기능이에요. 차량번호 대조 후 서버가 차량·경로·진행을 검증해야 추적을 시작할 수 있어요.',
         ),
         const SizedBox(height: 12),
         if (_state == _StopsState.loading) ...[

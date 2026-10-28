@@ -78,6 +78,22 @@ void main() {
     'PASSED',
     'ONE_STOP_AFTER',
   ]) {
+    test('destination hint is independent of preparation and rejects unknown event types', () {
+      final hint = NotificationHint.parse({
+        ...sessionHint,
+        'eventType': 'DESTINATION_REACHED',
+      });
+      expect(hint, isA<BoardingSessionNotification>());
+      expect(hint!.eventType, 'DESTINATION_REACHED');
+      expect(
+        hint.logicalKey,
+        isNot(NotificationHint.parse(sessionHint)!.logicalKey),
+      );
+      expect(
+        NotificationHint.parse({...sessionHint, 'eventType': 'STOPPED'}),
+        isNull,
+      );
+    });
     test('Alarm $type payload remains supported', () {
       final hint = NotificationHint.parse({...valid, 'eventType': type});
       expect(hint, isA<AlarmNotification>());

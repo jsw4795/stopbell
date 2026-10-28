@@ -138,7 +138,10 @@ void main() {
       await start(tester);
       await tester.pumpAndSettle();
       expect(find.text('서울70사1234'), findsOneWidget);
-      expect(find.textContaining('실제 하차 추적은 아직 지원되지 않아요'), findsOneWidget);
+      expect(
+        find.textContaining('서버가 차량·경로·진행을 검증해야 추적을 시작할 수 있어요'),
+        findsOneWidget,
+      );
       expect(
         requests.where((r) => r.url.path == '/auth/refresh'),
         hasLength(1),

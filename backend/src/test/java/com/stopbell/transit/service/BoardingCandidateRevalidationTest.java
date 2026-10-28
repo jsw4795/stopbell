@@ -18,6 +18,8 @@ import com.stopbell.transit.service.BoardingCandidateReferenceStore.Snapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardingCandidateRevalidationTest {
     private final BoardingCandidateMetadataService metadata = mock(BoardingCandidateMetadataService.class);
@@ -38,8 +40,9 @@ class BoardingCandidateRevalidationTest {
                 BoardingCandidateMapper.roster(roster("v1", "서울70사1234", DATA_TIME), NOW),
                 BoardingCandidateMapper.detail(detail("v1", "서울70사1234", "s1", 10, DATA_TIME), NOW));
         original = references.resolve(reference, 7L).orElseThrow();
-        when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(roster("v1", "서울70사1234", DATA_TIME)));
-        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, DATA_TIME)));
+        clock.now = NOW.plusSeconds(1);
+        when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(roster("v1", "서울70사1234", "20261019120001")));
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, "20261019120001")));
     }
 
     @Test
@@ -62,6 +65,45 @@ class BoardingCandidateRevalidationTest {
                 route.traversal().stream().map(item -> new BoardingRouteSnapshot.Occurrence(item.id(), item.externalStopId(),
                         item.order(), "새 표시 이름")).toList(), "새 노선번호");
         assertThat(service.revalidateSelected(original, renamed, "서울70사1234").progressIndex()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("같은 제공시각의 다른 occurrence는 시작 재검증에서도 새 진행으로 인정하지 않는다")
+    void reject_progress_change_with_same_provider_time() {
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, DATA_TIME)));
+        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+    }
+
+    @Test
+    @DisplayName("같은 제공시각과 같은 occurrence의 반복은 재검증 입력으로만 유지한다")
+    void allow_unchanged_source_without_inventing_progress() {
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s1", 10, DATA_TIME)));
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isZero();
+    }
+
+    @Test
+    @DisplayName("같은 제공시각에 roster 구간 문맥이 달라지면 sectOrd를 정류장 진행으로 해석하지 않고 거부한다")
+    void reject_conflicting_roster_at_same_provider_time() {
+        when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(
+                new com.stopbell.transit.dto.seoul.SeoulBusVehicleLocationItem("v1", "서울70사1234", 1000,
+                        "different-section", 1, DATA_TIME, null, null, "different-next-stop", "1", null)));
+        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("원래 후보나 최신 roster의 명시적 운행 종료는 같은 ID의 운행 재연결 근거로 사용하지 않는다")
+    void reject_known_run_end(boolean originalEnded) {
+        var ended = new com.stopbell.transit.dto.seoul.SeoulBusVehicleLocationItem("v1", "서울70사1234", 999,
+                "coarse", 1, DATA_TIME, null, null, "not-an-occurrence", "0", null);
+        if (originalEnded) {
+            original = new Snapshot(original.context(), route, route.fingerprint(),
+                    BoardingCandidateMapper.roster(ended, NOW), original.detailVehicle(), original.expiresAt());
+        } else {
+            when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(ended));
+        }
+        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        verifyNoInteractions(details);
     }
 
     @Test
@@ -116,7 +158,7 @@ class BoardingCandidateRevalidationTest {
                 BoardingCandidateMapper.detail(detail("v1", "서울70사1234", "s1", 10, DATA_TIME), NOW), original.expiresAt());
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, "20261019115959")));
         expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
-        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, "20261019120001")));
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, "20261019120002")));
         expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         clock.now = NOW.plusSeconds(61);
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, DATA_TIME)));

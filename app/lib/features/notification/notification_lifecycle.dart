@@ -58,15 +58,21 @@ final class AlarmNotification extends NotificationHint {
 }
 
 final class BoardingSessionNotification extends NotificationHint {
-  const BoardingSessionNotification(int sessionId, String eventId)
-    : super(sessionId, 'PREPARE_ALIGHT', eventId);
+  const BoardingSessionNotification(
+    int sessionId,
+    String eventId, [
+    String eventType = 'PREPARE_ALIGHT',
+  ]) : super(sessionId, eventType, eventId);
   int get boardingSessionId => resourceId;
   @override
   String get source => 'BOARDING_SESSION_EVENT';
 
   static BoardingSessionNotification? parse(Map<String, dynamic> data) {
     if (data['type'] != 'BOARDING_SESSION_EVENT' ||
-        data['eventType'] != 'PREPARE_ALIGHT' ||
+        !const {
+          'PREPARE_ALIGHT',
+          'DESTINATION_REACHED',
+        }.contains(data['eventType']) ||
         data.containsKey('alarmId')) {
       return null;
     }
@@ -77,6 +83,7 @@ final class BoardingSessionNotification extends NotificationHint {
     return BoardingSessionNotification(
       id,
       data['notificationEventId'] as String,
+      data['eventType'] as String,
     );
   }
 }

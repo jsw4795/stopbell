@@ -43,6 +43,12 @@ class BoardingSession {
     routeNumber = boardingText(value['routeNumber']);
     vehicleNumber = boardingText(value['vehicleNumber']);
     targetName = boardingText(value['targetName']);
+    if (value.containsKey('prepareNotificationEnabled') &&
+        value['prepareNotificationEnabled'] is! bool) {
+      throw const FormatException();
+    }
+    prepareNotificationEnabled =
+        value['prepareNotificationEnabled'] as bool? ?? true;
     targetOrder = boardingInteger(value['targetOrder'], positive: true);
     status = switch (boardingText(value['status'])) {
       'TRACKING' => BoardingSessionStatus.tracking,
@@ -107,6 +113,7 @@ class BoardingSession {
     }
   }
 
+  late final bool prepareNotificationEnabled;
   late final int id, revision, targetOrder;
   late final String routeNumber, vehicleNumber, targetName;
   late final BoardingSessionStatus status;

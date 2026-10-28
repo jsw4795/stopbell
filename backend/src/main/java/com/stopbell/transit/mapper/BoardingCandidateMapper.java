@@ -23,8 +23,13 @@ public final class BoardingCandidateMapper {
 
     public record Vehicle(
             String id, String number, String stopId, Integer order, Integer stopFlag,
-            Instant observedAt, Instant providerDataTime, ReasonCode timeIssue, String coarseContext
+            Instant observedAt, Instant providerDataTime, ReasonCode timeIssue, String coarseContext, boolean runEnded
     ) {
+        /** No run-end signal is different from verified operation/trip continuity. */
+        public Vehicle(String id, String number, String stopId, Integer order, Integer stopFlag,
+                Instant observedAt, Instant providerDataTime, ReasonCode timeIssue, String coarseContext) {
+            this(id, number, stopId, order, stopFlag, observedAt, providerDataTime, timeIssue, coarseContext, false);
+        }
     }
 
     public static Vehicle tago(TagoVehicleLocationItem item, Instant observedAt) {
@@ -38,16 +43,17 @@ public final class BoardingCandidateMapper {
             return new Vehicle(null, null, null, null, null, observedAt, null, null, null);
         }
         return seoul(item.vehId(), item.plainNo(), null, null, null, observedAt, item.dataTm(),
-                item.sectOrd() + ":" + item.sectionId() + ":" + item.nextStId() + ":" + item.stopFlag());
+                item.sectOrd() + ":" + item.sectionId() + ":" + item.nextStId() + ":" + item.stopFlag(),
+                "0".equals(item.isrunyn()));
     }
 
     public static Vehicle detail(SeoulBusVehicleDetailItem item, Instant observedAt) {
         return seoul(item.vehId(), item.plainNo(), text(item.stId()), item.stOrd(), item.stopFlag(),
-                observedAt, item.dataTm(), null);
+                observedAt, item.dataTm(), null, false);
     }
 
     private static Vehicle seoul(String id, String number, String stopId, Integer order, Integer flag,
-            Instant observedAt, String dataTm, String coarseContext) {
+            Instant observedAt, String dataTm, String coarseContext, boolean runEnded) {
         Instant providerTime = null;
         ReasonCode issue = null;
         if (text(dataTm) == null) {
@@ -60,7 +66,7 @@ public final class BoardingCandidateMapper {
             }
         }
         return new Vehicle(text(id), text(number), stopId, order, flag, observedAt, providerTime,
-                issue, coarseContext);
+                issue, coarseContext, runEnded);
     }
 
     private static String text(String value) {

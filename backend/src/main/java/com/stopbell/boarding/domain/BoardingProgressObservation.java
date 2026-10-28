@@ -8,5 +8,5 @@ public record BoardingProgressObservation(
         TransitProvider provider, String routeId, String cityCode, Vehicle vehicle,
         Meaning meaning, boolean orderOnlyVerified, String directionContext, boolean traversalAmbiguous
 ) {
-    public enum Meaning { UNVERIFIED, VERIFIED_REFERENCE, DIRECT_ARRIVAL }
+    public enum Meaning { UNVERIFIED, VERIFIED_REFERENCE, VERIFIED_REACHED, DIRECT_ARRIVAL }
 }

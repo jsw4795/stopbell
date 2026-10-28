@@ -13,9 +13,8 @@ public record VerifiedBoardingStart(
 ) {
     public VerifiedBoardingStart {
         if (metadata == null || traversal == null || checkpoint == null || referenceExpiresAt == null
-                || traversal.targetAlightAvailability() != BoardingTraversalSnapshot.AlightAvailability.ALLOWED
                 || checkpoint.getIndex() >= traversal.targetIndex()) {
-            throw new IllegalArgumentException("Supported target ahead and validated checkpoint are required");
+            throw new IllegalArgumentException("Exact target ahead and validated checkpoint are required");
         }
         checkpoint.validateAgainst(traversal);
         if (metadata.provider() != traversal.provider()

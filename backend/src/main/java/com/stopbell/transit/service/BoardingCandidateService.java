@@ -129,6 +129,9 @@ public class BoardingCandidateService {
                 || originalRoster.providerDataTime().isAfter(originalRoster.observedAt())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
+        if (originalRoster.runEnded()) {
+            throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        }
         Roster roster;
         try {
             roster = fetchRoster(route);
@@ -142,6 +145,9 @@ public class BoardingCandidateService {
         if (identityIssue(selected, conflictingIds(vehicles)) != null
                 || !confirmedNumber.equals(selected.number())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        if (selected.runEnded()) {
+            throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
         }
         Detail result = fetchDetail(selected);
         if (result.issue() != null) {
@@ -159,6 +165,12 @@ public class BoardingCandidateService {
                 || selected.providerDataTime().isBefore(original.rosterVehicle().providerDataTime())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
+        // A changed coarse roster at the same source time is conflicting data, not
+        // evidence that sectOrd is a Stop order or that a new trip has started.
+        if (selected.providerDataTime().equals(originalRoster.providerDataTime())
+                && !java.util.Objects.equals(selected.coarseContext(), originalRoster.coarseContext())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
         int current = progressIndex(route, detail);
         if (current < 0) {
             throw new ApiException(detail.stopId() == null || detail.order() == null
@@ -172,8 +184,7 @@ public class BoardingCandidateService {
         Vehicle previous = original.detailVehicle();
         if (!Integer.valueOf(1).equals(detail.stopFlag()) || previous == null
                 || !Integer.valueOf(1).equals(previous.stopFlag()) || progressIndex(route, previous) < 0
-                || route.traversal().stream().map(BoardingRouteSnapshot.Occurrence::externalStopId)
-                    .distinct().count() != route.traversal().size()) {
+                || !route.hasUniqueStopIds()) {
             throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
         }
         if (!detail.id().equals(previous.id()) || !detail.number().equals(previous.number())
@@ -182,6 +193,13 @@ public class BoardingCandidateService {
                 || previous.providerDataTime() == null || previous.timeIssue() != null
                 || previous.providerDataTime().isAfter(previous.observedAt())
                 || detail.providerDataTime().isBefore(previous.providerDataTime())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        // Match the polling evaluator: an unchanged source/receipt time cannot
+        // establish progress to a different occurrence during start/reconfirmation.
+        if ((detail.providerDataTime().equals(previous.providerDataTime())
+                || detail.observedAt().equals(previous.observedAt()))
+                && current != progressIndex(route, previous)) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         return new VerifiedCandidate(route, detail, current);

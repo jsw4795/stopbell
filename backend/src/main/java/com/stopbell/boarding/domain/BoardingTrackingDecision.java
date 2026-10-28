@@ -5,7 +5,7 @@ import java.time.LocalDateTime;
 import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.boarding.entity.BoardingStateReason;
 
-/** Candidate only: TASK-906 owns UNIQUE(sessionId, PREPARE_ALIGHT), Event and Delivery persistence. */
+/** Candidate only: Notification persistence owns UNIQUE(sessionId, boardingEventType) and Delivery fan-out. */
 public record BoardingTrackingDecision(
         Outcome outcome, BoardingCheckpoint checkpoint, BoardingStateReason reason,
         Integer remainingOccurrenceGap, LocalDateTime observedAt, LocalDateTime expiresAt, LocalDateTime eventDetectedAt

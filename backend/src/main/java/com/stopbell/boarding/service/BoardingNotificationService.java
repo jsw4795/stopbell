@@ -50,29 +50,37 @@ public class BoardingNotificationService {
     }
 
     /** Called only after current Session, metadata and a new checkpoint have been validated under lock. */
-    public Long prepare(BoardingSession session, BoardingTrackingSnapshot expected, BoardingTrackingDecision decision) {
-        if (decision.outcome() != BoardingTrackingDecision.Outcome.PREPARE_ALIGHT
-                || session.getStatus() != BoardingSessionStatus.TRACKING) {
+    public Long recordDecision(BoardingSession session, BoardingTrackingSnapshot expected, BoardingTrackingDecision decision) {
+        boolean destination = decision.outcome() == BoardingTrackingDecision.Outcome.ARRIVAL_OBSERVED
+                || decision.outcome() == BoardingTrackingDecision.Outcome.PASSED_OBSERVED;
+        if (!destination && (decision.outcome() != BoardingTrackingDecision.Outcome.PREPARE_ALIGHT
+                || !session.isPrepareNotificationEnabled())) {
             return null;
         }
+        if (session.getStatus() != (destination ? BoardingSessionStatus.COMPLETED : BoardingSessionStatus.TRACKING)) {
+            return null;
+        }
+        var type = destination ? BoardingNotificationEventType.DESTINATION_REACHED
+                : BoardingNotificationEventType.PREPARE_ALIGHT;
         var checkpoint = decision.checkpoint();
         int gap = session.getTraversal().targetIndex() - session.getCheckpoint().getIndex();
         if (checkpoint == null || !checkpoint.equals(session.getCheckpoint())
                 || !checkpoint.getObservedAt().equals(decision.observedAt())
                 || !checkpoint.getObservedAt().isAfter(expected.checkpoint().getObservedAt())
-                || expected.requiresConfirmation() || (gap != 1 && gap != 2)
+                || expected.requiresConfirmation() || (destination ? gap > 0 : gap != 1 && gap != 2)
+                || (destination && (session.getStateReason() != decision.reason()
+                    || expected.checkpoint().getIndex() > session.getTraversal().targetIndex()))
                 || !Integer.valueOf(gap).equals(decision.remainingOccurrenceGap())) {
-            throw new IllegalArgumentException("Preparation requires newly verified current progress");
+            throw new IllegalArgumentException("Notification requires newly verified current progress");
         }
-        var existing = events.findByBoardingSessionIdAndBoardingEventType(
-                session.getId(), BoardingNotificationEventType.PREPARE_ALIGHT);
+        var existing = events.findByBoardingSessionIdAndBoardingEventType(session.getId(), type);
         if (existing.isPresent()) {
             return existing.orElseThrow().getId();
         }
         LocalDateTime expiresAt = Duration.between(checkpoint.getObservedAt(), session.getExpiresAt()).compareTo(prepareTtl) <= 0
                 ? session.getExpiresAt() : checkpoint.getObservedAt().plus(prepareTtl);
         if (!expiresAt.equals(decision.expiresAt())) {
-            throw new IllegalArgumentException("Preparation must preserve original observation TTL");
+            throw new IllegalArgumentException("Notification must preserve original observation TTL");
         }
         // Read the Clock after identity locking and immediately before IDENTITY INSERT.
         LocalDateTime createdAt = now();
@@ -80,7 +88,7 @@ public class BoardingNotificationService {
             return null;
         }
         NotificationEvent event = events.saveAndFlush(NotificationEvent.forBoardingSession(session.getId(),
-                session.getUser(), BoardingNotificationEventType.PREPARE_ALIGHT, checkpoint,
+                session.getUser(), type, checkpoint,
                 decision.eventDetectedAt(), createdAt, expiresAt));
         // Session -> Event -> current eligible Device rows in ascending ID order -> Delivery.
         var recipients = devices.findEligibleByUserIdForUpdate(session.getUser().getId());
@@ -93,7 +101,7 @@ public class BoardingNotificationService {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    log.info("Boarding notification outcome=NO_RECIPIENT eventType=PREPARE_ALIGHT");
+                    log.info("Boarding notification outcome=NO_RECIPIENT eventType={}", type);
                 }
             });
         }
@@ -102,9 +110,13 @@ public class BoardingNotificationService {
 
     /** Exact identity check in a fresh reconciliation transaction; never selects recipients. */
     public boolean exists(Long sessionId, Long eventId) {
-        return events.findByBoardingSessionIdAndBoardingEventType(sessionId,
-                BoardingNotificationEventType.PREPARE_ALIGHT).filter(event -> eventId == null
-                        || eventId.equals(event.getId())).isPresent();
+        for (var type : BoardingNotificationEventType.values()) {
+            if (events.findByBoardingSessionIdAndBoardingEventType(sessionId, type)
+                    .filter(event -> eventId == null || eventId.equals(event.getId())).isPresent()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void terminatePending(BoardingSession session) {
@@ -115,20 +127,24 @@ public class BoardingNotificationService {
         if (!disallowed) {
             return;
         }
-        // Lock Event separately: MySQL FOR UPDATE OF Delivery alone would read a joined
-        // Event from an earlier REPEATABLE READ snapshot established by API authentication.
-        var event = events.findByBoardingSessionIdAndBoardingEventType(session.getId(),
-                BoardingNotificationEventType.PREPARE_ALIGHT);
-        if (event.isEmpty()) {
-            return;
-        }
-        for (var delivery : deliveries.findPendingByBoardingEventIdForUpdate(event.orElseThrow().getId())) {
-            // Re-read time after waiting for Delivery locks. Freshness takes precedence.
-            LocalDateTime now = now();
-            if (expired || !now.isBefore(delivery.getExpiresAt())) {
-                delivery.expire(now);
-            } else {
-                delivery.terminateDispatch(now);
+        for (var type : BoardingNotificationEventType.values()) {
+            // Completion ends preparation but preserves the atomic destination notification.
+            if (session.getStatus() == BoardingSessionStatus.COMPLETED
+                    && type == BoardingNotificationEventType.DESTINATION_REACHED) {
+                continue;
+            }
+            // Session -> exact Event -> PENDING Delivery current locks, without a stale joined snapshot.
+            var event = events.findByBoardingSessionIdAndBoardingEventType(session.getId(), type);
+            if (event.isEmpty()) {
+                continue;
+            }
+            for (var delivery : deliveries.findPendingByBoardingEventIdForUpdate(event.orElseThrow().getId())) {
+                LocalDateTime now = now();
+                if (expired || !now.isBefore(delivery.getExpiresAt())) {
+                    delivery.expire(now);
+                } else {
+                    delivery.terminateDispatch(now);
+                }
             }
         }
     }
