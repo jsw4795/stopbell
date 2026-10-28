@@ -78,7 +78,7 @@ class DevicePersistenceIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "select version from flyway_schema_history where success = true order by installed_rank desc limit 1",
                 String.class
-        )).isEqualTo("17");
+        )).isEqualTo("19");
     }
 
     @Test

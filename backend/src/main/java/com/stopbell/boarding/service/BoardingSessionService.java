@@ -125,7 +125,6 @@ public class BoardingSessionService {
             }
             LocalDateTime now = now();
             if (clock.instant().isAfter(start.referenceExpiresAt())
-                    || !start.vehicleNumber().equals(request.confirmedVehicleNumber())
                     || start.checkpoint().getObservedAt().isAfter(now)
                     || start.checkpoint().getObservedAt().isBefore(now.minus(BoardingCandidateReferenceStore.FRESHNESS))
                     || (start.checkpoint().getProviderDataTime() != null
@@ -224,7 +223,6 @@ public class BoardingSessionService {
                 || !java.util.Objects.equals(start.traversal().cityCode(), expected.cityCode())
                 || !start.vehicleTrackingId().equals(expected.vehicleId())
                 || !start.vehicleNumber().equals(expected.vehicleNumber())
-                || !start.vehicleNumber().equals(request.confirmedVehicleNumber())
                 || !start.traversal().sameTrackingPath(expected.traversal())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }

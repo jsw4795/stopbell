@@ -84,7 +84,7 @@ class _BoardingReconfirmationScreenState
         child: const Text('노선·정류장 다시 선택'),
       ),
       const Text('동일 차량 재확인 · 원래 선택 문맥으로 새 후보 조회'),
-      const Text('기존 전체 차량번호와 같은 차량을 직접 선택해 다시 대조하세요. 서버가 같은 운행·경로인지 최종 검증해요.'),
+      const Text('목록에서 기존 세션과 동일한 차량을 다시 선택하세요. 서버가 같은 운행·경로인지 최종 검증해요.'),
       OutlinedButton(
         onPressed: _loading ? null : _load,
         child: const Text('새 후보 다시 조회'),

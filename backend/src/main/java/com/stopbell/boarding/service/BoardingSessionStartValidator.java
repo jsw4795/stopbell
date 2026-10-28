@@ -25,15 +25,17 @@ public class BoardingSessionStartValidator {
         this.candidates = candidates;
     }
 
-    public VerifiedBoardingStart validate(Long userId, String candidateRef, String confirmedVehicleNumber) {
+    public VerifiedBoardingStart validate(Long userId, String candidateRef, String ignoredLegacyNumber) {
         var original = references.resolve(candidateRef, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED));
         var context = original.context();
         var current = metadata.read(context.routeId(), context.targetOccurrenceId(), context.boardingOccurrenceId());
-        var verified = candidates.revalidateSelected(original, current, confirmedVehicleNumber);
+        var verified = candidates.revalidateSelected(original, current, original.rosterVehicle().number());
         var vehicle = verified.vehicle();
-        var checkpoint = new BoardingCheckpoint(vehicle.stopId(), vehicle.order(),
-                verified.progressIndex(), BoardingCheckpoint.Evidence.ID_ORDER, null,
+        var checkpoint = new BoardingCheckpoint(verified.progressIndex() < 0 ? null : vehicle.stopId(),
+                verified.progressIndex() < 0 ? 0 : vehicle.order(),
+                verified.progressIndex(), verified.baselineVerified() ? BoardingCheckpoint.Evidence.ID_ORDER
+                        : BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE, null,
                 LocalDateTime.ofInstant(vehicle.observedAt(), ZoneOffset.UTC),
                 LocalDateTime.ofInstant(vehicle.providerDataTime(), ZoneOffset.UTC));
         // No passenger-access classification is required or inferred from stopFlag.

@@ -124,7 +124,8 @@ public class BoardingSession {
         required(routeNumber, 100);
         required(targetName, 255);
         checkpoint.validateAgainst(traversal);
-        if (checkpoint.getIndex() >= traversal.targetIndex()) {
+        if (checkpoint.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                && checkpoint.getIndex() >= traversal.targetIndex()) {
             throw new IllegalArgumentException("An exact target occurrence ahead is required");
         }
         this.createdAt = time(createdAt);
@@ -146,6 +147,8 @@ public class BoardingSession {
         this.traversalFingerprint = traversal.fingerprint();
         this.checkpoint = checkpoint;
         this.status = BoardingSessionStatus.TRACKING;
+        this.stateReason = checkpoint.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                ? BoardingStateReason.BASELINE_UNVERIFIED : null;
         this.updatedAt = this.createdAt;
     }
 
@@ -167,6 +170,12 @@ public class BoardingSession {
         requireOpenRevision(expectedRevision);
         if (reason == null || !reason.isSuspension()) {
             throw new IllegalArgumentException("Suspension requires a suspension reason");
+        }
+        if (reason == BoardingStateReason.TEMPORARY_PROVIDER_FAILURE || reason == BoardingStateReason.STALE_PROGRESS) {
+            if (status != BoardingSessionStatus.TRACKING || stateReason != reason) {
+                change(BoardingSessionStatus.TRACKING, reason, now);
+            }
+            return;
         }
         if (status != BoardingSessionStatus.SUSPENDED || stateReason != reason) {
             change(BoardingSessionStatus.SUSPENDED, reason, now);
@@ -190,14 +199,22 @@ public class BoardingSession {
                     || next.getProviderDataTime().isBefore(checkpoint.getProviderDataTime())))) {
             throw new IllegalArgumentException("Checkpoint must preserve monotonic progress and time");
         }
+        if (checkpoint.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE && completion != null) {
+            throw new IllegalArgumentException("Initial verification cannot complete a destination notification");
+        }
         if (completion != null && completion != BoardingStateReason.ARRIVAL_OBSERVED
                 && completion != BoardingStateReason.PASSED_OBSERVED) {
             throw new IllegalArgumentException("Invalid completion reason");
         }
-        if (next.equals(checkpoint) && status == BoardingSessionStatus.TRACKING && completion == null) {
+        if (next.equals(checkpoint) && status == BoardingSessionStatus.TRACKING && stateReason == null && completion == null) {
             return;
         }
-        if (completion == null) {
+        if (next.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
+            if (checkpoint.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE || completion != null) {
+                throw new IllegalArgumentException("Unverified evidence cannot replace a validated checkpoint");
+            }
+            change(BoardingSessionStatus.TRACKING, BoardingStateReason.BASELINE_UNVERIFIED, now);
+        } else if (completion == null) {
             change(BoardingSessionStatus.TRACKING, null, now);
         } else {
             finish(BoardingSessionStatus.COMPLETED, completion, now);
@@ -212,11 +229,14 @@ public class BoardingSession {
             throw new IllegalStateException("Only a live suspended session can be reconfirmed");
         }
         next.validateAgainst(getTraversal());
-        if (next.getIndex() >= getTraversal().targetIndex()) {
+        if (next.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                && next.getIndex() >= getTraversal().targetIndex()) {
             throw new IllegalArgumentException("Reconfirmed target must remain ahead");
         }
         // This is a new verified baseline, never a claim of continuity across the uncertain interval.
-        change(BoardingSessionStatus.TRACKING, null, now);
+        change(BoardingSessionStatus.TRACKING,
+                next.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                    ? BoardingStateReason.BASELINE_UNVERIFIED : null, now);
         checkpoint = next;
     }
 

@@ -100,7 +100,10 @@ public class BoardingCandidateService {
         }
         // Equal gaps have no preference. Vehicle numbers give a reproducible display order;
         // The stable input order breaks remaining ties without adding recommendation evidence.
-        candidates.sort(Comparator.comparing(Candidate::boardingOccurrenceGap,
+        candidates.sort(Comparator.comparing((Candidate candidate) -> candidate.boardingOccurrenceGap() == null
+                        ? 2 : candidate.boardingOccurrenceGap() < 0 ? 1 : 0)
+                .thenComparing(candidate -> candidate.boardingOccurrenceGap() == null
+                        ? null : Math.abs(candidate.boardingOccurrenceGap()),
                         Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparing(Candidate::vehicleNumber, Comparator.nullsLast(Comparator.naturalOrder())));
         CandidateSetStatus status = candidates.isEmpty() ? CandidateSetStatus.EMPTY
@@ -113,11 +116,11 @@ public class BoardingCandidateService {
 
     /** Reuses candidate mapping and identity checks without issuing/replacing screen references. */
     public VerifiedCandidate revalidateSelected(BoardingCandidateReferenceStore.Snapshot original,
-            BoardingRouteSnapshot route, String confirmedNumber) {
+            BoardingRouteSnapshot route, String expectedVehicleNumber) {
         if (!route.fingerprint().equals(original.metadataFingerprint())
                 || !route.targetOccurrenceId().equals(original.context().targetOccurrenceId())
                 || !java.util.Objects.equals(route.boardingOccurrenceId(), original.context().boardingOccurrenceId())
-                || !confirmedNumber.equals(original.rosterVehicle().number())) {
+                || !expectedVehicleNumber.equals(original.rosterVehicle().number())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         if (route.provider() == TransitProvider.TAGO) {
@@ -143,21 +146,28 @@ public class BoardingCandidateService {
         Vehicle selected = vehicles.stream().filter(vehicle -> selectedId.equals(vehicle.id()))
                 .findFirst().orElseThrow(() -> new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED));
         if (identityIssue(selected, conflictingIds(vehicles)) != null
-                || !confirmedNumber.equals(selected.number())) {
+                || !expectedVehicleNumber.equals(selected.number())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         if (selected.runEnded()) {
             throw unsupported(route, "CURRENT_RUN_ENDED");
         }
         Detail result = fetchDetail(selected);
-        if (result.issue() != null) {
+        if (result.issue() != null && result.issue() != ReasonCode.DETAIL_EMPTY) {
             throw new ApiException(switch (result.issue()) {
                 case DETAIL_HTTP_FAILURE, DETAIL_TRANSPORT_FAILURE, DETAIL_PROVIDER_FAILURE, DETAIL_PROTOCOL_FAILURE
                         -> ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE;
                 default -> ErrorCode.BOARDING_CANDIDATE_CHANGED;
             });
         }
-        Vehicle detail = result.vehicle();
+        boolean detailAvailable = result.issue() != ReasonCode.DETAIL_EMPTY;
+        // Normal empty detail is missing position, not an identity change. Keep any
+        // original reference/time only as UNVERIFIED evidence; never refresh it as an arrival.
+        Vehicle detail = detailAvailable ? result.vehicle()
+                : original.detailVehicle() != null ? original.detailVehicle() : selected;
+        if (!selected.id().equals(detail.id()) || !selected.number().equals(detail.number())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
         Instant now = clock.instant();
         if (now.isAfter(original.expiresAt()) || timeIssue(selected, now) != null || timeIssue(detail, now) != null
                 || detail.providerDataTime().isAfter(detail.observedAt())
@@ -172,63 +182,37 @@ public class BoardingCandidateService {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         int current = progressIndex(route, detail);
-        if (current < 0) {
-            if (detail.stopId() == null || detail.order() == null) {
-                throw unsupported(route, "CURRENT_POSITION_MISSING");
-            }
+        if (current < 0 && detail.stopId() != null && detail.order() != null) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
-        if (current >= route.indexOf(route.targetOccurrenceId())) {
-            throw new ApiException(ErrorCode.BOARDING_TARGET_NOT_AHEAD);
-        }
-        // A baseline must come from an exact stopped detail. Moving data can only
-        // corroborate that same previously stopped reference; it never establishes arrival.
         Vehicle previous = original.detailVehicle();
-        if (!(Integer.valueOf(1).equals(detail.stopFlag()) || Integer.valueOf(0).equals(detail.stopFlag()))) {
-            throw unsupported(route, "LATEST_STOP_FLAG_UNVERIFIED");
-        }
-        if (previous == null) {
-            throw unsupported(route, "ORIGINAL_DETAIL_MISSING");
-        }
-        if (!(Integer.valueOf(1).equals(previous.stopFlag()) || Integer.valueOf(0).equals(previous.stopFlag()))) {
-            throw unsupported(route, "ORIGINAL_STOP_FLAG_UNVERIFIED");
-        }
-        if (progressIndex(route, previous) < 0) {
-            throw unsupported(route, "ORIGINAL_POSITION_UNVERIFIED");
-        }
-        if (!route.hasUniqueStopIds()) {
-            throw unsupported(route, "REPEATED_STOP_TRAVERSAL");
-        }
-        boolean reuseStoppedBaseline = Integer.valueOf(0).equals(detail.stopFlag());
-        if (reuseStoppedBaseline && !Integer.valueOf(1).equals(previous.stopFlag())) {
-            throw unsupported(route, "MOVING_WITHOUT_STOPPED_BASELINE");
-        }
-        if (reuseStoppedBaseline && current != progressIndex(route, previous)) {
-            throw unsupported(route, "MOVING_REFERENCE_CHANGED");
-        }
-        if (!detail.id().equals(previous.id()) || !detail.number().equals(previous.number())
-                || current < progressIndex(route, previous)
+        boolean stopped = detailAvailable && current >= 0 && Integer.valueOf(1).equals(detail.stopFlag());
+        boolean reuseStoppedBaseline = detailAvailable && previous != null && current >= 0 && !stopped && Integer.valueOf(0).equals(detail.stopFlag())
+                && Integer.valueOf(1).equals(previous.stopFlag()) && current == progressIndex(route, previous)
+                && route.hasUniqueStopIds();
+        if (previous != null && (!detail.id().equals(previous.id()) || !detail.number().equals(previous.number())
+                || (current >= 0 && current < progressIndex(route, previous))
                 || detail.observedAt().isBefore(previous.observedAt())
                 || previous.providerDataTime() == null || timeIssue(previous, now) != null
                 || previous.providerDataTime().isAfter(previous.observedAt())
-                || detail.providerDataTime().isBefore(previous.providerDataTime())) {
+                || detail.providerDataTime().isBefore(previous.providerDataTime()))) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         // Match the polling evaluator: an unchanged source/receipt time cannot
         // establish progress to a different occurrence during start/reconfirmation.
-        if ((detail.providerDataTime().equals(previous.providerDataTime())
+        if (previous != null && (detail.providerDataTime().equals(previous.providerDataTime())
                 || detail.observedAt().equals(previous.observedAt()))
-                && current != progressIndex(route, previous)) {
+                && current >= 0 && progressIndex(route, previous) >= 0 && current != progressIndex(route, previous)) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
-        if (reuseStoppedBaseline) {
+        if (reuseStoppedBaseline && current < route.indexOf(route.targetOccurrenceId())) {
             // Keep the stopped evidence and BOTH original times. Refreshing them from
             // the moving response would misrepresent old arrival evidence as a new one.
             log.info("Boarding start validated: stage=candidate-revalidation provider={} outcome=STOPPED_BASELINE_REUSED",
                     route.provider());
-            return new VerifiedCandidate(route, previous, current);
+            return new VerifiedCandidate(route, previous, current, true);
         }
-        return new VerifiedCandidate(route, detail, current);
+        return new VerifiedCandidate(route, detail, current, stopped && route.hasUniqueStopIds() && current < route.indexOf(route.targetOccurrenceId()));
     }
 
     private static ApiException unsupported(BoardingRouteSnapshot route, String reason) {
@@ -238,7 +222,7 @@ public class BoardingCandidateService {
         return new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
     }
 
-    public record VerifiedCandidate(BoardingRouteSnapshot route, Vehicle vehicle, int progressIndex) {
+    public record VerifiedCandidate(BoardingRouteSnapshot route, Vehicle vehicle, int progressIndex, boolean baselineVerified) {
     }
 
     private Roster fetchRoster(BoardingRouteSnapshot route) {
@@ -299,7 +283,8 @@ public class BoardingCandidateService {
         if (held == null && detail != null) {
             held = timeIssue(detail, now);
         }
-        if (held == null && result.issue() != null && result.issue() != ReasonCode.DETAIL_NOT_REQUESTED) {
+        if (held == null && result.issue() != null && result.issue() != ReasonCode.DETAIL_NOT_REQUESTED
+                && result.issue() != ReasonCode.DETAIL_EMPTY) {
             held = result.issue();
         }
         Vehicle progressVehicle = route.provider() == TransitProvider.TAGO ? roster : detail;
@@ -325,16 +310,19 @@ public class BoardingCandidateService {
                     : ProgressKind.ROUTE_PROGRESS;
             progress = new Progress(occurrence.id(), occurrence.stopName(), occurrence.order(), kind);
             if (route.boardingOccurrenceId() != null) {
-                gap = Math.abs(progressIndex - route.indexOf(route.boardingOccurrenceId()));
+                gap = route.indexOf(route.boardingOccurrenceId()) - progressIndex;
             }
         }
         ReasonCode trackingReason = route.provider() == TransitProvider.TAGO ? ReasonCode.TAGO_ALIGHT_UNVERIFIED
                 : held != null ? held : progress == null ? positionIssue
-                : progressIndex >= route.indexOf(route.targetOccurrenceId()) ? ReasonCode.TARGET_NOT_AHEAD
                 : ReasonCode.REVALIDATION_REQUIRED;
         TrackingSupport support = trackingReason == ReasonCode.REVALIDATION_REQUIRED
+                || (held == null && route.provider() == TransitProvider.SEOUL_BUS && progress == null)
                 ? TrackingSupport.CONDITIONAL : TrackingSupport.HELD;
         List<ReasonCode> limitations = new ArrayList<>();
+        if (progressIndex >= route.indexOf(route.targetOccurrenceId())) {
+            limitations.add(ReasonCode.TARGET_NOT_AHEAD);
+        }
         if (held != null) {
             limitations.add(held);
         }
@@ -353,7 +341,8 @@ public class BoardingCandidateService {
             trackingReason = held;
             limitations.add(held);
         }
-        return new Candidate(reference, roster.number(), held == null ? ConfirmationStatus.AVAILABLE
+        return new Candidate(reference, held == null ? route.selectionKey(roster.id(), roster.number()) : null,
+                roster.number(), held == null ? ConfirmationStatus.AVAILABLE
                 : ConfirmationStatus.HELD, held != null ? held : positionIssue, progress, gap,
                 roster.observedAt(), detail == null ? roster.providerDataTime() : detail.providerDataTime(),
                 support, trackingReason, limitations);

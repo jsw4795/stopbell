@@ -58,7 +58,8 @@ public class BoardingTrackingRuntime {
 
     /** Called only with the exact state whose validation and database commit were acknowledged. */
     public void verified(BoardingTrackingSnapshot session) {
-        if (session.status() != BoardingSessionStatus.TRACKING) {
+        if (session.status() != BoardingSessionStatus.TRACKING || session.reason() != null
+                || session.checkpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
             committed(session.id(), session.revision(), false);
             return;
         }
@@ -90,7 +91,8 @@ public class BoardingTrackingRuntime {
     public boolean isReady(BoardingTrackingSnapshot session, LocalDateTime now) {
         var entry = revisions.get(session.id());
         var checkpoint = session.checkpoint();
-        boolean progressValid = checkpoint.getIndex() < session.traversal().targetIndex()
+        boolean progressValid = session.reason() == null && checkpoint.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                && checkpoint.getIndex() < session.traversal().targetIndex()
                 && (session.provider() != TransitProvider.SEOUL_BUS
                     || checkpoint.getProviderDataTime() != null)
                 && (checkpoint.getProviderDataTime() == null

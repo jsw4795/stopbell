@@ -90,17 +90,13 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> select(WidgetTester tester) => tap(tester, '이 차량 번호 직접 대조');
+  Future<void> select(WidgetTester tester) => tap(tester, '이 차량 선택');
   Future<void> confirm(WidgetTester tester, {bool reconfirm = false}) async {
-    await tester.enterText(
-      find.byKey(const ValueKey('confirmed-vehicle-number')),
-      '서울70사1234',
-    );
-    await tap(tester, reconfirm ? '동일 차량 재확인 요청' : '탑승 차량 확정');
+    await tap(tester, reconfirm ? '동일 차량 재확인 요청' : '하차 알림 등록');
   }
 
   testWidgets(
-    'explicit candidate selection and full number comparison precede POST; fixture success enters detail',
+    'explicit candidate selection without manual number input precedes POST; fixture success enters detail',
     (tester) async {
       await pump(tester);
       await candidates(tester);
@@ -108,16 +104,8 @@ void main() {
       expect(find.byType(BoardingConfirmationView), findsNothing);
       await select(tester);
       expect(api.creations, isEmpty);
-      expect(find.textContaining('차량·경로·진행 검증에 성공하면'), findsOneWidget);
-      for (final number in ['1234', '서울70사1234 ']) {
-        await tester.enterText(
-          find.byKey(const ValueKey('confirmed-vehicle-number')),
-          number,
-        );
-        await tap(tester, '탑승 차량 확정');
-        expect(api.creations, isEmpty);
-        expect(find.textContaining('전체 차량번호가 일치하지'), findsOneWidget);
-      }
+      expect(find.textContaining('등록하면 선택한 차량을 바로 추적'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
       await confirm(tester);
       expect(api.creations, hasLength(1));
       expect(find.byType(BoardingSessionView), findsOneWidget);
@@ -135,7 +123,7 @@ void main() {
       await pump(tester);
       await candidates(tester);
       final buttons = tester.widgetList<OutlinedButton>(
-        find.widgetWithText(OutlinedButton, '확정 불가 · 차량 정보 또는 추적 지원 확인 보류'),
+        find.widgetWithText(OutlinedButton, '선택 불가 · 차량 정보 또는 추적 지원 확인 보류'),
       );
       expect(buttons, hasLength(2));
       expect(buttons.every((b) => b.onPressed == null), isTrue);
@@ -143,15 +131,11 @@ void main() {
     },
   );
   testWidgets(
-    'changing draft candidate/context discards entered number without POST',
+    'changing draft candidate/context discards selection without POST',
     (tester) async {
       await pump(tester);
       await candidates(tester);
       await select(tester);
-      await tester.enterText(
-        find.byKey(const ValueKey('confirmed-vehicle-number')),
-        '서울70사1234',
-      );
       await tap(tester, '다른 후보 선택 · 다시 조회');
       await tester.tap(find.byKey(const ValueKey('occurrence-11')));
       await tester.pump();
@@ -161,15 +145,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('find-candidates')));
       await tester.pumpAndSettle();
       await select(tester);
-      expect(
-        tester
-            .widget<TextField>(
-              find.byKey(const ValueKey('confirmed-vehicle-number')),
-            )
-            .controller!
-            .text,
-        isEmpty,
-      );
+      expect(find.byType(TextField), findsNothing);
       expect(contexts.last, (754, 11, null));
       expect(api.creations, isEmpty);
     },
@@ -218,11 +194,7 @@ void main() {
       await pump(tester);
       await candidates(tester);
       await select(tester);
-      await tester.enterText(
-        find.byKey(const ValueKey('confirmed-vehicle-number')),
-        '서울70사1234',
-      );
-      await tap(tester, '탑승 차량 확정');
+      await tap(tester, '하차 알림 등록');
       expect(api.creations, hasLength(1));
       expect(storage.records, hasLength(1));
       expect(
@@ -418,15 +390,7 @@ void main() {
       expect(contexts, isEmpty);
       await candidates(tester);
       await select(tester);
-      expect(
-        tester
-            .widget<TextField>(
-              find.byKey(const ValueKey('confirmed-vehicle-number')),
-            )
-            .controller!
-            .text,
-        isEmpty,
-      );
+      expect(find.byType(TextField), findsNothing);
       await confirm(tester, reconfirm: true);
       expect(api.reconfirmations, [(123, 5, 'fresh-reference', '서울70사1234')]);
       expect(api.creations, isEmpty);
@@ -434,7 +398,7 @@ void main() {
     },
   );
   testWidgets(
-    'same-auth retained context fetches new candidate and user retypes full number',
+    'same-auth retained context fetches new candidate and user selects the same vehicle again',
     (tester) async {
       await pump(tester);
       await candidates(tester);
@@ -453,15 +417,7 @@ void main() {
       await tap(tester, '동일 차량 다시 확인');
       expect(contexts.last, (754, 22, null));
       await select(tester);
-      expect(
-        tester
-            .widget<TextField>(
-              find.byKey(const ValueKey('confirmed-vehicle-number')),
-            )
-            .controller!
-            .text,
-        isEmpty,
-      );
+      expect(find.byType(TextField), findsNothing);
       await confirm(tester, reconfirm: true);
       expect(api.reconfirmations, [
         (123, 6, 'fresh-reconfirmation-reference', '서울70사1234'),

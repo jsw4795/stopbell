@@ -16,6 +16,50 @@ void main() {
     'CANCELLED',
     'EXPIRED',
   ]) {
+    test('pending registration has no verified checkpoint or gap and remains cancellable', () {
+      final session = BoardingSession.fromJson({
+        ...sessionJson(
+          status: 'TRACKING',
+          evaluation: 'VERIFICATION_PENDING',
+          reason: 'BASELINE_UNVERIFIED',
+          gap: null,
+        ),
+        'checkpointObservedAt': null,
+      });
+      expect(session.status, BoardingSessionStatus.tracking);
+      expect(session.isOpen, isTrue);
+      expect(session.isTerminal, isFalse);
+      expect(session.checkpointObservedAt, isNull);
+      expect(session.remainingOccurrenceGap, isNull);
+      expect(
+        () => BoardingSession.fromJson({
+          ...sessionJson(status: 'TRACKING'),
+          'checkpointObservedAt': null,
+        }),
+        throwsFormatException,
+      );
+    });
+    test('legacy persisted request preserves its exact retry body after manual input removal', () {
+      final old = {
+        'clientRequestId': '8be1dffa-8e2c-4547-b136-d99bfd84e45c',
+        'candidateRef': 'old-ref',
+        'confirmedVehicleNumber': '서울70사1234',
+        'userIdentity': '1',
+        'sessionIdentity': 'login-a',
+        'context': sessionContext.toJson(),
+        'observedAt': sessionNow.toIso8601String(),
+      };
+      final restored = BoardingCreationIntent.fromJson(old);
+      expect(restored.body, {
+        'clientRequestId': old['clientRequestId'],
+        'candidateRef': 'old-ref',
+        'confirmedVehicleNumber': '서울70사1234',
+      });
+      expect(
+        BoardingCreationIntent.fromJson(restored.toJson()).body,
+        restored.body,
+      );
+    });
     test('parses $status and terminal/open identity', () {
       final evaluation = status == 'TRACKING'
           ? 'READY'
@@ -42,11 +86,25 @@ void main() {
       );
       expect(s.remainingOccurrenceGap, isNull);
       expect(s.providerDataTime, isNull);
-      expect(s.checkpointObservedAt.isUtc, isTrue);
+      expect(s.checkpointObservedAt!.isUtc, isTrue);
       expect(s.expiresAt.isUtc, isTrue);
-      expect(s.checkpointObservedAt.microsecond, 456);
+      expect(s.checkpointObservedAt!.microsecond, 456);
     });
   }
+  test('legacy VERIFYING response uses tracking presentation with closed evaluation', () {
+    final session = BoardingSession.fromJson({
+      ...sessionJson(
+        status: 'VERIFYING',
+        evaluation: 'VERIFICATION_PENDING',
+        reason: 'BASELINE_UNVERIFIED',
+        gap: null,
+      ),
+      'checkpointObservedAt': null,
+    });
+    expect(session.status, BoardingSessionStatus.tracking);
+    expect(session.evaluationStatus, BoardingEvaluation.verificationPending);
+    expect(session.isOpen, isTrue);
+  });
   test('UTC Instant handles offsets and optional provider timestamp', () {
     final s = BoardingSession.fromJson({
       ...sessionJson(),
@@ -165,7 +223,7 @@ void main() {
       final intent = BoardingCreationIntent(
         clientRequestId: newBoardingRequestId(),
         candidateRef: 'opaque',
-        confirmedVehicleNumber: '서울70사1234',
+        selectedVehicleNumber: '서울70사1234',
         userIdentity: '1',
         sessionIdentity: 'login-a',
         context: sessionContext,
@@ -196,7 +254,7 @@ void main() {
       final intent = BoardingCreationIntent(
         clientRequestId: newBoardingRequestId(),
         candidateRef: 'opaque',
-        confirmedVehicleNumber: '서울70사1234',
+        selectedVehicleNumber: '서울70사1234',
         userIdentity: '1',
         sessionIdentity: 'storage-race',
         context: sessionContext,
@@ -226,7 +284,7 @@ void main() {
       final intent = BoardingCreationIntent(
         clientRequestId: newBoardingRequestId(),
         candidateRef: 'opaque',
-        confirmedVehicleNumber: '서울70사1234',
+        selectedVehicleNumber: '서울70사1234',
         userIdentity: '1',
         sessionIdentity: 'failed-storage-race',
         context: sessionContext,

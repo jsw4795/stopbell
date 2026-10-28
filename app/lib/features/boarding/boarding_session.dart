@@ -9,9 +9,18 @@ enum BoardingSessionStatus {
   unknown,
 }
 
-enum BoardingEvaluation { ready, recoveryPending, held, ended, unknown }
+enum BoardingEvaluation {
+  verificationPending,
+  ready,
+  recoveryPending,
+  held,
+  ended,
+  unknown,
+}
 
 enum BoardingReason {
+  baselineUnverified,
+  targetNotAhead,
   temporaryProviderFailure,
   staleProgress,
   vehicleMissing,
@@ -27,6 +36,7 @@ enum BoardingReason {
   unknown;
 
   bool get needsReconfirmation => const {
+    BoardingReason.targetNotAhead,
     BoardingReason.vehicleMissing,
     BoardingReason.identityConflict,
     BoardingReason.progressRegression,
@@ -51,6 +61,8 @@ class BoardingSession {
         value['prepareNotificationEnabled'] as bool? ?? true;
     targetOrder = boardingInteger(value['targetOrder'], positive: true);
     status = switch (boardingText(value['status'])) {
+      'VERIFYING' =>
+        BoardingSessionStatus.tracking, // Legacy response compatibility.
       'TRACKING' => BoardingSessionStatus.tracking,
       'SUSPENDED' => BoardingSessionStatus.suspended,
       'COMPLETED' => BoardingSessionStatus.completed,
@@ -59,6 +71,7 @@ class BoardingSession {
       _ => BoardingSessionStatus.unknown,
     };
     evaluationStatus = switch (boardingText(value['evaluationStatus'])) {
+      'VERIFICATION_PENDING' => BoardingEvaluation.verificationPending,
       'READY' => BoardingEvaluation.ready,
       'RECOVERY_PENDING' => BoardingEvaluation.recoveryPending,
       'HELD' => BoardingEvaluation.held,
@@ -70,7 +83,9 @@ class BoardingSession {
     final gap = value['remainingOccurrenceGap'];
     if (gap != null && gap is! int) throw const FormatException();
     remainingOccurrenceGap = gap as int?;
-    checkpointObservedAt = boardingInstant(value['checkpointObservedAt']);
+    checkpointObservedAt = value['checkpointObservedAt'] == null
+        ? null
+        : boardingInstant(value['checkpointObservedAt']);
     providerDataTime = value['providerDataTime'] == null
         ? null
         : boardingInstant(value['providerDataTime']);
@@ -82,6 +97,8 @@ class BoardingSession {
     reasonCode = reason == null
         ? null
         : switch (boardingText(reason)) {
+            'BASELINE_UNVERIFIED' => BoardingReason.baselineUnverified,
+            'TARGET_NOT_AHEAD' => BoardingReason.targetNotAhead,
             'TEMPORARY_PROVIDER_FAILURE' =>
               BoardingReason.temporaryProviderFailure,
             'STALE_PROGRESS' => BoardingReason.staleProgress,
@@ -105,7 +122,12 @@ class BoardingSession {
           (isOpen && endedAt != null) ||
           (status == BoardingSessionStatus.tracking &&
               evaluationStatus != BoardingEvaluation.ready &&
-              evaluationStatus != BoardingEvaluation.recoveryPending) ||
+              evaluationStatus != BoardingEvaluation.recoveryPending &&
+              evaluationStatus != BoardingEvaluation.verificationPending) ||
+          (evaluationStatus != BoardingEvaluation.verificationPending &&
+              checkpointObservedAt == null &&
+              status != BoardingSessionStatus.suspended &&
+              !isTerminal) ||
           (status == BoardingSessionStatus.suspended &&
               evaluationStatus != BoardingEvaluation.held)) {
         throw const FormatException();
@@ -120,8 +142,8 @@ class BoardingSession {
   late final BoardingEvaluation evaluationStatus;
   late final BoardingReason? reasonCode;
   late final int? remainingOccurrenceGap;
-  late final DateTime checkpointObservedAt, expiresAt;
-  late final DateTime? providerDataTime, endedAt;
+  late final DateTime expiresAt;
+  late final DateTime? checkpointObservedAt, providerDataTime, endedAt;
 
   bool get isOpen =>
       status == BoardingSessionStatus.tracking ||

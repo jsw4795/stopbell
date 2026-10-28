@@ -227,7 +227,7 @@ class BoardingProgressEvaluatorTest {
             assertThat(result.checkpoint().getStopExternalId()).isNull();
             assertThat(result.checkpoint().getEvidence()).isEqualTo(BoardingCheckpoint.Evidence.VERIFIED_ORDER_ONLY);
         } else {
-            assertHeld(result, BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+            assertHeld(result, BoardingStateReason.STALE_PROGRESS);
         }
     }
 

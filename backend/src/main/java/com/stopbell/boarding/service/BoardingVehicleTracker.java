@@ -121,10 +121,21 @@ public class BoardingVehicleTracker {
             }
         }
         if (index < 0) {
+            if (vehicle.stopId() == null || vehicle.order() == null) {
+                if (previous.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
+                    return Input.held(BoardingStateReason.STALE_PROGRESS);
+                }
+                return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
+                        vehicle, BoardingProgressObservation.Meaning.UNVERIFIED, false, null, false), null);
+            }
             return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
         }
         if (index < previous.getIndex()) {
             return Input.held(BoardingStateReason.PROGRESS_REGRESSION);
+        }
+        if (previous.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
+            return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
+                    vehicle, BoardingProgressObservation.Meaning.UNVERIFIED, false, null, false), null);
         }
         if (index != previous.getIndex()) {
             if (vehicle.observedAt().equals(previous.getObservedAt().toInstant(ZoneOffset.UTC))

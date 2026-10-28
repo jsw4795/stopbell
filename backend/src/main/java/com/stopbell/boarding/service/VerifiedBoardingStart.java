@@ -6,15 +6,16 @@ import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.boarding.entity.BoardingTraversalSnapshot;
 import com.stopbell.transit.service.BoardingRouteSnapshot;
 
-/** Only validated evidence crosses into creation/reconfirmation transactions; no live Provider objects. */
+/** Validated vehicle identity and explicitly classified progress cross the transaction boundary; no live Provider objects. */
 public record VerifiedBoardingStart(
         BoardingRouteSnapshot metadata, BoardingTraversalSnapshot traversal, BoardingCheckpoint checkpoint,
         Instant referenceExpiresAt, String vehicleTrackingId, String vehicleNumber, String routeNumber, String targetName
 ) {
     public VerifiedBoardingStart {
         if (metadata == null || traversal == null || checkpoint == null || referenceExpiresAt == null
-                || checkpoint.getIndex() >= traversal.targetIndex()) {
-            throw new IllegalArgumentException("Exact target ahead and validated checkpoint are required");
+                || (checkpoint.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                    && checkpoint.getIndex() >= traversal.targetIndex())) {
+            throw new IllegalArgumentException("Target context and classified progress observation are required");
         }
         checkpoint.validateAgainst(traversal);
         if (metadata.provider() != traversal.provider()

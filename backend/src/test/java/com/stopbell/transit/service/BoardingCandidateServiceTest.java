@@ -54,7 +54,7 @@ class BoardingCandidateServiceTest {
         assertThat(candidate.vehicleNumber()).isEqualTo("경기70바5770");
         assertThat(candidate.confirmationStatus()).isEqualTo(ConfirmationStatus.AVAILABLE);
         assertThat(candidate.candidateRef()).isNotBlank();
-        assertThat(candidate.boardingOccurrenceGap()).isEqualTo(1);
+        assertThat(candidate.boardingOccurrenceGap()).isEqualTo(-1);
         assertThat(candidate.progress().kind()).isEqualTo(ProgressKind.ROUTE_PROGRESS);
         assertThat(candidate.trackingSupport()).isEqualTo(TrackingSupport.HELD);
         assertThat(candidate.trackingReasonCode()).isEqualTo(ReasonCode.TAGO_ALIGHT_UNVERIFIED);
@@ -93,7 +93,7 @@ class BoardingCandidateServiceTest {
                 tago("Z", "s4", 40), tago("B", "s3", 30), tago("A", "s1", 10), tago("C", null, 20)));
         var candidates = find(12L).candidates();
         assertThat(candidates).extracting(Candidate::vehicleNumber).containsExactly("A", "B", "Z", "C");
-        assertThat(candidates).extracting(Candidate::boardingOccurrenceGap).containsExactly(1, 1, 2, null);
+        assertThat(candidates).extracting(Candidate::boardingOccurrenceGap).containsExactly(1, -1, -2, null);
         assertThat(candidates).allMatch(candidate -> candidate.confirmationStatus() == ConfirmationStatus.AVAILABLE);
     }
 
@@ -176,7 +176,7 @@ class BoardingCandidateServiceTest {
         assertThat(candidate.vehicleNumber()).isEqualTo("서울74사1234");
         assertThat(candidate.progress()).isNull();
         assertThat(candidate.reasonCode()).isEqualTo(ReasonCode.DETAIL_NOT_REQUESTED);
-        assertThat(candidate.trackingSupport()).isEqualTo(TrackingSupport.HELD);
+        assertThat(candidate.trackingSupport()).isEqualTo(TrackingSupport.CONDITIONAL);
         assertThat(references.resolve(candidate.candidateRef(), context(null)).orElseThrow()
                 .rosterVehicle().id()).isEqualTo("raw-id");
         verifyNoInteractions(detailClient);
@@ -191,7 +191,7 @@ class BoardingCandidateServiceTest {
         var candidate = find(12L).candidates().getFirst();
         assertThat(candidate.progress().occurrenceId()).isEqualTo(13L);
         assertThat(candidate.progress().kind()).isEqualTo(ProgressKind.ARRIVAL_OBSERVED);
-        assertThat(candidate.boardingOccurrenceGap()).isEqualTo(1);
+        assertThat(candidate.boardingOccurrenceGap()).isEqualTo(-1);
         assertThat(candidate.providerDataTime()).isEqualTo(NOW);
         assertThat(candidate.trackingSupport()).isEqualTo(TrackingSupport.CONDITIONAL);
         assertThat(candidate.trackingReasonCode()).isEqualTo(ReasonCode.REVALIDATION_REQUIRED);
@@ -200,15 +200,16 @@ class BoardingCandidateServiceTest {
     }
 
     @Test
-    @DisplayName("목적지 현재 또는 이후 진행도 후보에서 제거하지 않되 추적 시작 지원을 보류한다")
+    @DisplayName("목적지 현재 또는 이후 후보는 등록을 허용하되 소급 알림 불가 제한을 표시한다")
     void target_not_ahead() {
         useRoute(TransitProvider.SEOUL_BUS, 12L);
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(roster("id", "A", DATA_TIME)));
         when(detailClient.fetchVehicleDetail("id")).thenReturn(detailResponse(detail("id", "A", "s4", 40, DATA_TIME)));
         var candidate = find(12L).candidates().getFirst();
         assertThat(candidate.confirmationStatus()).isEqualTo(ConfirmationStatus.AVAILABLE);
-        assertThat(candidate.trackingReasonCode()).isEqualTo(ReasonCode.TARGET_NOT_AHEAD);
-        assertThat(candidate.trackingSupport()).isEqualTo(TrackingSupport.HELD);
+        assertThat(candidate.trackingReasonCode()).isEqualTo(ReasonCode.REVALIDATION_REQUIRED);
+        assertThat(candidate.trackingSupport()).isEqualTo(TrackingSupport.CONDITIONAL);
+        assertThat(candidate.limitations()).contains(ReasonCode.TARGET_NOT_AHEAD);
     }
 
     @Test
@@ -277,7 +278,12 @@ class BoardingCandidateServiceTest {
         useRoute(TransitProvider.SEOUL_BUS, 12L);
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(roster("id", "A", DATA_TIME)));
         when(detailClient.fetchVehicleDetail("id")).thenReturn(detailResponse());
-        assertHeld(find(12L).candidates().getFirst(), ReasonCode.DETAIL_EMPTY);
+        var candidate = find(12L).candidates().getFirst();
+        assertThat(candidate.confirmationStatus()).isEqualTo(ConfirmationStatus.AVAILABLE);
+        assertThat(candidate.trackingSupport()).isEqualTo(TrackingSupport.CONDITIONAL);
+        assertThat(candidate.reasonCode()).isEqualTo(ReasonCode.DETAIL_EMPTY);
+        assertThat(candidate.candidateRef()).isNotBlank();
+        assertThat(candidate.progress()).isNull();
     }
 
     @Test

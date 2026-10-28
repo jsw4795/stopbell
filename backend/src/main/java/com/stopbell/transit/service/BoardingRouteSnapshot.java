@@ -34,6 +34,21 @@ public record BoardingRouteSnapshot(
         return -1;
     }
 
+    /** Stable opaque selection hint across fresh lookups; never an authorization or progress grant. */
+    public String selectionKey(String vehicleId, String vehicleNumber) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            add(digest, provider);
+            add(digest, externalRouteId);
+            add(digest, cityCode);
+            add(digest, vehicleId);
+            add(digest, vehicleNumber);
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is required", exception);
+        }
+    }
+
     public String fingerprint() {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

@@ -908,3 +908,52 @@ Boarding start rejected: stage=candidate-revalidation provider=SEOUL_BUS reason=
 - 검증: Java/JVM 21.0.12.1·Gradle Wrapper 8.14.3, `FCM_ENABLED=false ./gradlew --no-daemon test`로 Backend **69개 클래스·966개 테스트**가 failure/error/skip 0으로 통과했다. 새 단위/API **14개 사례**와 기존 Alarm·Notification·tracking 회귀를 포함한다. 최초 집중 104개 실행에서는 신규 API 기대값이 수신시각의 microsecond를 초 단위 Provider 시각에도 기대한 2건이 실패했으며, 원래 두 시각을 구분하도록 fixture 기대값을 수정한 뒤 전체 suite를 통과했다. 제품의 시각 검증을 완화하지 않았다
 - Flutter의 기존 `boarding_session_controller_test.dart`·`boarding_push_readiness_test.dart` **65개 통과**. Mock/Fake Push·Provider와 격리 MySQL/loopback HTTP 검증이며 실제 Provider/iPhone/FCM 성공이 아니다. `--no-daemon` JVM과 Testcontainers는 실행 후 종료됐고 최종 Backend·터널·Flutter 앱·harness·test worker 0개, 8080/20241 listener 없음, 실행 중 Docker 컨테이너는 기존 healthy MySQL만 확인했다. 편집기 도구는 보존했다
 - 문서 링크·`git diff --check`·diff/status·staging 비어 있음을 확인했다. 기존 미커밋 변경·main 유지, Git add/commit/push·브랜치/Worktree 변경 없음. API·Domain·ADR의 좁은 지원 변경과 local 실행 절차만 동기화하고 Dependency·Migration·devlog·기존 설정 파일은 변경하지 않았다
+
+## 27. 차량 선택 즉시 TRACKING 변경 (2026-10-29)
+
+사용자 확정으로 VERIFYING 접수 설계를 대체했다. 정차·이동·승차 전·이미 탑승 여부와 무관하게 유효한 후보의 등록은 즉시 TRACKING이다. 상세 계약은 [Requirements](../requirements.md#phase-9-탑승-세션과-하차-준비-알림), [Domain](../domain-model.md#snapshot-and-progress), [API](../api.md#탑승-세션-api-task-903), [V19 호환 전환](../database.md#phase-9-boarding-persistence-contract-task-903)을 따른다. §25~26의 정차 전 시작 거부·VERIFYING 제안은 당시 기록이며 현재 동작이 아니다.
+
+### 27.1 이동 관측 근거와 재생 검증
+
+§24.3의 차량 A 기록을 오프라인 통합 테스트로 재생했다. 실측 Stop ID/order와 두 원래 시각·flag를 사용하고 차량 identity는 테스트 값으로 대체했다. 격리 metadata는 order 7~10의 연속 구간이다. 실제 서울 API·기존 개발 DB를 호출하지 않았다.
+
+- 19:54:52 / order 7 / flag 0에서 후보 조회·실제 Validator·세션 생성은 즉시 TRACKING이며 위치 평가는 대기
+- 19:55:12 / order 8 / flag 1에서 신뢰할 기준점과 gap 2를 확보하여 PREPARE_ALIGHT 생성
+- 19:55:53 / order 8 / flag 0은 이미 검증한 동일 기준점을 유지하고 알림 중복 없음
+- 19:56:33 / order 9 / flag 1 진행 뒤 19:57:54 / order 10 / flag 1에서 목적지 도달 Event 생성
+
+이는 과거 관측 기록을 새 코드에 적용한 회귀 테스트다. 새 실제 Provider 등록 성공·실제 버스 탑승·iPhone 알림 성공으로 계산하지 않는다. 목적지 정차를 생략하고 검증된 이후 occurrence를 관측하는 PASSED 경로는 별도 통제 fixture로 검증한다.
+
+### 27.2 유지한 한계와 iPhone 전 잔여 검증
+
+위치 필드 누락·정상 empty detail도 신선한 동일 차량 roster가 확인되면 즉시 등록 가능하다. empty detail의 원래 위치 reference는 두 원래 시각의 미검증 근거로만 보존한다.
+
+이동 중 시작을 정차까지 지연하지 않는다. 다만 현재 실측은 `stopFlag=0`의 새로운 ID/order를 도달·통과로 해석하거나 `sectOrd`를 occurrence로 변환할 근거가 아니다. 이동 중 등록 후 목적지 이전의 신뢰할 정차 기준점을 얻으면 사전·목적지 알림까지 연결되지만 다음 범위는 추가 검증이 필요하다.
+
+- 최초부터 이동 관측만 계속되고 신뢰할 기준점을 끝내 확보하지 못하는 경로: 관측은 유지하나 목적지 알림을 보장할 수 없음
+- 최초 신뢰할 기준점이 이미 목적지 또는 이후인 경로: 과거 도달·통과 알림을 소급 생성하지 않음
+- 실제 무정차·회차·반복 정류장·장시간 위치 공백: 현재 보수적 보류를 유지하며 실제 의미·운행 연속성 근거 필요
+- 실제 iPhone에서 이동 중 등록→후속 관측→목적지 표시·foreground/background/terminated 수신·tap·중복·지연 확인 미실행
+
+추가 Provider 관측과 FCM 전송은 별도 승인 후에만 실행한다. Backend·Cloudflare를 시작하지 않았고 기존 MySQL·Credential·Git main/미커밋 변경은 보존했다. V18은 변경하지 않고 V19를 추가했으며 기존 개발 DB에는 적용하지 않았다. TASK-908은 `[ ]`를 유지한다.
+
+### 27.3 최종 자동 검증과 변경 범위
+
+| 검증 | 결과 |
+| --- | --- |
+| Java 21.0.12.1 / Gradle Wrapper 8.14.3 / MySQL 8.4.11 Testcontainers, `./gradlew test --offline --no-daemon` | 전체 987개, 실패·오류·skip 0 |
+| Flutter 3.47.1 / Dart 3.13.1, `flutter test --no-pub` | 전체 456개 통과 |
+| `flutter analyze --no-pub`, 변경 Dart format 검사 | 통과 |
+| 변경 문서의 상대 경로·anchor, `git diff --check` | 통과 |
+
+정차/이동/정상 empty detail 등록→위치 부족 유지→재시작→신뢰할 후속 관측→사전 ON/OFF·목적지 ARRIVED/PASSED·중복 억제를 실제 Validator/Polling/Store 경로로 검증했다. 기존 식별 충돌·역행·회차/반복 occurrence·연속성 공백·재시작 gate와 Alarm/Notification/FCM loopback 회귀도 포함한다. V18의 네 pending reason을 V19로 전환하여 identity·checkpoint·원래 시각·수명·사전 설정·기존 Event/Delivery 보존, User당 open UNIQUE 및 새 상태/evidence CHECK를 확인했다.
+
+핵심 Backend 변경 파일:
+
+- [BoardingSession](../../backend/src/main/java/com/stopbell/boarding/entity/BoardingSession.java), [BoardingSessionStatus](../../backend/src/main/java/com/stopbell/boarding/entity/BoardingSessionStatus.java), [BoardingTrackingDecision](../../backend/src/main/java/com/stopbell/boarding/domain/BoardingTrackingDecision.java): 즉시 추적 상태와 평가 결과 정리
+- [BoardingCandidateService](../../backend/src/main/java/com/stopbell/transit/service/BoardingCandidateService.java), [VerifiedBoardingStart](../../backend/src/main/java/com/stopbell/boarding/service/VerifiedBoardingStart.java): 위치와 식별 검증 분리·소급 알림 없는 시작
+- [BoardingProgressEvaluator](../../backend/src/main/java/com/stopbell/boarding/service/BoardingProgressEvaluator.java), [BoardingVehicleTracker](../../backend/src/main/java/com/stopbell/boarding/service/BoardingVehicleTracker.java), [BoardingTrackingStore](../../backend/src/main/java/com/stopbell/boarding/service/BoardingTrackingStore.java): 관측 지속·안전한 평가·원자 반영
+- [BoardingTrackingRuntime](../../backend/src/main/java/com/stopbell/boarding/service/BoardingTrackingRuntime.java), [BoardingSessionService](../../backend/src/main/java/com/stopbell/boarding/service/BoardingSessionService.java), [BoardingSessionResponse](../../backend/src/main/java/com/stopbell/boarding/dto/BoardingSessionResponse.java): 복구·readiness·응답 정리
+- [V19](../../backend/src/main/resources/db/migration/V19__boarding_immediate_tracking.sql): 기존 V18 데이터 호환 전환
+
+Flutter 변경 파일은 [boarding_session.dart](../../app/lib/features/boarding/boarding_session.dart), [boarding_session_controller.dart](../../app/lib/features/boarding/boarding_session_controller.dart), [boarding_session_view.dart](../../app/lib/features/boarding/boarding_session_view.dart), [boarding_confirmation_view.dart](../../app/lib/features/boarding/boarding_confirmation_view.dart)다. 새 응답과 이전 VERIFYING 응답의 호환 파싱, 등록 즉시 추적 화면, 위치 확인 중 표시를 반영했다. 관련 Backend·Flutter 테스트와 Owner 문서·ADR·TASK-908 진행 기록을 동기화했다. 새 Dependency·기존 Migration·Credential·실행 설정·devlog 변경과 Git add/commit/push·브랜치 변경은 없다.

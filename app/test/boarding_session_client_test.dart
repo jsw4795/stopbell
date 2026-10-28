@@ -133,7 +133,6 @@ void main() {
       expect(jsonDecode(requests[1].body), {
         'expectedRevision': 8,
         'candidateRef': 'new-reference',
-        'confirmedVehicleNumber': '서울70사1234',
       });
     },
   );

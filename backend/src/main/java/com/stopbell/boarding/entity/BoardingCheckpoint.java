@@ -10,7 +10,7 @@ import jakarta.persistence.Enumerated;
 
 @Embeddable
 public class BoardingCheckpoint {
-    public enum Evidence { ID_ORDER, VERIFIED_ORDER_ONLY }
+    public enum Evidence { ID_ORDER, VERIFIED_ORDER_ONLY, UNVERIFIED_REFERENCE }
 
     @Column(name = "checkpoint_stop_external_id")
     private String stopExternalId;
@@ -46,10 +46,12 @@ public class BoardingCheckpoint {
     }
 
     private void validate() {
-        if (stopOrder <= 0 || index < 0 || evidence == null || observedAt == null
+        boolean unlocated = evidence == Evidence.UNVERIFIED_REFERENCE && stopExternalId == null
+                && stopOrder == 0 && index == -1;
+        if ((!unlocated && (stopOrder <= 0 || index < 0)) || evidence == null || observedAt == null
                 || observedAt.getYear() < 1000 || observedAt.getYear() > 9999
-                || (evidence == Evidence.ID_ORDER ? stopExternalId == null || stopExternalId.isBlank()
-                    || stopExternalId.length() > 255 : stopExternalId != null)
+                || (!unlocated && (evidence != Evidence.VERIFIED_ORDER_ONLY ? stopExternalId == null || stopExternalId.isBlank()
+                    || stopExternalId.length() > 255 : stopExternalId != null))
                 || (directionContext != null && (directionContext.isBlank() || directionContext.length() > 255))
                 || (providerDataTime != null && (providerDataTime.getYear() < 1000 || providerDataTime.getYear() > 9999
                     || providerDataTime.isAfter(observedAt)))) {
@@ -59,11 +61,14 @@ public class BoardingCheckpoint {
 
     public void validateAgainst(BoardingTraversalSnapshot snapshot) {
         validate();
+        if (evidence == Evidence.UNVERIFIED_REFERENCE && index == -1) {
+            return;
+        }
         if (index >= snapshot.occurrences().size()) {
             throw new IllegalArgumentException("Checkpoint is outside traversal");
         }
         var occurrence = snapshot.occurrences().get(index);
-        if (stopOrder != occurrence.order() || (evidence == Evidence.ID_ORDER
+        if (stopOrder != occurrence.order() || (evidence != Evidence.VERIFIED_ORDER_ONLY
                 && !occurrence.externalStopId().equals(stopExternalId))) {
             throw new IllegalArgumentException("Checkpoint contradicts traversal");
         }

@@ -29,6 +29,7 @@ public record BoardingCandidatesResponse(
 
     public record Candidate(
             String candidateRef,
+            String selectionKey,
             String vehicleNumber,
             ConfirmationStatus confirmationStatus,
             ReasonCode reasonCode,

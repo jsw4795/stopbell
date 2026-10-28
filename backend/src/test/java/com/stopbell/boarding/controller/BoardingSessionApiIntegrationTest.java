@@ -85,6 +85,7 @@ class BoardingSessionApiIntegrationTest {
     @Autowired private BoardingSessionRepository sessions;
     @Autowired private BoardingSessionService service;
     @Autowired private BoardingTrackingRuntime runtime;
+    @Autowired private com.stopbell.boarding.service.BoardingSessionPollingService polling;
     @Autowired private BoardingCandidateMetadataService metadata;
     @Autowired private BoardingCandidateService candidates;
     @Autowired private com.stopbell.boarding.service.BoardingSessionProperties properties;
@@ -292,13 +293,11 @@ class BoardingSessionApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("타 User와 만료 reference 및 전체 번호 불일치는 새 세션 없이 거부한다")
+    @DisplayName("타 User와 만료 reference는 새 세션 없이 거부한다")
     void reject_invalid_reference_and_number() throws Exception {
         String reference = candidateRef();
         mvc.perform(auth(postSession(REQUEST_ID, reference), other)).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
-        mvc.perform(auth(postSession(REQUEST_ID, reference).content(body(REQUEST_ID, reference).replace(NUMBER, "1234")), owner))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
         time.set(NOW.plusSeconds(61));
         mvc.perform(auth(postSession(REQUEST_ID, reference), owner)).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
@@ -359,7 +358,7 @@ class BoardingSessionApiIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"NO_BASELINE", "CHANGED_REFERENCE", "TARGET_REACHED", "EXPIRED"})
-    @DisplayName("이동 중 기준점 부재·다른 occurrence·목적지 현재·후보 만료는 세션과 목적지 알림을 만들지 않는다")
+    @DisplayName("이동 차량과 목적지 현재 차량도 즉시 추적하고 만료 후보는 거부한다")
     void reject_unsupported_moving_creation(String issue) throws Exception {
         if (issue.equals("NO_BASELINE")) {
             when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress("s1", 10, 0));
@@ -372,10 +371,21 @@ class BoardingSessionApiIntegrationTest {
                 new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
                 new SeoulBusVehicleDetailItem("vehicle-id", NUMBER, stop, order, 0, "20261020120010", null, null)))));
 
-        expectError(reference, issue.equals("EXPIRED") ? "BOARDING_CANDIDATE_CHANGED"
-                : issue.equals("TARGET_REACHED") ? "BOARDING_TARGET_NOT_AHEAD" : "BOARDING_TRACKING_UNSUPPORTED", 409);
-
-        assertThat(sessions.count()).isZero();
+        if (!issue.equals("EXPIRED")) {
+            String content = "{\"clientRequestId\":\"" + REQUEST_ID + "\",\"candidateRef\":\"" + reference + "\"}";
+            mvc.perform(auth(postSession(REQUEST_ID, reference).content(content), owner))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("TRACKING"))
+                    .andExpect(jsonPath("$.evaluationStatus").value("VERIFICATION_PENDING"))
+                    .andExpect(jsonPath("$.remainingOccurrenceGap").isEmpty())
+                    .andExpect(jsonPath("$.checkpointObservedAt").isEmpty());
+            mvc.perform(auth(postSession(REQUEST_ID, reference).content(content), owner))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("TRACKING"));
+            assertThat(sessions.count()).isEqualTo(1);
+            assertThat(service.findCurrent(owner.getId())).hasSize(1);
+        } else {
+            expectError(reference, "BOARDING_CANDIDATE_CHANGED", 409);
+            assertThat(sessions.count()).isZero();
+        }
         assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
         verify(detail, times(issue.equals("EXPIRED") ? 1 : 2)).fetchVehicleDetail("vehicle-id");
@@ -421,13 +431,18 @@ class BoardingSessionApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("Provider 실패는 503이고 metadata 구조 변경과 목적지 이후 진행은 계약된 오류로 거부한다")
+    @DisplayName("Provider 실패와 metadata 구조 변경을 거부하고 목적지 현재는 알림 없이 추적한다")
     void provider_metadata_and_target_failures() throws Exception {
         String reference = candidateRef();
         when(detail.fetchVehicleDetail("vehicle-id")).thenThrow(TransitProviderClientException.http(TransitProvider.SEOUL_BUS, "detail", 503, null));
         expectError(reference, "TRANSIT_TEMPORARILY_UNAVAILABLE", 503);
-        doReturn(progress("s3", 30, 1)).when(detail).fetchVehicleDetail("vehicle-id");
-        expectError(reference, "BOARDING_TARGET_NOT_AHEAD", 409);
+        time.set(NOW.plusSeconds(10));
+        doReturn(liveProgress("s3", 30, 1)).when(detail).fetchVehicleDetail("vehicle-id");
+        var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, reference, null));
+        assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(created.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING);
+        service.cancel(owner.getId(), created.response().id(), created.response().revision());
+        sessions.deleteAll();
         jdbc.update("update bus_route_stop_occurrences set stop_order=11 where id=?", first.getId());
         expectError(reference, "BOARDING_CANDIDATE_CHANGED", 409);
     }
@@ -783,6 +798,153 @@ class BoardingSessionApiIntegrationTest {
             assertThat(both.await(5, TimeUnit.SECONDS)).isTrue();
             return start;
         }).when(validator).validate(anyLong(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("위치 없는 차량은 번호 입력 없이 대기로 등록하고 다른 요청 UUID의 중복 등록을 차단하며 취소할 수 있다")
+    void pending_unknown_position_is_registered_and_cancellable() throws Exception {
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress(null, 10, 0));
+        String reference = candidateRef();
+        var request = new CreateBoardingSessionRequest(REQUEST_ID, reference, null);
+        var created = service.create(owner.getId(), request);
+        assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(created.response().checkpointObservedAt()).isNull();
+        assertThat(service.create(owner.getId(), request).created()).isFalse();
+        assertThatThrownBy(() -> service.create(owner.getId(),
+                new CreateBoardingSessionRequest(UUID.randomUUID().toString(), reference, null)))
+                .isInstanceOfSatisfying(ApiException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.BOARDING_SESSION_CONFLICT));
+        var stored = sessions.findById(created.response().id()).orElseThrow();
+        assertThat(stored.getCheckpoint().getIndex()).isEqualTo(-1);
+        assertThat(stored.getCheckpoint().getStopExternalId()).isNull();
+        assertThat(service.cancel(owner.getId(), stored.getId(), stored.getRevision()).status())
+                .isEqualTo(BoardingSessionStatus.CANCELLED);
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("버스가 승차 정류장 이전에서 이동 중이어도 번호 입력 없이 알림을 사전 등록한다")
+    void register_before_boarding_stop_arrival() {
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress("s1", 10, 0));
+        var candidate = candidates.find(owner.getId(), route.getId(), target.getId(), target.getId())
+                .candidates().getFirst();
+        assertThat(candidate.boardingOccurrenceGap()).isEqualTo(2);
+        assertThat(candidate.progress().kind()).isEqualTo(
+                com.stopbell.transit.dto.BoardingCandidatesResponse.ProgressKind.MOVING_REFERENCE);
+        assertThat(candidate.selectionKey()).isNotBlank().doesNotContain("vehicle-id", NUMBER);
+        var result = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, candidate.candidateRef(), null));
+        assertThat(result.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(result.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING);
+        assertThat(result.response().remainingOccurrenceGap()).isNull();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"0,true,3,0", "0,true,4,0", "0,false,3,0", "0,false,4,0", "1,true,3,0", "1,true,3,1", "-1,true,3,0"})
+    @DisplayName("정차·이동 차량은 즉시 추적하고 위치 부족과 재시작 뒤 정상 관측에서 사전·목적지 알림을 중복 없이 생성한다")
+    void immediate_tracking_observes_then_notifies(int initialFlag, boolean prepare, int endStop, int unavailableFlag) {
+        occurrence("s4", 40);
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(initialFlag < 0
+                ? new SeoulBusVehicleDetailResponse(new SeoulBusVehicleDetailResponse.Header("4", null), null)
+                : progress("s1", 10, initialFlag));
+        String reference = candidateRef();
+        var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, reference, null, prepare));
+        Long id = created.response().id();
+        assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(created.response().evaluationStatus()).isEqualTo(initialFlag <= 0
+                ? BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING : BoardingSessionResponse.EvaluationStatus.RECOVERY_PENDING);
+        try {
+            for (int seconds : List.of(20, 40)) {
+                time.set(NOW.plusSeconds(seconds));
+                when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                        "vehicle-id", NUMBER, 999, "coarse", 1, liveDataTime(), null, null, null, null, null)));
+                // Identity is valid while location fields are temporarily unavailable.
+                when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(liveProgress(null, null, unavailableFlag));
+                polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+                assertThat(service.find(owner.getId(), id).status()).isEqualTo(BoardingSessionStatus.TRACKING);
+                assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+                runtime.forget(id); // Restart gate is default closed; DB identity/checkpoint remain.
+            }
+            time.set(NOW.plusSeconds(60));
+            when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                    "vehicle-id", NUMBER, 999, "coarse", 1, liveDataTime(), null, null, null, null, null)));
+            when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(liveProgress("s2", 20, 1));
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            assertThat(service.find(owner.getId(), id).evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
+            assertThat(jdbc.queryForObject("select count(*) from notification_events where boarding_event_type='PREPARE_ALIGHT'", Long.class))
+                    .isEqualTo(prepare ? 1L : 0L);
+            time.set(NOW.plusSeconds(80));
+            when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                    "vehicle-id", NUMBER, 999, "coarse", 1, liveDataTime(), null, null, null, null, null)));
+            when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(liveProgress("s" + endStop, endStop * 10, 1));
+            for (int repeat = 0; repeat < 2; repeat++) {
+                polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            }
+            var completed = service.find(owner.getId(), id);
+            assertThat(completed.status()).isEqualTo(BoardingSessionStatus.COMPLETED);
+            assertThat(completed.reasonCode()).isEqualTo(endStop == 3 ? BoardingStateReason.ARRIVAL_OBSERVED : BoardingStateReason.PASSED_OBSERVED);
+            assertThat(jdbc.queryForObject("select count(*) from notification_events where boarding_event_type='DESTINATION_REACHED'", Long.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(prepare ? 2L : 1L);
+        } finally {
+            jdbc.update("delete from notification_deliveries");
+            jdbc.update("delete from notification_events");
+        }
+    }
+
+    @Test
+    @DisplayName("서울 143번 기록의 이동→정차→이동→목적지 관측을 재생하면 즉시 추적부터 알림까지 이어진다")
+    void replay_seoul_143_recorded_observations() {
+        // docs/research/TASK-908-provider-evidence.md §24.3 vehicle A, orders 7..10.
+        // This is an offline replay with an isolated metadata subset, not a new live/E2E result.
+        occurrences.deleteAll();
+        stops.deleteAll();
+        first = occurrence("107000029", 7);
+        occurrence("107000031", 8);
+        occurrence("107000005", 9);
+        target = occurrence("107000007", 10);
+        replayObservation("2026-10-28T10:54:52Z", "20261028195440", "107000029", 7, 0);
+        var candidate = candidateRef();
+        var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, candidate, null));
+        assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(created.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING);
+        try {
+            replayObservation("2026-10-28T10:55:12Z", "20261028195503", "107000031", 8, 1);
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            assertThat(service.find(owner.getId(), created.response().id()).remainingOccurrenceGap()).isEqualTo(2);
+            replayObservation("2026-10-28T10:55:53Z", "20261028195538", "107000031", 8, 0);
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            assertThat(service.find(owner.getId(), created.response().id()).remainingOccurrenceGap()).isEqualTo(2);
+            replayObservation("2026-10-28T10:56:33Z", "20261028195615", "107000005", 9, 1);
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            replayObservation("2026-10-28T10:57:54Z", "20261028195736", "107000007", 10, 1);
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            assertThat(service.find(owner.getId(), created.response().id()).reasonCode()).isEqualTo(BoardingStateReason.ARRIVAL_OBSERVED);
+            assertThat(jdbc.queryForList("select boarding_event_type from notification_events order by id", String.class))
+                    .containsExactly("PREPARE_ALIGHT", "DESTINATION_REACHED");
+        } finally {
+            jdbc.update("delete from notification_deliveries");
+            jdbc.update("delete from notification_events");
+        }
+    }
+
+    private void replayObservation(String receivedAt, String dataTime, String stop, int order, int flag) {
+        time.set(Instant.parse(receivedAt));
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                "vehicle-id", NUMBER, order, "coarse", 1, dataTime, null, null, null, null, null)));
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
+                        new SeoulBusVehicleDetailItem("vehicle-id", NUMBER, stop, order, flag, dataTime, null, null)))));
+    }
+
+    private String liveDataTime() {
+        return java.time.format.DateTimeFormatter.ofPattern("yyyyMMddHHmmss").withZone(java.time.ZoneId.of("Asia/Seoul"))
+                .format(time.get());
+    }
+
+    private SeoulBusVehicleDetailResponse liveProgress(String stop, Integer order, int flag) {
+        return new SeoulBusVehicleDetailResponse(new SeoulBusVehicleDetailResponse.Header("0", null),
+                new SeoulBusVehicleDetailResponse.Body(List.of(new SeoulBusVehicleDetailItem(
+                        "vehicle-id", NUMBER, stop, order, flag, liveDataTime(), null, null))));
     }
 
     private String createOutcome(String id) {

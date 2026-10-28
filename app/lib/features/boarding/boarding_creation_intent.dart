@@ -46,29 +46,32 @@ class BoardingCreationIntent {
   const BoardingCreationIntent({
     required this.clientRequestId,
     required this.candidateRef,
-    required this.confirmedVehicleNumber,
+    required this.selectedVehicleNumber,
     required this.userIdentity,
     required this.sessionIdentity,
     required this.context,
     required this.observedAt,
     this.prepareNotificationEnabled = true,
+    this.legacyConfirmedVehicleNumber,
   });
   final String clientRequestId,
       candidateRef,
-      confirmedVehicleNumber,
+      selectedVehicleNumber,
       userIdentity,
       sessionIdentity;
+  final String? legacyConfirmedVehicleNumber;
   final BoardingSelectionContext context;
   final DateTime observedAt;
   final bool prepareNotificationEnabled;
   Map<String, Object> get body => {
     'clientRequestId': clientRequestId,
     'candidateRef': candidateRef,
-    'confirmedVehicleNumber': confirmedVehicleNumber,
+    'confirmedVehicleNumber': ?legacyConfirmedVehicleNumber,
     if (!prepareNotificationEnabled) 'prepareNotificationEnabled': false,
   };
   Map<String, Object?> toJson() => {
     ...body,
+    'selectedVehicleNumber': selectedVehicleNumber,
     'userIdentity': userIdentity,
     'sessionIdentity': sessionIdentity,
     'context': context.toJson(),
@@ -85,7 +88,10 @@ class BoardingCreationIntent {
     return BoardingCreationIntent(
       clientRequestId: uuid,
       candidateRef: boardingText(value['candidateRef']),
-      confirmedVehicleNumber: boardingText(value['confirmedVehicleNumber']),
+      selectedVehicleNumber: boardingText(
+        value['selectedVehicleNumber'] ?? value['confirmedVehicleNumber'],
+      ),
+      legacyConfirmedVehicleNumber: value['confirmedVehicleNumber'] as String?,
       userIdentity: boardingText(value['userIdentity']),
       sessionIdentity: boardingText(value['sessionIdentity']),
       context: BoardingSelectionContext.fromJson(value['context']),

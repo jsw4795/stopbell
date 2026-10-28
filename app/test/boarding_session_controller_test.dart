@@ -201,6 +201,88 @@ void main() {
       expect(c.session, isNull);
     },
   );
+  test('permission expiry refreshes only the identical selected vehicle before a new request', () async {
+    c.dispose();
+    var time = sessionNow;
+    c = BoardingSessionController(
+      auth: auth,
+      client: api,
+      storage: storage,
+      now: () => time,
+    );
+    await start();
+    var refreshes = 0;
+    await c.create(
+      sessionCandidate(),
+      '',
+      sessionContext,
+      preparePush: () async {
+        time = time.add(const Duration(seconds: 61));
+        return true;
+      },
+      refreshSelected: (selected) async {
+        refreshes++;
+        return sessionCandidate(
+          reference: 'refreshed-selected',
+          observedAt: time,
+        );
+      },
+    );
+    expect(refreshes, 1);
+    expect(api.creations.single['candidateRef'], 'refreshed-selected');
+    expect(api.creations.single, isNot(contains('confirmedVehicleNumber')));
+  });
+  test('permission expiry cannot substitute a different vehicle with the same display number', () async {
+    c.dispose();
+    var time = sessionNow;
+    c = BoardingSessionController(
+      auth: auth,
+      client: api,
+      storage: storage,
+      now: () => time,
+    );
+    await start();
+    await c.create(
+      sessionCandidate(),
+      '',
+      sessionContext,
+      preparePush: () async {
+        time = time.add(const Duration(seconds: 61));
+        return true;
+      },
+      refreshSelected: (selected) async => sessionCandidate(
+        selectionKey: 'different-provider-vehicle-id',
+        reference: 'different-ref',
+        observedAt: time,
+      ),
+    );
+    expect(api.creations, isEmpty);
+    expect(storage.records, isEmpty);
+  });
+  test('registered pending state is restored after screen disposal without a duplicate POST', () async {
+    await start();
+    api.onCreate = () async => sessionFixture(
+      status: 'TRACKING',
+      evaluation: 'VERIFICATION_PENDING',
+      reason: 'BASELINE_UNVERIFIED',
+      gap: null,
+    );
+    await create();
+    expect(c.session!.isOpen, isTrue);
+    final pending = c.session!;
+    c.dispose();
+    api.onCurrent = () async => pending;
+    c = BoardingSessionController(
+      auth: auth,
+      client: api,
+      storage: storage,
+      now: () => sessionNow,
+    );
+    await c.initialize();
+    expect(c.session!.status, BoardingSessionStatus.tracking);
+    expect(c.canCreate, isFalse);
+    expect(api.creations, hasLength(1));
+  });
   test('save failure prevents sending a new POST', () async {
     await start();
     storage.failSave = true;
@@ -209,13 +291,16 @@ void main() {
     expect(c.creationState, BoardingCreationState.notStarted);
     expect(c.message, contains('전송하지 않았어요'));
   });
-  test('full number mismatch including whitespace never creates', () async {
-    await start();
-    for (final number in ['1234', '서울70사1234 ', '서울 70사1234', '']) {
-      await c.create(sessionCandidate(), number, sessionContext);
-    }
-    expect(api.creations, isEmpty);
-  });
+  test(
+    'registration uses the selected candidate without a manual number field',
+    () async {
+      await start();
+      await c.create(sessionCandidate(), '', sessionContext);
+      expect(api.creations, hasLength(1));
+      expect(api.creations.single, isNot(contains('confirmedVehicleNumber')));
+      expect(c.session!.vehicleNumber, '서울70사1234');
+    },
+  );
   test('HELD, UNKNOWN, unsupported and stale references are blocked', () async {
     await start();
     for (final candidate in [
@@ -361,7 +446,7 @@ void main() {
     storage.records[auth.sessionIdentity!] = BoardingCreationIntent(
       clientRequestId: original.clientRequestId,
       candidateRef: original.candidateRef,
-      confirmedVehicleNumber: original.confirmedVehicleNumber,
+      selectedVehicleNumber: original.selectedVehicleNumber,
       userIdentity: 'another-user',
       sessionIdentity: auth.sessionIdentity!,
       context: sessionContext,
@@ -591,7 +676,7 @@ void main() {
     },
   );
   test(
-    'reconfirm rejects other vehicle, partial input and stale candidate',
+    'reconfirm rejects a different selected vehicle and stale candidate',
     () async {
       api.currentSession = sessionFixture(
         status: 'SUSPENDED',
@@ -604,7 +689,6 @@ void main() {
         '서울70사9999',
         sessionContext,
       );
-      await c.reconfirm(sessionCandidate(), '1234', sessionContext);
       await c.reconfirm(
         sessionCandidate(
           observedAt: sessionNow.subtract(const Duration(minutes: 2)),

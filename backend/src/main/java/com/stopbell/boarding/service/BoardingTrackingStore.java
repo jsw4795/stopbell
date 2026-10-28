@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.stopbell.boarding.domain.*;
 import com.stopbell.boarding.domain.BoardingTrackingDecision.Outcome;
+import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.boarding.entity.BoardingSessionStatus;
 import com.stopbell.boarding.entity.BoardingSession;
 import com.stopbell.boarding.entity.BoardingStateReason;
@@ -105,7 +106,9 @@ public class BoardingTrackingStore {
             }
         }
         if (result.accepted() && result.status() == BoardingSessionStatus.TRACKING
-                && result.decision().checkpoint() != null && !runtime.isReady(committed.snapshot(), now())) {
+                && result.decision().checkpoint() != null
+                && result.decision().checkpoint().getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                && !runtime.isReady(committed.snapshot(), now())) {
             // A newer cancellation/hold may commit between DB acknowledgement and publication.
             return new Applied(result.sessionId(), false, result.revision(), result.status(), null);
         }

@@ -365,7 +365,7 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 
 ### Phase 9 Boarding persistence contract (TASK-903)
 
-이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했고 TASK-906 1단계에서 Notification source를 V16으로 확장했다. 2026-10-28 요구사항 정정은 V17로 사전 알림 선택과 목적지 Event를 확장한다. 기존 V1~V16 Migration과 Alarm/BusAlarmTarget Schema는 수정하지 않는다.
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했고 TASK-906 1단계에서 Notification source를 V16으로 확장했다. 2026-10-28 요구사항 정정은 V17로 사전 알림 선택과 목적지 Event를 확장했고 TASK-908의 V18은 미검증 관측 접수를 추가했고 V19는 즉시 TRACKING 의미로 전환한다. 기존 V1~V18 Migration과 Alarm/BusAlarmTarget Schema는 수정하지 않는다.
 
 #### boarding_sessions
 
@@ -388,10 +388,10 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 | `revision` | BIGINT NOT NULL | 0 이상, checkpoint/상태 반영의 semantic revision |
 | `state_reason` | VARCHAR(64) NULL | allowlist의 보류/종료 사유, raw 오류 저장 금지 |
 | `checkpoint_stop_external_id` | VARCHAR(255) NULL | 실제 관측 ID. order-only면 NULL 유지 |
-| `checkpoint_stop_order`, `checkpoint_index` | INT NOT NULL | 양의 raw order / 0 이상 snapshot index |
-| `checkpoint_evidence` | VARCHAR(32) NOT NULL | ID_ORDER / VERIFIED_ORDER_ONLY 등 검증 근거 종류 |
+| `checkpoint_stop_order`, `checkpoint_index` | INT NOT NULL | 양의 raw order / 0 이상 snapshot index. 미검증 위치 없음만 0 / -1 |
+| `checkpoint_evidence` | VARCHAR(32) NOT NULL | ID_ORDER / VERIFIED_ORDER_ONLY / UNVERIFIED_REFERENCE. 마지막 값은 알림 근거 아님 |
 | `checkpoint_direction_context` | VARCHAR(255) NULL | 실제 확보·검증에 사용한 경우만 보존 |
-| `checkpoint_observed_at` | DATETIME(6) NOT NULL | 마지막 검증 성공 응답 수신 UTC |
+| `checkpoint_observed_at` | DATETIME(6) NOT NULL | 마지막 보존 관측 수신 UTC. UNVERIFIED_REFERENCE는 검증 시각으로 노출하지 않음 |
 | `checkpoint_provider_data_time` | DATETIME(6) NULL | 실제 Provider 제공시각, 없는 값 합성 없음 |
 | `created_at`, `updated_at`, `expires_at` | DATETIME(6) NOT NULL | UTC microsecond. expiresAt은 최초 수명으로 고정 |
 | `ended_at` | DATETIME(6) NULL | terminal에서만 필수 |
@@ -399,7 +399,7 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 
 `traversal_snapshot`은 version·ordered occurrences·targetIndex와 대상의 하차 가능/불가/미확인 분류를 갖는 고정 스키마다. occurrence에는 실제 external Stop ID/order와 반복·회차 판단에 필요한 **검증된** 문맥만 둔다. 전체 Route 구조가 필요하면 포함하되 GPS·raw response·일반 Map provider context·모든 표시 metadata는 복제하지 않는다. 분류 근거가 없으면 UNKNOWN을 보존한다. 이 분류는 승객 접근 부가 metadata이며 occurrence 추적을 차단하지 않는다. 목적지 도달·통과 근거는 별도의 차량 진행 검증이 소유한다.
 
-V15의 JSON version 1은 `version`, `provider`, `externalRouteId`, nullable `cityCode`, ordered `occurrences`(`occurrenceId`, `externalStopId`, `order`), `targetIndex`, `targetAlightAvailability`(`ALLOWED`/`PROHIBITED`/`UNKNOWN`), nullable `targetClassificationEvidence`를 저장한다. 표시 이름은 JSON에 넣지 않는다. 알려진 분류에는 검증 근거가 필요하고 UNKNOWN의 근거는 NULL이다. 현재 metadata는 하차 가능 분류를 제공하지 않아 UNKNOWN을 저장한다. Entity는 분류와 무관하게 정확한 목적지 이전 checkpoint를 최초 TRACKING으로 저장하며 실제 차량 진행 검증은 [API의 지원 경계](api.md#탑승-세션-api-task-903)를 따른다.
+V15의 JSON version 1은 `version`, `provider`, `externalRouteId`, nullable `cityCode`, ordered `occurrences`(`occurrenceId`, `externalStopId`, `order`), `targetIndex`, `targetAlightAvailability`(`ALLOWED`/`PROHIBITED`/`UNKNOWN`), nullable `targetClassificationEvidence`를 저장한다. 표시 이름은 JSON에 넣지 않는다. 알려진 분류에는 검증 근거가 필요하고 UNKNOWN의 근거는 NULL이다. 현재 metadata는 하차 가능 분류를 제공하지 않아 UNKNOWN을 저장한다. Entity는 분류·진행 검증 유무와 무관하게 TRACKING으로 생성하며 실제 차량 진행 검증은 [API의 지원 경계](api.md#탑승-세션-api-task-903)를 따른다.
 
 fingerprint는 provider/Route·typed request context·순서화한 occurrence ID/order·target 의미·판단에 사용하는 분류/검증 문맥의 canonical 직렬화로 계산한다. 표시 이름·조회 시각·단순 sync 완료 시각은 구조 hash에 넣지 않는다. SHA-256 hash만 저장하는 것으로 실제 snapshot을 대체하지 않는다. metadata Entity FK 없이 선택 당시 snapshot을 보존하고 sync로 덮어쓰지 않는다.
 
@@ -407,12 +407,14 @@ fingerprint는 provider/Route·typed request context·순서화한 occurrence ID
 
 - `UNIQUE(user_id, client_request_id)`: 동일 생성 의도 중복 방지. 다른 request fingerprint는 conflict이며 terminal 원래 세션도 재생성하지 않음
 - `UNIQUE(open_user_id)`: nullable generated key로 User당 미종료 하나. 별도 active-session table·users의 current-session pointer 없음
-- CHECK: provider·status·reason/evidence allowlist, non-empty required reference/번호, revision/index 0 이상·order 양수, TAGO cityCode/서울 NULL, expiresAt>createdAt, terminal에서 endedAt 필수/미종료에서 NULL. nullable CHECK는 UNKNOWN 통과를 피하도록 명시
+- CHECK: provider·status·reason/evidence allowlist, non-empty required reference/번호, revision 0 이상·검증 index 0 이상·order 양수 (V18의 위치 없음 예외 포함), TAGO cityCode/서울 NULL, expiresAt>createdAt, terminal에서 endedAt 필수/미종료에서 NULL. nullable CHECK는 UNKNOWN 통과를 피하도록 명시
 - JSON 구조/version·target/index 범위·checkpoint 대응·분류 근거·시간 일관성은 Domain에서 검증. 조회가 필요 없는 JSON 내부에 speculative index를 추가하지 않음
 - `INDEX(status, id)`: 미종료 polling/복구의 bounded 조회. current User 조회는 open_user_id UNIQUE, 요청 복구는 request UNIQUE 사용
 - Session/ID/번호/hash 비교는 대소문자·공백을 임의로 합치지 않는 opaque semantics를 유지하고 UUID만 canonical 형식 검증. V15는 opaque reference/번호에 `utf8mb4_0900_bin`(NO PAD), UUID/hash/enum에 `ascii_bin`을 사용하고 MySQL 8.4 통합 테스트로 CHECK와 UNIQUE를 검증
 
 기존 row의 mutation은 Session PESSIMISTIC_WRITE와 semantic revision을 사용한다. 생성만 User lock을 먼저 얻어 current 미종료 조회와 직렬화하며 UNIQUE가 최종 경계다. @Version·별도 CAS framework·tracking/event-history table·prepareNotified boolean은 없다. 2단계 polling도 V15의 마지막 검증 checkpoint 한 개만 overwrite하며 새 table/column은 추가하지 않는다. 새 checkpoint 또는 상태 의미 변경 때 revision을 증가시키고 반복 Provider 데이터와 같은 보류 사유의 반복은 갱신하지 않는다. 소실/역행 등 알려진 연속성 상실 사유는 영속한다. Provider I/O 없이 짧은 row-lock transaction에서 status/revision/identity/snapshot을 재확인한다. Session 수명과 준비 Event 기한은 [Architecture](architecture.md#boarding-초기-설정과-만료), 상태 의미는 [Domain](domain-model.md#boardingsession)을 따른다.
+
+V18 `boarding_verification_pending`은 당시 VERIFYING과 UNVERIFIED_REFERENCE를 추가한 이력으로 변경하지 않는다. V19 `boarding_immediate_tracking`은 기존 VERIFYING row를 TRACKING으로 전환하고 revision만 1 증가시킨다. 기존 METADATA_CHANGED는 구조 보류를 유지하도록 SUSPENDED로 전환한다. 그 외 identity·checkpoint·원래 시각·수명·사전 설정 및 모든 Event/Delivery는 보존한다. 현행 status/end CHECK와 generated UNIQUE는 TRACKING/SUSPENDED만 미종료로 다룬다. TRACKING은 BASELINE_UNVERIFIED+UNVERIFIED_REFERENCE 또는 TEMPORARY_PROVIDER_FAILURE/STALE_PROGRESS를 허용한다. 정상 TRACKING의 reason은 NULL이고 검증 evidence가 필요하며 COMPLETED는 미검증 evidence를 허용하지 않는다. 위치 없음은 Stop ID NULL/order 0/index -1 조합으로만 허용한다. 새 table·Dependency·기존 Migration 수정은 없다. 기존 개발 DB 적용은 이번 작업에 포함하지 않는다.
 
 #### Notification source 확장 (TASK-906 1단계)
 

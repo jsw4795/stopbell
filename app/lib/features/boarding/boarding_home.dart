@@ -122,6 +122,21 @@ class _BoardingHomeState extends State<BoardingHome> {
         draft.candidate,
         number,
         draft.selection,
+        refreshSelected: (selected) async {
+          if (selected.selectionKey == null) return null;
+          final result = await widget.findCandidates(
+            routeId: draft.selection.routeId,
+            targetStopOccurrenceId: draft.selection.targetId,
+            boardingStopOccurrenceId: draft.selection.boardingId,
+            expectedGeneration: _generation,
+            isRequestCurrent: () => _current && identical(_draft, draft),
+          );
+          if (!_current) return null;
+          final matches = result.candidates
+              .where((item) => item.selectionKey == selected.selectionKey)
+              .toList();
+          return matches.length == 1 ? matches.single : null;
+        },
         prepareNotificationEnabled: _prepareNotificationEnabled,
         preparePush: () =>
             widget.beforeCreate?.call(context) ??

@@ -128,7 +128,7 @@ class BoardingTrackingIntegrationTest {
         var checkpoint = new BoardingCheckpoint("s0", 10, 0, BoardingCheckpoint.Evidence.ID_ORDER, null, UTC_NOW, UTC_NOW.minusSeconds(1));
         var request = new com.stopbell.boarding.dto.CreateBoardingSessionRequest(UUID.randomUUID().toString(), "ref", NUMBER);
         var saved = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(), request.fingerprint(),
-                "vehicle-id", NUMBER, "7000", "목적지", snapshot, checkpoint, UTC_NOW, UTC_NOW.plusHours(4)));
+                "vehicle-id", NUMBER, "7000", "목적지", snapshot, checkpoint, UTC_NOW, UTC_NOW.plus(Duration.ofHours(4))));
         runtime.admitCreated(saved.getId());
         return saved;
     }
@@ -387,7 +387,8 @@ class BoardingTrackingIntegrationTest {
         var held = sessions.findById(session.getId()).orElseThrow();
         assertThat(held.getStateReason()).isEqualTo(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
         assertThat(held.getCheckpoint().getIndex()).isZero();
-        assertThat(api.find(held.getUser().getId(), held.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.HELD);
+        assertThat(held.getStatus()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(api.find(held.getUser().getId(), held.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.RECOVERY_PENDING);
         doAnswer(invocation -> roster()).when(seoul).fetchVehicleLocations(any());
         time.set(NOW.plusSeconds(40));
         var resumed = polling.poll(cycle()).getFirst();
@@ -1437,6 +1438,169 @@ class BoardingTrackingIntegrationTest {
                 .ignoringFields("notificationEvent", "device").isEqualTo(alarmDelivery);
         assertThat(events.findById(alarmDelivery.getNotificationEvent().getId()).orElseThrow().getSourceType())
                 .isEqualTo(NotificationSourceType.ALARM);
+    }
+
+    @Test
+    @DisplayName("이동 차량은 즉시 추적하고 후보 만료 후에도 관측하며 재시작 뒤 기준점 검증과 목적지 알림을 수행한다")
+    void pending_registration_survives_candidate_expiry_and_restart() {
+        pendingSession();
+        device(session.getUser());
+        for (int seconds : List.of(20, 80, 140, 200)) {
+            time.set(NOW.plusSeconds(seconds));
+            when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> movingDetail(0));
+            var applied = polling.poll(cycle()).getFirst();
+            assertThat(applied.accepted()).isTrue();
+            assertThat(applied.status()).isEqualTo(BoardingSessionStatus.TRACKING);
+            assertThat(runtime.isReady(BoardingTrackingSnapshot.from(sessions.findById(session.getId()).orElseThrow()), utc())).isFalse();
+            assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus())
+                    .isEqualTo(EvaluationStatus.VERIFICATION_PENDING);
+            assertThat(events.count()).isZero();
+            assertThat(deliveries.count()).isZero();
+            runtime.forget(session.getId());
+        }
+        time.set(NOW.plusSeconds(220));
+        when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> detail(1));
+        polling.poll(cycle());
+        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.READY);
+        assertThat(events.findAll()).extracting(NotificationEvent::getBoardingEventType)
+                .containsExactly(BoardingNotificationEventType.PREPARE_ALIGHT);
+        time.set(NOW.plusSeconds(240));
+        when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> detail(2));
+        polling.poll(cycle());
+        polling.poll(cycle());
+        assertThat(events.findAll()).extracting(NotificationEvent::getBoardingEventType)
+                .containsExactly(BoardingNotificationEventType.PREPARE_ALIGHT);
+        time.set(NOW.plusSeconds(260));
+        when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> detail(4));
+        polling.poll(cycle());
+        polling.poll(cycle());
+        assertThat(api.find(session.getUser().getId(), session.getId()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
+        assertThat(events.findAll()).extracting(NotificationEvent::getBoardingEventType)
+                .containsExactlyInAnyOrder(BoardingNotificationEventType.PREPARE_ALIGHT, BoardingNotificationEventType.DESTINATION_REACHED);
+        assertThat(deliveries.count()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("검증 대기 중 일시 장애와 지연은 알림 없이 유지하고 연속성 공백 초과는 안전하게 보류한다")
+    void pending_provider_failure_is_closed() {
+        pendingSession();
+        when(seoul.fetchVehicleLocations(any())).thenThrow(TransitProviderClientException.transport(
+                TransitProvider.SEOUL_BUS, "roster", new IllegalStateException("fixture")));
+        polling.poll(cycle());
+        var response = api.find(session.getUser().getId(), session.getId());
+        assertThat(response.status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(response.reasonCode()).isEqualTo(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
+        assertThat(response.checkpointObservedAt()).isNull();
+        time.set(NOW.plusSeconds(121));
+        polling.poll(cycle());
+        assertThat(api.find(session.getUser().getId(), session.getId()).reasonCode())
+                .isEqualTo(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
+        assertThat(events.count()).isZero();
+    }
+
+    @Test
+    @DisplayName("검증 대기에서 목적지까지의 진행을 먼저 관측해도 이전 미검증 관측으로 목적지 알림을 합성하지 않는다")
+    void pending_target_is_not_a_destination_event() {
+        pendingSession();
+        when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> detail(3));
+        polling.poll(cycle());
+        assertThat(api.find(session.getUser().getId(), session.getId()).reasonCode()).isEqualTo(BoardingStateReason.TARGET_NOT_AHEAD);
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+    }
+
+    @Test
+    @DisplayName("검증 대기 세션은 현재 조회와 취소 및 만료를 지원하며 새 세션 중복을 차단한다")
+    void pending_lifecycle_is_persisted() {
+        pendingSession();
+        assertThat(api.findCurrent(session.getUser().getId())).hasSize(1);
+        assertThat(store.findOpen()).hasSize(1);
+        var duplicate = new BoardingSession(session.getUser(), UUID.randomUUID().toString(), "a".repeat(64),
+                "other", "other-number", "7000", "목적지", session.getTraversal(), session.getCheckpoint(),
+                UTC_NOW, UTC_NOW.plus(Duration.ofHours(4)));
+        assertThatThrownBy(() -> sessions.saveAndFlush(duplicate)).isInstanceOf(DataIntegrityViolationException.class);
+        var cancelled = api.cancel(session.getUser().getId(), session.getId(), 0);
+        assertThat(cancelled.status()).isEqualTo(BoardingSessionStatus.CANCELLED);
+        assertThat(api.findCurrent(session.getUser().getId())).isEmpty();
+        pendingSession();
+        time.set(NOW.plus(Duration.ofHours(4)));
+        polling.poll(cycle());
+        assertThat(api.find(session.getUser().getId(), session.getId()).status()).isEqualTo(BoardingSessionStatus.EXPIRED);
+        assertThat(events.count()).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"CONFLICT", "MISSING", "REGRESSION", "RUN_ENDED", "STALE"})
+    @DisplayName("검증 대기 차량도 식별 충돌·소실·역행·운행 종료·오래된 관측에서 알림을 만들지 않는다")
+    void pending_safety_guards(String issue) {
+        pendingSession();
+        if (issue.equals("CONFLICT")) {
+            when(detail.fetchVehicleDetail(anyString())).thenReturn(new SeoulBusVehicleDetailResponse(
+                    new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
+                    new SeoulBusVehicleDetailItem("different", NUMBER, "s0", 10, 0, dataTime(), null, null)))));
+        } else if (issue.equals("MISSING")) {
+            when(seoul.fetchVehicleLocations(any())).thenReturn(new SeoulBusVehicleLocationResponse(
+                    new SeoulBusVehicleLocationResponse.Header("4", null), null));
+        } else if (issue.equals("RUN_ENDED")) {
+            when(seoul.fetchVehicleLocations(any())).thenReturn(new SeoulBusVehicleLocationResponse(
+                    new SeoulBusVehicleLocationResponse.Header("0", null), new SeoulBusVehicleLocationResponse.Body(List.of(
+                    new SeoulBusVehicleLocationItem("vehicle-id", NUMBER, 1, "section", 0, dataTime(), null, null, null, "0", null)))));
+        } else if (issue.equals("REGRESSION")) {
+            time.set(NOW.plusSeconds(40));
+            when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> movingDetail(1));
+            polling.poll(cycle());
+            time.set(NOW.plusSeconds(60));
+            when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> movingDetail(0));
+        } else {
+            time.set(NOW.plusSeconds(90));
+            when(detail.fetchVehicleDetail(anyString())).thenReturn(detail(0));
+            time.set(NOW.plusSeconds(160));
+        }
+        polling.poll(cycle());
+        var held = api.find(session.getUser().getId(), session.getId());
+        assertThat(held.evaluationStatus()).isNotEqualTo(EvaluationStatus.READY);
+        assertThat(held.reasonCode()).isEqualTo(switch (issue) {
+            case "CONFLICT" -> BoardingStateReason.IDENTITY_CONFLICT;
+            case "MISSING" -> BoardingStateReason.VEHICLE_MISSING;
+            case "REGRESSION" -> BoardingStateReason.PROGRESS_REGRESSION;
+            case "RUN_ENDED" -> BoardingStateReason.TRAVERSAL_AMBIGUOUS;
+            default -> BoardingStateReason.CONTINUITY_GAP_EXCEEDED;
+        });
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+    }
+
+    @Test
+    @DisplayName("위치 없는 대기 세션은 신선한 미검증 관측을 보존하고 나중에 exact 정차 근거를 확보하면 알림 평가를 재개한다")
+    void unlocated_pending_progress_is_not_a_fake_occurrence() {
+        sessions.deleteAll();
+        var checkpoint = new BoardingCheckpoint(null, 0, -1, BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE,
+                null, UTC_NOW, UTC_NOW.minusSeconds(1));
+        session = sessions.saveAndFlush(new BoardingSession(session.getUser(), UUID.randomUUID().toString(), "a".repeat(64),
+                "vehicle-id", NUMBER, "7000", "목적지", session.getTraversal(), checkpoint, UTC_NOW, UTC_NOW.plusHours(4)));
+        when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
+                new SeoulBusVehicleDetailItem("vehicle-id", NUMBER, null, null, 0, dataTime(), null, null)))));
+        for (int seconds : List.of(20, 80, 140, 200)) {
+            time.set(NOW.plusSeconds(seconds));
+            polling.poll(cycle());
+            assertThat(sessions.findById(session.getId()).orElseThrow().getCheckpoint().getIndex()).isEqualTo(-1);
+            assertThat(api.find(session.getUser().getId(), session.getId()).status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        }
+        time.set(NOW.plusSeconds(220));
+        when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> detail(1));
+        polling.poll(cycle());
+        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.READY);
+        assertThat(events.findAll()).extracting(NotificationEvent::getBoardingEventType)
+                .containsExactly(BoardingNotificationEventType.PREPARE_ALIGHT);
+    }
+
+    private void pendingSession() {
+        sessions.deleteAll();
+        var checkpoint = new BoardingCheckpoint("s0", 10, 0, BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE,
+                null, UTC_NOW, UTC_NOW.minusSeconds(1));
+        session = sessions.saveAndFlush(new BoardingSession(session.getUser(), UUID.randomUUID().toString(), "a".repeat(64),
+                "vehicle-id", NUMBER, "7000", "목적지", session.getTraversal(), checkpoint, UTC_NOW, UTC_NOW.plus(Duration.ofHours(4))));
     }
 
     private static void await(CountDownLatch latch) {

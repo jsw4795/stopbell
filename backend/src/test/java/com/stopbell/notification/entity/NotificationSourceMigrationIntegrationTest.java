@@ -23,7 +23,7 @@ class NotificationSourceMigrationIntegrationTest {
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
 
     @Test
-    @DisplayName("V16과 V17은 기존 Event·Delivery·Session을 보존하고 사전 알림 기본값과 UNIQUE를 유지한다")
+    @DisplayName("V16부터 V19는 기존 Event·Delivery·Session을 보존하고 사전 알림 기본값과 UNIQUE를 유지한다")
     void preserve_existing_events_deliveries_and_sessions() {
         var dataSource = new DriverManagerDataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword());
         Flyway.configure().dataSource(dataSource).target("14").load().migrate();
@@ -102,12 +102,18 @@ class NotificationSourceMigrationIntegrationTest {
         var boardingEvent = jdbc.queryForMap("select * from notification_events where id=?", boardingEventId);
         var boardingDelivery = jdbc.queryForMap("select * from notification_deliveries where notification_event_id=?", boardingEventId);
 
-        var latest = Flyway.configure().dataSource(dataSource).load();
+        var latest = Flyway.configure().dataSource(dataSource).target("17").load();
         assertThat(latest.migrate().migrationsExecuted).isEqualTo(1);
         latest.validate();
         assertThat(latest.migrate().migrationsExecuted).isZero();
         assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class))
                 .isEqualTo("17");
+        var beforeV18 = jdbc.queryForList("select * from boarding_sessions");
+        var v18 = Flyway.configure().dataSource(dataSource).target("18").load();
+        assertThat(v18.migrate().migrationsExecuted).isEqualTo(1);
+        v18.validate();
+        assertThat(v18.migrate().migrationsExecuted).isZero();
+        assertThat(jdbc.queryForList("select * from boarding_sessions")).isEqualTo(beforeV18);
         var migratedEvents = jdbc.queryForList("select * from notification_events where source_type='ALARM' order by id");
         assertThat(migratedEvents).hasSameSizeAs(oldEvents);
         for (int i = 0; i < oldEvents.size(); i++) {
@@ -141,5 +147,57 @@ class NotificationSourceMigrationIntegrationTest {
                 select notification_event_id, device_id, recipient_ownership_generation,
                     'PENDING', created_at, expires_at, created_at, updated_at from notification_deliveries limit 1
                 """)).isInstanceOf(DataAccessException.class).hasMessageContaining("uk_notification_deliveries_event_device");
+
+        // Include every V18 pending reason; metadata holds must remain held after conversion.
+        for (String reason : List.of("BASELINE_UNVERIFIED", "TEMPORARY_PROVIDER_FAILURE", "STALE_PROGRESS", "METADATA_CHANGED")) {
+            jdbc.update("insert into users (auth_provider, provider_user_id, created_at, updated_at) values ('GOOGLE', ?, ?, ?)",
+                    "pending-" + reason, now, now);
+            Long pendingOwner = jdbc.queryForObject("select id from users where provider_user_id=?", Long.class, "pending-" + reason);
+            jdbc.update("""
+                    insert into boarding_sessions (user_id, client_request_id, request_fingerprint, provider,
+                        external_route_id, vehicle_tracking_id, vehicle_number, route_number, target_name,
+                        traversal_snapshot, traversal_fingerprint, status, state_reason, revision,
+                        checkpoint_stop_external_id, checkpoint_stop_order, checkpoint_index, checkpoint_evidence,
+                        checkpoint_observed_at, created_at, updated_at, expires_at, prepare_notification_enabled)
+                    select ?, ?, request_fingerprint, provider, external_route_id, vehicle_tracking_id,
+                        vehicle_number, route_number, target_name, traversal_snapshot, traversal_fingerprint,
+                        'VERIFYING', ?, 7, null, 0, -1, 'UNVERIFIED_REFERENCE', checkpoint_observed_at,
+                        created_at, updated_at, expires_at, false from boarding_sessions where id=?
+                    """, pendingOwner, UUID.randomUUID().toString(), reason, sessionId);
+        }
+        var pendingRows = jdbc.queryForList("select * from boarding_sessions where status='VERIFYING' order by id");
+        var allEvents = jdbc.queryForList("select * from notification_events order by id");
+        var allDeliveries = jdbc.queryForList("select * from notification_deliveries order by id");
+        var v19 = Flyway.configure().dataSource(dataSource).load();
+        assertThat(v19.migrate().migrationsExecuted).isEqualTo(1);
+        v19.validate();
+        assertThat(v19.migrate().migrationsExecuted).isZero();
+        for (var before : pendingRows) {
+            var expected = new java.util.HashMap<>(before);
+            expected.put("status", before.get("state_reason").equals("METADATA_CHANGED") ? "SUSPENDED" : "TRACKING");
+            expected.put("revision", 8L);
+            var after = jdbc.queryForMap("select * from boarding_sessions where id=?", before.get("id"));
+            assertThat(after).isEqualTo(expected);
+            assertThatThrownBy(() -> jdbc.update("update boarding_sessions set status='VERIFYING' where id=?", before.get("id")))
+                    .isInstanceOf(DataAccessException.class);
+            assertThatThrownBy(() -> jdbc.update("update boarding_sessions set status='TRACKING', state_reason=null where id=?", before.get("id")))
+                    .isInstanceOf(DataAccessException.class);
+            assertThatThrownBy(() -> jdbc.update("""
+                    insert into boarding_sessions (user_id, client_request_id, request_fingerprint, provider,
+                        external_route_id, vehicle_tracking_id, vehicle_number, route_number, target_name,
+                        traversal_snapshot, traversal_fingerprint, status, state_reason, revision,
+                        checkpoint_stop_external_id, checkpoint_stop_order, checkpoint_index, checkpoint_evidence,
+                        checkpoint_observed_at, created_at, updated_at, expires_at)
+                    select user_id, ?, request_fingerprint, provider, external_route_id, vehicle_tracking_id,
+                        vehicle_number, route_number, target_name, traversal_snapshot, traversal_fingerprint,
+                        status, state_reason, revision, checkpoint_stop_external_id, checkpoint_stop_order,
+                        checkpoint_index, checkpoint_evidence, checkpoint_observed_at, created_at, updated_at,
+                        expires_at from boarding_sessions where id=?
+                    """, UUID.randomUUID().toString(), before.get("id")))
+                    .isInstanceOf(DataAccessException.class).hasMessageContaining("uk_boarding_sessions_open_user");
+        }
+        assertThat(jdbc.queryForMap("select * from boarding_sessions where id=?", sessionId)).isEqualTo(beforeV18.getFirst());
+        assertThat(jdbc.queryForList("select * from notification_events order by id")).isEqualTo(allEvents);
+        assertThat(jdbc.queryForList("select * from notification_deliveries order by id")).isEqualTo(allDeliveries);
     }
 }

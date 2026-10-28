@@ -118,7 +118,7 @@ void main() {
   }
 
   testWidgets(
-    'production entry reuses route search and stops, exact IDs, JWT refresh and comparison only',
+    'production entry reuses route search and stops, exact IDs, JWT refresh and candidate selection only',
     (tester) async {
       await pump(tester);
       var calls = 0;
@@ -138,10 +138,7 @@ void main() {
       await start(tester);
       await tester.pumpAndSettle();
       expect(find.text('서울70사1234'), findsOneWidget);
-      expect(
-        find.textContaining('서버가 차량·경로·진행을 검증해야 추적을 시작할 수 있어요'),
-        findsOneWidget,
-      );
+      expect(find.textContaining('목록에서 차량을 선택해 미리 등록하세요'), findsOneWidget);
       expect(
         requests.where((r) => r.url.path == '/auth/refresh'),
         hasLength(1),

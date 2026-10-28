@@ -130,20 +130,19 @@ class BoardingSessionController extends ChangeNotifier {
   }
 
   bool validCandidate(BoardingCandidate candidate, String number) =>
-      candidate.canRequestConfirmation &&
-      number == candidate.vehicleNumber &&
-      candidateFresh(candidate);
+      candidate.canRequestConfirmation && candidateFresh(candidate);
 
   Future<void> create(
     BoardingCandidate candidate,
     String number,
     BoardingSelectionContext context, {
     Future<bool> Function()? preparePush,
+    Future<BoardingCandidate?> Function(BoardingCandidate)? refreshSelected,
     bool prepareNotificationEnabled = true,
   }) async {
     if (!canCreate) return;
     if (!validCandidate(candidate, number)) {
-      message = '전체 차량번호가 일치하지 않거나 후보가 오래됐어요. 후보를 다시 조회해 주세요.';
+      message = '후보가 오래됐어요. 차량 정보를 다시 조회해 주세요.';
       _emit();
       return;
     }
@@ -165,15 +164,31 @@ class BoardingSessionController extends ChangeNotifier {
       if (!current || !allowed) return;
       // Permission/registration may outlive candidate freshness. No UUID exists yet.
       if (!validCandidate(candidate, number)) {
-        message = '알림 준비 중 후보 정보가 오래됐어요. 후보를 다시 조회해 주세요.';
+        busy = true;
         _emit();
-        return;
+        BoardingCandidate? refreshed;
+        try {
+          refreshed = await refreshSelected?.call(candidate);
+        } catch (_) {
+          // A failed refresh cannot select a replacement or create a new request.
+        }
+        if (!current) return;
+        busy = false;
+        if (candidate.selectionKey == null ||
+            refreshed?.selectionKey != candidate.selectionKey ||
+            refreshed == null ||
+            !validCandidate(refreshed, number)) {
+          message = '후보 정보가 오래됐어요. 선택한 차량을 다시 조회해 주세요.';
+          _emit();
+          return;
+        }
+        candidate = refreshed;
       }
     }
     final intent = BoardingCreationIntent(
       clientRequestId: newBoardingRequestId(),
       candidateRef: candidate.candidateRef!,
-      confirmedVehicleNumber: number,
+      selectedVehicleNumber: candidate.vehicleNumber!,
       userIdentity: userIdentity!,
       sessionIdentity: sessionIdentity!,
       context: context,
@@ -229,7 +244,7 @@ class BoardingSessionController extends ChangeNotifier {
         current: () => current,
       );
       if (!current) return;
-      if (result.vehicleNumber != intent.confirmedVehicleNumber ||
+      if (result.vehicleNumber != intent.selectedVehicleNumber ||
           result.prepareNotificationEnabled !=
               intent.prepareNotificationEnabled) {
         throw const BoardingSessionException(SessionFailure.parsing);
@@ -308,7 +323,7 @@ class BoardingSessionController extends ChangeNotifier {
       creationState = BoardingCreationState.outcomeUnknown;
       message = '아직 생성 성공을 확인할 수 없어요. 서버 처리 중일 수 있어요. 새 요청을 만들지 않고 원래 결과를 다시 조회하거나 동일 요청만 재시도할 수 있어요.';
     } else {
-      if (result.vehicleNumber != pending!.confirmedVehicleNumber ||
+      if (result.vehicleNumber != pending!.selectedVehicleNumber ||
           result.prepareNotificationEnabled !=
               pending!.prepareNotificationEnabled) {
         throw const BoardingSessionException(SessionFailure.parsing);
@@ -409,12 +424,12 @@ class BoardingSessionController extends ChangeNotifier {
       return;
     }
     if (!validCandidate(candidate, number) ||
-        number != session!.vehicleNumber) {
-      message = '기존 세션과 동일한 차량의 전체 번호를 다시 대조하고 새 후보를 조회해 주세요.';
+        candidate.vehicleNumber != session!.vehicleNumber) {
+      message = '기존 세션과 동일한 차량을 목록에서 다시 선택해 주세요.';
       _emit();
       return;
     }
-    await _mutate(candidate, number);
+    await _mutate(candidate, candidate.vehicleNumber);
     if (current && session?.status == BoardingSessionStatus.tracking) {
       selectionContext = context;
     }
@@ -503,7 +518,7 @@ class BoardingSessionController extends ChangeNotifier {
 String boardingSessionError(BoardingSessionException error) =>
     switch (error.code) {
       'BOARDING_CANDIDATE_CHANGED' =>
-        '차량 후보가 변경되었거나 오래됐어요. 새 후보를 조회해 다시 대조해 주세요.',
+        '차량 후보가 변경되었거나 오래됐어요. 새 후보를 조회해 다시 선택해 주세요.',
       'BOARDING_SESSION_CONFLICT' => '이미 진행 중인 세션이 있어요. 현재 세션을 확인해 주세요.',
       'BOARDING_REQUEST_CONFLICT' =>
         '원래 생성 요청과 내용이 일치하지 않아요. 요청을 바꾸지 않고 원래 결과를 확인해 주세요.',

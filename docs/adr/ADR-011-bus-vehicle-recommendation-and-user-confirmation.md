@@ -4,6 +4,10 @@
 - 날짜: 2026-10-19
 - 대상: TASK-902 설계. Backend/Flutter 구현과 DB Schema 변경은 포함하지 않음
 
+## TASK-908 변경 (2026-10-29)
+
+이 문서의 번호 입력·실제 번호 대조·번호 일치 우선 정렬과 관련 예시는 TASK-902 당시 결정 기록이며 TASK-908에서 대체했다. 현행 UX는 목록에서 명시적으로 차량을 선택하고 번호 입력 없이 등록한다. 승차 지점 이전/같음/이후 관측 관계를 구분하고 이전 기준 후보, 이후 기준 후보, 위치 미확인 순으로 묶어 각 그룹의 배열 간격 절댓값으로 보조 정렬한다. 자동 선택·탑승 확률 추정은 없다. GPS 비의존·차량 내부 식별·불확실성·다른 차량 자동 전환 금지와 Provider 의미 검증 제한은 유지한다. 현행 즉시 TRACKING 등록·관측 readiness는 [ADR-012](ADR-012-boarding-session-and-alight-notification-contract.md), HTTP 필드는 [API](../api.md#탑승-세션-api-task-903)가 소유한다.
+
 ## 배경
 
 [TASK-901 조사](../research/TASK-901-bus-vehicle-identification.md)는 TAGO `vehicleno`, 서울 `vehId/plainNo`와 제한된 정상 진행 관측을 확인했다. GPS 없는 API는 사용자 본인이 어느 버스 안에 있는지 관측하지 않으며, 차량 ID의 장기 안정성·회차·소실 후 동일성과 실제 차체/차내 번호 대응은 검증되지 않았다. 조사 완료를 제품 정확성 검증 완료로 취급하지 않는다.

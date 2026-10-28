@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
+import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.boarding.entity.BoardingSession;
 import com.stopbell.boarding.entity.BoardingSessionStatus;
 import com.stopbell.boarding.entity.BoardingStateReason;
@@ -14,7 +15,7 @@ public record BoardingSessionResponse(
         Instant providerDataTime, EvaluationStatus evaluationStatus, BoardingStateReason reasonCode,
         Instant expiresAt, Instant endedAt, boolean prepareNotificationEnabled
 ) {
-    public enum EvaluationStatus { READY, RECOVERY_PENDING, HELD, ENDED }
+    public enum EvaluationStatus { VERIFICATION_PENDING, READY, RECOVERY_PENDING, HELD, ENDED }
 
     public static BoardingSessionResponse from(BoardingSession session) {
         return from(session, null);
@@ -24,12 +25,15 @@ public record BoardingSessionResponse(
         var traversal = session.getTraversal();
         EvaluationStatus evaluation = !session.getStatus().isOpen() ? EvaluationStatus.ENDED
                 : session.getStatus() == BoardingSessionStatus.SUSPENDED ? EvaluationStatus.HELD
+                : session.getCheckpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                    ? EvaluationStatus.VERIFICATION_PENDING
                 : verifiedGap != null ? EvaluationStatus.READY : EvaluationStatus.RECOVERY_PENDING;
         return new BoardingSessionResponse(session.getId(), session.getStatus(), session.getRevision(),
                 session.getRouteNumber(), session.getVehicleNumber(), session.getTargetName(),
                 traversal.occurrences().get(traversal.targetIndex()).order(),
                 evaluation == EvaluationStatus.READY ? verifiedGap : null,
-                instant(session.getCheckpoint().getObservedAt()), instant(session.getCheckpoint().getProviderDataTime()),
+                session.getCheckpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                    ? null : instant(session.getCheckpoint().getObservedAt()), instant(session.getCheckpoint().getProviderDataTime()),
                 evaluation, session.getStateReason(), instant(session.getExpiresAt()), instant(session.getEndedAt()),
                 session.isPrepareNotificationEnabled());
     }

@@ -136,7 +136,8 @@ public class NotificationEvent {
             LocalDateTime eventDetectedAt, LocalDateTime createdAt, LocalDateTime expiresAt
     ) {
         if (boardingSessionId == null || boardingSessionId <= 0 || user == null
-                || eventType == null || checkpoint == null) {
+                || eventType == null || checkpoint == null
+                || checkpoint.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
             throw new IllegalArgumentException("Boarding Event identity, owner and evidence must be valid");
         }
         NotificationEvent event = new NotificationEvent();

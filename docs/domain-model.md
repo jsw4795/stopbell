@@ -446,7 +446,7 @@ TAGO Arrival의 `arrprevstationcnt`와 `arrtime`은 Route/Stop 수준의 auxilia
 
 ## 탑승 차량 추천과 확인
 
-TASK-902에서 정의한 후보·화면 선택·사용자 확정은 서로 다른 의미다. 사용자 확정은 실제 전체 차량번호 대조와 유효한 후보의 명시적 선택을 요구하며 후보 개수·간격·목록 순서로 대체하지 않는다. 승차 occurrence와의 간격은 차량 identity 또는 탑승 신뢰도를 구성하지 않는다. 사용자 확정은 물리적 탑승 사실을 시스템이 관측했다는 의미도 아니다.
+후보·화면 선택·등록·진행 검증은 서로 다른 의미다. 등록은 유효 후보의 명시적 목록 선택을 요구하며 차량번호 입력·수동 대조는 요구하지 않는다. 후보 개수·간격·목록 순서로 자동 선택하지 않는다. 승차 occurrence와의 간격은 차량 identity 또는 탑승 신뢰도를 구성하지 않는다. 사용자 확정은 물리적 탑승 사실을 시스템이 관측했다는 의미도 아니다.
 
 후보는 Provider/Route 문맥 안의 transient 차량 reference와 확인용 번호의 대응을 보존한다. TAGO는 vehicleno, 서울은 vehId와 plainNo의 구분을 유지하고 번호를 대체 ID로 합성하지 않는다. 위치 ID가 없다는 사실만으로 식별 가능한 후보를 버리지 않으며, 검증된 order 참고도 누락된 Stop ID나 정확한 정차 위치를 합성하지 않는다.
 
@@ -458,7 +458,7 @@ TASK-902에서 정의한 후보·화면 선택·사용자 확정은 서로 다�
 
 ## Purpose and Identity
 
-사용자가 전체 번호를 대조한 특정 차량만 목적 occurrence까지 추적하는 독립 aggregate다. 기존 Alarm/BusAlarmTarget/ACTIVE/FOLLOW_UP을 세션으로 재사용하지 않는다. TASK-905 1단계에서 Entity·V15·최초 checkpoint와 생성·조회·취소 API 경계를 구현했다. 2단계는 특정 차량 polling·checkpoint 갱신·하차 준비 후보 및 종료 판정을 구현했다. 3단계는 새 관측과 저장 checkpoint를 비교하는 재시작 자동 복구 및 동일 차량 재확인을 구현했다. Provider별 생성·재확인의 조건부 지원 범위는 [API](api.md#탑승-세션-api-task-903)를 따른다. 결정 근거는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
+사용자가 목록에서 선택한 특정 차량을 목적 occurrence까지 관측하는 독립 aggregate다. 등록은 실제 탑승 확인이 아니며 기존 Alarm/BusAlarmTarget/ACTIVE/FOLLOW_UP을 재사용하지 않는다. Provider별 지원 경계는 [API](api.md#탑승-세션-api-task-903), 선택·검증 분리의 근거는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
 
 소유자는 인증된 User다. TRACKING/SUSPENDED를 미종료로 보며 User당 최대 하나다. Provider·externalRouteId·vehicleTrackingId·전체 표시 번호·목적 occurrence는 한 세션 안에서 불변이다. TAGO vehicleno, 서울 vehId/plainNo 구분과 typed cityCode 문맥을 유지한다. 번호는 ID 누락·변경의 대체 identity가 아니다. 없는 direction/trip/lap 값을 만들지 않는다.
 
@@ -466,13 +466,16 @@ TASK-902에서 정의한 후보·화면 선택·사용자 확정은 서로 다�
 
 | 현재 상태 / 입력 | 다음 상태 / 의미 |
 | --- | --- |
-| 세션 없음 + 사용자 확정·최신 검증 성공 | TRACKING. 최초 checkpoint 저장과 즉시 추적, CONFIRMED/별도 Start 없음 |
-| 시작 검증 실패·목적지가 이미 현재/이후 | 새 세션 없음. 목적지가 아직 앞인지 불명확해도 시작 거부 |
+| 세션 없음 + 차량 선택·식별 검증 성공 | 즉시 TRACKING. 진행 기준점 유무·정차 여부·실제 탑승 확인과 분리 |
+| TRACKING + 새 일관된 미검증 관측 | TRACKING 유지. 동일 차량의 관측 기준만 갱신하고 알림 없음 |
+| TRACKING + 새 검증 기준점 확보 | READY 평가 가능. 검증된 현재 간격 2/1이면 사전 알림 판단 가능, 과거 알림 소급 없음 |
+| TRACKING + 지연·Provider 장애 / 식별 충돌·역행·연속성 상실 | TRACKING 유지 / SUSPENDED. 같은 차량만 재검증 |
+| 식별 검증 실패 | 새 세션 없음. 위치 근거 부족·목적지 현재/이후는 미검증 TRACKING으로 등록하되 소급 알림 없음 |
 | TRACKING + 유효한 준비 Event | TRACKING 유지. 같은 차량만 계속 추적 |
 | TRACKING + 충분한 목적지 직접 도착 또는 같은 운행의 이후 진행 | COMPLETED. 종료 사유로 ARRIVAL_OBSERVED/PASSED_OBSERVED 구분 |
-| TRACKING + 실패·식별/진행 불확실 | SUSPENDED와 사유. 실패를 소실·운행 종료로 바꾸지 않음 |
+| TRACKING + 구조 변경·식별/진행 충돌 | SUSPENDED와 사유. 실패를 소실·운행 종료로 바꾸지 않음 |
 | SUSPENDED + 자동 재검증 성공 | 일시 실패 등 자동 복구 가능한 사유만 TRACKING |
-| SUSPENDED + 동일 차량의 사용자 재확인·최신 검증 성공 | TRACKING. 별도 Start 없이 재개, 과거 불확실 공백과 연결하지 않는 새 checkpoint |
+| SUSPENDED + 동일 차량을 목록에서 재선택·최신 식별 검증 성공 | TRACKING. 별도 Start 없이 재개, 과거 불확실 공백과 연결하지 않는 새 checkpoint |
 | 미종료 + 사용자 취소 / 수명 종료 | CANCELLED / EXPIRED. 추적·pending 전달 종료 |
 | terminal + 늦은 결과·재요청 | terminal 유지. 재시작·Device 변경·FCM 결과로 되살리지 않음 |
 
@@ -482,15 +485,21 @@ COMPLETED는 실제 정차·사용자 하차나 Push 성공을 뜻하지 않는�
 
 | stateReason | 자동 복구 / 종료 의미 |
 | --- | --- |
+| BASELINE_UNVERIFIED | TRACKING의 위치 근거 부족. 알림 판단·전송 불가 |
+| TARGET_NOT_AHEAD | 검증 기준점 확보 전에 목적지 현재/이후 관측. 과거 목적지 알림 합성 없이 재선택 필요 |
 | TEMPORARY_PROVIDER_FAILURE / STALE_PROGRESS | 유효 관측을 자동 재조회. 공백 상한 안에서 다른 조건도 충족해야 재개 |
 | VEHICLE_MISSING / IDENTITY_CONFLICT / PROGRESS_REGRESSION / TRAVERSAL_AMBIGUOUS / CONTINUITY_GAP_EXCEEDED | 재확인 필요. 단순 재등장·번호 일치로 사유를 자동 제거하지 않음 |
 | METADATA_CHANGED | 구조 변경 보류. 기존 불변 snapshot과 다시 일치하지 않으면 취소 후 목적지를 새로 선택하며 자동 치환 없음 |
 | ARRIVAL_OBSERVED / PASSED_OBSERVED | COMPLETED 종료 사유 |
 | USER_CANCELLED / SESSION_LIFETIME_EXPIRED | CANCELLED / EXPIRED 종료 사유 |
 
-TRACKING의 stateReason은 NULL, SUSPENDED는 보류 사유, terminal은 해당 종료 사유를 갖는다. runtime RECOVERY_PENDING은 DB stateReason이 아니며 재시작만으로 모든 row를 갱신하지 않는다.
+TRACKING의 stateReason은 정상 진행이면 NULL, 미검증이면 BASELINE_UNVERIFIED, 일시 장애·지연이면 TEMPORARY_PROVIDER_FAILURE/STALE_PROGRESS다. SUSPENDED는 보류 사유, terminal은 해당 종료 사유를 갖는다. runtime RECOVERY_PENDING은 DB stateReason이 아니며 재시작만으로 모든 row를 갱신하지 않는다.
 
 ## Snapshot and Progress
+
+TASK-908은 `UNVERIFIED_REFERENCE`를 진행 검증 근거와 구분한다. 차량 ID·전체 번호·불변 traversal과 함께 최신 미검증 ID/order·두 시각만 저장하며 이를 현재 위치나 검증 checkpoint로 노출하지 않는다. 위치가 없으면 Stop ID NULL/order 0/index -1의 명시적 위치 없음 표현을 사용하고 occurrence를 합성하지 않는다. 미검증 TRACKING도 현재 조회·취소·단일 open 세션·UUID 중복 방지·PT4H 수명에 포함된다. 후보 reference의 60초 유효기간은 성공한 세션의 수명이 아니다.
+
+대기 중 fresh한 동일 차량 관측은 원래 source 시각을 보존해 단조성과 공백을 검증하며 계속 이동해도 관측을 이어간다. ID/전체 번호 충돌·역행·운행 종료·반복 Stop/회차 모호성은 자동 해소하지 않는다. 새 유일 traversal의 exact stopped detail을 얻으면 기준점을 확립하지만 최초 근거가 이미 목적지 현재/이후이면 TARGET_NOT_AHEAD로 보류한다. 현재 실측은 최초부터 이동한 stId/stOrd·sectOrd의 새로운 진행 의미를 입증하지 않아 반복 이동만으로 기준점을 승격하지 않는다. 등록은 기준점과 무관하게 즉시 TRACKING이다. 기존 정차 기준점과 같은 이동 reference를 재사용하면 검증된 진행 근거도 보존한다. 향후 독립된 의미 검증이 확보돼야 이동만으로 새 기준점 확립을 확장할 수 있다.
 
 세션은 일관되게 읽은 ordered traversal snapshot과 구조 fingerprint를 불변으로 가진다. `AlightAvailability`와 분류 근거는 승객 접근에 관한 부가 metadata이며 추적 지원·시작·도달/통과 판정 조건이 아니다. ALLOWED/PROHIBITED/UNKNOWN 모두 같은 추적 규칙을 사용한다. 재확인은 이 부가 분류를 제외한 정확한 차량·목적·경로 일치를 검증하고 원래 snapshot은 유지한다. 같은 Stop 재방문은 Stop ID와 order/문맥으로 구분하고 다음 lap을 자동 가정하지 않는다. 미정차·경유 occurrence를 배열에서 제거하지 않으며 metadata에 없는 지점을 합성하지 않는다.
 
@@ -510,13 +519,13 @@ TRACKING의 stateReason은 NULL, SUSPENDED는 보류 사유, terminal은 해당 
 
 간격 3→1은 현재 1로 판단할 수 있다. 목적지/이후로 jump하면 준비·도착 관측을 소급 생성하지 않는다. 이후 진행은 같은 운행의 충분한 이전/현재 근거가 있어야 하며 실제 무정차·사용자 하차 실패를 뜻하지 않는다. 목적지 자체의 도달은 DIRECT_ARRIVAL 또는 별도로 검증한 VERIFIED_REACHED를 요구하며 stopFlag=1 자체를 목적지 알림의 필수 조건으로 삼지 않는다. 근거가 없으면 단순 gap=0이나 order 증가만으로 완료하지 않는다.
 
-2단계의 `BoardingTrackingDecision`은 PREPARE_ALIGHT 후보, NO_CANDIDATE, HELD, ARRIVAL_OBSERVED, PASSED_OBSERVED, EXPIRED_CANDIDATE를 구분한다. 후보 기한은 원래 observedAt과 세션 수명으로 고정하며 저장 lock을 기다리는 동안 TTL이 지나도 checkpoint만 반영할 수 있다. gap=0의 검증된 기준점만으로 직접 도착을 확정하지 않고, 목적지 이후는 같은 traversal의 이전/현재 연속성이 있어야 종료한다.
+2단계의 `BoardingTrackingDecision`은 PREPARE_ALIGHT 후보, NO_CANDIDATE(미검증 관측 저장 포함), HELD, ARRIVAL_OBSERVED, PASSED_OBSERVED, EXPIRED_CANDIDATE를 구분한다. 후보 기한은 원래 observedAt과 세션 수명으로 고정하며 저장 lock을 기다리는 동안 TTL이 지나도 checkpoint만 반영할 수 있다. gap=0의 검증된 기준점만으로 직접 도착을 확정하지 않고, 목적지 이후는 같은 traversal의 이전/현재 연속성이 있어야 종료한다.
 
 세션 Notification identity는 `(boardingSessionId, boardingEventType)`이며 PREPARE_ALIGHT와 DESTINATION_REACHED를 독립적으로 dedup한다. 목적지 알림은 사전 알림 OFF·실패·기회 소비와 무관하다. identity에 revision·restart·재확인 횟수는 포함하지 않는다. 최초 Event INSERT 직전 원래 observedAt 기반 기한이 지났으면 Event·Delivery·소비 표식을 만들지 않는다. 검증된 checkpoint 갱신만 가능하며 이후 새 관측으로 재판단한다. 이미 존재하는 Event는 recipient 없음·전송 실패·만료 뒤에도 기회를 소비한 상태로 보존한다. prepareNotified boolean이나 별도 tracking cycle은 추가하지 않는다.
 
 ## Recovery
 
-재시작만으로 DB 상태를 일괄 SUSPENDED로 바꾸지 않는다. 새 프로세스의 추적 중 세션 전송 gate는 모두 차단하며 저장 checkpoint와 새 관측을 먼저 검증한다. 복구 전 과거 checkpoint 자체로 새 Event를 만들지 않는다. 기존 `BoardingProgressEvaluator`를 정상 polling과 복구가 함께 사용하며, 새 checkpoint가 없는 반복 결과는 복구 허용 근거가 아니다. 재확인은 SUSPENDED의 같은 불변 identity/traversal만 새 검증 baseline으로 전환하며, 이전 checkpoint와의 단조 연결 조건을 재개 근거로 사용하지 않는다. 최초 수명과 후속 durable Event identity는 그대로 유지한다.
+재시작만으로 DB 상태를 일괄 SUSPENDED로 바꾸지 않는다. 새 프로세스의 추적 중 세션 전송 gate는 모두 차단하며 저장 checkpoint와 새 관측을 먼저 검증한다. 복구 전 과거 checkpoint 자체로 새 Event를 만들지 않는다. 기존 `BoardingProgressEvaluator`를 정상 polling과 복구가 함께 사용하며, 새 checkpoint가 없는 반복 결과는 복구 허용 근거가 아니다. 미검증 TRACKING도 저장한 관측과 새 관측의 identity·단조성·공백을 재검증하며 과거 근거만으로 READY·Event를 만들지 않는다. 재확인은 SUSPENDED의 같은 불변 identity/traversal만 새 검증 baseline으로 전환하며, 이전 checkpoint와의 단조 연결 조건을 재개 근거로 사용하지 않는다. 최초 수명과 후속 durable Event identity는 그대로 유지한다.
 
 자동 복구는 미종료·미만료, ID/번호/Route 대응, 구조 fingerprint, 새 관측의 freshness·시각 일관성, 같은 traversal의 정지/단조 진행, 회차·reset·다른 lap 모호성 없음과 [복구 공백 설정](architecture.md#boarding-초기-설정과-만료)을 함께 요구한다. gap은 마지막 검증 observedAt부터 새 observedAt까지다. 과거 checkpoint는 현재 위치가 아닌 비교 기준이므로 기존 Observation freshness만으로 폐기하지 않되 복구 공백 상한은 지킨다.
 

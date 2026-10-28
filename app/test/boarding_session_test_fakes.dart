@@ -82,6 +82,7 @@ BoardingSession sessionFixture({
 );
 BoardingCandidate sessionCandidate({
   String reference = 'fresh-reference',
+  String? selectionKey = 'stable-selected-vehicle',
   String number = '서울70사1234',
   String confirmation = 'AVAILABLE',
   String tracking = 'CONDITIONAL',
@@ -93,6 +94,7 @@ BoardingCandidate sessionCandidate({
     tracking: tracking,
   ),
   'candidateRef': reference,
+  'selectionKey': selectionKey,
   'observedAt': (observedAt ?? sessionNow).toIso8601String(),
 });
 const sessionContext = BoardingSelectionContext(
@@ -104,7 +106,7 @@ BoardingCreationIntent intentFixture(AuthSession auth) =>
     BoardingCreationIntent(
       clientRequestId: '8be1dffa-8e2c-4547-b136-d99bfd84e45c',
       candidateRef: 'original-reference',
-      confirmedVehicleNumber: '서울70사1234',
+      selectedVehicleNumber: '서울70사1234',
       userIdentity: auth.userIdentity!,
       sessionIdentity: auth.sessionIdentity!,
       context: sessionContext,

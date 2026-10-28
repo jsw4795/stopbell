@@ -93,13 +93,13 @@ class BoardingCandidateRevalidationTest {
         assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isEqualTo(1);
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
                 "v1", "서울70사1234", "s2", 20, 0, "20261019120001", null, null)));
-        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").baselineVerified()).isFalse();
     }
 
     @ParameterizedTest
     @ValueSource(ints = {0, 1})
     @ExtendWith(OutputCaptureExtension.class)
-    @DisplayName("검증된 동일 정차 기준점이 없는 이동 응답은 시작을 거부하고 식별자 없이 사유를 기록한다")
+    @DisplayName("검증된 정차 기준점이 없는 이동 응답은 선택을 접수하되 진행 미검증으로 반환한다")
     void diagnose_latest_moving_detail(int previousFlag, CapturedOutput output) {
         original = new Snapshot(original.context(), route, route.fingerprint(), original.rosterVehicle(),
                 BoardingCandidateMapper.detail(new SeoulBusVehicleDetailItem("v1", "서울70사1234", "s1", 10,
@@ -107,9 +107,9 @@ class BoardingCandidateRevalidationTest {
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
                 "v1", "서울70사1234", "s2", 20, 0, "20261019120001", null, null)));
 
-        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
-
-        assertDiagnostic(output, previousFlag == 0 ? "MOVING_WITHOUT_STOPPED_BASELINE" : "MOVING_REFERENCE_CHANGED");
+        var selected = service.revalidateSelected(original, route, "서울70사1234");
+        assertThat(selected.baselineVerified()).isFalse();
+        assertThat(selected.progressIndex()).isEqualTo(1);
         verify(seoul, times(1)).fetchVehicleLocations(any());
         verify(details, times(1)).fetchVehicleDetail("v1");
         verifyNoInteractions(tago);
@@ -200,9 +200,14 @@ class BoardingCandidateRevalidationTest {
         original = new Snapshot(original.context(), route, route.fingerprint(), original.rosterVehicle(),
                 previous, original.expiresAt());
 
-        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
-
-        assertDiagnostic(output, reason);
+        if (reason.endsWith("RUN_ENDED") || reason.equals("PROVIDER_UNVERIFIED")) {
+            expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+            assertDiagnostic(output, reason);
+        } else {
+            var selected = service.revalidateSelected(original, route, "서울70사1234");
+            assertThat(selected.baselineVerified()).isEqualTo(!reason.equals("LATEST_STOP_FLAG_UNVERIFIED")
+                    && !reason.equals("REPEATED_STOP_TRAVERSAL") && !reason.equals("CURRENT_POSITION_MISSING"));
+        }
     }
 
     private void assertDiagnostic(CapturedOutput output, String reason) {
@@ -247,10 +252,10 @@ class BoardingCandidateRevalidationTest {
     }
 
     @Test
-    @DisplayName("목적지 현재와 이후 관측은 다음 lap을 가정하지 않고 시작을 거부한다")
-    void reject_target_not_ahead() {
-        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s4", 40, DATA_TIME)));
-        expect(ErrorCode.BOARDING_TARGET_NOT_AHEAD);
+    @DisplayName("목적지 현재와 이후 관측도 차량 선택을 허용하되 검증된 시작 근거로 승격하지 않는다")
+    void target_not_ahead_has_no_baseline() {
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s4", 40, "20261019120001")));
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").baselineVerified()).isFalse();
     }
 
     @Test
@@ -258,9 +263,9 @@ class BoardingCandidateRevalidationTest {
     void reject_unverified_progress() {
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
                 "v1", "서울70사1234", "s2", 20, 0, DATA_TIME, null, null)));
-        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", null, 20, DATA_TIME)));
-        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").baselineVerified()).isFalse();
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "wrong-id", 20, DATA_TIME)));
         expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
     }
@@ -276,7 +281,7 @@ class BoardingCandidateRevalidationTest {
         original = new Snapshot(original.context(), repeated, repeated.fingerprint(), original.rosterVehicle(),
                 original.detailVehicle(), original.expiresAt());
         route = repeated;
-        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").baselineVerified()).isFalse();
     }
 
     @Test
@@ -304,6 +309,17 @@ class BoardingCandidateRevalidationTest {
         doReturn(rosterResponse(roster("v1", "서울70사1234", DATA_TIME))).when(seoul).fetchVehicleLocations(any());
         when(details.fetchVehicleDetail("v1")).thenThrow(TransitProviderClientException.protocol(TransitProvider.SEOUL_BUS, "detail", null));
         expect(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("정상 empty detail에서는 원래 위치와 시각을 미검증으로만 보존하고 식별은 최신 roster와 비교한다")
+    void empty_detail_preserves_unverified_original_reference() {
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse());
+        var validated = service.revalidateSelected(original, route, "서울70사1234");
+        assertThat(validated.baselineVerified()).isFalse();
+        assertThat(validated.vehicle()).isEqualTo(original.detailVehicle());
+        assertThat(validated.vehicle().observedAt()).isEqualTo(NOW);
+        assertThat(validated.progressIndex()).isZero();
     }
 
     @Test

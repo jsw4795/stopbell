@@ -35,9 +35,7 @@ class BoardingCandidatesView extends StatelessWidget {
         'Provider 제공 시각: ${result.providerDataTime == null ? '알 수 없음' : boardingTime(result.providerDataTime!)}',
       ),
       Text('화면 수신 시각: ${boardingTime(receivedAt)}'),
-      const Text(
-        '목록 순서는 탑승 가능성이나 신뢰도를 뜻하지 않아요. 실제 차량에 표시된 전체 차량번호를 직접 대조해야 해요.',
-      ),
+      const Text('원하는 차량을 목록에서 선택하세요. 차량번호 입력 없이 버스 도착 전에도 등록할 수 있어요.'),
       const Text(
         '진행 정보는 정확한 현재 위치·실제 정차·탑승 사실을 보장하지 않아요. 원본 갱신 시각이 없거나 정보가 지연될 수 있어요.',
       ),
@@ -91,15 +89,15 @@ class _CandidateCard extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             Text(
-              '차량번호 확인: ${canCompare
-                  ? '대조 가능 (탑승 미확정)'
+              '차량 선택: ${canCompare
+                  ? '선택 가능'
                   : item.confirmationStatus == ConfirmationStatus.unknown
                   ? '상태 미확인 · 확인 보류'
                   : '확인 보류'}',
             ),
             Text(
               '하차 추적 지원: ${switch (item.trackingSupport) {
-                TrackingSupport.conditional => '추가 검증 필요 · 시작 보장 없음',
+                TrackingSupport.conditional => '등록 후 진행 검증 · 대기할 수 있음',
                 TrackingSupport.held => '보류',
                 TrackingSupport.unknown => '알 수 없음 · 보류',
               }}',
@@ -116,7 +114,14 @@ class _CandidateCard extends StatelessWidget {
             ),
             if (item.boardingOccurrenceGap != null) ...[
               Text(
-                '선택한 승차 정류장과 관측된 진행 지점의 노선상 간격: ${item.boardingOccurrenceGap}',
+                item.boardingOccurrenceGap! > 0
+                    ? '승차 지점 이전에 관측된 차량'
+                    : item.boardingOccurrenceGap! < 0
+                    ? '승차 지점 이후에 관측된 차량 · 이미 지났을 수 있음'
+                    : '승차 지점과 같은 관측 기준 · 실제 도착 여부는 미확정',
+              ),
+              Text(
+                '선택한 승차 정류장과 관측된 진행 지점의 노선상 간격: ${item.boardingOccurrenceGap!.abs()}',
               ),
               const Text('노선 방문 지점 배열의 간격이며 실제 정차 수·거리·남은 시간이 아니에요.'),
             ],
@@ -132,8 +137,8 @@ class _CandidateCard extends StatelessWidget {
                     : null,
                 child: Text(
                   canConfirmBoardingCandidate(item)
-                      ? '이 차량 번호 직접 대조'
-                      : '확정 불가 · 차량 정보 또는 추적 지원 확인 보류',
+                      ? '이 차량 선택'
+                      : '선택 불가 · 차량 정보 또는 추적 지원 확인 보류',
                 ),
               ),
             for (final reason in reasons) Text('• ${_reasonMessage(reason)}'),

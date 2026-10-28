@@ -37,6 +37,7 @@ class BoardingCandidates {
 class BoardingCandidate {
   BoardingCandidate.fromJson(Object? value) {
     final json = _object(value);
+    selectionKey = _optionalText(json['selectionKey']);
     candidateRef = _optionalText(json['candidateRef']);
     vehicleNumber = _optionalText(json['vehicleNumber']);
     confirmationStatus = switch (_text(json['confirmationStatus'])) {
@@ -49,7 +50,7 @@ class BoardingCandidate {
         ? null
         : BoardingProgress.fromJson(json['progress']);
     final gap = json['boardingOccurrenceGap'];
-    if (gap != null && (gap is! int || gap < 0)) throw const FormatException();
+    if (gap != null && (gap is! int)) throw const FormatException();
     boardingOccurrenceGap = gap as int?;
     observedAt = boardingInstant(json['observedAt']);
     providerDataTime = _optionalInstant(json['providerDataTime']);
@@ -64,7 +65,7 @@ class BoardingCandidate {
     limitations = List.unmodifiable(reasons.map(_text));
   }
 
-  late final String? candidateRef;
+  late final String? candidateRef, selectionKey;
   late final String? vehicleNumber;
   late final ConfirmationStatus confirmationStatus;
   late final String? reasonCode;

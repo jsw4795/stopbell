@@ -76,7 +76,7 @@ class BoardingSessionApiClient implements BoardingSessionClient {
     required int generation,
     required bool Function() current,
   }) async {
-    if ((body.length != 3 && body.length != 4) ||
+    if ((body.length < 2 || body.length > 4) ||
         (body.containsKey('prepareNotificationEnabled') &&
             body['prepareNotificationEnabled'] is! bool) ||
         body.keys.any(
@@ -170,11 +170,7 @@ class BoardingSessionApiClient implements BoardingSessionClient {
       generation,
       current,
       id: id,
-      body: {
-        'expectedRevision': revision,
-        'candidateRef': reference,
-        'confirmedVehicleNumber': number,
-      },
+      body: {'expectedRevision': revision, 'candidateRef': reference},
     );
   }
 
@@ -300,7 +296,7 @@ class BoardingSessionApiClient implements BoardingSessionClient {
   }
 
   void _reference(Object? reference, Object? number) {
-    for (final value in [reference, number]) {
+    for (final value in [reference, ?number]) {
       if (value is! String || value.trim().isEmpty || value.length > 255) {
         throw ArgumentError('vehicle confirmation');
       }

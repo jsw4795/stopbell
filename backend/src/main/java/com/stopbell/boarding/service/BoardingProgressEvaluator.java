@@ -62,7 +62,15 @@ public class BoardingProgressEvaluator {
         }
         if (observation.traversalAmbiguous()
                 || !Objects.equals(previous.getDirectionContext(), observation.directionContext())
-                || observation.meaning() == null || observation.meaning() == BoardingProgressObservation.Meaning.UNVERIFIED) {
+                || observation.meaning() == null) {
+            return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        }
+        if ((vehicle.order() == null || vehicle.stopId() == null && !observation.orderOnlyVerified())
+                && previous.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
+            return BoardingTrackingDecision.held(BoardingStateReason.STALE_PROGRESS);
+        }
+        if (observation.meaning() == BoardingProgressObservation.Meaning.UNVERIFIED
+                && previous.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
             return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
         }
         var traversal = session.traversal();
@@ -77,11 +85,20 @@ public class BoardingProgressEvaluator {
                 }
             }
         }
-        if (index < 0) {
+        if (index < 0 && !(previous.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                && (vehicle.stopId() == null || vehicle.order() == null))) {
             return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        }
+        if (index < 0 && previous.getIndex() >= 0) {
+            return BoardingTrackingDecision.held(BoardingStateReason.STALE_PROGRESS);
         }
         if (index < previous.getIndex()) {
             return BoardingTrackingDecision.held(BoardingStateReason.PROGRESS_REGRESSION);
+        }
+        boolean pending = previous.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE;
+        if (pending && traversal.occurrences().stream().map(item -> item.externalStopId()).distinct().count()
+                != traversal.occurrences().size()) {
+            return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
         }
         boolean sameProviderData = providerTime != null && providerTime.equals(previous.getProviderDataTime());
         if ((sameProviderData || observedAt.equals(previous.getObservedAt())) && index != previous.getIndex()) {
@@ -98,10 +115,20 @@ public class BoardingProgressEvaluator {
             return new BoardingTrackingDecision(Outcome.NO_CANDIDATE, null, null, gap,
                     previous.getObservedAt(), null, now);
         }
-        var checkpoint = new BoardingCheckpoint(vehicle.stopId(), vehicle.order(), index,
-                vehicle.stopId() == null ? BoardingCheckpoint.Evidence.VERIFIED_ORDER_ONLY
+        if (pending && index >= traversal.targetIndex()) {
+            // No trusted baseline before the target: never infer a missed destination.
+            return BoardingTrackingDecision.held(BoardingStateReason.TARGET_NOT_AHEAD);
+        }
+        boolean verified = !pending || index >= 0 && observation.meaning() == BoardingProgressObservation.Meaning.DIRECT_ARRIVAL;
+        var checkpoint = new BoardingCheckpoint(index < 0 ? null : vehicle.stopId(), index < 0 ? 0 : vehicle.order(), index,
+                !verified ? BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                        : vehicle.stopId() == null ? BoardingCheckpoint.Evidence.VERIFIED_ORDER_ONLY
                         : BoardingCheckpoint.Evidence.ID_ORDER,
                 observation.directionContext(), observedAt, providerTime);
+        if (!verified) {
+            return new BoardingTrackingDecision(Outcome.NO_CANDIDATE, checkpoint, null, null,
+                    checkpoint.getObservedAt(), null, now);
+        }
         observedAt = checkpoint.getObservedAt();
         LocalDateTime expiry = Duration.between(observedAt, session.expiresAt()).compareTo(prepareTtl) <= 0
                 ? session.expiresAt() : observedAt.plus(prepareTtl);

@@ -5,6 +5,21 @@ import 'boarding_test_fakes.dart';
 
 void main() {
   test(
+    'fresh identified candidate remains selectable with normal empty detail',
+    () {
+      final candidate = BoardingCandidate.fromJson({
+        ...candidateJson(),
+        'progress': null,
+        'boardingOccurrenceGap': null,
+        'reasonCode': 'DETAIL_EMPTY',
+        'trackingReasonCode': 'DETAIL_EMPTY',
+        'limitations': ['DETAIL_EMPTY'],
+      });
+      expect(candidate.canRequestConfirmation, isTrue);
+      expect(candidate.progress, isNull);
+    },
+  );
+  test(
     'preserves available, held, nulls, timestamps, reasons and server order',
     () {
       final result = BoardingCandidates.fromJson(
@@ -153,7 +168,6 @@ void main() {
       {'confirmationStatus': null},
       {'trackingSupport': false},
       {'progress': []},
-      {'boardingOccurrenceGap': -1},
       {'boardingOccurrenceGap': 1.5},
       {'observedAt': '2026-02-30T00:00:00Z'},
       {'observedAt': '2026-10-20T01:02:03'},

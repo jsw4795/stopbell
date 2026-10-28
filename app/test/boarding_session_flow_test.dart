@@ -133,11 +133,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('find-candidates')));
     await tester.pumpAndSettle();
-    await tap(tester, '이 차량 번호 직접 대조');
-    await tester.enterText(
-      find.byKey(const ValueKey('confirmed-vehicle-number')),
-      '서울70사1234',
-    );
+    await tap(tester, '이 차량 선택');
   }
 
   testWidgets(
@@ -163,9 +159,40 @@ void main() {
           'prepareNotificationEnabled': false,
         }, 201);
       };
-      await tap(tester, '탑승 차량 확정');
+      await tap(tester, '하차 알림 등록');
       await tap(tester, '알림 없이 계속');
       expect(find.text('사전 알림: OFF · 목적지 알림: ON'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'registration immediately opens tracking while location is unavailable',
+    (tester) async {
+      await pump(tester);
+      await prepare(tester);
+      sessionResponse = (request) async => boardingJson({
+        ...sessionJson(
+          status: 'TRACKING',
+          evaluation: 'VERIFICATION_PENDING',
+          reason: 'BASELINE_UNVERIFIED',
+          gap: null,
+        ),
+        'checkpointObservedAt': null,
+      }, 201);
+      await tap(tester, '하차 알림 등록');
+      await tap(tester, '알림 없이 계속');
+      expect(find.byType(BoardingSessionView), findsOneWidget);
+      expect(find.textContaining('TRACKING · 선택한 차량 추적 중'), findsOneWidget);
+      expect(find.textContaining('차량 위치 확인 중'), findsWidgets);
+      expect(find.textContaining('VERIFYING'), findsNothing);
+      expect(find.text('추적 취소'), findsOneWidget);
+      expect(
+        requests.where(
+          (r) =>
+              r.method == 'POST' && r.url.path == '/api/v1/boarding-sessions',
+        ),
+        hasLength(1),
+      );
     },
   );
 
@@ -192,7 +219,7 @@ void main() {
             ? boardingJson({}, 401)
             : boardingJson(sessionJson(revision: 7), 201);
       };
-      await tap(tester, '탑승 차량 확정');
+      await tap(tester, '하차 알림 등록');
       await tap(tester, '알림 없이 계속');
       expect(find.byType(BoardingSessionView), findsOneWidget);
       final posts = requests
@@ -213,7 +240,7 @@ void main() {
               )
               .body,
         )['confirmedVehicleNumber'],
-        '서울70사1234',
+        isNull,
       );
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
@@ -236,7 +263,7 @@ void main() {
       await prepare(tester);
       sessionResponse = (_) async =>
           throw http.ClientException('response lost');
-      await tap(tester, '탑승 차량 확정');
+      await tap(tester, '하차 알림 등록');
       await tap(tester, '알림 없이 계속');
       final original = storage.records.values.single;
       sessionResponse = (request) async {
@@ -267,7 +294,7 @@ void main() {
       await prepare(tester);
       final result = Completer<http.Response>();
       sessionResponse = (_) => result.future;
-      await tap(tester, '탑승 차량 확정');
+      await tap(tester, '하차 알림 등록');
       await tap(tester, '알림 없이 계속');
       await tap(tester, '로그아웃');
       result.complete(boardingJson(sessionJson(), 201));

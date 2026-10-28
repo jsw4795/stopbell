@@ -118,7 +118,7 @@ class BoardingSessionDetails extends StatelessWidget {
         ),
         Text(
           '상태: ${switch (s.status) {
-            BoardingSessionStatus.tracking => 'TRACKING · 차량 진행 확인 중',
+            BoardingSessionStatus.tracking => 'TRACKING · 선택한 차량 추적 중',
             BoardingSessionStatus.suspended => 'SUSPENDED · 추적 보류',
             BoardingSessionStatus.completed => 'COMPLETED · 추적 종료',
             BoardingSessionStatus.cancelled => 'CANCELLED · 사용자 취소로 종료',
@@ -127,6 +127,8 @@ class BoardingSessionDetails extends StatelessWidget {
           }}',
         ),
         Text(switch (s.evaluationStatus) {
+          BoardingEvaluation.verificationPending =>
+            '차량 위치 확인 중 · 선택한 차량을 계속 관측하고 있어요. 위치 근거가 확보되면 알림을 판단해요.',
           BoardingEvaluation.ready => 'READY · 서버의 새 관측 검증 응답',
           BoardingEvaluation.recoveryPending =>
             'RECOVERY_PENDING · 현재 차량 진행 정보를 다시 확인하고 있어요.',
@@ -147,15 +149,16 @@ class BoardingSessionDetails extends StatelessWidget {
         if (s.status == BoardingSessionStatus.suspended)
           Text(
             s.reasonCode?.needsReconfirmation == true
-                ? '기존 차량의 연속성을 확인할 수 없어요. 실제 차량번호를 다시 확인해야 해요.'
+                ? '기존 차량의 연속성을 확인할 수 없어요. 목록에서 동일 차량을 다시 선택해 주세요.'
                 : s.reasonCode == BoardingReason.unknown || s.reasonCode == null
                 ? '보류 사유를 확인할 수 없어요. 상태를 다시 확인해 주세요.'
                 : '차량 정보 확인이 일시적으로 중단됐어요. 새로운 정보를 기다리고 있어요.',
           ),
         if (s.reasonCode != null) Text('사유: ${_reason(s.reasonCode!)}'),
-        Text(
-          '마지막 검증 checkpoint 관측 시각: ${boardingTime(s.checkpointObservedAt)}',
-        ),
+        if (s.checkpointObservedAt != null)
+          Text(
+            '마지막 검증 checkpoint 관측 시각: ${boardingTime(s.checkpointObservedAt!)}',
+          ),
         const Text('과거 검증 근거 시각이며 현재 버스 위치 시각이 아니에요.'),
         Text(
           'Provider 제공 시각: ${s.providerDataTime == null ? '알 수 없음' : boardingTime(s.providerDataTime!)}',
@@ -168,6 +171,8 @@ class BoardingSessionDetails extends StatelessWidget {
 }
 
 String _reason(BoardingReason reason) => switch (reason) {
+  BoardingReason.baselineUnverified => '차량 위치 확인 중',
+  BoardingReason.targetNotAhead => '검증 전 목적지 도달 또는 통과 · 알림 판단 불가',
   BoardingReason.temporaryProviderFailure => '차량 정보 제공 일시 장애',
   BoardingReason.staleProgress => '진행 정보 지연',
   BoardingReason.vehicleMissing => '기존 차량 정보 소실',
