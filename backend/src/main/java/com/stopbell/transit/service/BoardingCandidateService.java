@@ -121,7 +121,7 @@ public class BoardingCandidateService {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         if (route.provider() == TransitProvider.TAGO) {
-            throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+            throw unsupported(route, "PROVIDER_UNVERIFIED");
         }
         Instant validationTime = clock.instant();
         Vehicle originalRoster = original.rosterVehicle();
@@ -130,7 +130,7 @@ public class BoardingCandidateService {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         if (originalRoster.runEnded()) {
-            throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+            throw unsupported(route, "ORIGINAL_RUN_ENDED");
         }
         Roster roster;
         try {
@@ -147,7 +147,7 @@ public class BoardingCandidateService {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         if (selected.runEnded()) {
-            throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+            throw unsupported(route, "CURRENT_RUN_ENDED");
         }
         Detail result = fetchDetail(selected);
         if (result.issue() != null) {
@@ -173,24 +173,43 @@ public class BoardingCandidateService {
         }
         int current = progressIndex(route, detail);
         if (current < 0) {
-            throw new ApiException(detail.stopId() == null || detail.order() == null
-                    ? ErrorCode.BOARDING_TRACKING_UNSUPPORTED : ErrorCode.BOARDING_CANDIDATE_CHANGED);
+            if (detail.stopId() == null || detail.order() == null) {
+                throw unsupported(route, "CURRENT_POSITION_MISSING");
+            }
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         if (current >= route.indexOf(route.targetOccurrenceId())) {
             throw new ApiException(ErrorCode.BOARDING_TARGET_NOT_AHEAD);
         }
-        // Moving detail semantics, order-only and repeated-stop/lap contexts are not verified.
-        // Do not promote candidate sorting evidence into supported alight tracking.
+        // A baseline must come from an exact stopped detail. Moving data can only
+        // corroborate that same previously stopped reference; it never establishes arrival.
         Vehicle previous = original.detailVehicle();
-        if (!Integer.valueOf(1).equals(detail.stopFlag()) || previous == null
-                || !Integer.valueOf(1).equals(previous.stopFlag()) || progressIndex(route, previous) < 0
-                || !route.hasUniqueStopIds()) {
-            throw new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        if (!(Integer.valueOf(1).equals(detail.stopFlag()) || Integer.valueOf(0).equals(detail.stopFlag()))) {
+            throw unsupported(route, "LATEST_STOP_FLAG_UNVERIFIED");
+        }
+        if (previous == null) {
+            throw unsupported(route, "ORIGINAL_DETAIL_MISSING");
+        }
+        if (!(Integer.valueOf(1).equals(previous.stopFlag()) || Integer.valueOf(0).equals(previous.stopFlag()))) {
+            throw unsupported(route, "ORIGINAL_STOP_FLAG_UNVERIFIED");
+        }
+        if (progressIndex(route, previous) < 0) {
+            throw unsupported(route, "ORIGINAL_POSITION_UNVERIFIED");
+        }
+        if (!route.hasUniqueStopIds()) {
+            throw unsupported(route, "REPEATED_STOP_TRAVERSAL");
+        }
+        boolean reuseStoppedBaseline = Integer.valueOf(0).equals(detail.stopFlag());
+        if (reuseStoppedBaseline && !Integer.valueOf(1).equals(previous.stopFlag())) {
+            throw unsupported(route, "MOVING_WITHOUT_STOPPED_BASELINE");
+        }
+        if (reuseStoppedBaseline && current != progressIndex(route, previous)) {
+            throw unsupported(route, "MOVING_REFERENCE_CHANGED");
         }
         if (!detail.id().equals(previous.id()) || !detail.number().equals(previous.number())
                 || current < progressIndex(route, previous)
                 || detail.observedAt().isBefore(previous.observedAt())
-                || previous.providerDataTime() == null || previous.timeIssue() != null
+                || previous.providerDataTime() == null || timeIssue(previous, now) != null
                 || previous.providerDataTime().isAfter(previous.observedAt())
                 || detail.providerDataTime().isBefore(previous.providerDataTime())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
@@ -202,7 +221,21 @@ public class BoardingCandidateService {
                 && current != progressIndex(route, previous)) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
+        if (reuseStoppedBaseline) {
+            // Keep the stopped evidence and BOTH original times. Refreshing them from
+            // the moving response would misrepresent old arrival evidence as a new one.
+            log.info("Boarding start validated: stage=candidate-revalidation provider={} outcome=STOPPED_BASELINE_REUSED",
+                    route.provider());
+            return new VerifiedCandidate(route, previous, current);
+        }
         return new VerifiedCandidate(route, detail, current);
+    }
+
+    private static ApiException unsupported(BoardingRouteSnapshot route, String reason) {
+        // Fixed internal reasons only: no user/reference/vehicle/stop identifiers or raw Provider data.
+        log.warn("Boarding start rejected: stage=candidate-revalidation provider={} reason={} responseStatus=409",
+                route.provider(), reason);
+        return new ApiException(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
     }
 
     public record VerifiedCandidate(BoardingRouteSnapshot route, Vehicle vehicle, int progressIndex) {

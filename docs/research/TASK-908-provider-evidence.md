@@ -2,6 +2,8 @@
 
 > **현행 요구사항 정정 (2026-10-28):** §1~22의 목적 occurrence 하차 허용 근거를 시작 조건으로 둔 해석은 철회한다. 하차 가능성 공식 근거 조사는 종료하며 현재 계약은 [요구사항](../requirements.md#phase-9-탑승-세션과-하차-준비-알림)과 [API 지원 경계](../api.md#탑승-세션-api-task-903)를 따른다. 아래 실측 횟수·미실행·과거 보류 기록은 당시 사실로 보존한다.
 
+최신 실제 서울 143번·격리 MySQL·Notification 검증은 [§24](#24-실제-서울-143번-생성진행notification-검증-2026-10-28)를 따른다. §23까지의 미실행·미지원 설명은 각 작업 시점의 기록이며 현행 지원 경계는 API/Domain이 소유한다.
+
 §1~17은 Phase A 기록을 보존한다. **Phase B의 사전검증은 §18, 최초 점검·보류는 §19, 실제 실행은 §20, 후속 인증 없는 연결 진단과 로컬 경로 수정은 §21, HTTP 연결 완료 이후 Backend 안전 검증 보강은 §22**에 구분한다. 각 절의 승인·환경·호출 횟수는 해당 작업 시점의 기록이다. §21 종료 시점 누적 인증 데이터 요청 시도는 **서울1회/TAGO0회, 실제 데이터 확보0건**이며, §21의 **인증 없는 서울 HTTP 진단4회**는 별도다. 이후 서울 HTTP 성공 기록은 §22의 링크를 따른다.
 
 ## 1. 목적과 실행 범위
@@ -739,3 +741,170 @@ Java/Gradle JVM 21·Wrapper 8.14.3에서 다음을 검증했다.
 실제 서울 이동 detail 의미는 여전히 UNVERIFIED다. `sectOrd`는 구간 문맥으로만 사용하며 occurrence order로 치환하지 않는다. 현재 서울 시작은 이전·최신 exact stopped detail과 번호/ID·freshness·단조 진행·목적지 이전·반복 Stop/회차 모호성 없는 경로를 요구한다. 이전 detail이 없는 승차 occurrence 생략 조회, 이동 의미·order-only·반복 Stop의 회차 문맥 미검증, 운행 종료는 하차 가능성과 무관한 실제 차단 조건이다. 추적 중 미검증 이동 관측은 보류·재확인을 요구하므로 실차 연속 추적 지원 완료를 주장하지 않는다. 목적지 정차 없이 이후의 검증된 정차 detail로 통과를 확인하는 테스트는 사이의 미검증 이동 관측을 VERIFIED 처리한 것이 아니다.
 
 이번 실제 Provider·FCM·iPhone 호출/검증은 **0회**다. 기존 서울 HTTP 설정을 유지하고 개발 DB에 V17을 적용하거나 실제 BoardingSession을 생성하지 않았다. 실제 버스/iPhone E2E와 TASK-710/TASK-908 `[ ]`는 남는다. main 유지, Git add/commit/push 없음, 새 Dependency·devlog 변경 없음이며 기존 작업 중 변경을 보존했다.
+
+## 24. 실제 서울 143번 생성·진행·Notification 검증 (2026-10-28)
+
+### 24.1 범위와 증거 구분
+
+- 기준 `main` / `f7e8027`, 시작 working tree clean. 이번 사용자가 승인한 제한적 읽기 전용 서울 호출만 수행했다. HTTP endpoint·Provider 설정을 재조사하거나 변경하지 않았다
+- 실측: **2026-10-28 19:47:43~20:00:49 KST**. 노선 `100100022`(143), 목록 **41~43대**, 같은 두 차량 A/B를 연속 관측했다. 장기 vehId 안정성·실제 탑승/차체 번호 대조를 검증한 것은 아니다
+- 기존 `SeoulBusVehicleLocationClient` / `SeoulBusVehicleDetailClient` 사용. 최초 확인 및 세 번의 한정 관측 실행은 **roster 50회 / detail 91회**다. 마지막 공개 후보 API 조회 1회는 roster 1회 / detail 최대 41회, 공개 생성 1회는 roster 1회 / detail 1회이므로 이번 총량은 **roster 52회 / detail 최대 133회, 합계 최대 185회**다. 마지막 HTTP 경로의 내부 호출 계수는 별도 계측하지 않아 상한으로 기록한다. TAGO·metadata API·FCM 호출은 0회다
+- 자동 Scheduler와 Notification Worker·FCM을 모두 OFF로 고정한 격리 MySQL 8.4.11 Testcontainers에서 검증했다. 기존 로컬 DB에는 읽기 전용 JDBC 연결로 143번 metadata 113개 occurrence만 읽었으며 운영/기존 DB를 변경하지 않았다
+- 실측용 Java harness는 `/tmp`에서만 사용했다. 삭제했던 Provider 실측 도구를 복원하거나 저장소에 범용 수집 도구를 추가하지 않았다. 인증키·전체 요청 URL·GPS·차량번호 원문·raw response 전체를 보고서에 기록하지 않았다
+- 연속 관측은 실제 DTO와 원래 roster/detail 수신시각을 같은 cycle의 Client 응답으로 재사용하여 production Tracker/Evaluator/Polling/Store에 전달했다. **추가 HTTP를 막는 응답 재사용이며 인공 Provider 진행을 생성한 Mock 실측이 아니다.** 시작 Validator는 기존 실제 Client로 최신 roster/detail을 별도 재검증했다. 최종 공개 후보 GET→세션 POST는 응답 대체 없이 실제 Provider와 production HTTP 경로를 사용했다
+- 최초 harness는 생성 직전 관측을 생성 후 polling에 재입력하여 올바르게 PROGRESS_REGRESSION에 걸렸다. 두 번째 실행의 당일 생성 cycle에도 같은 문제가 있었다. 이 결과는 제품 결함/정상 추적 증거에서 제외했다. 수정 검증에서는 생성한 cycle의 이전 관측을 평가하지 않고 다음 관측부터 평가했다. 호출량에는 이 실행들도 포함했다
+
+### 24.2 Migration
+
+V1~V17 빈 DB 적용, Flyway validate와 재실행 0건, Backend startup 성공을 확인했다. V17은 새 테이블을 만들지 않고 `boarding_sessions.prepare_notification_enabled` 기본 TRUE와 Notification source CHECK 확장만 적용한다.
+
+`NotificationSourceMigrationIntegrationTest`를 보강하여 V14의 네 Alarm Event·각 Delivery 상태·Device·Alarm, V15 Session 보존에 이어 **V16의 기존 PREPARE_ALIGHT Event 및 PENDING Delivery를 저장한 뒤 V17만 적용**했다. 기존 값 보존, 기존 Session TRUE 기본값, Alarm/Delivery UNIQUE 유지가 통과했다. 최종 실제 진행의 DESTINATION_REACHED INSERT와 Delivery FK/UNIQUE도 MySQL에서 정상 동작했다. Migration 수정·새 Dependency·기존 DB Migration 적용은 없다.
+
+### 24.3 실제 필드와 occurrence 대응
+
+| 필드 | 이번 확인과 의미의 한계 |
+| --- | --- |
+| `vehId` | 같은 A/B의 roster/detail ID가 매 관측 일치하고 유지됨. 영구 차량/trip/lap identity 보장은 미검증 |
+| `plainNo` | 두 차량 각각의 전체 번호가 roster/detail과 시작 재검증에서 일치. ID와 별도로 비교하며 현장 번호 대조는 미실행 |
+| `sectOrd` | 선택 표본에서 detail stOrd와 숫자가 같았음. 구간 문맥으로만 보존하며 **occurrence 순번으로 치환하지 않음** |
+| `stId` + `stOrd` | 로컬 143번 metadata의 exact Stop ID/order 쌍에 대응. 단순 숫자 일치를 근거로 쓰지 않음 |
+| `stopFlag` | 같은 ID/order에서 1→0, 이어 다음 ID/order에서 1을 여러 번 관측. 0만으로 새 정류장 도달/통과를 선언하지 않음 |
+| `dataTm` | KST `yyyyMMddHHmmss`를 UTC로 해석. 증가와 같은 제공시각 반복 모두 관측. 선택 차량의 수신-제공 시각 차는 약 7.4~42.5초이며 물리 도착 지연/SLA가 아님 |
+| `isrunyn` | 선택 차량의 관측은 모두 1. 같은 lap의 증명으로 쓰지 않음. 0 운행 종료 차단은 자동 테스트 근거이며 이번 실측에서 0을 관측하지 않음 |
+
+113개 occurrence에는 동일 external Stop ID 재등장이 없었다. A는 전체 관측에서 order 2→4→5→6→7→8→9→10→11, B는 8→9→10→11→12→13→14로 진행했다. 2→4 등은 관측 사이의 jump이며 누락된 정차를 합성하지 않는다. 회차·역행·동일 Stop 반복 occurrence·다른 lap 연결은 실제로 관측하지 못했다.
+
+수정 검증의 대표 행은 다음과 같다. 시각은 KST이며 A/B는 원문 ID/번호를 대체한 보고용 표기다.
+
+| 수신시각 | 차량 | stId / stOrd | flag | dataTm | 결과 |
+| --- | --- | --- | --- | --- | --- |
+| 19:54:52 | A | 107000029 / 7 | 0 | 19:54:40 | 최신 이동 detail 시작 409 UNSUPPORTED |
+| 19:55:12 | A | 107000031 / 8 | 1 | 19:55:03 | 목적 order 10, 사전 ON, 201 TRACKING |
+| 19:55:33 | A | 107000031 / 8 | 1 | 19:55:15 | gap 2 준비 Event/Delivery 각 1개 |
+| 19:55:53 | A | 107000031 / 8 | 0 | 19:55:38 | 기존 기준점 유지, 준비 Event 중복 없음 |
+| 19:56:33 | A | 107000005 / 9 | 1 | 19:56:15 | gap 1 진행, 준비 Event 총 1개 유지 |
+| 19:57:54 | A | 107000007 / 10 | 1 | 19:57:36 | COMPLETED / ARRIVAL_OBSERVED, 목적지 Event/Delivery |
+| 19:56:13 | B | 100000005 / 12 | 1 | 19:55:59 | 목적 order 14, 사전 OFF, 201 TRACKING |
+| 19:56:53 | B | 100000005 / 12 | 0 | 19:56:46 | 기존 기준점 유지, 준비 Event 없음 |
+| 19:58:34 | B | 100000003 / 13 | 1 | 19:58:08 | gap 1 진행, 준비 Event 없음 |
+| 19:59:14 | B | 100000002 / 14 | 1 | 19:59:01 | COMPLETED / ARRIVAL_OBSERVED, 목적지 Event/Delivery |
+
+### 24.4 시작과 수정한 문제
+
+실제 정차에서 A/B의 `HTTP 201 TRACKING`을 확인했다. 제한 관측에서는 선택한 실제 roster/detail과 production ReferenceStore로 후보 snapshot을 구성했다. 마지막 확인은 **공개 후보 GET 200 PARTIAL / 41개 → 그 응답의 candidateRef로 공개 세션 POST 201 TRACKING**이며, Validator 성공값 주입이나 Provider Mock을 사용하지 않았다. PARTIAL 목록에서도 식별/신선도/진행 검증을 통과한 정차 후보만 선택했다. 장기간 누적한 차량 관측 저장소 없이 첫 후보 조회와 최신 재검증만으로 생성됐다.
+
+확인한 제품 문제는 정상적인 정차→동일 occurrence 이동의 첫 관측이 TRAVERSAL_AMBIGUOUS 영구 보류가 되어 이후 정상 정차도 polling하지 않는 것이었다. 사용자 요청의 안전 검증 보존·최소 수정 범위에서 다음을 적용했다.
+
+- `BoardingVehicleTracker`: 이미 ID_ORDER로 검증한 checkpoint와 정확히 같은 이동 detail은 기존 기준점만 유지. 새로운 occurrence의 이동 detail은 알림·checkpoint 없이 일시 재조회. 충돌·역행·회차 모호성·반복 Stop·동일 시각 위치 변경·2분 공백 제한은 보존. 상세 계약은 [Domain](../domain-model.md#snapshot-and-progress)이 소유함
+- `BoardingCandidateService`: 이전 후보 detail의 flag=0도 최신 정차 baseline과 식별/시각/단조성 비교에만 사용. 최신 flag=1·정확한 ID/order·유일한 traversal·목적지 이전 등 기존 검증은 유지. 이전 이동→최신 정차 시작은 자동 테스트로 확인했으며 실제 생성 성공 사례의 이전 detail은 정차였음
+
+최신 detail도 이동 상태이면 여전히 시작 거부다(실제 409 확인). 승차 occurrence 생략으로 이전 detail이 없거나, freshness/identity/occurrence/운행 연속성이 부족한 입력도 계속 차단한다. “버스가 이미 이동 중이어도 언제든 즉시 시작 가능”으로 지원 범위를 확대하지 않았다.
+
+### 24.5 Notification과 검증 등급
+
+수정 후 실제 관측을 적용한 격리 DB의 최종 결과:
+
+| 세션 | PREPARE_ALIGHT | DESTINATION_REACHED | Delivery | 상태 |
+| --- | --- | --- | --- | --- |
+| A / 사전 ON | 1 | 1 | 2 | COMPLETED / ARRIVAL_OBSERVED |
+| B / 사전 OFF | 0 | 1 | 1 | COMPLETED / ARRIVAL_OBSERVED |
+
+각 Event는 올바른 boardingSessionId에 연결됐으며 반복 관측·완료 뒤 추가 polling에서도 Event 3개/Delivery 3개를 유지했다. dummy Device만 있는 격리 DB에서 **attempt 합계 0 / 실제 FCM 전송 0**이다. 기존 Alarm/FCM 코드는 변경하지 않았다.
+
+**실측 확인:** 신선한 ID/전체 번호 대응, metadata exact occurrence, 정차에서 생성, 같은 기준점의 이동 중 추적 유지, 다음 정차 진행, gap 2 준비와 gap 1 중복 억제, ON/OFF별 목적지 Event·Delivery 연결, 반복 polling 중복 억제.
+
+**자동 테스트로만 확인:** 첫 gap 2를 놓친 뒤 gap 1 대체, 목적지 정차 관측 없이 검증된 이후 occurrence로 PASSED_OBSERVED, 앞선 새 occurrence 이동의 일시 보류·정차 복구, 기존 2분 공백 초과 차단, 잘못된 ID/번호·역행·중복 timestamp·회차/반복 Stop 모호성 차단, FCM dispatch/retry 회귀. 이번 관측은 목적지 flag=1을 모두 확보했으므로 **실제 무정차 통과 성공을 주장하지 않는다.** 20초 간격에서 flag=1 미관측도 물리적 무정차의 증거가 아니다.
+
+### 24.6 테스트·문서·다음 단계
+
+- Java 21 / Gradle Wrapper 8.14.3 / MySQL 8.4.11에서 수정 후 Backend 전체 **937개** 통과(실패/오류/skip 0)
+- 그 뒤 V16 Boarding Event/Delivery 보존과 이동 보류의 공백 제한을 보강하고 관련 통합 테스트 **118개** 재통과(실패/오류/skip 0). 현재 테스트 수 938개 전체를 다시 실행했다고 주장하지 않음
+- 초기 추가 단위 테스트의 checkpoint 소수초와 초 단위 Provider 시각 fixture 불일치 1건은 fixture를 일치시킨 뒤 위 전체 테스트로 재검증. 검증을 skip하거나 안전 판단을 완화해 통과시키지 않음
+- Flutter 변경·재검증 없음. 새 Dependency·Provider 설정·Migration 파일·devlog 변경 없음. Domain/API/ADR의 좁은 지원 경계를 동기화하고 TASK-908은 실제 탑승 E2E가 남아 `[ ]` 유지
+- Git add/commit/push·branch/worktree/checkout/reset/stash/clean 없음. 사용자 커밋 전 변경 상태 유지
+
+**판단:** 서울 143번에서 승차 occurrence를 선택하고 전체 번호를 직접 대조한 뒤 최신 정차 detail에서 시작하는 **제한된 iPhone E2E는 시작 가능**하다. 단말에서 접근 가능한 Backend 주소·인증·Device 등록과 기존 설정의 monitoring/dispatch/FCM 활성화는 실제 기기 시험 때 별도로 준비해야 한다. 이번에는 활성화·전송하지 않았다.
+
+이동 중 즉시 시작까지 포함한 일반 사용 준비 완료나 실제 알림 표시 성공은 아니다. 필수 후속 검증은 ① 이동 상태에서 시작할 때 새 occurrence 의미·baseline을 안전하게 확정할 최소 근거/구현 ② 실제 목적지 무정차·회차·공백의 지원 범위 확인 ③ 실제 iPhone의 표시·tap·중복·지연 E2E다. ①이 필요한 상황에서는 정차 관측까지 시작을 보류해야 하며 임의 성공으로 처리하지 않는다. TASK-908/710/711 및 Phase 9 종료 감사의 완료를 의미하지 않는다.
+
+## 25. 실제 iPhone 차량 확정 실패 분석과 진단 보강 (2026-10-28)
+
+### 25.1 확인된 원인과 증거 한계
+
+사용자는 서울 143번에서 승차·목적 occurrence 선택 → 후보 조회 → 전체 번호 입력 → 확정 뒤 `BOARDING_TRACKING_UNSUPPORTED`를 확인했다. 이번에는 실제 Provider API·FCM을 호출하지 않고 현재 코드·기존 로그·프로세스 실행 경로를 조사했다. 시작 시 기존 13개 파일의 변경을 보존했다.
+
+- `BoardingSessionStartValidator.validate`는 reference 소유권/만료 → 최신 metadata → `BoardingCandidateService.revalidateSelected`를 거쳐 검증된 checkpoint를 만든다. §22 당시의 무조건 throw는 현재 코드에 없다
+- 현재 제품 코드에서 이 오류를 던지는 곳은 `revalidateSelected`뿐이다. `BoardingSessionService.create`의 저장 transaction 전에 실패하므로 거절된 요청으로 TRACKING 세션·알림 Event를 만들지 않는다
+- 최초 detail은 flag 0 또는 1이면 비교에 사용할 수 있지만 **최종 detail은 flag 1만 허용**한다. 최초·최종 모두 정차를 요구하던 옛 조건은 기존 사용자 변경에서 이미 완화됐다. 그 변경을 보존했다
+- §24의 실제 201은 최신 정차 detail을 선택한 제한된 성공이다. 같은 실측에서도 19:54:52의 최신 flag 0은 409였다. 따라서 이전 201과 일반 앱 흐름의 실패는 모순되지 않는다
+- 기존 iPhone Backend 로그에는 시작/Dispatcher 초기화만 있고 해당 요청의 세부 거절 사유·관측 snapshot은 없다. **이번 iPhone 요청 자체의 flag 0은 미확정**이다. 이동 중 최종 재검증 거부가 확인된 재현 가능한 구조적 제약이지만, 이 요청이 다른 미지원 조건에 걸렸을 가능성을 배제하지 않는다
+
+### 25.2 실행 Backend와 iPhone 연결
+
+조사 시 두 JVM이 동일 `backend/build/classes/java/main`에서 실행 중이었다. 조사 전 Candidate service 소스 수정은 19:53:02, class 빌드는 19:54:00이며 두 JVM 시작보다 앞선다. 현재 소스와 실행 경로·빌드 시각을 대조했으며 오래된 무조건 실패 Validator를 실행 중이라는 증거는 발견하지 못했다. 프로세스 내부 class를 추출하거나 hot reload/교체한 것은 아니다.
+
+| PID / 시작 KST | Listener / 확인한 실행 인수 |
+| --- | --- |
+| 29713 / 23:03:44 | `127.0.0.1:8080`; monitoring·dispatch·FCM 모두 false |
+| 49877 / 23:18:44 | `*:8080`; local profile, monitoring·dispatch true. FCM의 실제 유효값·전송 여부는 이번에 확인하지 않음 |
+
+기존 iPhone 터널 로그의 origin은 `http://127.0.0.1:8080`이므로 명시적인 loopback listener인 29713이 연결 대상이다. 이는 터널 설정·listener 점검이며 실제 실패 요청의 access trace를 복원한 것은 아니다. 29713에서는 세션 생성이 성공하더라도 자동 추적·실제 알림은 OFF다. 49877의 ON 설정을 iPhone 대상 설정으로 오인하면 안 된다. 기존 프로세스·터널·설정·DB를 변경하지 않았다.
+
+### 25.3 최소 진단 수정
+
+기존 검증 순서·응답 code·지원 범위·Provider 호출 수를 그대로 두고 미지원 조건을 분리했다. 최초로 실패한 guard 하나만 다음 형태로 WARN 기록한다.
+
+```text
+Boarding start rejected: stage=candidate-revalidation provider=SEOUL_BUS reason=LATEST_DETAIL_MOVING responseStatus=409
+```
+
+| 내부 reason | 차단 조건 |
+| --- | --- |
+| PROVIDER_UNVERIFIED | TAGO의 하차 추적 미검증 |
+| ORIGINAL_RUN_ENDED / CURRENT_RUN_ENDED | 최초/최신 roster의 명시적 운행 종료 |
+| CURRENT_POSITION_MISSING | 최신 Stop ID 또는 order 없음 |
+| LATEST_DETAIL_MOVING / LATEST_STOP_FLAG_UNVERIFIED | 최신 flag 0 / 최신 flag가 0·1로 검증되지 않음 |
+| ORIGINAL_DETAIL_MISSING | 최초 후보에 detail 없음 |
+| ORIGINAL_STOP_FLAG_UNVERIFIED | 최초 flag가 0·1로 검증되지 않음 |
+| ORIGINAL_POSITION_UNVERIFIED | 최초 ID/order의 정확한 metadata 대응 불가 |
+| REPEATED_STOP_TRAVERSAL | 전체 traversal에 반복 Stop ID가 있어 회차 문맥 불명확 |
+
+차량번호·vehId·Stop ID·reference·User ID·fingerprint·GPS·제공시각 원문·URL/query·credential·Provider body를 로그에 추가하지 않는다. reference 소실/만료·식별/시각/metadata 충돌은 기존 `BOARDING_CANDIDATE_CHANGED`, 목적지 현재/이후는 `BOARDING_TARGET_NOT_AHEAD`, Provider 실패는 503을 유지한다.
+
+진단 수정은 컴파일·테스트했지만 **기존 JVM은 재시작하지 않아 실행 중 Backend에는 아직 적용되지 않았다**. 새 로그로 다음 실제 요청을 확인하려면 올바른 Backend에 진단 빌드를 적용해야 한다. 이번에 재현 목적의 후보/확정 요청이나 자동 Provider 조회를 실행하지 않았다.
+
+### 25.4 실차 시작 조건과 후속 설계안 — 미확정·미구현
+
+현재 성공 조건은 선택 승차 occurrence로 조회해 최초 detail을 확보하고, 원래 roster/detail의 freshness 60초 안에 같은 vehId·전체 번호의 최신 roster/detail을 재검증하며, 최신 exact `stId/stOrd + flag 1`이 목적지 이전이고 단조 진행·시각·구조 일치·유일 Stop traversal·운행 종료 없음 등을 통과하는 것이다. 사용자별 미종료 세션 충돌과 저장 직전 만료/metadata 검증도 통과해야 한다. 사전 알림 선택은 시작 지원 조건을 바꾸지 않는다.
+
+최종 응답을 Provider의 정차 관측 시점에 맞추는 것은 실차에서 항상 가능하지 않다. 번호 대조·입력·Push 준비·HTTP 왕복 사이 출발할 수 있고 §24의 제공→수신 지연은 약7.4~42.5초였다. 물리적으로 정차해 있다고 Provider가 flag 1을 반환한다고 보장하지 않는다. 최초 조회도 정차를 요구하는 옛 조건을 복구하면 성공 창이 더 좁아진다. 반복 확정/자동 재시도로 이 문제를 해결하면 원래 freshness·idempotency·호출 예산을 손상할 수 있다.
+
+검토 가능한 두 경로는 다음과 같다. 아래는 지원 계약 변경 제안이며 승인된 설계로 승격하거나 구현하지 않았다.
+
+1. **좁은 기존 기준점 재사용:** 최초 후보가 검증된 정차였고 최신 이동 detail이 정확히 같은 ID/order를 유지하는 경우만, 원래 정차 checkpoint와 원래 시각으로 시작하는 방안. 현재 Tracker의 기존 기준점 유지 원칙과 일치시킬 수 있지만, 최종 정차 필수라는 현 API 지원 계약을 바꾸므로 결정이 필요하다. 이동 응답을 새 도착/진행으로 만들거나 원래 시각을 최신 수신시각으로 갱신해서는 안 된다. 최초·최종 모두 이동이거나 occurrence가 바뀌면 해결하지 못한다
+2. **검증 대기 접수:** 최초부터 이동인 일반 흐름은 사용자 번호 확인 의도와 추적 시작을 분리하고, 예를 들어 `AWAITING_BASELINE` 같은 대기 상태에서 선택 차량만 제한적으로 재검증한다. 신선한 정차 기준점·같은 차량/운행·metadata·목적지 이전을 모두 확보한 뒤에만 TRACKING으로 전이한다. 대기 중에는 checkpoint/gap/추적 성공·Event/Delivery/전송을 만들지 않으며, 차량 소실·identity/metadata 변경·역행·회차 불명확은 자동 연결하지 않는다. 대기 기한 초과·목적지 도달 전에 기준점 미확보는 실패/만료로 명확히 표시해야 한다
+
+두 번째 방안은 Requirements/ADR-012의 확정 성공=즉시 추적 및 실패 시 세션 미생성 계약, API 응답/동일 UUID 재요청·조회·취소, Domain/DB의 필수 checkpoint·User당 open 세션 UNIQUE, restart/worker admission·FCM gate, Flutter pending intent·상태 UI를 함께 바꿔야 한다. 기존 SUSPENDED는 이미 검증된 세션의 상태이므로 미검증 접수를 임의로 넣지 않는다. 접수 TTL·조회 예산/주기·동일성 상실 처리와 Migration을 먼저 결정해야 한다. 대기는 번호 대조 UX를 살리지만 정차 관측을 끝내 놓치면 추적 시작을 보장할 수 없다. 이동 detail만으로 새 baseline을 만드는 안은 추가 근거 없이 채택하지 않는다.
+
+### 25.5 검증과 상태
+
+- Java/JVM 21.0.12.1·Gradle Wrapper 8.14.3에서 Candidate service/revalidation/reference 및 실제 StartValidator를 사용하는 Session API 통합 **130개 통과**, failure/error/skip 0. 신규 11개 사례로 최초 flag 0/1 → 최신 flag 0 거부, 나머지 미지원 분기별 사유·민감 식별자 비노출·Provider 추가 호출 없음 확인
+- 격리 MySQL Testcontainers·Mock Provider 사용. 실제 Provider API·FCM 전송 0회, 기존 개발 DB 변경·Backend 재시작·Flutter 변경 없음
+- 제품 변경은 Candidate service의 진단 로그, 테스트는 RevalidationTest만 추가. Owner API/Domain/요구사항의 지원 계약은 변경하지 않음. 새 Dependency·Migration·devlog 수정 없음
+- `git diff --check`와 최종 diff/status 확인. 기존 사용자 변경 보존, Git add/commit/push·브랜치 변경 없음. TASK-908 `[ ]` 유지. 일반 이동 중 시작과 실제 iPhone E2E 차단은 아직 해결 완료로 처리하지 않음
+
+## 26. 잔여 실행 정리와 정차 기준점 재사용 (2026-10-29)
+
+이번 사용자는 §25의 좁은 개선을 안전하게 구현하고 실행 환경을 정리하도록 지시했다. §25의 최신 정차 필수·설계 미확정·Backend 실행 상태는 당시 기록이며, 현재 지원 계약은 [API](../api.md#탑승-세션-api-task-903)와 Domain·ADR-012의 이번 동기화를 따른다.
+
+- 실행 정리: StopBell cwd·실행 인수·부모 관계·기존 `/tmp` 로그를 확인한 Backend 29713(loopback 8080)과 Cloudflare 30311(loopback 20241)을 SIGTERM으로 정상 종료했다. Spring graceful shutdown·JPA/Hikari 종료를 확인했고 bootRun 29404 및 그 daemon 80638도 종료됐다. 이전 StopBell 테스트의 유휴 Gradle daemon 69328도 SIGTERM으로 종료했다. 사용자 Backend 49877은 이미 없었다
+- VS Code 소속 Flutter daemon 50754·language server 50755·tooling daemon 50756·DevTools 50821과 Java/Kotlin 편집기 도구는 StopBell 앱 실행/임시 서버라는 근거가 없고 다른 workspace도 사용할 수 있어 보존했다. `flutter run`, 임시 Provider/Notification harness 실행은 발견하지 못했다. Docker `stopbell-mysql-1`/Volume/데이터·Migration 이력·설정·Credential은 보존했다
+- 원인: 기존 실패 요청의 차단 사유는 여전히 미확정이다. 종료한 Backend 로그에도 해당 요청의 진단이 없었다. Flutter는 전체 번호 확인 → Push permission/Device 준비 → freshness 재검증 → 원래 UUID/body 저장 → freshness 재검증 → POST 순서다. Push 준비 중 만료는 기존 보호가 POST 전에 막으며, 서버 reference는 최초 roster/detail의 제공/수신시각 중 가장 이른 만료를 사용한다. Provider 지연만큼 실제 입력 여유는 60초보다 짧을 수 있다. timeout을 늘리거나 관측을 새로 받은 것처럼 처리하지 않았다
+- 최소 구현: `BoardingCandidateService.revalidateSelected`가 최신 이동을 받으면 최초의 신선한 정차와 정확히 같은 ID/order인지 확인하고, 기존 identity·시각·단조성·유일 traversal·목적지 이전·운행 종료 차단을 모두 통과한 경우에만 **최초 정차 Vehicle과 원래 두 시각**을 Validator에 전달한다. Validator·Entity·runtime·알림 정책은 재사용하며 새 상태/Schema/Dependency는 없다. 저장 직전 만료·metadata 검사도 그대로다
+- 진단: 미지원 이동은 `MOVING_WITHOUT_STOPPED_BASELINE` 또는 `MOVING_REFERENCE_CHANGED`로 구분한다. 정상 기준점 재사용은 `outcome=STOPPED_BASELINE_REUSED`이며 validation 결과일 뿐 생성/전송 성공 로그가 아니다. 다른 기존 비식별 reason과 개인정보·credential 비노출을 유지한다. 다음 Backend 실행부터 적용되며 상시 서버를 재가동하지 않았다
+- 지원: 정차→정차 및 기존 이동→최신 정차 지원을 유지하고, **정차→같은 occurrence 이동**만 추가했다. 이동→이동, 새 occurrence 이동, 만료·stale·차량/번호 변경·역행·운행 종료·반복 Stop/회차 불명확·목적지 현재/이후는 계속 거부한다. 생성은 Event/Delivery를 만들지 않고 `RECOVERY_PENDING`을 반환하며 과거 정차를 현재 위치로 표현하지 않는다
+- 대기 접수는 미구현: 처음부터 이동인 차량에는 검증 대기 의도/상태, checkpoint nullable 여부·Migration, User당 open 세션과 UUID idempotency, 접수 만료·조회 예산, 취소/재시작/소실 시 처리, Flutter 상태, TRACKING 전 Event/Delivery/FCM 금지 계약을 먼저 결정해야 한다. 기존 SUSPENDED에 미검증 접수를 넣지 않고 §25.4의 별도 설계 경계를 유지한다
+- 다음 실기기 절차는 [Local Development](../local-development.md#사용자-실행-순서)에 단일 Backend → 터널/새 HTTPS 주소 → local.json/Flutter 재빌드, 명시적 승인 후 자동 Provider/FCM 활성화, 시험 후 전체 종료 순서로 반영했다. 실제 Provider 추가 호출·FCM 전송·터널/개발 Backend 재가동·iPhone 실행은 이번에 수행하지 않았다. TASK-908은 `[ ]` 유지
+- 검증: Java/JVM 21.0.12.1·Gradle Wrapper 8.14.3, `FCM_ENABLED=false ./gradlew --no-daemon test`로 Backend **69개 클래스·966개 테스트**가 failure/error/skip 0으로 통과했다. 새 단위/API **14개 사례**와 기존 Alarm·Notification·tracking 회귀를 포함한다. 최초 집중 104개 실행에서는 신규 API 기대값이 수신시각의 microsecond를 초 단위 Provider 시각에도 기대한 2건이 실패했으며, 원래 두 시각을 구분하도록 fixture 기대값을 수정한 뒤 전체 suite를 통과했다. 제품의 시각 검증을 완화하지 않았다
+- Flutter의 기존 `boarding_session_controller_test.dart`·`boarding_push_readiness_test.dart` **65개 통과**. Mock/Fake Push·Provider와 격리 MySQL/loopback HTTP 검증이며 실제 Provider/iPhone/FCM 성공이 아니다. `--no-daemon` JVM과 Testcontainers는 실행 후 종료됐고 최종 Backend·터널·Flutter 앱·harness·test worker 0개, 8080/20241 listener 없음, 실행 중 Docker 컨테이너는 기존 healthy MySQL만 확인했다. 편집기 도구는 보존했다
+- 문서 링크·`git diff --check`·diff/status·staging 비어 있음을 확인했다. 기존 미커밋 변경·main 유지, Git add/commit/push·브랜치/Worktree 변경 없음. API·Domain·ADR의 좁은 지원 변경과 local 실행 절차만 동기화하고 Dependency·Migration·devlog·기존 설정 파일은 변경하지 않았다

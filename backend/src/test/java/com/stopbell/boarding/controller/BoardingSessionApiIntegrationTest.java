@@ -317,6 +317,70 @@ class BoardingSessionApiIntegrationTest {
         });
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("후보 조회의 정차 뒤 같은 occurrence에서 이동 중 확정하면 원래 기준점을 저장하고 알림을 만들지 않는다")
+    void create_from_stopped_baseline_while_moving(boolean prepare) throws Exception {
+        var lookup = mvc.perform(auth(get("/api/v1/bus-routes/" + route.getId() + "/boarding-candidates")
+                        .param("targetStopOccurrenceId", target.getId().toString())
+                        .param("boardingStopOccurrenceId", first.getId().toString()), owner))
+                .andExpect(status().isOk()).andReturn();
+        String reference = json.readTree(lookup.getResponse().getContentAsString())
+                .get("candidates").get(0).get("candidateRef").asString();
+        time.set(NOW.plusSeconds(10));
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
+                new SeoulBusVehicleDetailItem("vehicle-id", NUMBER, "s1", 10, 0, "20261020120010", null, null)))));
+        String content = body(REQUEST_ID, reference).replace("}", ",\"prepareNotificationEnabled\":" + prepare + "}");
+
+        mvc.perform(auth(postSession(REQUEST_ID, reference).content(content), owner))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("TRACKING"))
+                .andExpect(jsonPath("$.checkpointObservedAt").value(NOW.toString()))
+                .andExpect(jsonPath("$.providerDataTime").value(NOW.truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()))
+                .andExpect(jsonPath("$.evaluationStatus").value("RECOVERY_PENDING"))
+                .andExpect(jsonPath("$.remainingOccurrenceGap").isEmpty())
+                .andExpect(jsonPath("$.prepareNotificationEnabled").value(prepare));
+        assertThat(sessions.findAll()).singleElement().satisfies(session -> {
+            assertThat(session.getCheckpoint().getObservedAt()).isEqualTo(UTC_NOW);
+            assertThat(session.getCheckpoint().getProviderDataTime())
+                    .isEqualTo(UTC_NOW.truncatedTo(java.time.temporal.ChronoUnit.SECONDS));
+            assertThat(session.getCheckpoint().getIndex()).isZero();
+        });
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
+        time.set(NOW.plusSeconds(61));
+        mvc.perform(auth(postSession(REQUEST_ID, reference).content(content), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.checkpointObservedAt").value(NOW.toString()));
+        assertThat(sessions.count()).isEqualTo(1);
+        verify(seoul, times(2)).fetchVehicleLocations(any());
+        verify(detail, times(2)).fetchVehicleDetail("vehicle-id");
+        verifyNoInteractions(tago);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"NO_BASELINE", "CHANGED_REFERENCE", "TARGET_REACHED", "EXPIRED"})
+    @DisplayName("이동 중 기준점 부재·다른 occurrence·목적지 현재·후보 만료는 세션과 목적지 알림을 만들지 않는다")
+    void reject_unsupported_moving_creation(String issue) throws Exception {
+        if (issue.equals("NO_BASELINE")) {
+            when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress("s1", 10, 0));
+        }
+        String reference = candidateRef();
+        time.set(NOW.plusSeconds(issue.equals("EXPIRED") ? 61 : 10));
+        String stop = issue.equals("TARGET_REACHED") ? "s3" : issue.equals("CHANGED_REFERENCE") ? "s2" : "s1";
+        int order = stop.equals("s3") ? 30 : stop.equals("s2") ? 20 : 10;
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
+                new SeoulBusVehicleDetailItem("vehicle-id", NUMBER, stop, order, 0, "20261020120010", null, null)))));
+
+        expectError(reference, issue.equals("EXPIRED") ? "BOARDING_CANDIDATE_CHANGED"
+                : issue.equals("TARGET_REACHED") ? "BOARDING_TARGET_NOT_AHEAD" : "BOARDING_TRACKING_UNSUPPORTED", 409);
+
+        assertThat(sessions.count()).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
+        verify(detail, times(issue.equals("EXPIRED") ? 1 : 2)).fetchVehicleDetail("vehicle-id");
+    }
+
     @Test
     @DisplayName("같은 제공시각의 occurrence 변경은 실제 시작 검증에서 세션과 알림을 저장하지 않는다")
     void conflicting_progress_does_not_create_session() throws Exception {

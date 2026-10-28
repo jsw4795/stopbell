@@ -162,6 +162,60 @@ class BoardingTrackingIntegrationTest {
         assertThat(deliveries.count()).isEqualTo(events.count());
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("정차·동일 기준점 이동·다음 이동 보류·정차 복구 뒤 목적지 도달은 선택별 Event와 Delivery를 한 번 저장한다")
+    void stopped_moving_stopped_progress(boolean preparation) {
+        jdbc.update("update boarding_sessions set prepare_notification_enabled=? where id=?", preparation, session.getId());
+        device(session.getUser());
+        when(detail.fetchVehicleDetail(anyString())).thenReturn(movingDetail(0));
+        polling.poll(cycle());
+        assertThat(store.findOpen().getFirst().checkpoint().getIndex()).isZero();
+        assertThat(store.findOpen().getFirst().status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(events.count()).isZero();
+
+        time.set(NOW.plusSeconds(40));
+        when(detail.fetchVehicleDetail(anyString())).thenReturn(movingDetail(1));
+        polling.poll(cycle());
+        assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.STALE_PROGRESS);
+        assertThat(store.findOpen().getFirst().requiresConfirmation()).isFalse();
+        assertThat(store.findOpen().getFirst().checkpoint().getIndex()).isZero();
+        assertThat(events.count()).isZero();
+
+        time.set(NOW.plusSeconds(60));
+        when(detail.fetchVehicleDetail(anyString())).thenReturn(detail(1));
+        polling.poll(cycle());
+        polling.poll(cycle());
+        assertThat(store.findOpen().getFirst().status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(events.count()).isEqualTo(preparation ? 1 : 0);
+        time.set(NOW.plusSeconds(80));
+        when(detail.fetchVehicleDetail(anyString())).thenReturn(detail(4));
+        polling.poll(cycle());
+        polling.poll(cycle());
+        assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.COMPLETED);
+        assertThat(events.count()).isEqualTo(preparation ? 2 : 1);
+        assertThat(deliveries.count()).isEqualTo(events.count());
+    }
+
+    @Test
+    @DisplayName("신선한 새 occurrence 이동 응답도 마지막 검증 이후 2분 공백을 넘으면 재확인을 요구한다")
+    void moving_forward_does_not_bridge_excessive_gap() {
+        time.set(NOW.plusSeconds(160));
+        when(detail.fetchVehicleDetail(anyString())).thenReturn(movingDetail(1));
+        polling.poll(cycle());
+        assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
+        assertThat(store.findOpen().getFirst().requiresConfirmation()).isTrue();
+        assertThat(store.findOpen().getFirst().checkpoint().getIndex()).isZero();
+        assertThat(events.count()).isZero();
+    }
+
+    private SeoulBusVehicleDetailResponse movingDetail(int index) {
+        var item = detail(index).body().itemList().getFirst();
+        return new SeoulBusVehicleDetailResponse(new SeoulBusVehicleDetailResponse.Header("0", null),
+                new SeoulBusVehicleDetailResponse.Body(List.of(new SeoulBusVehicleDetailItem(item.vehId(), item.plainNo(),
+                        item.stId(), item.stOrd(), 0, item.dataTm(), null, null))));
+    }
+
     @Test
     @DisplayName("목적지 Event 저장 실패는 완료 상태와 checkpoint까지 rollback한다")
     void destination_insert_failure_rolls_back_completion() {

@@ -6,6 +6,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import com.stopbell.boarding.domain.*;
+import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.boarding.entity.BoardingStateReason;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.mapper.BoardingCandidateMapper;
@@ -87,13 +88,62 @@ public class BoardingVehicleTracker {
             }
             vehicle = detail;
         }
-        // Production evidence supports only Seoul exact stopped detail. Moving semantics, TAGO
-        // alight tracking and order-only remain unverified; no environment switch bypasses this.
+        if (session.provider() == TransitProvider.SEOUL_BUS && Integer.valueOf(0).equals(vehicle.stopFlag())) {
+            return moving(session, vehicle);
+        }
+        // Only exact stopped detail establishes a new arrival. A moving response never
+        // establishes arrival at a new occurrence, even when its numeric order matches.
         var meaning = session.provider() == TransitProvider.SEOUL_BUS && Integer.valueOf(1).equals(vehicle.stopFlag())
                 && vehicle.stopId() != null ? BoardingProgressObservation.Meaning.DIRECT_ARRIVAL
                 : BoardingProgressObservation.Meaning.UNVERIFIED;
         return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
                 vehicle, meaning, false, null, false), null);
+    }
+
+    private Input moving(BoardingTrackingSnapshot session, Vehicle vehicle) {
+        var previous = session.checkpoint();
+        if (vehicle.observedAt().isBefore(previous.getObservedAt().toInstant(ZoneOffset.UTC))
+                || (previous.getProviderDataTime() != null && vehicle.providerDataTime()
+                    .isBefore(previous.getProviderDataTime().toInstant(ZoneOffset.UTC)))) {
+            return Input.held(BoardingStateReason.PROGRESS_REGRESSION);
+        }
+        var occurrences = session.traversal().occurrences();
+        if (occurrences.stream().map(item -> item.externalStopId()).distinct().count() != occurrences.size()) {
+            return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        }
+        int index = -1;
+        for (int i = 0; i < occurrences.size(); i++) {
+            var occurrence = occurrences.get(i);
+            if (Integer.valueOf(occurrence.order()).equals(vehicle.order())
+                    && occurrence.externalStopId().equals(vehicle.stopId())) {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0) {
+            return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        }
+        if (index < previous.getIndex()) {
+            return Input.held(BoardingStateReason.PROGRESS_REGRESSION);
+        }
+        if (index != previous.getIndex()) {
+            if (vehicle.observedAt().equals(previous.getObservedAt().toInstant(ZoneOffset.UTC))
+                    || (previous.getProviderDataTime() != null && vehicle.providerDataTime()
+                        .equals(previous.getProviderDataTime().toInstant(ZoneOffset.UTC)))) {
+                return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+            }
+            // A plausible forward moving reference is unavailable arrival evidence, not
+            // known loss of the run. Retain the checkpoint and bounded automatic retry.
+            return Input.held(BoardingStateReason.STALE_PROGRESS);
+        }
+        if (previous.getEvidence() != BoardingCheckpoint.Evidence.ID_ORDER) {
+            return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        }
+        // Seoul live observations retain the last stopped stId/stOrd after flag 1 -> 0.
+        // Preserve only that already verified reference; never advance it from moving data.
+        return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
+                vehicle, BoardingProgressObservation.Meaning.VERIFIED_REFERENCE, false,
+                previous.getDirectionContext(), false), null);
     }
 
     private static boolean stale(Vehicle vehicle, Instant now) {

@@ -86,13 +86,29 @@ class NotificationSourceMigrationIntegrationTest {
                 start.traversal().toJson(), start.traversal().fingerprint(), now, now, now, now.plusHours(4));
         var oldSessions = jdbc.queryForList("select * from boarding_sessions");
 
+        assertThat(Flyway.configure().dataSource(dataSource).target("16").load().migrate().migrationsExecuted).isEqualTo(1);
+        Long sessionId = jdbc.queryForObject("select id from boarding_sessions", Long.class);
+        jdbc.update("""
+                insert into notification_events (source_type, boarding_session_id, boarding_event_type, user_id,
+                    observed_at, event_detected_at, created_at, expires_at)
+                values ('BOARDING_SESSION', ?, 'PREPARE_ALIGHT', ?, ?, ?, ?, ?)
+                """, sessionId, userId, now, now, now, now.plusSeconds(30));
+        Long boardingEventId = jdbc.queryForObject("select max(id) from notification_events", Long.class);
+        jdbc.update("""
+                insert into notification_deliveries (notification_event_id, device_id, recipient_ownership_generation,
+                    status, next_attempt_at, expires_at, created_at, updated_at)
+                select ?, min(id), 3, 'PENDING', ?, ?, ?, ? from devices
+                """, boardingEventId, now, now.plusSeconds(30), now, now);
+        var boardingEvent = jdbc.queryForMap("select * from notification_events where id=?", boardingEventId);
+        var boardingDelivery = jdbc.queryForMap("select * from notification_deliveries where notification_event_id=?", boardingEventId);
+
         var latest = Flyway.configure().dataSource(dataSource).load();
-        assertThat(latest.migrate().migrationsExecuted).isEqualTo(2);
+        assertThat(latest.migrate().migrationsExecuted).isEqualTo(1);
         latest.validate();
         assertThat(latest.migrate().migrationsExecuted).isZero();
         assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class))
                 .isEqualTo("17");
-        var migratedEvents = jdbc.queryForList("select * from notification_events order by id");
+        var migratedEvents = jdbc.queryForList("select * from notification_events where source_type='ALARM' order by id");
         assertThat(migratedEvents).hasSameSizeAs(oldEvents);
         for (int i = 0; i < oldEvents.size(); i++) {
             assertThat(migratedEvents.get(i)).containsAllEntriesOf(oldEvents.get(i))
@@ -101,8 +117,12 @@ class NotificationSourceMigrationIntegrationTest {
                     .containsEntry("boarding_event_type", null)
                     .containsEntry("expires_at", null);
         }
-        assertThat(jdbc.queryForList("select * from notification_deliveries order by id")).isEqualTo(oldDeliveries);
-        assertThat(jdbc.queryForList("select status from notification_deliveries order by id", String.class))
+        assertThat(jdbc.queryForMap("select * from notification_events where id=?", boardingEventId)).isEqualTo(boardingEvent);
+        assertThat(jdbc.queryForMap("select * from notification_deliveries where notification_event_id=?", boardingEventId))
+                .isEqualTo(boardingDelivery);
+        assertThat(jdbc.queryForList("select * from notification_deliveries where notification_event_id=? order by id", eventId))
+                .isEqualTo(oldDeliveries);
+        assertThat(jdbc.queryForList("select status from notification_deliveries where notification_event_id=? order by id", String.class, eventId))
                 .containsExactly("PENDING", "ACCEPTED", "FAILED", "EXPIRED");
         assertThat(jdbc.queryForList("select * from devices order by id")).isEqualTo(oldDevices);
         assertThat(jdbc.queryForList("select * from alarms order by id")).isEqualTo(oldAlarms);

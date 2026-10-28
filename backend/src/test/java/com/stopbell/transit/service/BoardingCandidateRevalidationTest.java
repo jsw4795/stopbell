@@ -18,8 +18,11 @@ import com.stopbell.transit.service.BoardingCandidateReferenceStore.Snapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 class BoardingCandidateRevalidationTest {
     private final BoardingCandidateMetadataService metadata = mock(BoardingCandidateMetadataService.class);
@@ -79,6 +82,134 @@ class BoardingCandidateRevalidationTest {
     void allow_unchanged_source_without_inventing_progress() {
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s1", 10, DATA_TIME)));
         assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isZero();
+    }
+
+    @Test
+    @DisplayName("이전 후보가 이동 중이어도 최신 정차 detail과 식별·시각·단조 진행을 검증하면 시작한다")
+    void allow_previous_moving_reference_with_latest_arrival() {
+        original = new Snapshot(original.context(), route, route.fingerprint(), original.rosterVehicle(),
+                BoardingCandidateMapper.detail(new SeoulBusVehicleDetailItem("v1", "서울70사1234", "s1", 10,
+                        0, DATA_TIME, null, null), NOW), original.expiresAt());
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isEqualTo(1);
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
+                "v1", "서울70사1234", "s2", 20, 0, "20261019120001", null, null)));
+        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1})
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("검증된 동일 정차 기준점이 없는 이동 응답은 시작을 거부하고 식별자 없이 사유를 기록한다")
+    void diagnose_latest_moving_detail(int previousFlag, CapturedOutput output) {
+        original = new Snapshot(original.context(), route, route.fingerprint(), original.rosterVehicle(),
+                BoardingCandidateMapper.detail(new SeoulBusVehicleDetailItem("v1", "서울70사1234", "s1", 10,
+                        previousFlag, DATA_TIME, null, null), NOW), original.expiresAt());
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
+                "v1", "서울70사1234", "s2", 20, 0, "20261019120001", null, null)));
+
+        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+
+        assertDiagnostic(output, previousFlag == 0 ? "MOVING_WITHOUT_STOPPED_BASELINE" : "MOVING_REFERENCE_CHANGED");
+        verify(seoul, times(1)).fetchVehicleLocations(any());
+        verify(details, times(1)).fetchVehicleDetail("v1");
+        verifyNoInteractions(tago);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {DATA_TIME, "20261019120001"})
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("정차 뒤 같은 occurrence의 이동 응답을 확인하면 최초 정차 근거와 원래 두 시각으로 시작한다")
+    void reuse_stopped_baseline_without_refreshing_times(String latestTime, CapturedOutput output) {
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
+                "v1", "서울70사1234", "s1", 10, 0, latestTime, null, null)));
+
+        var verified = service.revalidateSelected(original, route, "서울70사1234");
+
+        assertThat(verified.vehicle()).isSameAs(original.detailVehicle());
+        assertThat(verified.vehicle().observedAt()).isEqualTo(NOW);
+        assertThat(verified.vehicle().providerDataTime()).isEqualTo(NOW);
+        assertThat(verified.progressIndex()).isZero();
+        assertThat(output.getAll()).contains("outcome=STOPPED_BASELINE_REUSED")
+                .doesNotContain("서울70사1234", "v1", "s1", "external-route");
+        verify(seoul, times(1)).fetchVehicleLocations(any());
+        verify(details, times(1)).fetchVehicleDetail("v1");
+        verifyNoInteractions(tago);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ID", "NUMBER", "SOURCE_REGRESSION", "STALE_DETAIL", "STALE_BASELINE", "COARSE_CONFLICT"})
+    @DisplayName("같은 occurrence의 이동 응답도 식별·시각·원래 기준점 freshness·운행 문맥 검증을 통과해야 한다")
+    void reject_unsafe_moving_start(String issue) {
+        String id = issue.equals("ID") ? "other-vehicle" : "v1";
+        String number = issue.equals("NUMBER") ? "다른 번호" : "서울70사1234";
+        String time = issue.equals("SOURCE_REGRESSION") ? "20261019115959" : "20261019120001";
+        if (issue.equals("STALE_DETAIL")) {
+            time = "20261019115859";
+        } else if (issue.equals("STALE_BASELINE")) {
+            original = new Snapshot(original.context(), route, route.fingerprint(), original.rosterVehicle(),
+                    BoardingCandidateMapper.detail(detail("v1", number, "s1", 10, "20261019115859"), NOW),
+                    original.expiresAt());
+        } else if (issue.equals("COARSE_CONFLICT")) {
+            when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(
+                    new com.stopbell.transit.dto.seoul.SeoulBusVehicleLocationItem("v1", number, 999,
+                            "changed-section", 0, DATA_TIME, null, null, "not-an-occurrence", "1", null)));
+        }
+        when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
+                id, number, "s1", 10, 0, time, null, null)));
+
+        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"LATEST_STOP_FLAG_UNVERIFIED", "ORIGINAL_DETAIL_MISSING",
+            "ORIGINAL_STOP_FLAG_UNVERIFIED", "ORIGINAL_POSITION_UNVERIFIED", "CURRENT_POSITION_MISSING",
+            "REPEATED_STOP_TRAVERSAL", "ORIGINAL_RUN_ENDED", "CURRENT_RUN_ENDED", "PROVIDER_UNVERIFIED"})
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("같은 미지원 오류의 서로 다른 차단 조건을 고정 사유로 구분하고 차량·정류장·reference를 기록하지 않는다")
+    void diagnose_other_unsupported_conditions(String reason, CapturedOutput output) {
+        var previous = original.detailVehicle();
+        switch (reason) {
+            case "LATEST_STOP_FLAG_UNVERIFIED" -> when(details.fetchVehicleDetail("v1"))
+                    .thenReturn(detailResponse(new SeoulBusVehicleDetailItem("v1", "서울70사1234", "s2", 20,
+                            null, "20261019120001", null, null)));
+            case "ORIGINAL_DETAIL_MISSING" -> previous = null;
+            case "ORIGINAL_STOP_FLAG_UNVERIFIED" -> previous = BoardingCandidateMapper.detail(
+                    new SeoulBusVehicleDetailItem("v1", "서울70사1234", "s1", 10, null, DATA_TIME, null, null), NOW);
+            case "ORIGINAL_POSITION_UNVERIFIED" -> previous = BoardingCandidateMapper.detail(
+                    detail("v1", "서울70사1234", null, 10, DATA_TIME), NOW);
+            case "CURRENT_POSITION_MISSING" -> when(details.fetchVehicleDetail("v1"))
+                    .thenReturn(detailResponse(detail("v1", "서울70사1234", null, 20, "20261019120001")));
+            case "REPEATED_STOP_TRAVERSAL" -> route = new BoardingRouteSnapshot(1L, route.provider(),
+                    route.externalRouteId(), null, 14L, 12L, List.of(route.traversal().get(0),
+                    route.traversal().get(1), new BoardingRouteSnapshot.Occurrence(13L, "s1", 30, "재방문"),
+                    route.traversal().get(3)), route.routeNumber());
+            case "ORIGINAL_RUN_ENDED", "CURRENT_RUN_ENDED" -> {
+                var ended = roster("v1", "서울70사1234", DATA_TIME);
+                ended = new com.stopbell.transit.dto.seoul.SeoulBusVehicleLocationItem(ended.vehId(), ended.plainNo(),
+                        999, "coarse", 1, DATA_TIME, null, null, "not-an-occurrence", "0", null);
+                if (reason.equals("ORIGINAL_RUN_ENDED")) {
+                    original = new Snapshot(original.context(), route, route.fingerprint(),
+                            BoardingCandidateMapper.roster(ended, NOW), previous, original.expiresAt());
+                } else {
+                    when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(ended));
+                }
+            }
+            case "PROVIDER_UNVERIFIED" -> route = route(TransitProvider.TAGO, 12L);
+            default -> throw new AssertionError(reason);
+        }
+        original = new Snapshot(original.context(), route, route.fingerprint(), original.rosterVehicle(),
+                previous, original.expiresAt());
+
+        expect(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+
+        assertDiagnostic(output, reason);
+    }
+
+    private void assertDiagnostic(CapturedOutput output, String reason) {
+        assertThat(output.getAll()).contains("stage=candidate-revalidation provider=" + route.provider(),
+                        "reason=" + reason + " responseStatus=409")
+                .doesNotContain("서울70사1234", "v1", "s1", "s2", "external-route", DATA_TIME,
+                        original.metadataFingerprint(), original.expiresAt().toString());
     }
 
     @Test

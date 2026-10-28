@@ -101,7 +101,7 @@ class BoardingDispatchIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {0, 1, 2, 3, 4})
+    @ValueSource(ints = {0, 1, 2, 3, 4, 5, 6})
     @DisplayName("완료 목적지 알림도 기한·관측 freshness·Event 대응·완료 상태가 틀리면 FCM을 호출하지 않는다")
     void reject_invalid_destination_evidence(int scenario) {
         var fixture = fixture(false);
@@ -113,22 +113,45 @@ class BoardingDispatchIntegrationTest {
             case 2 -> jdbc.update("update boarding_sessions set checkpoint_provider_data_time=? where id=?", UTC_NOW.minusSeconds(61), fixture.sessionId());
             case 3 -> jdbc.update("update notification_events set provider_data_time=? where id=?", UTC_NOW.minusSeconds(1), eventId);
             case 4 -> jdbc.update("update boarding_sessions set checkpoint_index=0 where id=?", fixture.sessionId());
+            case 5 -> jdbc.update("update boarding_sessions set status='CANCELLED', state_reason='USER_CANCELLED' where id=?",
+                    fixture.sessionId());
+            case 6 -> jdbc.update("update boarding_sessions set status='EXPIRED', state_reason='SESSION_LIFETIME_EXPIRED' where id=?",
+                    fixture.sessionId());
         }
         worker(attempts, provider, 5).dispatchPending();
         verifyNoInteractions(provider);
+        if (scenario >= 5) {
+            assertThat(attempts.beginAttempt(deliveries.findAllByNotificationEventIdOrderByIdAsc(eventId).getFirst().getId()))
+                    .isEmpty();
+        }
         assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(eventId)).singleElement()
                 .extracting(NotificationDelivery::getAttemptCount).isEqualTo(0);
     }
 
-    @Test
-    @DisplayName("검증된 fixture는 실제 Worker·commit·HTTP v1을 거쳐 원래 Session payload와 기한으로 ACCEPTED를 저장한다")
-    void worker_to_loopback_fcm() throws Exception {
+    @ParameterizedTest
+    @EnumSource(BoardingNotificationEventType.class)
+    @DisplayName("준비와 완료 목적지 알림은 실제 Worker·HTTP v1 payload로 한 번 전송하고 원래 기한을 보존한다")
+    void worker_to_loopback_fcm(BoardingNotificationEventType type) throws Exception {
         var fixture = fixture(true);
+        Long eventId = fixture.eventId();
+        if (type == BoardingNotificationEventType.DESTINATION_REACHED) {
+            time.set(NOW.plusSeconds(1));
+            eventId = completeDestination(fixture);
+            assertThat(snapshot(fixture).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
+            assertThat(row(fixture).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+            assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(eventId)).singleElement()
+                    .extracting(NotificationDelivery::getStatus).isEqualTo(NotificationDeliveryStatus.PENDING);
+            runtime.forget(fixture.sessionId());
+        }
+        long deliveryId = deliveries.findAllByNotificationEventIdOrderByIdAsc(eventId).getFirst().getId();
+        var expectedExpiry = deliveries.findById(deliveryId).orElseThrow().getExpiresAt();
         var body = new AtomicReference<String>();
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
         var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/send", exchange -> {
+            calls.incrementAndGet();
             body.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            var started = row(fixture);
+            var started = deliveries.findById(deliveryId).orElseThrow();
             assertThat(started.getAttemptCount()).isOne();
             byte[] response = "{\"name\":\"projects/fixture/messages/session\"}".getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, response.length);
@@ -140,12 +163,23 @@ class BoardingDispatchIntegrationTest {
             var fcm = new FcmProviderClient(new FcmClientProperties(true, "test-project", "/unused",
                     Duration.ofSeconds(1), Duration.ofSeconds(2), Duration.ofSeconds(5)), clock,
                     URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/send"), attempt -> "synthetic-token");
-            worker(attempts, fcm, 5).dispatchPending();
-            var data = JsonParser.parseString(body.get()).getAsJsonObject().getAsJsonObject("message").getAsJsonObject("data");
+            var dispatch = worker(attempts, fcm, 5);
+            dispatch.dispatchPending();
+            dispatch.dispatchPending();
+            assertThat(calls.get()).isOne();
+            var message = JsonParser.parseString(body.get()).getAsJsonObject().getAsJsonObject("message");
+            var data = message.getAsJsonObject("data");
             assertThat(data.keySet()).containsExactlyInAnyOrder("type", "boardingSessionId", "eventType", "notificationEventId");
+            assertThat(data.get("type").getAsString()).isEqualTo("BOARDING_SESSION_EVENT");
             assertThat(data.get("boardingSessionId").getAsString()).isEqualTo(Long.toString(fixture.sessionId()));
-            assertThat(row(fixture).getStatus()).isEqualTo(NotificationDeliveryStatus.ACCEPTED);
-            assertThat(row(fixture).getExpiresAt()).isEqualTo(UTC_NOW.plusSeconds(30));
+            assertThat(data.get("eventType").getAsString()).isEqualTo(type.name());
+            assertThat(data.get("notificationEventId").getAsString()).isEqualTo(eventId.toString());
+            assertThat(message.has("fid")).isTrue();
+            assertThat(message.has("token")).isFalse();
+            assertThat(message.getAsJsonObject("apns").getAsJsonObject("headers").get("apns-expiration").getAsString())
+                    .isEqualTo(Long.toString(expectedExpiry.toEpochSecond(ZoneOffset.UTC)));
+            assertThat(deliveries.findById(deliveryId).orElseThrow().getStatus()).isEqualTo(NotificationDeliveryStatus.ACCEPTED);
+            assertThat(deliveries.findById(deliveryId).orElseThrow().getExpiresAt()).isEqualTo(expectedExpiry);
             // ACCEPTED is only Provider acceptance; this fixture has no iPhone.
         } finally {
             server.stop(0);

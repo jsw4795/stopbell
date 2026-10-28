@@ -102,12 +102,50 @@ class BoardingVehicleTrackerTest {
         assertThat(tracker.observe(session, cycle()).reason()).isEqualTo(BoardingStateReason.IDENTITY_CONFLICT);
     }
 
-    @ParameterizedTest
-    @ValueSource(ints = {0, 2})
+    @Test
     @DisplayName("실제 서울 이동 중 detail 의미가 검증되지 않은 범위는 테스트 fixture의 검증된 진행과 구분한다")
-    void moving_semantics_remain_unverified(int flag) {
-        when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s1", 20, flag, "20261020120019"));
+    void unknown_flag_remains_unverified() {
+        when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s1", 20, 2, "20261020120019"));
         assertThat(tracker.observe(session, cycle()).observation().meaning()).isEqualTo(Meaning.UNVERIFIED);
+    }
+
+    @Test
+    @DisplayName("정차 뒤 같은 ID와 occurrence의 이동 응답은 기존 기준점만 유지하고 새 도착을 주장하지 않는다")
+    void moving_retains_verified_checkpoint() {
+        when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s0", 10, 0, "20261020120019"));
+        var input = tracker.observe(session, cycle());
+        assertThat(input.reason()).isNull();
+        assertThat(input.observation().meaning()).isEqualTo(Meaning.VERIFIED_REFERENCE);
+        var result = new BoardingProgressEvaluator(Duration.ofMinutes(2), Duration.ofSeconds(30))
+                .evaluate(session, input.observation(), UTC_NOW.plusSeconds(20));
+        assertThat(result.outcome()).isEqualTo(BoardingTrackingDecision.Outcome.NO_CANDIDATE);
+        assertThat(result.checkpoint().getIndex()).isZero();
+    }
+
+    @Test
+    @DisplayName("새 occurrence의 이동 응답은 checkpoint나 알림 없이 일시 보류하고 정상 정차 재검증을 허용한다")
+    void moving_forward_waits_for_stopped_detail() {
+        when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s1", 20, 0, "20261020120019"));
+        var input = tracker.observe(session, cycle());
+        assertThat(input.reason()).isEqualTo(BoardingStateReason.STALE_PROGRESS);
+        assertThat(input.reason().allowsAutomaticRevalidation()).isTrue();
+        assertThat(input.observation()).isNull();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"s0,20,20261020120019,TRAVERSAL_AMBIGUOUS",
+            "s1,20,20261020115959,TRAVERSAL_AMBIGUOUS",
+            "s0,10,20261020115958,PROGRESS_REGRESSION"})
+    @DisplayName("이동 응답도 ID와 order 모순 및 동일 제공시각의 진행과 시각 역행은 영구 보류한다")
+    void moving_conflicts_require_confirmation(String stop, int order, String time, BoardingStateReason reason) {
+        when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, stop, order, 0, time));
+        var previous = session.checkpoint();
+        var checkpoint = new BoardingCheckpoint(previous.getStopExternalId(), previous.getStopOrder(), previous.getIndex(),
+                previous.getEvidence(), null, previous.getObservedAt(), previous.getProviderDataTime().withNano(0));
+        var exactSourceTime = new BoardingTrackingSnapshot(session.id(), session.revision(), session.status(), session.reason(),
+                session.provider(), session.routeId(), session.cityCode(), session.vehicleId(), session.vehicleNumber(),
+                session.traversal(), checkpoint, session.expiresAt());
+        assertThat(tracker.observe(exactSourceTime, cycle()).reason()).isEqualTo(reason);
     }
 
     @ParameterizedTest

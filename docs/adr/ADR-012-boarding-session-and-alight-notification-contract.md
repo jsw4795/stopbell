@@ -17,7 +17,7 @@ StopBell은 승객 하차 가능성을 판단하는 서비스가 아니라 사�
 - ALLOWED/PROHIBITED/UNKNOWN은 승객 접근 부가 metadata로만 보존하고 차량 식별·occurrence 대응·freshness·방향·운행 연속성 검증과 분리
 - PREPARE_ALIGHT는 사용자 선택 시 세션당 한 번, DESTINATION_REACHED는 선택과 무관하게 도달·통과 완료와 함께 세션당 한 번 저장
 - 실제 정차 없는 통과도 검증된 같은 traversal의 이후 진행으로 판정하며 sectOrd 숫자·stopFlag만으로 진행을 검증하지 않음
-- 서울의 기존 exact stopped detail 검증 성공 경로는 실제 생성으로 연결하되 이동·order-only·회차 미검증 범위는 계속 거부
+- 서울의 exact stopped detail 검증 성공 경로는 실제 생성으로 연결. 2026-10-29 사용자 요청에 따라 최초 정차 기준점과 최신 이동의 exact ID/order가 같고 나머지 검증을 통과하면 원래 시각의 기준점을 재사용하는 최소 확장을 반영. 이동만으로 새 기준점·도달 확정, order-only·회차 미검증 범위는 계속 거부. 기존 기준점 유지·일시 재조회 경계는 [Domain](../domain-model.md#snapshot-and-progress), 시작 지원 범위는 [API](../api.md#탑승-세션-api-task-903)를 따름
 
 사용자 보장은 Requirements, 진행 의미는 Domain, 요청·지원 범위는 API, 새 V17은 Database, 완료 알림의 durable 전송 검증은 Architecture가 소유한다. 아래 TASK-903 당시의 준비 중심 설명은 이 정정과 각 Owner 문서를 우선해 읽는다. 실제 Provider·FCM·iPhone 검증 완료를 의미하지 않는다.
 

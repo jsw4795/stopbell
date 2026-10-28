@@ -427,6 +427,50 @@ Backend의 외부 요청 Client·설정·주입 경로와 서울 metadata source
 
 이번 실제 Provider/FCM 호출은 **0회**이며 앞선 HTTP 200·44건·Candidates 200 결과를 반복하지 않았다. 새 Dependency·Migration·API 계약·FCM/Alarm 동작 변경은 없다. `BOARDING_TRACKING_UNSUPPORTED`, TASK-710/TASK-908 `[ ]` 및 main·기존 변경사항을 유지하고 Git add/commit/push는 수행하지 않는다. Java/Gradle JVM 21 및 Wrapper 8.14.3을 확인하고 관련 회귀 **105개**(Client URI·HTTP origin/profile·redirect/XML/오류·TAGO·후보·서울 Mapper·CSV source)를 실행하여 실패/오류/skip 없이 모두 통과했다. `git diff --check`도 통과했다. 첫 실행의 test profile TAGO 기대값을 기존 mock HTTPS override에 맞게 보정한 뒤 동일 suite 전체를 재통과했으며 제품 TAGO 설정은 변경하지 않았다.
 
+## TASK-908 iPhone Boarding E2E 준비 (2026-10-28)
+
+실제 143번 Provider 생성/추적 결과는 [증거 보고서 §24](research/TASK-908-provider-evidence.md#24-실제-서울-143번-생성진행notification-검증-2026-10-28)를 따른다. 2026-10-29에는 최초 정차 기준점을 유지한 이동 중 확정을 오프라인 검증했다. 지원 조건은 [API](api.md#탑승-세션-api-task-903)를 따르며 최초부터 이동인 차량까지 즉시 시작을 보장하지 않는다. **Backend·터널·Flutter 앱 실행은 정리한 상태이며, 아래 절차는 다음 사용자 재실행 지시 후에만 수행한다.**
+
+2026-10-28 준비 당시 확인한 상태:
+
+- 기존 개발 MySQL 8.4.11에 V17 적용 및 17개 Migration validate 성공. 기존 INACTIVE Alarm 2개, ACCEPTED Delivery 8개, IOS Device 1개와 143번 metadata 113개 occurrence 보존. BoardingSession/PENDING Delivery는 0개
+- Backend를 `127.0.0.1:8080`에 실행하고 기존 Cloudflare 임시 HTTPS 방식을 재사용. 로컬/HTTPS health `200 UP` 확인 후 Git 제외 `app/config/local.json`의 API_BASE_URL만 갱신. 실제 iPhone 네트워크에서의 연결 확인은 사용자가 수행
+- **현재 실행은 monitoring=false / dispatch=false / FCM=false**이며 별도 실전송 승인 전까지 유지. 기존 `.env`의 FCM_ENABLED=true는 변경하지 않았고 실행 인자로 false를 우선 적용. Scheduler는 Boarding 전용 별도 토글이 아니라 기존 `transit.monitoring.enabled`를 공유
+- 기존 Firebase project/Bundle/OAuth 일치, FID mode와 명시적 native 등록·auto-init=false, background fetch/remote-notification·기본 swizzling 보존. Service Account 파일은 SDK에서 네트워크 없이 parsing 성공, project 일치 확인. OAuth token 발급·Firebase 전송·Console APNs key 유효성 재검증은 미실행
+- 유선 iPhone 13 Pro Max/iOS 27.0.1, paired/Developer Mode enabled 확인. 새 HTTPS 주소로 signed release 빌드 성공, `codesign --verify --deep --strict` 통과. 실제 서명의 APNs entitlement=development, 기존 provisioning에 연결 기기 포함·만료일 2027-10-07 확인. 기기 설치/실행/권한 변경은 수행하지 않음
+- DB의 기존 Device는 enabled/FID 있음까지만 확인. 현재 설치본의 APNs/FID·로그인 owner·알림 권한·OS 수신은 앱을 실행해 Push 준비를 완료해야 다시 확인 가능. 원문 FID/JWT/credential을 출력하지 않음
+
+완료 목적지의 Worker 경로는 TRACKING 준비 gate와 분리되어 있다. 완료 transaction은 준비 PENDING만 종료하고 목적지 PENDING을 보존한다. Worker는 COMPLETED 목적지를 선정하고 불변 완료 checkpoint·Event 대응·owner·freshness·원래 기한을 검증한 후 전달한다. 취소/만료는 허용하지 않는다. 격리 MySQL과 loopback HTTP v1에서 준비/목적지 payload·정확한 Session/Event ID·FID·APNs expiration·두 번 Worker 실행의 단일 요청·ACCEPTED 저장을 확인했다. 실제 Firebase 접수/기기 수신 결과는 아니다.
+
+### 사용자 실행 순서
+
+1. 기존 MySQL의 healthy 상태와 8080 listener 부재를 확인하고 `backend`에서 아래 안전 모드 Backend를 **하나만** 실행한다. 이어 별도 터미널에서 `cloudflared tunnel --url http://127.0.0.1:8080`을 실행한다. 로컬 및 새 HTTPS 주소의 `/actuator/health`를 확인하고 `app/config/local.json`의 API_BASE_URL을 해당 HTTPS 주소로 맞춘다. 현재 작업에서는 재실행하거나 local.json을 변경하지 않았다.
+
+   ```sh
+   env -u JAVA_HOME ./gradlew bootRun --args='--server.address=127.0.0.1 --transit.monitoring.enabled=false --notification.dispatch.enabled=false --notification.fcm.enabled=false --notification.fcm.smoke=false'
+   ```
+
+   안전 모드에서도 후보/확정 요청은 실제 Provider를 호출하므로 다음 실측 승인 범위 안에서만 수행한다. 자동 polling·알림은 OFF다. 터널 주소가 바뀌면 앱 재빌드가 필요하다.
+2. `app`에서 `flutter devices`로 실제 기기를 선택하고 아래 release 명령을 실행한다. 기존 signed 산출물은 `app/build/ios/iphoneos/Runner.app`에 준비돼 있다. 앱 삭제·Firebase installation 초기화는 필요 없다.
+
+   ```sh
+   flutter run --release --no-pub --dart-define-from-file=config/local.json -d <실제-iPhone-ID>
+   ```
+
+3. 사용할 계정으로 로그인하고 iOS 알림을 허용한다. Focus/알림 표시 상태와 하차 확정 전 Push 준비 완료를 확인한다. Backend에 같은 owner의 enabled IOS Device가 등록돼야 한다. 기존 다른 계정의 Device를 직접 DB에서 이전하지 않는다. 이 단계에서는 세션을 생성하지 않으며, 실제 확정과 그 과정의 Push 준비 확인은 아래 활성화 후 수행한다.
+4. **실제 Provider 자동 조회·FCM 전송 별도 승인 후에만** 안전 모드 Backend를 종료하고 8080 listener 부재를 확인한 뒤 `backend`에서 다음 설정으로 하나만 재실행한다. credential/project는 기존 `.env`를 사용하고 smoke는 끈다. Worker를 켜면 허용된 기존 Alarm/Session PENDING도 처리하므로 그 시점의 대상 상태를 다시 확인한다. 이번 작업에서는 이 명령을 실행하지 않았다.
+
+   ```sh
+   env -u JAVA_HOME ./gradlew bootRun --args='--server.address=127.0.0.1 --transit.monitoring.enabled=true --notification.dispatch.enabled=true --notification.fcm.enabled=true --notification.fcm.smoke=false'
+   ```
+
+5. 서울 143번 → 실제 승차 정류장 → 목적 occurrence → 사전 ON/OFF → 후보 조회 → 실제 전체 번호 대조 → 확정 순서로 시작한다. 최신 정차 detail 또는 최초 정차와 같은 occurrence를 유지한 최신 이동 detail에서만 시작을 기대한다. `STOPPED_BASELINE_REUSED`는 시작 검증 통과일 뿐 최종 저장 성공·현재 위치·실수신을 뜻하지 않는다. 최초부터 이동이거나 다른 occurrence로 이동한 경우에는 안전 검증을 우회하지 않는다. Push 준비가 길어지면 후보를 다시 조회해야 하며 새 조회 뒤 번호를 다시 대조한다. 테스트용 실제 Session ID와 비식별 거절 reason을 확인한다.
+6. ON에서는 준비 한 번·목적지 한 번, OFF에서는 목적지만 기대한다. 매 시험은 새 세션으로 foreground/background/terminated 상태를 나누고 수신·tap을 확인한다. foreground는 앱 안내의 사용자 선택으로, background/terminated는 알림 tap으로 **정확한 Session ID의 상세**가 열려야 한다. 목적지 수신 시 COMPLETED/ENDED 상세는 정상이다.
+7. 서버에서 같은 Session의 Event 종류·Delivery 상태·attempt/result와 실제 기기 표시를 대조한다. ACCEPTED는 Firebase 접수일 뿐 실수신과 별도로 기록한다. 통상 반복 polling/Worker에서는 Event 중복·추가 발송이 없어야 하나 접수 후 응답 유실/crash의 OS exactly-once는 보장하지 않는다. 취소 시험은 목적지 이전에 별도 세션으로 수행한다.
+8. 시험 종료 뒤 Flutter 실행·터널·Backend를 정상 종료하고 8080 listener와 관련 실행 프로세스 부재를 확인한다. 안전 모드 Backend도 상시 실행해 두지 않는다. Docker/MySQL·Volume·DB·설정 파일은 보존한다. TASK-908/710/711은 각 실제 검증 완료 전까지 미완료로 유지한다.
+
+이번 검증: Backend 발송 관련 **109개**와 Flutter 전체 **437개** 실패/오류/skip 없이 통과, `flutter analyze` 통과 및 signed release 빌드/서명 검증 성공. production 발송 코드는 이미 완료 목적지를 지원하므로 변경하지 않았으며 테스트만 보강했다. 실제 서울 API 추가 호출·FCM 전송·기기 설치/조작은 0회다.
+
 ## Backend Connection
 
 Mac에서 Backend를 실행하는 iPhone Simulator의 Local `API_BASE_URL`은 `http://localhost:8080`이다. 실제 iPhone의 `localhost`는 Mac을 가리키지 않으므로, 실제 기기 검증 시에는 Mac의 접근 가능한 Local 주소 또는 개발 서버 주소를 사용한다.
