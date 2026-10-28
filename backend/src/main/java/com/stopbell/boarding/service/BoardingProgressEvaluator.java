@@ -96,10 +96,6 @@ public class BoardingProgressEvaluator {
             return BoardingTrackingDecision.held(BoardingStateReason.PROGRESS_REGRESSION);
         }
         boolean pending = previous.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE;
-        if (pending && traversal.occurrences().stream().map(item -> item.externalStopId()).distinct().count()
-                != traversal.occurrences().size()) {
-            return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
-        }
         boolean sameProviderData = providerTime != null && providerTime.equals(previous.getProviderDataTime());
         if ((sameProviderData || observedAt.equals(previous.getObservedAt())) && index != previous.getIndex()) {
             return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
@@ -119,7 +115,8 @@ public class BoardingProgressEvaluator {
             // No trusted baseline before the target: never infer a missed destination.
             return BoardingTrackingDecision.held(BoardingStateReason.TARGET_NOT_AHEAD);
         }
-        boolean verified = !pending || index >= 0 && observation.meaning() == BoardingProgressObservation.Meaning.DIRECT_ARRIVAL;
+        boolean verified = !pending || index >= 0 && (observation.meaning() == BoardingProgressObservation.Meaning.DIRECT_ARRIVAL
+                    || observation.meaning() == BoardingProgressObservation.Meaning.VERIFIED_REACHED);
         var checkpoint = new BoardingCheckpoint(index < 0 ? null : vehicle.stopId(), index < 0 ? 0 : vehicle.order(), index,
                 !verified ? BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
                         : vehicle.stopId() == null ? BoardingCheckpoint.Evidence.VERIFIED_ORDER_ONLY
@@ -142,7 +139,8 @@ public class BoardingProgressEvaluator {
             return new BoardingTrackingDecision(Outcome.PASSED_OBSERVED, checkpoint,
                     BoardingStateReason.PASSED_OBSERVED, gap, observedAt, expiry, now);
         }
-        Outcome outcome = session.prepareNotificationEnabled() && (gap == 1 || gap == 2)
+        int offset = session.notificationOffsetStops() == null ? 2 : session.notificationOffsetStops();
+        Outcome outcome = session.prepareNotificationEnabled() && gap > 0 && gap <= offset
                 ? now.isBefore(expiry) ? Outcome.PREPARE_ALIGHT : Outcome.EXPIRED_CANDIDATE
                 : Outcome.NO_CANDIDATE;
         return new BoardingTrackingDecision(outcome, checkpoint, null, gap, observedAt, expiry, now);

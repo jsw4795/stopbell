@@ -365,7 +365,7 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 
 ### Phase 9 Boarding persistence contract (TASK-903)
 
-이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했고 TASK-906 1단계에서 Notification source를 V16으로 확장했다. 2026-10-28 요구사항 정정은 V17로 사전 알림 선택과 목적지 Event를 확장했고 TASK-908의 V18은 미검증 관측 접수를 추가했고 V19는 즉시 TRACKING 의미로 전환한다. 기존 V1~V18 Migration과 Alarm/BusAlarmTarget Schema는 수정하지 않는다.
+이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했고 TASK-906 1단계에서 Notification source를 V16으로 확장했다. 2026-10-28 요구사항 정정은 V17로 사전 알림 선택과 목적지 Event를 확장했고 TASK-908의 V18은 미검증 관측 접수를 추가했고 V19는 즉시 TRACKING 의미로 전환한다. V20은 하차 전 알림 시점만 추가하며 기존 V1~V19 Migration과 Alarm/BusAlarmTarget Schema는 수정하지 않는다.
 
 #### boarding_sessions
 
@@ -378,10 +378,11 @@ TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `las
 | `provider` | VARCHAR(20) NOT NULL | TAGO / SEOUL_BUS |
 | `external_route_id` | VARCHAR(255) NOT NULL | opaque Route reference |
 | `vehicle_tracking_id` | VARCHAR(255) NOT NULL | TAGO vehicleno / 서울 vehId |
-| `vehicle_number` | VARCHAR(255) NOT NULL | 사용자가 대조한 전체 번호, 서울 plainNo 별도 보존 |
+| `vehicle_number` | VARCHAR(255) NOT NULL | 선택한 차량의 Provider 전체 번호, 서울 plainNo 별도 보존 |
 | `city_code` | VARCHAR(50) NULL | TAGO 필수, 서울 NULL |
 | `route_number`, `target_name` | VARCHAR(100), VARCHAR(255) NOT NULL | 최소 표시 snapshot |
-| `prepare_notification_enabled` | BOOLEAN NOT NULL DEFAULT TRUE | 불변 사전 알림 선택. 목적지 알림은 항상 활성 |
+| `prepare_notification_enabled` | BOOLEAN NOT NULL DEFAULT TRUE | 기존 정책의 ON/OFF 보존. 새 정책에서는 TRUE 고정 |
+| `notification_offset_stops` | INT NULL | 새 정책 1/2. NULL은 기존 정책이며 backfill 없음 |
 | `traversal_snapshot` | JSON NOT NULL | 아래 고정 구조의 불변 순서 snapshot |
 | `traversal_fingerprint` | CHAR(64) ascii_bin NOT NULL | canonical 구조 hash |
 | `status` | VARCHAR(20) NOT NULL | TRACKING / SUSPENDED / COMPLETED / CANCELLED / EXPIRED |
@@ -416,6 +417,9 @@ fingerprint는 provider/Route·typed request context·순서화한 occurrence ID
 
 V18 `boarding_verification_pending`은 당시 VERIFYING과 UNVERIFIED_REFERENCE를 추가한 이력으로 변경하지 않는다. V19 `boarding_immediate_tracking`은 기존 VERIFYING row를 TRACKING으로 전환하고 revision만 1 증가시킨다. 기존 METADATA_CHANGED는 구조 보류를 유지하도록 SUSPENDED로 전환한다. 그 외 identity·checkpoint·원래 시각·수명·사전 설정 및 모든 Event/Delivery는 보존한다. 현행 status/end CHECK와 generated UNIQUE는 TRACKING/SUSPENDED만 미종료로 다룬다. TRACKING은 BASELINE_UNVERIFIED+UNVERIFIED_REFERENCE 또는 TEMPORARY_PROVIDER_FAILURE/STALE_PROGRESS를 허용한다. 정상 TRACKING의 reason은 NULL이고 검증 evidence가 필요하며 COMPLETED는 미검증 evidence를 허용하지 않는다. 위치 없음은 Stop ID NULL/order 0/index -1 조합으로만 허용한다. 새 table·Dependency·기존 Migration 수정은 없다. 기존 개발 DB 적용은 이번 작업에 포함하지 않는다.
 
+V20 `boarding_pre_departure_notification_policy`는 nullable INT `notification_offset_stops`만 추가한다. NULL은 기존 ON/OFF+목적지 정책이며 기존 row를 backfill하거나 fingerprint·checkpoint·Event/Delivery를 수정하지 않는다. 새 요청 fingerprint만 정책 구분과 오프셋을 포함한다. 신규 애플리케이션 생성은 명시적으로 1/2를 저장하며 legacy boolean은 true로 유지한다. CHECK `ck_boarding_sessions_notification_offset`는 NULL 또는 (1/2 AND prepare_notification_enabled=TRUE)을 요구한다. DB DEFAULT가 없어 이전 row의 의미를 임의로 2로 바꾸지 않는다. 기존 세션·대기 목적지 알림의 전송 계약은 유지하고 새 세션의 목적지 Event는 생성·dispatch하지 않는다. Event UNIQUE·Delivery retry/TTL은 변경하지 않는다. 실제 개발 DB에는 이번 작업에서 적용하지 않으며 격리 MySQL에서 V19→V20 데이터 보존·CHECK·재적용 무변경을 검증한다.
+
+
 #### Notification source 확장 (TASK-906 1단계)
 
 V16 `extend_notification_event_sources`는 기존 notification_events에 다음 분기를 추가하고 Delivery operational Schema와 Event×Device UNIQUE를 유지한다. source_type의 일시 DEFAULT 'ALARM'으로 기존 row를 backfill한 뒤 DEFAULT를 제거해 이후 writer의 명시적 source 입력을 요구한다. 기존 Event ID·identity·근거·시각과 Delivery의 PENDING/ACCEPTED/FAILED/EXPIRED·attempt/result를 삭제하거나 초기화하지 않는다.
@@ -442,7 +446,7 @@ TASK-906 3단계는 `findDuePendingIds`의 ALARM 전용 예산을 유지하고 `
 
 기존 due index/Device FK/Delivery UNIQUE를 재사용하고 새 claim/lease/status/attempt table을 추가하지 않는다. 단일 Worker의 각 cycle은 독립 bounded 조회로 (1) ALARM/BOARDING_SESSION 각각의 expired PENDING 정리, (2) ALARM due, (3) 준비 READY 또는 완료 목적지 BOARDING_SESSION due를 처리한다. 각 조회는 기존 batch-size 상한을 적용해 세션 대기가 Alarm 예산을 점유하지 않는다.
 
-세션 조회는 `PENDING AND next_attempt_at <= now AND expires_at > now`에 BOARDING_SESSION source와 owner/Session 미만료를 적용하고, `(PREPARE_ALIGHT AND gate-ready ID AND TRACKING AND 사전 알림 ON) OR (DESTINATION_REACHED AND COMPLETED)`를 **LIMIT 전에** 적용해 next_attempt_at/id 순서로 제한한다. ready 집합이 비어도 완료 목적지 조회는 수행한다. 만료 조회는 `PENDING AND expires_at <= now`이며 gate와 nextAttemptAt을 요구하지 않는다. Worker는 source별 `findExpiredPendingIdsBySource`를 각각 batch-size로 제한하고 expiresAt/id로 정렬해 한 source의 backlog가 다른 source의 만료를 밀어내지 않게 한다. 공통 `findExpiredPendingIds`도 모든 source에 동일 만료 기준을 적용한다. 조회 결과는 권한이 아니고 current revision/상태/gate는 attempt transaction에서 재검증한다.
+세션 조회는 `PENDING AND next_attempt_at <= now AND expires_at > now`에 BOARDING_SESSION source와 owner/Session 미만료를 적용하고, `(PREPARE_ALIGHT AND gate-ready ID AND TRACKING AND 사전 알림 ON) OR (DESTINATION_REACHED AND COMPLETED AND notification_offset_stops IS NULL)`를 **LIMIT 전에** 적용해 next_attempt_at/id 순서로 제한한다. ready 집합이 비어도 완료 목적지 조회는 수행한다. 만료 조회는 `PENDING AND expires_at <= now`이며 gate와 nextAttemptAt을 요구하지 않는다. Worker는 source별 `findExpiredPendingIdsBySource`를 각각 batch-size로 제한하고 expiresAt/id로 정렬해 한 source의 backlog가 다른 source의 만료를 밀어내지 않게 한다. 공통 `findExpiredPendingIds`도 모든 source에 동일 만료 기준을 적용한다. 조회 결과는 권한이 아니고 current revision/상태/gate는 attempt transaction에서 재검증한다.
 
 `findSourceIdentity`는 Delivery PK로 immutable Event ID/source/Session ID만 projection 조회한다. 실제 attempt는 별도 REQUIRES_NEW persistence context에서 Session→Delivery current lock과 Event identity 재확인 후 Device lock을 얻어 오래된 REPEATABLE READ snapshot을 자격으로 쓰지 않는다.
 

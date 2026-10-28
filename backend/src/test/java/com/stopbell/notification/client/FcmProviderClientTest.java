@@ -87,7 +87,7 @@ class FcmProviderClientTest {
     void sends_boarding_payload_without_internal_state(BoardingNotificationEventType type) throws Exception {
         URI endpoint = server(exchange -> respond(exchange, 200, "{\"name\":\"projects/stopbell/messages/session\"}"));
         var source = NotificationSourceHint.boardingSession(123, type);
-        var request = new NotificationSendRequest(FID, source, 456, NOW.plusSeconds(30));
+        var request = new NotificationSendRequest(FID, source, 456, NOW.plusSeconds(30), "실제 목적지");
         assertThat(client(endpoint, Duration.ofSeconds(2), attempt -> TOKEN).send(request).result()).isEqualTo(ACCEPTED);
         var message = JsonParser.parseString(payload.get()).getAsJsonObject().getAsJsonObject("message");
         assertThat(message.get("fid").getAsString()).isEqualTo(FID);
@@ -107,6 +107,9 @@ class FcmProviderClientTest {
         assertThat(message.getAsJsonObject("notification").get("body").getAsString())
                 .contains(type == BoardingNotificationEventType.PREPARE_ALIGHT ? "하차를 준비" : "도달하거나 통과")
                 .doesNotContain("정차했", "하차했");
+        if (type == BoardingNotificationEventType.PREPARE_ALIGHT) {
+            assertThat(message.getAsJsonObject("notification").get("body").getAsString()).contains("실제 목적지");
+        }
         assertThat(payload.get()).doesNotContain("alarmId", "userId", "revision", "checkpoint", "fingerprint", "GPS");
     }
 

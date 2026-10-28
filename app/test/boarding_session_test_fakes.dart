@@ -52,6 +52,8 @@ Map<String, dynamic> sessionJson({
   'routeNumber': '7000',
   'vehicleNumber': '서울70사1234',
   'targetName': '목적 정류장',
+  'notificationOffsetStops': 2,
+  'preparationNotificationStatus': 'NOT_CREATED',
   'targetOrder': 9,
   'remainingOccurrenceGap': gap,
   'checkpointObservedAt': '2026-10-21T01:00:00.123456Z',

@@ -13,13 +13,13 @@ class BoardingConfirmationView extends StatefulWidget {
     required this.onBack,
     this.busy = false,
     this.reconfirm = false,
-    this.onPrepareNotificationChanged,
+    this.onNotificationOffsetChanged,
   });
   final BoardingCandidate candidate;
   final String routeNumber, targetName;
   final Future<void> Function(String) onConfirm;
   final VoidCallback onBack;
-  final ValueChanged<bool>? onPrepareNotificationChanged;
+  final ValueChanged<int>? onNotificationOffsetChanged;
   final bool busy, reconfirm;
   @override
   State<BoardingConfirmationView> createState() =>
@@ -28,7 +28,7 @@ class BoardingConfirmationView extends StatefulWidget {
 
 class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
   bool _sending = false;
-  bool _prepareNotificationEnabled = true;
+  int _notificationOffsetStops = 2;
   Future<void> _confirm() async {
     if (_sending || widget.busy) return;
     if (!canConfirmBoardingCandidate(widget.candidate)) return;
@@ -57,22 +57,27 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
       Text('전체 차량번호: ${widget.candidate.vehicleNumber}'),
       Text('원래 관측 시각: ${boardingTime(widget.candidate.observedAt)}'),
       const Text('선택한 차량으로 버스 도착 전에도 알림을 등록할 수 있어요. 차량번호 입력은 필요 없어요.'),
-      const Text(
-        '등록하면 선택한 차량을 바로 추적해요. 위치 정보가 부족하면 차량 위치 확인 중으로 표시하며 다음 관측을 기다려요. 선택한 정류장에 도달하거나 통과하면 알리며, 실제 정차나 하차 가능 여부를 보장하지 않아요.',
+      Text(
+        widget.reconfirm ? '같은 차량의 진행을 다시 확인해 추적을 재개해요. 저장된 목적지와 알림 설정은 유지돼요.' : '등록하면 선택한 차량을 바로 추적해요. 위치 정보가 부족하면 차량 위치 확인 중으로 표시하며 다음 관측을 기다려요. 선택한 실제 목적지의 1정거장 또는 2정거장 전에 하차 준비 알림을 한 번 보내요. 목적지 도달 시에는 추적을 완료해요.',
       ),
-      if (!widget.reconfirm)
-        SwitchListTile(
-          key: const ValueKey('prepare-notification-enabled'),
-          title: const Text('사전 알림 받기'),
-          subtitle: const Text('2정거장 전 우선 · 놓치면 1정거장 전 한 번. 꺼도 목적지 알림은 받아요.'),
-          value: _prepareNotificationEnabled,
-          onChanged: widget.busy || _sending
+      if (!widget.reconfirm) ...[
+        const Text('알림 시점'),
+        SegmentedButton<int>(
+          key: const ValueKey('notification-offset-stops'),
+          segments: const [
+            ButtonSegment(value: 2, label: Text('2정거장 전 (기본)')),
+            ButtonSegment(value: 1, label: Text('1정거장 전')),
+          ],
+          selected: {_notificationOffsetStops},
+          onSelectionChanged: widget.busy || _sending
               ? null
-              : (value) {
-                  setState(() => _prepareNotificationEnabled = value);
-                  widget.onPrepareNotificationChanged?.call(value);
+              : (values) {
+                  final offset = values.single;
+                  setState(() => _notificationOffsetStops = offset);
+                  widget.onNotificationOffsetChanged?.call(offset);
                 },
         ),
+      ],
       FilledButton(
         onPressed: widget.busy || _sending ? null : _confirm,
         child: Text(widget.reconfirm ? '동일 차량 재확인 요청' : '하차 알림 등록'),

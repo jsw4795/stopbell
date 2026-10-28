@@ -187,9 +187,6 @@ public class BoardingCandidateService {
         }
         Vehicle previous = original.detailVehicle();
         boolean stopped = detailAvailable && current >= 0 && Integer.valueOf(1).equals(detail.stopFlag());
-        boolean reuseStoppedBaseline = detailAvailable && previous != null && current >= 0 && !stopped && Integer.valueOf(0).equals(detail.stopFlag())
-                && Integer.valueOf(1).equals(previous.stopFlag()) && current == progressIndex(route, previous)
-                && route.hasUniqueStopIds();
         if (previous != null && (!detail.id().equals(previous.id()) || !detail.number().equals(previous.number())
                 || (current >= 0 && current < progressIndex(route, previous))
                 || detail.observedAt().isBefore(previous.observedAt())
@@ -205,14 +202,19 @@ public class BoardingCandidateService {
                 && current >= 0 && progressIndex(route, previous) >= 0 && current != progressIndex(route, previous)) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
-        if (reuseStoppedBaseline && current < route.indexOf(route.targetOccurrenceId())) {
-            // Keep the stopped evidence and BOTH original times. Refreshing them from
-            // the moving response would misrepresent old arrival evidence as a new one.
-            log.info("Boarding start validated: stage=candidate-revalidation provider={} outcome=STOPPED_BASELINE_REUSED",
-                    route.provider());
-            return new VerifiedCandidate(route, previous, current, true);
-        }
-        return new VerifiedCandidate(route, detail, current, stopped && route.hasUniqueStopIds() && current < route.indexOf(route.targetOccurrenceId()));
+        // Empirical TASK-908 assumption (143/N51), not an official API contract.
+        // Exact stId+stOrd map to CSV node ID + Stop order; sectOrd is never used.
+        // A moving reference may establish the current baseline before the destination,
+        // without inventing arrival events for any skipped occurrence. Non-stop updates
+        // still require subsequent real-provider/iPhone verification.
+        boolean reached = stopped || detailAvailable && current >= 0 && Integer.valueOf(0).equals(detail.stopFlag());
+        boolean sameReachedSource = previous != null && current >= 0 && current == progressIndex(route, previous)
+                && detail.providerDataTime().equals(previous.providerDataTime())
+                && (Integer.valueOf(0).equals(previous.stopFlag()) || Integer.valueOf(1).equals(previous.stopFlag()));
+        // Repeated source data cannot extend observation freshness or the original preparation TTL.
+        Vehicle baseline = sameReachedSource ? previous : detail;
+        return new VerifiedCandidate(route, baseline, current,
+                reached && current < route.indexOf(route.targetOccurrenceId()));
     }
 
     private static ApiException unsupported(BoardingRouteSnapshot route, String reason) {

@@ -106,6 +106,8 @@ class BoardingSessionApiIntegrationTest {
 
     @BeforeEach
     void set_up() {
+        jdbc.update("delete from notification_deliveries");
+        jdbc.update("delete from notification_events");
         sessions.deleteAll();
         occurrences.deleteAll();
         routes.deleteAll();
@@ -130,29 +132,108 @@ class BoardingSessionApiIntegrationTest {
         });
     }
 
+    @Test
+    @DisplayName("반복 Stop의 첫 방문과 목적지 재방문은 실제 후보·저장·이동 polling에서도 정확한 occurrence로 구분한다")
+    void repeated_destination_occurrence_across_real_candidate_and_polling() {
+        target = occurrences.saveAndFlush(new BusRouteStopOccurrence(route, first.getStop(), 40));
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress("s1", 10, 0));
+        var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, candidateRef(), null, 1));
+        assertThat(created.response().targetName()).isEqualTo("s1");
+        assertThat(created.response().targetOrder()).isEqualTo(40);
+        assertThat(created.response().remainingOccurrenceGap()).isEqualTo(3);
+        assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        time.set(NOW.plusSeconds(20));
+        when(seoul.fetchVehicleLocations(any())).thenAnswer(invocation -> roster(new SeoulBusVehicleLocationItem(
+                "vehicle-id", NUMBER, 999, "coarse", 0, liveDataTime(), null, null, null, null, null)));
+        when(detail.fetchVehicleDetail("vehicle-id")).thenAnswer(invocation -> liveProgress("s3", 30, 0));
+        polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+        assertThat(service.find(owner.getId(), created.response().id()).remainingOccurrenceGap()).isEqualTo(1);
+        time.set(NOW.plusSeconds(40));
+        when(detail.fetchVehicleDetail("vehicle-id")).thenAnswer(invocation -> liveProgress("s1", 40, 0));
+        polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+        assertThat(service.find(owner.getId(), created.response().id()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
+        assertThat(jdbc.queryForList("select boarding_event_type from notification_events", String.class)).containsExactly("PREPARE_ALIGHT");
+    }
+
+    @Test
+    @DisplayName("등록 근거의 준비 TTL이 이미 지났으면 기회를 소비하지 않고 이후 새 이동 관측에서 대체 알림을 생성한다")
+    void initial_expired_preparation_keeps_later_opportunity() {
+        supportFixture();
+        time.set(NOW.plusSeconds(31));
+        var created = service.create(owner.getId(), request(REQUEST_ID, "ref"));
+        assertThat(created.response().preparationNotificationStatus()).isEqualTo("NOT_CREATED");
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        time.set(NOW.plusSeconds(40));
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                "vehicle-id", NUMBER, 999, "coarse", 0, liveDataTime(), null, null, null, null, null)));
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(liveProgress("s2", 20, 0));
+        polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+        assertThat(jdbc.queryForList("select boarding_event_type from notification_events", String.class)).containsExactly("PREPARE_ALIGHT");
+        assertThat(service.find(owner.getId(), created.response().id()).preparationNotificationStatus()).isEqualTo("NO_RECIPIENT");
+    }
+
     @ParameterizedTest
-    @ValueSource(booleans = {false, true})
-    @DisplayName("실제 Validator의 생성은 사전 알림 선택을 저장하고 같은 UUID로 선택을 바꾸면 충돌한다")
-    void real_creation_preserves_notification_choice(boolean enabled) throws Exception {
+    @org.junit.jupiter.params.provider.CsvSource({"1,0", "1,1", "2,0", "2,1"})
+    @DisplayName("등록 시 이미 목적지 한 occurrence 전이면 최신 이동·정차 근거로 실제 목적지 준비 알림을 즉시 한 번 생성한다")
+    void initial_registration_already_in_notification_window(int offset, int flag) {
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress("s2", 20, flag));
+        var request = new CreateBoardingSessionRequest(REQUEST_ID, candidateRef(), null, offset);
+        var created = service.create(owner.getId(), request);
+        assertThat(created.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
+        assertThat(created.response().remainingOccurrenceGap()).isEqualTo(1);
+        assertThat(created.response().targetName()).isEqualTo("목적지");
+        assertThat(created.response().preparationNotificationStatus()).isEqualTo("NO_RECIPIENT");
+        service.create(owner.getId(), request);
+        polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+        assertThat(jdbc.queryForList("select boarding_event_type from notification_events", String.class)).containsExactly("PREPARE_ALIGHT");
+        assertThat(jdbc.queryForObject("select current_stop_external_id from notification_events", String.class)).isEqualTo("s2");
+        assertThat(sessions.findById(created.response().id()).orElseThrow().getTraversal().targetIndex()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    @DisplayName("실제 Validator 생성은 알림 시점을 저장하고 UUID의 설정 변경을 거부한다")
+    void real_creation_preserves_notification_choice(int offset) throws Exception {
         String ref = candidateRef();
-        String content = body(REQUEST_ID, ref).replace("}", ",\"prepareNotificationEnabled\":" + enabled + "}");
+        String content = body(REQUEST_ID, ref).replace("}", ",\"notificationOffsetStops\":" + offset + "}");
         mvc.perform(auth(postSession(REQUEST_ID, ref).content(content), owner)).andExpect(status().isCreated())
-                .andExpect(jsonPath("$.prepareNotificationEnabled").value(enabled));
-        assertThat(sessions.findAll()).singleElement().extracting(BoardingSession::isPrepareNotificationEnabled)
-                .isEqualTo(enabled);
-        mvc.perform(auth(postSession(REQUEST_ID, ref).content(content), owner)).andExpect(status().isOk());
-        mvc.perform(auth(postSession(REQUEST_ID, ref).content(content.replace(":" + enabled + "}", ":" + !enabled + "}")), owner))
+                .andExpect(jsonPath("$.notificationOffsetStops").value(offset))
+                .andExpect(jsonPath("$.preparationNotificationStatus").value(offset == 2 ? "NO_RECIPIENT" : "NOT_CREATED"));
+        assertThat(sessions.findAll()).singleElement().extracting(BoardingSession::getNotificationOffsetStops).isEqualTo(offset);
+        runtime.forget(sessions.findAll().getFirst().getId());
+        mvc.perform(auth(postSession(REQUEST_ID, ref).content(content), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.notificationOffsetStops").value(offset));
+        mvc.perform(auth(postSession(REQUEST_ID, ref).content(content.replace(":" + offset + "}", ":" + (3 - offset) + "}")), owner))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BOARDING_REQUEST_CONFLICT"));
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"null", "0", "\"false\"", "{}"})
-    @DisplayName("사전 알림 선택은 생략 또는 boolean만 허용한다")
+    @ValueSource(strings = {"null", "0", "3", "1.0", "true", "\"1\"", "{}", "2147483649"})
+    @DisplayName("알림 시점은 생략하거나 정수 1과 2만 허용한다")
     void reject_invalid_preparation_choice(String value) throws Exception {
         mvc.perform(auth(postSession(REQUEST_ID, "ref").content(body(REQUEST_ID, "ref")
-                .replace("}", ",\"prepareNotificationEnabled\":" + value + "}")), owner))
+                .replace("}", ",\"notificationOffsetStops\":" + value + "}")), owner))
                 .andExpect(status().isBadRequest());
         assertThat(sessions.count()).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("기존 ON/OFF 요청은 저장된 세션 재시도만 허용하고 새 세션 정책으로 해석하지 않는다")
+    void legacy_request_only_reconciles_existing_session(boolean enabled) throws Exception {
+        String ref = "legacy-ref";
+        String content = body(REQUEST_ID, ref).replace("}", ",\"prepareNotificationEnabled\":" + enabled + "}");
+        mvc.perform(auth(postSession(REQUEST_ID, ref).content(content), owner)).andExpect(status().isBadRequest());
+        var start = verified(metadata());
+        var legacy = new CreateBoardingSessionRequest(REQUEST_ID, ref, NUMBER, enabled);
+        sessions.saveAndFlush(new BoardingSession(owner, REQUEST_ID, legacy.fingerprint(), "vehicle-id", NUMBER,
+                "7000", "목적지", start.traversal(), start.checkpoint(), UTC_NOW, UTC_NOW.plusHours(4), enabled));
+        mvc.perform(auth(postSession(REQUEST_ID, ref).content(content), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.notificationOffsetStops").isEmpty())
+                .andExpect(jsonPath("$.prepareNotificationEnabled").value(enabled));
+        verifyNoInteractions(seoul, detail);
     }
 
     @Test
@@ -168,17 +249,18 @@ class BoardingSessionApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("검증된 입력의 생성은 201 TRACKING과 고정 수명을 반환하고 과거 gap이나 알림 성공을 노출하지 않는다")
+    @DisplayName("최신 검증 입력은 201 TRACKING과 현재 READY 및 고정 수명을 반환하고 준비 Event를 즉시 생성한다")
     void create_verified_session() throws Exception {
         supportFixture();
         var response = mvc.perform(auth(postSession(REQUEST_ID, "ref"), owner)).andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("TRACKING"))
                 .andExpect(jsonPath("$.revision").value(0))
                 .andExpect(jsonPath("$.routeNumber").value("7000"))
+                .andExpect(jsonPath("$.notificationOffsetStops").value(2))
                 .andExpect(jsonPath("$.vehicleNumber").value(NUMBER))
                 .andExpect(jsonPath("$.targetOrder").value(30))
-                .andExpect(jsonPath("$.remainingOccurrenceGap").isEmpty())
-                .andExpect(jsonPath("$.evaluationStatus").value("RECOVERY_PENDING"))
+                .andExpect(jsonPath("$.remainingOccurrenceGap").value(2))
+                .andExpect(jsonPath("$.evaluationStatus").value("READY"))
                 .andExpect(jsonPath("$.checkpointObservedAt").value(NOW.toString()))
                 .andExpect(jsonPath("$.expiresAt").value(NOW.plusSeconds(14400).toString()))
                 .andExpect(jsonPath("$.vehicleTrackingId").doesNotExist())
@@ -187,7 +269,7 @@ class BoardingSessionApiIntegrationTest {
         long id = json.readTree(response.getResponse().getContentAsString()).get("id").asLong();
         assertThat(sessions.findById(id).orElseThrow().getCheckpoint().getIndex()).isZero();
         assertThat(jdbc.queryForObject("select count(*) from alarms", Long.class)).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(1);
     }
 
     @Test
@@ -318,7 +400,7 @@ class BoardingSessionApiIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    @DisplayName("후보 조회의 정차 뒤 같은 occurrence에서 이동 중 확정하면 원래 기준점을 저장하고 알림을 만들지 않는다")
+    @DisplayName("정차 뒤 이동 중 등록은 최신 검증 기준점과 선택 시점을 보존하고 알림 구간이면 즉시 생성한다")
     void create_from_stopped_baseline_while_moving(boolean prepare) throws Exception {
         var lookup = mvc.perform(auth(get("/api/v1/bus-routes/" + route.getId() + "/boarding-candidates")
                         .param("targetStopOccurrenceId", target.getId().toString())
@@ -330,26 +412,26 @@ class BoardingSessionApiIntegrationTest {
         when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(new SeoulBusVehicleDetailResponse(
                 new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
                 new SeoulBusVehicleDetailItem("vehicle-id", NUMBER, "s1", 10, 0, "20261020120010", null, null)))));
-        String content = body(REQUEST_ID, reference).replace("}", ",\"prepareNotificationEnabled\":" + prepare + "}");
+        String content = body(REQUEST_ID, reference).replace("}", ",\"notificationOffsetStops\":" + (prepare ? 2 : 1) + "}");
 
         mvc.perform(auth(postSession(REQUEST_ID, reference).content(content), owner))
                 .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("TRACKING"))
-                .andExpect(jsonPath("$.checkpointObservedAt").value(NOW.toString()))
-                .andExpect(jsonPath("$.providerDataTime").value(NOW.truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()))
-                .andExpect(jsonPath("$.evaluationStatus").value("RECOVERY_PENDING"))
-                .andExpect(jsonPath("$.remainingOccurrenceGap").isEmpty())
-                .andExpect(jsonPath("$.prepareNotificationEnabled").value(prepare));
+                .andExpect(jsonPath("$.checkpointObservedAt").value(NOW.plusSeconds(10).toString()))
+                .andExpect(jsonPath("$.providerDataTime").value(NOW.plusSeconds(10).truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()))
+                .andExpect(jsonPath("$.evaluationStatus").value("READY"))
+                .andExpect(jsonPath("$.remainingOccurrenceGap").value(2))
+                .andExpect(jsonPath("$.notificationOffsetStops").value(prepare ? 2 : 1));
         assertThat(sessions.findAll()).singleElement().satisfies(session -> {
-            assertThat(session.getCheckpoint().getObservedAt()).isEqualTo(UTC_NOW);
+            assertThat(session.getCheckpoint().getObservedAt()).isEqualTo(UTC_NOW.plusSeconds(10));
             assertThat(session.getCheckpoint().getProviderDataTime())
-                    .isEqualTo(UTC_NOW.truncatedTo(java.time.temporal.ChronoUnit.SECONDS));
+                    .isEqualTo(UTC_NOW.plusSeconds(10).truncatedTo(java.time.temporal.ChronoUnit.SECONDS));
             assertThat(session.getCheckpoint().getIndex()).isZero();
         });
-        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(prepare ? 1 : 0);
         assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
         time.set(NOW.plusSeconds(61));
         mvc.perform(auth(postSession(REQUEST_ID, reference).content(content), owner)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.checkpointObservedAt").value(NOW.toString()));
+                .andExpect(jsonPath("$.checkpointObservedAt").value(NOW.plusSeconds(10).toString()));
         assertThat(sessions.count()).isEqualTo(1);
         verify(seoul, times(2)).fetchVehicleLocations(any());
         verify(detail, times(2)).fetchVehicleDetail("vehicle-id");
@@ -375,9 +457,9 @@ class BoardingSessionApiIntegrationTest {
             String content = "{\"clientRequestId\":\"" + REQUEST_ID + "\",\"candidateRef\":\"" + reference + "\"}";
             mvc.perform(auth(postSession(REQUEST_ID, reference).content(content), owner))
                     .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("TRACKING"))
-                    .andExpect(jsonPath("$.evaluationStatus").value("VERIFICATION_PENDING"))
-                    .andExpect(jsonPath("$.remainingOccurrenceGap").isEmpty())
-                    .andExpect(jsonPath("$.checkpointObservedAt").isEmpty());
+                    .andExpect(jsonPath("$.evaluationStatus").value(issue.equals("TARGET_REACHED") ? "VERIFICATION_PENDING" : "READY"))
+                    .andExpect(jsonPath("$.remainingOccurrenceGap").value(issue.equals("TARGET_REACHED") ? null : issue.equals("CHANGED_REFERENCE") ? 1 : 2))
+                    .andExpect(jsonPath("$.checkpointObservedAt").value(issue.equals("TARGET_REACHED") ? null : NOW.plusSeconds(10).toString()));
             mvc.perform(auth(postSession(REQUEST_ID, reference).content(content), owner))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("TRACKING"));
             assertThat(sessions.count()).isEqualTo(1);
@@ -386,7 +468,7 @@ class BoardingSessionApiIntegrationTest {
             expectError(reference, "BOARDING_CANDIDATE_CHANGED", 409);
             assertThat(sessions.count()).isZero();
         }
-        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(issue.equals("EXPIRED") || issue.equals("TARGET_REACHED") ? 0 : 1);
         assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
         verify(detail, times(issue.equals("EXPIRED") ? 1 : 2)).fetchVehicleDetail("vehicle-id");
     }
@@ -493,7 +575,10 @@ class BoardingSessionApiIntegrationTest {
             var b = pool.submit(() -> service.create(owner.getId(), request(REQUEST_ID, "ref")));
             var first = a.get(10, TimeUnit.SECONDS);
             var second = b.get(10, TimeUnit.SECONDS);
-            assertThat(first.response()).isEqualTo(second.response());
+            assertThat(first.response()).usingRecursiveComparison()
+                    .ignoringFields("evaluationStatus", "remainingOccurrenceGap").isEqualTo(second.response());
+            assertThat(first.response().preparationNotificationStatus()).isEqualTo("NO_RECIPIENT");
+            assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(1);
             assertThat(first.created()).isNotEqualTo(second.created());
         }
         assertThat(sessions.count()).isEqualTo(1);
@@ -523,6 +608,8 @@ class BoardingSessionApiIntegrationTest {
             assertThat(result.created()).isEqualTo(!committed);
             assertThat(result.response().checkpointObservedAt()).isEqualTo(NOW);
             assertThat(result.response().expiresAt()).isEqualTo(NOW.plusSeconds(14400));
+            assertThat(jdbc.queryForObject("select count(*) from notification_events where boarding_session_id=?",
+                    Long.class, result.response().id())).isEqualTo(1);
         }
     }
 
@@ -558,7 +645,7 @@ class BoardingSessionApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value("BOARDING_REVISION_CONFLICT"));
         assertThat(sessions.findById(id).orElseThrow().getCheckpoint()).isEqualTo(recovered.getCheckpoint());
         assertThat(sessions.count()).isEqualTo(1);
-        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(1);
     }
 
     @Test
@@ -834,25 +921,25 @@ class BoardingSessionApiIntegrationTest {
         assertThat(candidate.selectionKey()).isNotBlank().doesNotContain("vehicle-id", NUMBER);
         var result = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, candidate.candidateRef(), null));
         assertThat(result.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
-        assertThat(result.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING);
-        assertThat(result.response().remainingOccurrenceGap()).isNull();
-        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        assertThat(result.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
+        assertThat(result.response().remainingOccurrenceGap()).isEqualTo(2);
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(1);
     }
 
     @ParameterizedTest
     @org.junit.jupiter.params.provider.CsvSource({"0,true,3,0", "0,true,4,0", "0,false,3,0", "0,false,4,0", "1,true,3,0", "1,true,3,1", "-1,true,3,0"})
-    @DisplayName("정차·이동 차량은 즉시 추적하고 위치 부족과 재시작 뒤 정상 관측에서 사전·목적지 알림을 중복 없이 생성한다")
+    @DisplayName("정차·이동 등록과 위치 부족·재시작에서도 준비 알림 한 번과 목적지 완료를 유지한다")
     void immediate_tracking_observes_then_notifies(int initialFlag, boolean prepare, int endStop, int unavailableFlag) {
         occurrence("s4", 40);
         when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(initialFlag < 0
                 ? new SeoulBusVehicleDetailResponse(new SeoulBusVehicleDetailResponse.Header("4", null), null)
                 : progress("s1", 10, initialFlag));
         String reference = candidateRef();
-        var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, reference, null, prepare));
+        var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, reference, null, prepare ? 2 : 1));
         Long id = created.response().id();
         assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
-        assertThat(created.response().evaluationStatus()).isEqualTo(initialFlag <= 0
-                ? BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING : BoardingSessionResponse.EvaluationStatus.RECOVERY_PENDING);
+        assertThat(created.response().evaluationStatus()).isEqualTo(initialFlag < 0
+                ? BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING : BoardingSessionResponse.EvaluationStatus.READY);
         try {
             for (int seconds : List.of(20, 40)) {
                 time.set(NOW.plusSeconds(seconds));
@@ -862,7 +949,7 @@ class BoardingSessionApiIntegrationTest {
                 when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(liveProgress(null, null, unavailableFlag));
                 polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
                 assertThat(service.find(owner.getId(), id).status()).isEqualTo(BoardingSessionStatus.TRACKING);
-                assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+                assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(initialFlag >= 0 && prepare ? 1 : 0);
                 runtime.forget(id); // Restart gate is default closed; DB identity/checkpoint remain.
             }
             time.set(NOW.plusSeconds(60));
@@ -872,7 +959,7 @@ class BoardingSessionApiIntegrationTest {
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
             assertThat(service.find(owner.getId(), id).evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
             assertThat(jdbc.queryForObject("select count(*) from notification_events where boarding_event_type='PREPARE_ALIGHT'", Long.class))
-                    .isEqualTo(prepare ? 1L : 0L);
+                    .isEqualTo(1L);
             time.set(NOW.plusSeconds(80));
             when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
                     "vehicle-id", NUMBER, 999, "coarse", 1, liveDataTime(), null, null, null, null, null)));
@@ -883,8 +970,8 @@ class BoardingSessionApiIntegrationTest {
             var completed = service.find(owner.getId(), id);
             assertThat(completed.status()).isEqualTo(BoardingSessionStatus.COMPLETED);
             assertThat(completed.reasonCode()).isEqualTo(endStop == 3 ? BoardingStateReason.ARRIVAL_OBSERVED : BoardingStateReason.PASSED_OBSERVED);
-            assertThat(jdbc.queryForObject("select count(*) from notification_events where boarding_event_type='DESTINATION_REACHED'", Long.class)).isEqualTo(1);
-            assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(prepare ? 2L : 1L);
+            assertThat(jdbc.queryForObject("select count(*) from notification_events where boarding_event_type='DESTINATION_REACHED'", Long.class)).isZero();
+            assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(1L);
         } finally {
             jdbc.update("delete from notification_deliveries");
             jdbc.update("delete from notification_events");
@@ -906,7 +993,7 @@ class BoardingSessionApiIntegrationTest {
         var candidate = candidateRef();
         var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, candidate, null));
         assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
-        assertThat(created.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING);
+        assertThat(created.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
         try {
             replayObservation("2026-10-28T10:55:12Z", "20261028195503", "107000031", 8, 1);
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
@@ -920,7 +1007,7 @@ class BoardingSessionApiIntegrationTest {
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
             assertThat(service.find(owner.getId(), created.response().id()).reasonCode()).isEqualTo(BoardingStateReason.ARRIVAL_OBSERVED);
             assertThat(jdbc.queryForList("select boarding_event_type from notification_events order by id", String.class))
-                    .containsExactly("PREPARE_ALIGHT", "DESTINATION_REACHED");
+                    .containsExactly("PREPARE_ALIGHT");
         } finally {
             jdbc.update("delete from notification_deliveries");
             jdbc.update("delete from notification_events");

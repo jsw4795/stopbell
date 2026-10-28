@@ -91,8 +91,11 @@ public class BoardingVehicleTracker {
         if (session.provider() == TransitProvider.SEOUL_BUS && Integer.valueOf(0).equals(vehicle.stopFlag())) {
             return moving(session, vehicle);
         }
-        // Only exact stopped detail establishes a new arrival. A moving response never
-        // establishes arrival at a new occurrence, even when its numeric order matches.
+        if (session.provider() == TransitProvider.SEOUL_BUS && !Integer.valueOf(1).equals(vehicle.stopFlag())) {
+            // Missing/unknown meaning is unavailable progress, not proof of lost continuity.
+            return Input.held(BoardingStateReason.STALE_PROGRESS);
+        }
+        // A stopped exact detail is a direct arrival; moving detail uses the empirical contract below.
         var meaning = session.provider() == TransitProvider.SEOUL_BUS && Integer.valueOf(1).equals(vehicle.stopFlag())
                 && vehicle.stopId() != null ? BoardingProgressObservation.Meaning.DIRECT_ARRIVAL
                 : BoardingProgressObservation.Meaning.UNVERIFIED;
@@ -108,9 +111,6 @@ public class BoardingVehicleTracker {
             return Input.held(BoardingStateReason.PROGRESS_REGRESSION);
         }
         var occurrences = session.traversal().occurrences();
-        if (occurrences.stream().map(item -> item.externalStopId()).distinct().count() != occurrences.size()) {
-            return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
-        }
         int index = -1;
         for (int i = 0; i < occurrences.size(); i++) {
             var occurrence = occurrences.get(i);
@@ -133,27 +133,19 @@ public class BoardingVehicleTracker {
         if (index < previous.getIndex()) {
             return Input.held(BoardingStateReason.PROGRESS_REGRESSION);
         }
-        if (previous.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
-            return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
-                    vehicle, BoardingProgressObservation.Meaning.UNVERIFIED, false, null, false), null);
-        }
-        if (index != previous.getIndex()) {
-            if (vehicle.observedAt().equals(previous.getObservedAt().toInstant(ZoneOffset.UTC))
+        if (index != previous.getIndex()
+                && (vehicle.observedAt().equals(previous.getObservedAt().toInstant(ZoneOffset.UTC))
                     || (previous.getProviderDataTime() != null && vehicle.providerDataTime()
-                        .equals(previous.getProviderDataTime().toInstant(ZoneOffset.UTC)))) {
-                return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
-            }
-            // A plausible forward moving reference is unavailable arrival evidence, not
-            // known loss of the run. Retain the checkpoint and bounded automatic retry.
-            return Input.held(BoardingStateReason.STALE_PROGRESS);
-        }
-        if (previous.getEvidence() != BoardingCheckpoint.Evidence.ID_ORDER) {
+                        .equals(previous.getProviderDataTime().toInstant(ZoneOffset.UTC))))) {
             return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
         }
-        // Seoul live observations retain the last stopped stId/stOrd after flag 1 -> 0.
-        // Preserve only that already verified reference; never advance it from moving data.
+        // TASK-908: empirical Seoul 143/N51 assumption, NOT an official API guarantee:
+        // flag=0 stId/stOrd identifies the last reported reached/passed occurrence;
+        // flag=1 identifies the current arrival. Non-stopping updates remain unverified live.
+        // Exact metadata ID+stOrd occurrence mapping and evaluator continuity/time gates
+        // are mandatory. Roster sectOrd is never substituted for a Stop occurrence order.
         return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
-                vehicle, BoardingProgressObservation.Meaning.VERIFIED_REFERENCE, false,
+                vehicle, BoardingProgressObservation.Meaning.VERIFIED_REACHED, false,
                 previous.getDirectionContext(), false), null);
     }
 

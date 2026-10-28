@@ -93,13 +93,13 @@ class BoardingCandidateRevalidationTest {
         assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isEqualTo(1);
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
                 "v1", "서울70사1234", "s2", 20, 0, "20261019120001", null, null)));
-        assertThat(service.revalidateSelected(original, route, "서울70사1234").baselineVerified()).isFalse();
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").baselineVerified()).isTrue();
     }
 
     @ParameterizedTest
     @ValueSource(ints = {0, 1})
     @ExtendWith(OutputCaptureExtension.class)
-    @DisplayName("검증된 정차 기준점이 없는 이동 응답은 선택을 접수하되 진행 미검증으로 반환한다")
+    @DisplayName("정차 기준점 없는 이동도 exact ID/order와 시간 검증을 통과하면 진행 기준점으로 반환한다")
     void diagnose_latest_moving_detail(int previousFlag, CapturedOutput output) {
         original = new Snapshot(original.context(), route, route.fingerprint(), original.rosterVehicle(),
                 BoardingCandidateMapper.detail(new SeoulBusVehicleDetailItem("v1", "서울70사1234", "s1", 10,
@@ -108,7 +108,7 @@ class BoardingCandidateRevalidationTest {
                 "v1", "서울70사1234", "s2", 20, 0, "20261019120001", null, null)));
 
         var selected = service.revalidateSelected(original, route, "서울70사1234");
-        assertThat(selected.baselineVerified()).isFalse();
+        assertThat(selected.baselineVerified()).isTrue();
         assertThat(selected.progressIndex()).isEqualTo(1);
         verify(seoul, times(1)).fetchVehicleLocations(any());
         verify(details, times(1)).fetchVehicleDetail("v1");
@@ -118,18 +118,18 @@ class BoardingCandidateRevalidationTest {
     @ParameterizedTest
     @ValueSource(strings = {DATA_TIME, "20261019120001"})
     @ExtendWith(OutputCaptureExtension.class)
-    @DisplayName("정차 뒤 같은 occurrence의 이동 응답을 확인하면 최초 정차 근거와 원래 두 시각으로 시작한다")
+    @DisplayName("같은 source의 이동 재응답은 원래 시각을 유지하고 새 source만 최신 reference로 시작한다")
     void reuse_stopped_baseline_without_refreshing_times(String latestTime, CapturedOutput output) {
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
                 "v1", "서울70사1234", "s1", 10, 0, latestTime, null, null)));
 
         var verified = service.revalidateSelected(original, route, "서울70사1234");
 
-        assertThat(verified.vehicle()).isSameAs(original.detailVehicle());
-        assertThat(verified.vehicle().observedAt()).isEqualTo(NOW);
-        assertThat(verified.vehicle().providerDataTime()).isEqualTo(NOW);
+        assertThat(verified.vehicle().stopFlag()).isEqualTo(latestTime.equals(DATA_TIME) ? 1 : 0);
+        assertThat(verified.vehicle().observedAt()).isEqualTo(NOW.plusSeconds(latestTime.equals(DATA_TIME) ? 0 : 1));
+        assertThat(verified.vehicle().providerDataTime()).isEqualTo(NOW.plusSeconds(latestTime.equals(DATA_TIME) ? 0 : 1));
         assertThat(verified.progressIndex()).isZero();
-        assertThat(output.getAll()).contains("outcome=STOPPED_BASELINE_REUSED")
+        assertThat(output.getAll())
                 .doesNotContain("서울70사1234", "v1", "s1", "external-route");
         verify(seoul, times(1)).fetchVehicleLocations(any());
         verify(details, times(1)).fetchVehicleDetail("v1");
@@ -206,7 +206,7 @@ class BoardingCandidateRevalidationTest {
         } else {
             var selected = service.revalidateSelected(original, route, "서울70사1234");
             assertThat(selected.baselineVerified()).isEqualTo(!reason.equals("LATEST_STOP_FLAG_UNVERIFIED")
-                    && !reason.equals("REPEATED_STOP_TRAVERSAL") && !reason.equals("CURRENT_POSITION_MISSING"));
+                    && !reason.equals("CURRENT_POSITION_MISSING"));
         }
     }
 
@@ -271,8 +271,8 @@ class BoardingCandidateRevalidationTest {
     }
 
     @Test
-    @DisplayName("회차 문맥이 모호한 동일 Stop 재방문 traversal은 자동으로 확정하지 않는다")
-    void reject_repeated_stop_traversal() {
+    @DisplayName("동일 Stop 재방문도 정확한 ID와 서로 다른 order가 대응하면 현재 occurrence로 검증한다")
+    void distinguish_repeated_stop_occurrences() {
         var repeated = new BoardingRouteSnapshot(1L, route.provider(), route.externalRouteId(), null, 14L, 12L,
                 List.of(new BoardingRouteSnapshot.Occurrence(11L, "s1", 10, "처음"),
                         new BoardingRouteSnapshot.Occurrence(12L, "s2", 20, "승차"),
@@ -281,7 +281,7 @@ class BoardingCandidateRevalidationTest {
         original = new Snapshot(original.context(), repeated, repeated.fingerprint(), original.rosterVehicle(),
                 original.detailVehicle(), original.expiresAt());
         route = repeated;
-        assertThat(service.revalidateSelected(original, route, "서울70사1234").baselineVerified()).isFalse();
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").baselineVerified()).isTrue();
     }
 
     @Test

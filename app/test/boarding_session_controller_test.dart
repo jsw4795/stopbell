@@ -43,7 +43,7 @@ void main() {
     transport.close();
   });
   test(
-    'preparation OFF survives durable storage and exact uncertain retries',
+    'one-stop timing survives durable storage and exact uncertain retries',
     () async {
       await start();
       api.onCreate = () async =>
@@ -52,24 +52,24 @@ void main() {
         sessionCandidate(),
         '서울70사1234',
         sessionContext,
-        prepareNotificationEnabled: false,
+        notificationOffsetStops: 1,
       );
-      expect(api.creations.single['prepareNotificationEnabled'], isFalse);
+      expect(api.creations.single['notificationOffsetStops'], 1);
       final original = storage.records.values.single;
       expect(
         BoardingCreationIntent.fromJson(original.toJson())
-            .prepareNotificationEnabled,
-        isFalse,
+            .notificationOffsetStops,
+        1,
       );
-      expect(c.pending!.prepareNotificationEnabled, isFalse);
+      expect(c.pending!.notificationOffsetStops, 1);
       final body = Map.of(api.creations.single);
       api.onCreate = () async => BoardingSession.fromJson({
         ...sessionJson(),
-        'prepareNotificationEnabled': false,
+        'notificationOffsetStops': 1,
       });
       await c.retryCreation();
       expect(api.creations.last, body);
-      expect(c.session!.prepareNotificationEnabled, isFalse);
+      expect(c.session!.notificationOffsetStops, 1);
       expect(storage.records, isEmpty);
     },
   );

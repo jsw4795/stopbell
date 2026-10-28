@@ -515,3 +515,10 @@ Compose file은 저장소 루트에 있으며, 서비스 이름은 `mysql`이다
 - Database seed data 및 fixture 제공 방식
 - API mock 또는 Transit provider sandbox 사용 여부
 - Local Push notification credential 관리 방식
+
+
+### TASK-908 하차 전 단일 알림 변경의 실행 경계 (2026-10-29)
+
+현재 소스의 신규 세션은 실제 목적지를 유지하고 2정거장 전(기본)/1정거장 전 준비 알림만 생성한다. 현재 빌드와 과거 §24~27 E2E 산출물은 구분하며 예전 설치본/Backend로 새 정책을 검증했다고 하지 않는다. 기존 개발 DB에는 V20을 아직 적용하지 않았다. 향후 승인된 실행 시 기존 MySQL/설정/데이터를 보존하고 정상 Flyway로 V20을 적용한 뒤 새 세션에서 확인한다. 기존 NULL offset 세션·대기 알림은 기존 정책이므로 새 정책 E2E와 혼동하지 않는다.
+
+이번 작업은 Testcontainers의 격리 MySQL, Provider mock/loopback FCM HTTP fixture, Flutter 자동 테스트와 서명 없는 iOS build만 사용한다. 실제 Provider·FCM·기기 설치/실행은 별도 승인 범위이며 monitoring/dispatch/FCM 설정과 Credential을 변경하지 않는다. 실제 무정차 stOrd 갱신·회차/반복 occurrence·수신/tap 검증은 [증거 보고서 §28](research/TASK-908-provider-evidence.md#28-하차-전-단일-알림과-이동-진행-평가-2026-10-29)을 따른다. Backend와 터널을 시작해 두지 않으며 TASK-908은 미완료로 유지한다.

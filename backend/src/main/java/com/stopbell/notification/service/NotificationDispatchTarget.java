@@ -43,7 +43,7 @@ public record NotificationDispatchTarget(
 
     public NotificationSendRequest request() {
         return new NotificationSendRequest(fid, source, notificationEventId,
-                expiresAt.toInstant(ZoneOffset.UTC));
+                expiresAt.toInstant(ZoneOffset.UTC), validatedSession == null ? null : validatedSession.targetName());
     }
 
     @Override

@@ -77,6 +77,11 @@ class BoardingSessionApiClient implements BoardingSessionClient {
     required bool Function() current,
   }) async {
     if ((body.length < 2 || body.length > 4) ||
+        (body.containsKey('notificationOffsetStops') &&
+            (body['notificationOffsetStops'] is! int ||
+                !const [1, 2].contains(body['notificationOffsetStops']))) ||
+        (body.containsKey('notificationOffsetStops') &&
+            body.containsKey('prepareNotificationEnabled')) ||
         (body.containsKey('prepareNotificationEnabled') &&
             body['prepareNotificationEnabled'] is! bool) ||
         body.keys.any(
@@ -85,6 +90,7 @@ class BoardingSessionApiClient implements BoardingSessionClient {
             'candidateRef',
             'confirmedVehicleNumber',
             'prepareNotificationEnabled',
+            'notificationOffsetStops',
           }.contains(key),
         ) ||
         body['clientRequestId'] is! String ||

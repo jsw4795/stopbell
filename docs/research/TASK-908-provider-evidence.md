@@ -1,5 +1,7 @@
 # TASK-908 사전 검증 1단계: Provider 차량·진행·하차 가능성 증거
 
+> **현행 TASK-908 정책 (2026-10-29):** 하차 전 단일 알림·이동 진행과 반복 occurrence 구분의 현재 구현 및 검증 범위는 [§28](#28-하차-전-단일-알림과-이동-진행-평가-2026-10-29)을 따른다. §27까지의 제한·정책·검증 결과는 각 작업 시점의 기록이다.
+
 > **현행 요구사항 정정 (2026-10-28):** §1~22의 목적 occurrence 하차 허용 근거를 시작 조건으로 둔 해석은 철회한다. 하차 가능성 공식 근거 조사는 종료하며 현재 계약은 [요구사항](../requirements.md#phase-9-탑승-세션과-하차-준비-알림)과 [API 지원 경계](../api.md#탑승-세션-api-task-903)를 따른다. 아래 실측 횟수·미실행·과거 보류 기록은 당시 사실로 보존한다.
 
 최신 실제 서울 143번·격리 MySQL·Notification 검증은 [§24](#24-실제-서울-143번-생성진행notification-검증-2026-10-28)를 따른다. §23까지의 미실행·미지원 설명은 각 작업 시점의 기록이며 현행 지원 경계는 API/Domain이 소유한다.
@@ -957,3 +959,44 @@ Boarding start rejected: stage=candidate-revalidation provider=SEOUL_BUS reason=
 - [V19](../../backend/src/main/resources/db/migration/V19__boarding_immediate_tracking.sql): 기존 V18 데이터 호환 전환
 
 Flutter 변경 파일은 [boarding_session.dart](../../app/lib/features/boarding/boarding_session.dart), [boarding_session_controller.dart](../../app/lib/features/boarding/boarding_session_controller.dart), [boarding_session_view.dart](../../app/lib/features/boarding/boarding_session_view.dart), [boarding_confirmation_view.dart](../../app/lib/features/boarding/boarding_confirmation_view.dart)다. 새 응답과 이전 VERIFYING 응답의 호환 파싱, 등록 즉시 추적 화면, 위치 확인 중 표시를 반영했다. 관련 Backend·Flutter 테스트와 Owner 문서·ADR·TASK-908 진행 기록을 동기화했다. 새 Dependency·기존 Migration·Credential·실행 설정·devlog 변경과 Git add/commit/push·브랜치 변경은 없다.
+
+
+## 28. 하차 전 단일 알림과 이동 진행 평가 (2026-10-29)
+
+이번 사용자 결정은 신규 세션의 사전 ON/OFF·필수 목적지 Push를 대체한다. 실제 목적지는 그대로 두고 2정거장 전(기본)/1정거장 전만 선택한다. 알림 구간에 도달·통과한 신뢰할 현재 관측에서 PREPARE_ALIGHT를 세션당 최대 한 번 생성한다. 등록 시 이미 구간 안이면 최신 검증 baseline으로 즉시 생성하고 commit 확인 뒤 gate를 연다. 목적지 현재·이후로 건너뛴 관측에서는 준비를 소급 생성하지 않고 검증된 도달/통과로 세션만 완료한다. 관측이 불명확한 등록은 TRACKING과 위치 확인 중을 유지한다.
+
+### 근거와 가정의 구분
+
+- **저장된 서울 143번 기록:** §24.3의 7(flag=0) → 8(flag=1) → 8(flag=0) → 9(flag=1) → 10(flag=1)을 오프라인에서 재생한다. flag=0에서 직전 정차 reference 유지 패턴은 확인했으나 이 기록에는 무정차 통과에 따른 stOrd 갱신을 입증할 표본이 없다
+- **사용자의 N51 관찰 보고:** flag=1로 바뀌며 stOrd 증가, flag=0에서 직전 도착 순번 유지. 이번 요청에 기록된 사용자 보고이며 별도 원시 응답·수신시각 파일을 새로 수집하거나 동일 실험을 재현하지 않았다
+- **채택한 실측 기반 가정:** flag=0의 stId/stOrd는 마지막으로 도달하거나 통과했다고 보고된 정류장, flag=1은 현재 도착 정류장이다. 공식 API 보장으로 확정하지 않는다. 특히 실제 **무정차 통과 시 stOrd가 같은 규칙으로 갱신되는지는 미검증**이다
+- **occurrence 대응:** `SeoulCsvMetadataSource`는 노선ID/노드ID/정류장순번을 읽고, 같은 노선의 ordered metadata와 detail stId/stOrd를 두 값 모두 일치시킨다. §24의 일부 실제 ID/order 대응은 근거이나 모든 노선의 순번 의미를 실측 보장하지 않는다. roster sectOrd는 구간 문맥으로만 유지하며 Stop occurrence order로 전용하지 않는다
+
+### 구현 및 오프라인 검증 경계
+
+`BoardingCandidateService`는 최신 이동 exact detail로도 목적지 이전 baseline을 만들고(동일 occurrence·제공시각 반복은 원래 두 시각 유지) `BoardingVehicleTracker`는 새 이동 occurrence를 VERIFIED_REACHED로 전달한다. `BoardingProgressEvaluator`와 Entity는 동일 ID/전체 번호/노선·60초 freshness·제공/수신시각 단조성·진행 역행·PT2M 연속성 공백 검증을 유지한다. flag=0 자체로는 거부하지 않지만 필드 부족·ID/order 모순·회차/반복 Stop의 모호성·운행 종료·소실·알려진 연속성 상실은 진행 근거로 승격하지 않는다. 반복 occurrence를 raw Stop ID만으로 합치거나 다음 lap/다른 차량으로 전환하지 않는다. 반복 Stop도 ID/order의 유일한 쌍과 기존 시각·연속성 검증으로 구분하며 같은 ID의 첫 방문을 뒤쪽 목적지 방문으로 혼동하지 않는다. 실제 trip/lap 식별자를 새로 확보한 것은 아니다. 순번 reset·방향 모순·대응 불가 등 실제 모호성은 보류한다.
+
+목표는 raw order 차감이 아닌 실제 배열 index로 계산한다. 테스트는 10/20/40/80/100처럼 비연속 순번도 사용한다. 2개 전에서 직접 관측 또는 1개 전 대체, 선택 1개 전에서는 2개 전 발송 없음, 목적지 현재/이후 알림 없음, 최초 위치 미확인→이동 검증, 중복 cycle·재시작·기존 Event 재사용·목적지 pending 종료를 다룬다. 이동 중 순번 증가·관측 누락은 **합성 fixture 검증**이며 실제 무정차 데이터를 새로 확보한 결과가 아니다.
+
+V17/V18/V19는 보존하고 V20의 nullable notification_offset_stops를 추가한다. 기존 NULL offset 세션은 ON/OFF와 목적지 Event/Delivery를 기존 정책으로 유지하며 기존 row/fingerprint/시각을 변환하지 않는다. 새 생성은 1/2만 저장하고 PREPARE_ALIGHT만 생성·dispatch한다. Legacy 요청은 기존 UUID 결과 복구만 허용한다. Notification identity·recipient 고정·원래 TTL·bounded retry·FCM 접수/표시 구분은 유지한다. 준비 문구에는 실제 목적지 이름을 전달하고 Flutter는 목적지·알림 시점·진행·전송 상태·종료 상태를 구분한다.
+
+### 변경 파일
+
+Backend: [BoardingTrackingSnapshot.java](../../backend/src/main/java/com/stopbell/boarding/domain/BoardingTrackingSnapshot.java), [BoardingSessionResponse.java](../../backend/src/main/java/com/stopbell/boarding/dto/BoardingSessionResponse.java), [CreateBoardingSessionRequest.java](../../backend/src/main/java/com/stopbell/boarding/dto/CreateBoardingSessionRequest.java), [BoardingSession.java](../../backend/src/main/java/com/stopbell/boarding/entity/BoardingSession.java), [BoardingNotificationService.java](../../backend/src/main/java/com/stopbell/boarding/service/BoardingNotificationService.java), [BoardingProgressEvaluator.java](../../backend/src/main/java/com/stopbell/boarding/service/BoardingProgressEvaluator.java), [BoardingSessionService.java](../../backend/src/main/java/com/stopbell/boarding/service/BoardingSessionService.java), [BoardingVehicleTracker.java](../../backend/src/main/java/com/stopbell/boarding/service/BoardingVehicleTracker.java), [FcmProviderClient.java](../../backend/src/main/java/com/stopbell/notification/client/FcmProviderClient.java), [NotificationSendRequest.java](../../backend/src/main/java/com/stopbell/notification/client/NotificationSendRequest.java), [NotificationDeliveryRepository.java](../../backend/src/main/java/com/stopbell/notification/repository/NotificationDeliveryRepository.java), [NotificationDispatchAttemptService.java](../../backend/src/main/java/com/stopbell/notification/service/NotificationDispatchAttemptService.java), [NotificationDispatchTarget.java](../../backend/src/main/java/com/stopbell/notification/service/NotificationDispatchTarget.java), [BoardingCandidateService.java](../../backend/src/main/java/com/stopbell/transit/service/BoardingCandidateService.java), [V20__boarding_pre_departure_notification_policy.sql](../../backend/src/main/resources/db/migration/V20__boarding_pre_departure_notification_policy.sql).
+
+Flutter: [boarding_confirmation_view.dart](../../app/lib/features/boarding/boarding_confirmation_view.dart), [boarding_creation_intent.dart](../../app/lib/features/boarding/boarding_creation_intent.dart), [boarding_home.dart](../../app/lib/features/boarding/boarding_home.dart), [boarding_session.dart](../../app/lib/features/boarding/boarding_session.dart), [boarding_session_client.dart](../../app/lib/features/boarding/boarding_session_client.dart), [boarding_session_controller.dart](../../app/lib/features/boarding/boarding_session_controller.dart), [boarding_session_view.dart](../../app/lib/features/boarding/boarding_session_view.dart).
+
+테스트 18개 파일에서 정책·API·진행·저장·Migration·dispatch·FCM payload·Flutter 화면/복구를 검증한다. 관련 Owner 문서와 ADR-012를 같은 작업에서 동기화하며 devlog은 수정하지 않는다.
+
+### 자동 검증 결과
+
+- Java 21 / Gradle Wrapper 8.14.3 환경 확인
+- `./gradlew test bootJar --offline --no-daemon`: Backend 전체 **1,027개**, 실패 0·오류 0·skip 0 및 실행 JAR build 성공. Spring Application Context·JPA schema validate·V20 격리 MySQL Migration·기존 Alarm/FCM retry·서울 143번 재생·반복 occurrence 후보→저장→이동 polling·동시 상태 조회 포함
+- `flutter test --no-pub`: Flutter 전체 **470개** 통과. 1/2 시점 선택·저장/복구·기존 ON/OFF intent 호환·전송 상태/상세·기존 Session/Notification 회귀 포함
+- `flutter analyze --no-pub`: 문제 없음. 변경 Dart 파일 format 통과
+- `flutter build ios --debug --no-codesign --no-pub`: 서명 없는 iOS build 성공. 실제 iPhone 설치·실행·수신 검증 결과가 아님
+- `git diff --check`와 로컬 문서 링크 검사 통과. main 유지, staged 변경 없음. 새 Dependency·기존 V17/V18/V19·Credential·환경설정·devlog 변경 없음. 기존 개발 MySQL 적용·실제 Provider/FCM 호출 0회, Backend/터널 상시 실행 없음, Git add/commit/push·브랜치 변경 없음
+
+### 잔여 실측
+
+N51 및 다른 노선의 실제 무정차 stOrd 갱신, 조회 사이 1개 이상 통과·회차/반복 occurrence의 운행 문맥, API 지연에 따른 목적지 이전 판단·알림 지연, 실제 iPhone background/terminated 수신·tap·기기 표시·목적지 별도 Push 없음은 후속 승인된 Provider 실측과 iPhone E2E로 확인해야 한다. 현재는 이를 검증 완료로 주장하지 않는다. 기존 개발 DB 적용·실제 Provider/FCM·Backend/터널 상시 실행·Git add/commit/push/브랜치 변경은 수행하지 않는다. TASK-908은 실제 iPhone E2E 성공 전까지 `[ ]`를 유지한다.

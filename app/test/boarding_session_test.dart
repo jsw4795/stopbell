@@ -9,6 +9,74 @@ import 'package:stopbell/features/boarding/boarding_session_client.dart';
 import 'boarding_session_test_fakes.dart';
 
 void main() {
+  test(
+    'new creation defaults to two stops and preserves destination separately',
+    () {
+      final intent = BoardingCreationIntent(
+        clientRequestId: newBoardingRequestId(),
+        candidateRef: 'opaque',
+        selectedVehicleNumber: '서울70사1234',
+        userIdentity: '1',
+        sessionIdentity: 'offset-default',
+        context: sessionContext,
+        observedAt: sessionNow,
+      );
+      expect(intent.body['notificationOffsetStops'], 2);
+      expect(intent.body, isNot(contains('prepareNotificationEnabled')));
+      expect(
+        BoardingCreationIntent.fromJson(intent.toJson()).body,
+        intent.body,
+      );
+      final session = BoardingSession.fromJson({
+        ...sessionJson(),
+        'notificationOffsetStops': 1,
+      });
+      expect(session.targetName, '목적 정류장');
+      expect(session.targetOrder, 9);
+      expect(session.notificationOffsetStops, 1);
+    },
+  );
+  for (final invalid in [0, 3, -1, 1.0, true, '1']) {
+    test('rejects malformed notification offset $invalid', () {
+      expect(
+        () => BoardingSession.fromJson({
+          ...sessionJson(),
+          'notificationOffsetStops': invalid,
+        }),
+        throwsFormatException,
+      );
+    });
+  }
+  test(
+    'legacy OFF pending intent keeps original body and no offset after restart',
+    () {
+      final old = {
+        'clientRequestId': newBoardingRequestId(),
+        'candidateRef': 'old-ref',
+        'selectedVehicleNumber': '서울70사1234',
+        'prepareNotificationEnabled': false,
+        'userIdentity': '1',
+        'sessionIdentity': 'old-login',
+        'context': sessionContext.toJson(),
+        'observedAt': sessionNow.toIso8601String(),
+      };
+      final intent = BoardingCreationIntent.fromJson(old);
+      expect(intent.notificationOffsetStops, isNull);
+      expect(intent.body['prepareNotificationEnabled'], isFalse);
+      expect(intent.body, isNot(contains('notificationOffsetStops')));
+      expect(
+        BoardingCreationIntent.fromJson(intent.toJson()).body,
+        intent.body,
+      );
+      final session = BoardingSession.fromJson({
+        ...sessionJson(),
+        'notificationOffsetStops': null,
+        'prepareNotificationEnabled': false,
+      });
+      expect(session.notificationOffsetStops, isNull);
+      expect(session.prepareNotificationEnabled, isFalse);
+    },
+  );
   for (final status in [
     'TRACKING',
     'SUSPENDED',
@@ -39,7 +107,7 @@ void main() {
         throwsFormatException,
       );
     });
-    test('legacy persisted request preserves its exact retry body after manual input removal', () {
+    test('legacy default-ON intent preserves canonical identity and explicitly prevents new-policy creation', () {
       final old = {
         'clientRequestId': '8be1dffa-8e2c-4547-b136-d99bfd84e45c',
         'candidateRef': 'old-ref',
@@ -54,6 +122,7 @@ void main() {
         'clientRequestId': old['clientRequestId'],
         'candidateRef': 'old-ref',
         'confirmedVehicleNumber': '서울70사1234',
+        'prepareNotificationEnabled': true,
       });
       expect(
         BoardingCreationIntent.fromJson(restored.toJson()).body,
@@ -234,7 +303,7 @@ void main() {
       expect(await storage.read('login-b'), isNull);
       final raw = await const FlutterSecureStorage().readAll();
       expect(raw, hasLength(1));
-      expect(jsonDecode(raw.values.single), hasLength(7));
+      expect(jsonDecode(raw.values.single), hasLength(8));
       expect(raw.values.single, isNot(contains('Token')));
       expect(raw.values.single, isNot(contains('FID')));
       await storage.delete('login-b');

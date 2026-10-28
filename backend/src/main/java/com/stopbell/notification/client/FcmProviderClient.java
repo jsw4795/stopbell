@@ -147,7 +147,8 @@ public final class FcmProviderClient {
     static String payload(NotificationSendRequest request) {
         boolean boarding = request.source().sourceType() == NotificationSourceType.BOARDING_SESSION;
         String body = boarding ? switch (request.source().boardingEventType()) {
-            case PREPARE_ALIGHT -> "선택한 정류장이 가까워졌어요. 하차를 준비해 주세요.";
+            case PREPARE_ALIGHT -> (request.targetName() == null ? "선택한 정류장" : request.targetName())
+                    + "이(가) 가까워졌어요. 하차를 준비해 주세요.";
             case DESTINATION_REACHED -> "버스가 선택한 정류장에 도달하거나 통과했어요.";
         } : switch (request.eventType()) {
             case ONE_STOP_BEFORE -> "목표 정류장까지 한 정거장 남았어요.";

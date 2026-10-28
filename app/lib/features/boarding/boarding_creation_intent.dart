@@ -51,6 +51,7 @@ class BoardingCreationIntent {
     required this.sessionIdentity,
     required this.context,
     required this.observedAt,
+    this.notificationOffsetStops = 2,
     this.prepareNotificationEnabled = true,
     this.legacyConfirmedVehicleNumber,
   });
@@ -62,12 +63,17 @@ class BoardingCreationIntent {
   final String? legacyConfirmedVehicleNumber;
   final BoardingSelectionContext context;
   final DateTime observedAt;
-  final bool prepareNotificationEnabled;
+  final bool prepareNotificationEnabled; // Stored legacy intent only.
+  final int? notificationOffsetStops;
   Map<String, Object> get body => {
     'clientRequestId': clientRequestId,
     'candidateRef': candidateRef,
     'confirmedVehicleNumber': ?legacyConfirmedVehicleNumber,
-    if (!prepareNotificationEnabled) 'prepareNotificationEnabled': false,
+    'notificationOffsetStops': ?notificationOffsetStops,
+    // Make the legacy policy explicit so an unresolved old default-ON intent
+    // cannot create a new-policy session when its UUID is absent on the server.
+    if (notificationOffsetStops == null)
+      'prepareNotificationEnabled': prepareNotificationEnabled,
   };
   Map<String, Object?> toJson() => {
     ...body,
@@ -83,6 +89,13 @@ class BoardingCreationIntent {
         value['prepareNotificationEnabled'] is! bool) {
       throw const FormatException();
     }
+    final offset = value['notificationOffsetStops'];
+    if (offset != null &&
+        (offset is! int ||
+            !const [1, 2].contains(offset) ||
+            value.containsKey('prepareNotificationEnabled'))) {
+      throw const FormatException();
+    }
     final uuid = boardingText(value['clientRequestId']);
     if (!isBoardingUuid(uuid)) throw const FormatException();
     return BoardingCreationIntent(
@@ -96,6 +109,7 @@ class BoardingCreationIntent {
       sessionIdentity: boardingText(value['sessionIdentity']),
       context: BoardingSelectionContext.fromJson(value['context']),
       observedAt: boardingInstant(value['observedAt']),
+      notificationOffsetStops: offset as int?,
       prepareNotificationEnabled:
           value['prepareNotificationEnabled'] as bool? ?? true,
     );

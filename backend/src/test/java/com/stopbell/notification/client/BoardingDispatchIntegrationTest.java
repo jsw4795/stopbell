@@ -187,6 +187,39 @@ class BoardingDispatchIntegrationTest {
     }
 
     @Test
+    @DisplayName("새 정책의 준비도 재시작 gate와 기존 attempt를 사용하고 실제 목적지 이름을 전송한다")
+    void new_policy_preparation_keeps_dispatch_gate() {
+        var fixture = fixture(false);
+        jdbc.update("update boarding_sessions set notification_offset_stops=2 where id=?", fixture.sessionId());
+        assertThat(attempts.beginAttempt(fixture.deliveryId())).isEmpty();
+        runtime.verified(snapshot(fixture));
+        var attempt = attempts.beginAttempt(fixture.deliveryId()).orElseThrow();
+        assertThat(attempt.target().request().targetName()).isEqualTo("목적지");
+        assertThat(attempt.target().validatedSession().notificationOffsetStops()).isEqualTo(2);
+        assertThat(attempts.allowsBeforeSend(attempt)).isTrue();
+        time.set(NOW.plusSeconds(10));
+        // The real TrackingStore closes the old revision before committing completion.
+        runtime.committed(fixture.sessionId(), snapshot(fixture).revision(), false);
+        assertThat(completeDestination(fixture)).isNull();
+        assertThat(attempts.allowsBeforeSend(attempt)).isFalse();
+        assertThat(row(fixture).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+        assertThat(events.findAll()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("새 정책 세션에 잘못 연결된 목적지 Event는 SQL LIMIT 전과 attempt에서 모두 배제한다")
+    void new_policy_rejects_destination_delivery() {
+        var fixture = fixture(false);
+        time.set(NOW.plusSeconds(10));
+        Long eventId = completeDestination(fixture);
+        Long destinationDelivery = deliveries.findAllByNotificationEventIdOrderByIdAsc(eventId).getFirst().getId();
+        jdbc.update("update boarding_sessions set notification_offset_stops=2 where id=?", fixture.sessionId());
+        assertThat(deliveries.findBoardingDuePendingIds(List.of(-1L), utc(), PageRequest.of(0, 10))).isEmpty();
+        assertThat(attempts.beginAttempt(destinationDelivery)).isEmpty();
+        assertThat(deliveries.findById(destinationDelivery).orElseThrow().getAttemptCount()).isZero();
+    }
+
+    @Test
     @DisplayName("Session attempt는 current Session·Delivery·Device 순서로 잠그고 결과는 Session을 다시 잠그지 않는다")
     void lock_order_and_exact_attempt() {
         var fixture = fixture(true);

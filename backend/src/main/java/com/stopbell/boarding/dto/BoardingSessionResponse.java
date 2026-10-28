@@ -13,7 +13,8 @@ public record BoardingSessionResponse(
         Long id, BoardingSessionStatus status, long revision, String routeNumber, String vehicleNumber,
         String targetName, int targetOrder, Integer remainingOccurrenceGap, Instant checkpointObservedAt,
         Instant providerDataTime, EvaluationStatus evaluationStatus, BoardingStateReason reasonCode,
-        Instant expiresAt, Instant endedAt, boolean prepareNotificationEnabled
+        Instant expiresAt, Instant endedAt, boolean prepareNotificationEnabled, Integer notificationOffsetStops,
+        String preparationNotificationStatus
 ) {
     public enum EvaluationStatus { VERIFICATION_PENDING, READY, RECOVERY_PENDING, HELD, ENDED }
 
@@ -35,7 +36,13 @@ public record BoardingSessionResponse(
                 session.getCheckpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
                     ? null : instant(session.getCheckpoint().getObservedAt()), instant(session.getCheckpoint().getProviderDataTime()),
                 evaluation, session.getStateReason(), instant(session.getExpiresAt()), instant(session.getEndedAt()),
-                session.isPrepareNotificationEnabled());
+                session.isPrepareNotificationEnabled(), session.getNotificationOffsetStops(), "UNKNOWN");
+    }
+
+    public BoardingSessionResponse withPreparationStatus(String status) {
+        return new BoardingSessionResponse(id, this.status, revision, routeNumber, vehicleNumber, targetName,
+                targetOrder, remainingOccurrenceGap, checkpointObservedAt, providerDataTime, evaluationStatus,
+                reasonCode, expiresAt, endedAt, prepareNotificationEnabled, notificationOffsetStops, status);
     }
 
     private static Instant instant(LocalDateTime time) {

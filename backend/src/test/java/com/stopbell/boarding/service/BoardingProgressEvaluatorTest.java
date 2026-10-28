@@ -50,6 +50,39 @@ class BoardingProgressEvaluatorTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"2,1,PREPARE_ALIGHT", "2,2,PREPARE_ALIGHT", "1,1,NO_CANDIDATE", "1,2,PREPARE_ALIGHT",
+            "2,3,ARRIVAL_OBSERVED", "1,3,ARRIVAL_OBSERVED", "2,4,PASSED_OBSERVED", "1,4,PASSED_OBSERVED"})
+    @DisplayName("선택한 occurrence 오프셋과 목적지 이전 여부로 준비·대체 알림을 구분한다")
+    void chosen_offset_and_destination_boundary(int offset, int index, Outcome outcome) {
+        var base = snapshot(0);
+        var session = new BoardingTrackingSnapshot(base.id(), base.revision(), base.status(), base.reason(),
+                base.provider(), base.routeId(), base.cityCode(), base.vehicleId(), base.vehicleNumber(),
+                base.traversal(), base.checkpoint(), base.expiresAt(), true, offset);
+        for (var meaning : List.of(Meaning.DIRECT_ARRIVAL, Meaning.VERIFIED_REACHED)) {
+            var result = evaluator.evaluate(session, observation(session, index, meaning, 20), UTC_NOW.plusSeconds(20));
+            assertThat(result.outcome()).isEqualTo(outcome);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 2})
+    @DisplayName("최초 위치 미검증 세션도 이동 중 exact occurrence가 목적지 이전이면 현재 준비 시점을 판단한다")
+    void first_moving_baseline_near_target(int offset) {
+        var base = snapshot(0);
+        var checkpoint = new BoardingCheckpoint(null, 0, -1, BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE,
+                null, UTC_NOW, UTC_NOW.minusSeconds(1));
+        var session = new BoardingTrackingSnapshot(base.id(), base.revision(), base.status(), BoardingStateReason.BASELINE_UNVERIFIED,
+                base.provider(), base.routeId(), base.cityCode(), base.vehicleId(), base.vehicleNumber(),
+                base.traversal(), checkpoint, base.expiresAt(), true, offset);
+        assertThat(evaluator.evaluate(session, observation(session, 2, Meaning.VERIFIED_REACHED, 20),
+                UTC_NOW.plusSeconds(20)).outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
+        for (int index : List.of(3, 4)) {
+            assertHeld(evaluator.evaluate(session, observation(session, index, Meaning.VERIFIED_REACHED, 20),
+                    UTC_NOW.plusSeconds(20)), BoardingStateReason.TARGET_NOT_AHEAD);
+        }
+    }
+
+    @ParameterizedTest
     @CsvSource({"0,0,NO_CANDIDATE,3", "0,1,PREPARE_ALIGHT,2", "0,2,PREPARE_ALIGHT,1",
             "1,2,PREPARE_ALIGHT,1", "0,3,NO_CANDIDATE,0", "0,4,PASSED_OBSERVED,-1", "2,3,NO_CANDIDATE,0"})
     @DisplayName("검증된 이동 기준점의 배열 간격은 미정차와 경유 occurrence를 포함하고 raw order 차이를 사용하지 않는다")

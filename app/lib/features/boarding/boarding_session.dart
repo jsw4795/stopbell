@@ -59,6 +59,18 @@ class BoardingSession {
     }
     prepareNotificationEnabled =
         value['prepareNotificationEnabled'] as bool? ?? true;
+    final offset = value['notificationOffsetStops'];
+    if (offset != null &&
+        (offset is! int ||
+            !const [1, 2].contains(offset) ||
+            !prepareNotificationEnabled)) {
+      throw const FormatException();
+    }
+    notificationOffsetStops = offset as int?;
+    preparationNotificationStatus =
+        value['preparationNotificationStatus'] == null
+        ? 'UNKNOWN'
+        : boardingText(value['preparationNotificationStatus']);
     targetOrder = boardingInteger(value['targetOrder'], positive: true);
     status = switch (boardingText(value['status'])) {
       'VERIFYING' =>
@@ -136,6 +148,8 @@ class BoardingSession {
   }
 
   late final bool prepareNotificationEnabled;
+  late final int? notificationOffsetStops;
+  late final String preparationNotificationStatus;
   late final int id, revision, targetOrder;
   late final String routeNumber, vehicleNumber, targetName;
   late final BoardingSessionStatus status;

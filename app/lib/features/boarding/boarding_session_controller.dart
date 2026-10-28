@@ -138,8 +138,11 @@ class BoardingSessionController extends ChangeNotifier {
     BoardingSelectionContext context, {
     Future<bool> Function()? preparePush,
     Future<BoardingCandidate?> Function(BoardingCandidate)? refreshSelected,
-    bool prepareNotificationEnabled = true,
+    int notificationOffsetStops = 2,
   }) async {
+    if (!const [1, 2].contains(notificationOffsetStops)) {
+      throw ArgumentError('notificationOffsetStops');
+    }
     if (!canCreate) return;
     if (!validCandidate(candidate, number)) {
       message = '후보가 오래됐어요. 차량 정보를 다시 조회해 주세요.';
@@ -193,7 +196,7 @@ class BoardingSessionController extends ChangeNotifier {
       sessionIdentity: sessionIdentity!,
       context: context,
       observedAt: candidate.observedAt,
-      prepareNotificationEnabled: prepareNotificationEnabled,
+      notificationOffsetStops: notificationOffsetStops,
     );
     busy = true;
     message = null;
@@ -245,8 +248,10 @@ class BoardingSessionController extends ChangeNotifier {
       );
       if (!current) return;
       if (result.vehicleNumber != intent.selectedVehicleNumber ||
-          result.prepareNotificationEnabled !=
-              intent.prepareNotificationEnabled) {
+          result.notificationOffsetStops != intent.notificationOffsetStops ||
+          (intent.notificationOffsetStops == null &&
+              result.prepareNotificationEnabled !=
+                  intent.prepareNotificationEnabled)) {
         throw const BoardingSessionException(SessionFailure.parsing);
       }
       session = result;
@@ -324,8 +329,10 @@ class BoardingSessionController extends ChangeNotifier {
       message = '아직 생성 성공을 확인할 수 없어요. 서버 처리 중일 수 있어요. 새 요청을 만들지 않고 원래 결과를 다시 조회하거나 동일 요청만 재시도할 수 있어요.';
     } else {
       if (result.vehicleNumber != pending!.selectedVehicleNumber ||
-          result.prepareNotificationEnabled !=
-              pending!.prepareNotificationEnabled) {
+          result.notificationOffsetStops != pending!.notificationOffsetStops ||
+          (pending!.notificationOffsetStops == null &&
+              result.prepareNotificationEnabled !=
+                  pending!.prepareNotificationEnabled)) {
         throw const BoardingSessionException(SessionFailure.parsing);
       }
       session = result;

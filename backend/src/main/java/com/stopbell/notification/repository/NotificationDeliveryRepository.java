@@ -20,6 +20,11 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
 
     List<NotificationDelivery> findAllByNotificationEventIdOrderByIdAsc(Long notificationEventId);
 
+    /** Current status read after the caller's Session -> Event locks, independent of an older read view. */
+    @Lock(LockModeType.PESSIMISTIC_READ)
+    @Query("select delivery from NotificationDelivery delivery where delivery.notificationEvent.id = :eventId order by delivery.id")
+    List<NotificationDelivery> findBoardingEventDeliveriesForRead(Long eventId);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select delivery from NotificationDelivery delivery
@@ -84,7 +89,8 @@ public interface NotificationDeliveryRepository extends JpaRepository<Notificati
             where event.sourceType = 'BOARDING_SESSION'
               and ((event.boardingEventType = 'PREPARE_ALIGHT' and event.boardingSessionId in :readyIds
                     and session.status = 'TRACKING' and session.prepareNotificationEnabled = true)
-                or (event.boardingEventType = 'DESTINATION_REACHED' and session.status = 'COMPLETED'))
+                or (event.boardingEventType = 'DESTINATION_REACHED' and session.status = 'COMPLETED'
+                    and session.notificationOffsetStops is null))
               and session.expiresAt > :now
               and session.user.id = event.user.id
               and delivery.status = 'PENDING' and delivery.nextAttemptAt <= :now and delivery.expiresAt > :now

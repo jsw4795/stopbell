@@ -127,10 +127,82 @@ class BoardingTrackingIntegrationTest {
                 3, BoardingTraversalSnapshot.AlightAvailability.ALLOWED, "controlled-test-evidence");
         var checkpoint = new BoardingCheckpoint("s0", 10, 0, BoardingCheckpoint.Evidence.ID_ORDER, null, UTC_NOW, UTC_NOW.minusSeconds(1));
         var request = new com.stopbell.boarding.dto.CreateBoardingSessionRequest(UUID.randomUUID().toString(), "ref", NUMBER);
-        var saved = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(), request.fingerprint(),
+        var saved = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(), request.legacyFingerprint(),
                 "vehicle-id", NUMBER, "7000", "목적지", snapshot, checkpoint, UTC_NOW, UTC_NOW.plus(Duration.ofHours(4))));
         runtime.admitCreated(saved.getId());
         return saved;
+    }
+
+    @Test
+    @DisplayName("알림 상태 조회는 오래된 MySQL read view가 있어도 새로 commit된 Event의 PENDING 수신자를 확인한다")
+    void preparation_status_uses_current_delivery_read() {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        var decision = decision(expected, 1);
+        new TransactionTemplate(manager).executeWithoutResult(status -> {
+            assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
+            try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+                assertThat(pool.submit(() -> store.apply(expected, decision)).get(10, TimeUnit.SECONDS).accepted()).isTrue();
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
+            assertThat(notifications.preparationStatus(session.getId())).isEqualTo("PENDING");
+        });
+    }
+
+    @Test
+    @DisplayName("일시적인 stopFlag 누락은 추적을 유지하고 새 이동 근거에서 자동 재검증해 준비 알림을 생성한다")
+    void missing_flag_waits_for_trustworthy_moving_progress() {
+        jdbc.update("update boarding_sessions set notification_offset_stops=2 where id=?", session.getId());
+        device(session.getUser());
+        var item = detail(1).body().itemList().getFirst();
+        when(detail.fetchVehicleDetail(anyString())).thenReturn(new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
+                new SeoulBusVehicleDetailItem(item.vehId(), item.plainNo(), item.stId(), item.stOrd(), null,
+                        item.dataTm(), null, null)))));
+        polling.poll(cycle());
+        var waiting = api.find(session.getUser().getId(), session.getId());
+        assertThat(waiting.status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(waiting.reasonCode()).isEqualTo(BoardingStateReason.STALE_PROGRESS);
+        assertThat(events.count()).isZero();
+        time.set(NOW.plusSeconds(40));
+        when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> movingDetail(1));
+        polling.poll(cycle());
+        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.READY);
+        assertThat(events.count()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"2,1,0,true", "2,2,0,true", "1,1,0,false", "1,2,0,true",
+            "2,1,1,true", "1,2,1,true", "2,3,0,false", "2,4,0,false", "1,3,1,false", "1,4,1,false"})
+    @DisplayName("새 정책은 이동·정차·관측 누락·재시작에도 준비 Event 한 번과 목적지 완료만 저장한다")
+    void pre_departure_policy_polling(int offset, int index, int stopFlag, boolean prepare) {
+        jdbc.update("update boarding_sessions set notification_offset_stops=? where id=?", offset, session.getId());
+        device(session.getUser());
+        runtime.forget(session.getId()); // Process restart: the new observation must reopen readiness.
+        when(detail.fetchVehicleDetail(anyString())).thenReturn(stopFlag == 0 ? movingDetail(index) : detail(index));
+        polling.poll(cycle());
+        polling.poll(cycle());
+        var current = api.find(session.getUser().getId(), session.getId());
+        assertThat(current.notificationOffsetStops()).isEqualTo(offset);
+        assertThat(current.preparationNotificationStatus()).isEqualTo(prepare ? "PENDING" : "NOT_CREATED");
+        assertThat(events.count()).isEqualTo(prepare ? 1 : 0);
+        assertThat(deliveries.count()).isEqualTo(events.count());
+        assertThat(current.status()).isEqualTo(index >= 3 ? BoardingSessionStatus.COMPLETED : BoardingSessionStatus.TRACKING);
+        if (index < 3) {
+            time.set(NOW.plusSeconds(30));
+            when(detail.fetchVehicleDetail(anyString())).thenReturn(movingDetail(2));
+            polling.poll(cycle());
+            assertThat(events.count()).isEqualTo(1); // one-stop fallback, or existing identity reused
+            time.set(NOW.plusSeconds(40));
+            when(detail.fetchVehicleDetail(anyString())).thenReturn(movingDetail(3));
+            polling.poll(cycle());
+        }
+        assertThat(api.find(session.getUser().getId(), session.getId()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
+        assertThat(events.findAll()).allSatisfy(event ->
+                assertThat(event.getBoardingEventType()).isEqualTo(BoardingNotificationEventType.PREPARE_ALIGHT));
+        assertThat(events.count()).isLessThanOrEqualTo(1);
+        assertThat(deliveries.findAll()).noneMatch(delivery -> delivery.getStatus() == NotificationDeliveryStatus.PENDING);
     }
 
     @ParameterizedTest
@@ -164,7 +236,7 @@ class BoardingTrackingIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    @DisplayName("정차·동일 기준점 이동·다음 이동 보류·정차 복구 뒤 목적지 도달은 선택별 Event와 Delivery를 한 번 저장한다")
+    @DisplayName("기존 정책도 정차·이동 전진·정차 재검증 뒤 목적지 도달에서 기존 Event와 Delivery를 보존한다")
     void stopped_moving_stopped_progress(boolean preparation) {
         jdbc.update("update boarding_sessions set prepare_notification_enabled=? where id=?", preparation, session.getId());
         device(session.getUser());
@@ -177,10 +249,10 @@ class BoardingTrackingIntegrationTest {
         time.set(NOW.plusSeconds(40));
         when(detail.fetchVehicleDetail(anyString())).thenReturn(movingDetail(1));
         polling.poll(cycle());
-        assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.STALE_PROGRESS);
+        assertThat(store.findOpen().getFirst().reason()).isNull();
         assertThat(store.findOpen().getFirst().requiresConfirmation()).isFalse();
-        assertThat(store.findOpen().getFirst().checkpoint().getIndex()).isZero();
-        assertThat(events.count()).isZero();
+        assertThat(store.findOpen().getFirst().checkpoint().getIndex()).isEqualTo(1);
+        assertThat(events.count()).isEqualTo(preparation ? 1 : 0);
 
         time.set(NOW.plusSeconds(60));
         when(detail.fetchVehicleDetail(anyString())).thenReturn(detail(1));
@@ -1412,7 +1484,11 @@ class BoardingTrackingIntegrationTest {
         assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
         assertThat(sessions.findById(session.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.EXPIRED);
         assertThat(deliveries.findAll().getFirst().getStatus()).isEqualTo(NotificationDeliveryStatus.EXPIRED);
-        assertThat(onlyEvent().getId()).isEqualTo(original.getId());
+        assertThat(events.findAll()).hasSize(2);
+        assertThat(events.findById(original.getId()).orElseThrow().getBoardingSessionId()).isEqualTo(session.getId());
+        assertThat(events.findAll()).filteredOn(event -> event.getBoardingSessionId().equals(created.response().id()))
+                .singleElement().satisfies(event -> assertThat(event.getId()).isNotEqualTo(original.getId()));
+        assertThat(created.response().preparationNotificationStatus()).isEqualTo("PENDING");
     }
 
     @Test
@@ -1451,9 +1527,9 @@ class BoardingTrackingIntegrationTest {
             var applied = polling.poll(cycle()).getFirst();
             assertThat(applied.accepted()).isTrue();
             assertThat(applied.status()).isEqualTo(BoardingSessionStatus.TRACKING);
-            assertThat(runtime.isReady(BoardingTrackingSnapshot.from(sessions.findById(session.getId()).orElseThrow()), utc())).isFalse();
+            assertThat(runtime.isReady(BoardingTrackingSnapshot.from(sessions.findById(session.getId()).orElseThrow()), utc())).isTrue();
             assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus())
-                    .isEqualTo(EvaluationStatus.VERIFICATION_PENDING);
+                    .isEqualTo(EvaluationStatus.READY);
             assertThat(events.count()).isZero();
             assertThat(deliveries.count()).isZero();
             runtime.forget(session.getId());
@@ -1566,7 +1642,7 @@ class BoardingTrackingIntegrationTest {
             case "RUN_ENDED" -> BoardingStateReason.TRAVERSAL_AMBIGUOUS;
             default -> BoardingStateReason.CONTINUITY_GAP_EXCEEDED;
         });
-        assertThat(events.count()).isZero();
+        assertThat(events.count()).isEqualTo(issue.equals("REGRESSION") ? 1 : 0);
         assertThat(deliveries.count()).isZero();
     }
 

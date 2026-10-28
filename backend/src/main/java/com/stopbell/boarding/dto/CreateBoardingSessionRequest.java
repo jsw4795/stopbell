@@ -8,11 +8,17 @@ import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
 import tools.jackson.databind.JsonNode;
 
-/** confirmedVehicleNumber is optional legacy retry data, never a vehicle validation input. */
+/** Legacy ON/OFF bodies are accepted only to reconcile an already stored request. */
 public record CreateBoardingSessionRequest(String clientRequestId, String candidateRef, String confirmedVehicleNumber,
-        boolean prepareNotificationEnabled) {
-    public CreateBoardingSessionRequest(String clientRequestId, String candidateRef, String confirmedVehicleNumber) {
-        this(clientRequestId, candidateRef, confirmedVehicleNumber, true);
+        Integer notificationOffsetStops, Boolean legacyPrepareNotificationEnabled) {
+    public CreateBoardingSessionRequest(String id, String ref, String number) {
+        this(id, ref, number, null, null);
+    }
+    public CreateBoardingSessionRequest(String id, String ref, String number, int offset) {
+        this(id, ref, number, offset, null);
+    }
+    public CreateBoardingSessionRequest(String id, String ref, String number, boolean legacyEnabled) {
+        this(id, ref, number, null, legacyEnabled);
     }
     public CreateBoardingSessionRequest {
         try {
@@ -21,6 +27,7 @@ public record CreateBoardingSessionRequest(String clientRequestId, String candid
             throw new ApiException(ErrorCode.INVALID_REQUEST);
         }
         if (candidateRef == null || candidateRef.isBlank() || candidateRef.length() > 255
+                || notificationOffsetStops != null && notificationOffsetStops != 1 && notificationOffsetStops != 2
                 || (confirmedVehicleNumber != null && (confirmedVehicleNumber.isBlank() || confirmedVehicleNumber.length() > 255))) {
             throw new ApiException(ErrorCode.INVALID_REQUEST);
         }
@@ -28,26 +35,33 @@ public record CreateBoardingSessionRequest(String clientRequestId, String candid
 
     @JsonCreator
     public static CreateBoardingSessionRequest fromJson(
-            @JsonProperty("clientRequestId") JsonNode clientRequestId,
-            @JsonProperty("candidateRef") JsonNode candidateRef,
-            @JsonProperty("confirmedVehicleNumber") JsonNode confirmedVehicleNumber,
-            @JsonProperty("prepareNotificationEnabled") JsonNode prepareNotificationEnabled) {
-        if (clientRequestId == null || !clientRequestId.isString() || candidateRef == null || !candidateRef.isString()) {
+            @JsonProperty("clientRequestId") JsonNode id,
+            @JsonProperty("candidateRef") JsonNode ref,
+            @JsonProperty("confirmedVehicleNumber") JsonNode number,
+            @JsonProperty("notificationOffsetStops") JsonNode offset,
+            @JsonProperty("prepareNotificationEnabled") JsonNode legacy) {
+        if (id == null || !id.isString() || ref == null || !ref.isString()
+                || number != null && !number.isString()
+                || offset != null && (!offset.isIntegralNumber() || !offset.canConvertToInt()
+                    || offset.asInt() != 1 && offset.asInt() != 2)
+                || legacy != null && (!legacy.isBoolean() || offset != null)) {
             throw new ApiException(ErrorCode.INVALID_REQUEST);
         }
-        if (confirmedVehicleNumber != null && !confirmedVehicleNumber.isString()) {
-            throw new ApiException(ErrorCode.INVALID_REQUEST);
-        }
-        if (prepareNotificationEnabled != null && !prepareNotificationEnabled.isBoolean()) {
-            throw new ApiException(ErrorCode.INVALID_REQUEST);
-        }
-        return new CreateBoardingSessionRequest(clientRequestId.asString(), candidateRef.asString(),
-                confirmedVehicleNumber == null ? null : confirmedVehicleNumber.asString(), prepareNotificationEnabled == null || prepareNotificationEnabled.asBoolean());
+        return new CreateBoardingSessionRequest(id.asString(), ref.asString(), number == null ? null : number.asString(),
+                offset == null ? null : Integer.valueOf(offset.asInt()), legacy == null ? null : legacy.asBoolean());
+    }
+
+    public int effectiveNotificationOffsetStops() { return notificationOffsetStops == null ? 2 : notificationOffsetStops; }
+
+    public String legacyFingerprint() {
+        return Boolean.FALSE.equals(legacyPrepareNotificationEnabled)
+                ? BoardingFingerprint.hash(clientRequestId, candidateRef, confirmedVehicleNumber, "false")
+                : BoardingFingerprint.hash(clientRequestId, candidateRef, confirmedVehicleNumber);
     }
 
     public String fingerprint() {
-        // Preserve retries of existing requests that predate the optional setting.
-        return prepareNotificationEnabled ? BoardingFingerprint.hash(clientRequestId, candidateRef, confirmedVehicleNumber)
-                : BoardingFingerprint.hash(clientRequestId, candidateRef, confirmedVehicleNumber, "false");
+        return legacyPrepareNotificationEnabled != null ? legacyFingerprint()
+                : BoardingFingerprint.hash(clientRequestId, candidateRef, confirmedVehicleNumber,
+                    "PRE_DEPARTURE_V2", Integer.toString(effectiveNotificationOffsetStops()));
     }
 }

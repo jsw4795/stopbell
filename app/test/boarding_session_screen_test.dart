@@ -15,6 +15,34 @@ import 'boarding_session_test_fakes.dart';
 import 'boarding_test_fakes.dart';
 
 void main() {
+  for (final entry in {
+    'NOT_CREATED': '아직 생성되지 않음',
+    'PENDING': '발송 대기 중',
+    'ACCEPTED': '전송 서비스 접수 완료 · 기기 표시 미확인',
+    'NO_RECIPIENT': '알림 생성 · 수신 가능한 기기 없음',
+    'FAILED': '발송 종료 · 실패',
+    'EXPIRED': '발송 기한 만료',
+  }.entries) {
+    testWidgets(
+      'detail separates timing, actual destination and ${entry.key}',
+      (tester) async {
+        final s = BoardingSession.fromJson({
+          ...sessionJson(),
+          'notificationOffsetStops': 1,
+          'preparationNotificationStatus': entry.key,
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: BoardingSessionDetails(session: s)),
+          ),
+        );
+        expect(find.text('목적지 목적 정류장 · 노선 순서 9'), findsOneWidget);
+        expect(find.text('알림 시점: 1정거장 전 · 세션당 한 번'), findsOneWidget);
+        expect(find.text('준비 알림: ${entry.value}'), findsOneWidget);
+        expect(find.textContaining('목적지 알림: ON'), findsNothing);
+      },
+    );
+  }
   late AuthSession auth;
   late FakeBoardingSessions api;
   late MemoryBoardingIntents storage;

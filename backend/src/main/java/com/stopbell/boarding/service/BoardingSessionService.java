@@ -81,6 +81,9 @@ public class BoardingSessionService {
         if (existing.isPresent()) {
             return new CreationResult(existing.orElseThrow(), false);
         }
+        if (request.legacyPrepareNotificationEnabled() != null) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST);
+        }
         // All Provider I/O occurs here, before either User or Session lock is acquired.
         VerifiedBoardingStart start = validator.validate(userId, request.candidateRef(), request.confirmedVehicleNumber());
         CreationResult result;
@@ -97,6 +100,12 @@ public class BoardingSessionService {
         // A duplicate read after restart must not admit an old session without recovery.
         if (result.created()) {
             runtime.admitCreated(result.response().id());
+            // Registration itself validated fresh current progress and metadata before commit.
+            // Publish only that acknowledged snapshot; a later cancellation/revision still wins.
+            if (result.validated() != null) {
+                runtime.verified(result.validated());
+                result = new CreationResult(find(userId, result.response().id()), true);
+            }
         }
         return result;
     }
@@ -134,13 +143,17 @@ public class BoardingSessionService {
             BoardingSession session = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(),
                     request.fingerprint(), start.vehicleTrackingId(), start.vehicleNumber(), start.routeNumber(),
                     start.targetName(), start.traversal(), start.checkpoint(), now, now.plus(properties.getMaxLifetime()),
-                    request.prepareNotificationEnabled()));
-            return new CreationResult(response(session), true);
+                    request.effectiveNotificationOffsetStops()));
+            notifications.recordInitialPreparation(session);
+            sessions.flush();
+            return new CreationResult(response(session), true,
+                    session.getStateReason() == null ? BoardingTrackingSnapshot.from(session) : null);
         });
     }
 
     private BoardingSessionResponse existing(BoardingSession session, CreateBoardingSessionRequest request) {
-        if (!session.getRequestFingerprint().equals(request.fingerprint())) {
+        if (!session.getRequestFingerprint().equals(session.getNotificationOffsetStops() == null
+                && request.notificationOffsetStops() == null ? request.legacyFingerprint() : request.fingerprint())) {
             throw new ApiException(ErrorCode.BOARDING_REQUEST_CONFLICT);
         }
         return response(session);
@@ -315,7 +328,7 @@ public class BoardingSessionService {
 
     private BoardingSessionResponse response(BoardingSession session) {
         closeAfterCommit(session);
-        return runtime.response(session, now());
+        return runtime.response(session, now()).withPreparationStatus(notifications.preparationStatus(session.getId()));
     }
 
     private BoardingSession owned(Long userId, Long id) {
@@ -353,6 +366,9 @@ public class BoardingSessionService {
         return false;
     }
 
-    public record CreationResult(BoardingSessionResponse response, boolean created) {
+    public record CreationResult(BoardingSessionResponse response, boolean created, BoardingTrackingSnapshot validated) {
+        public CreationResult(BoardingSessionResponse response, boolean created) {
+            this(response, created, null);
+        }
     }
 }

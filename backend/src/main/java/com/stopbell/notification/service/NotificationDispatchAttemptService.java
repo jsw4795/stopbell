@@ -174,7 +174,7 @@ public class NotificationDispatchAttemptService {
     private boolean destinationReady(BoardingTrackingSnapshot session, LocalDateTime now) {
         var checkpoint = session.checkpoint();
         var providerTime = checkpoint.getProviderDataTime();
-        return session.destinationReached() && now.isBefore(session.expiresAt())
+        return session.notificationOffsetStops() == null && session.destinationReached() && now.isBefore(session.expiresAt())
                 && !checkpoint.getObservedAt().isAfter(now)
                 && !checkpoint.getObservedAt().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))
                 && (session.provider() != TransitProvider.SEOUL_BUS || providerTime != null)

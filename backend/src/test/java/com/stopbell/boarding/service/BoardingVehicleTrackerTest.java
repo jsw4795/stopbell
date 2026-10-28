@@ -35,6 +35,48 @@ class BoardingVehicleTrackerTest {
         when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s1", 20, 1, "20261020120019"));
     }
 
+    @ParameterizedTest
+    @CsvSource({"0,10,PREPARE_ALIGHT", "0,40,ARRIVAL_OBSERVED", "1,10,PREPARE_ALIGHT", "1,40,ARRIVAL_OBSERVED"})
+    @DisplayName("같은 Stop ID의 두 occurrence는 stOrd로 구분해 첫 방문을 목적지 도달로 혼동하지 않는다")
+    void exact_repeated_occurrence(int flag, int order, BoardingTrackingDecision.Outcome outcome) {
+        var traversal = new BoardingTraversalSnapshot(1, session.provider(), session.routeId(), null,
+                List.of(new BoardingTraversalSnapshot.Occurrence(11, "repeat", 10),
+                    new BoardingTraversalSnapshot.Occurrence(12, "middle", 20),
+                    new BoardingTraversalSnapshot.Occurrence(13, "repeat", 40),
+                    new BoardingTraversalSnapshot.Occurrence(14, "after", 80)),
+                2, BoardingTraversalSnapshot.AlightAvailability.UNKNOWN, null);
+        var checkpoint = new BoardingCheckpoint("repeat", 10, 0, BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE,
+                null, UTC_NOW, UTC_NOW.minusSeconds(1));
+        var selected = new BoardingTrackingSnapshot(1L, 0, BoardingSessionStatus.TRACKING,
+                BoardingStateReason.BASELINE_UNVERIFIED, session.provider(), session.routeId(), null,
+                session.vehicleId(), session.vehicleNumber(), traversal, checkpoint, session.expiresAt(), true, 2);
+        when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "repeat", order, flag, "20261020120019"));
+        var input = tracker.observe(selected, cycle());
+        assertThat(input.reason()).isNull();
+        var evaluator = new BoardingProgressEvaluator(Duration.ofMinutes(2), Duration.ofSeconds(30));
+        var result = evaluator.evaluate(selected, input.observation(), UTC_NOW.plusSeconds(20));
+        // An initial observation at the second occurrence has no verified earlier baseline.
+        assertThat(result.outcome()).isEqualTo(order == 40 ? BoardingTrackingDecision.Outcome.HELD : outcome);
+        if (order == 40) {
+            assertThat(result.reason()).isEqualTo(BoardingStateReason.TARGET_NOT_AHEAD);
+        }
+        var verified = new BoardingTrackingSnapshot(selected.id(), selected.revision(), selected.status(), null,
+                selected.provider(), selected.routeId(), null, selected.vehicleId(), selected.vehicleNumber(), traversal,
+                new BoardingCheckpoint("repeat", 10, 0, BoardingCheckpoint.Evidence.ID_ORDER, null,
+                    UTC_NOW, UTC_NOW.minusSeconds(1)), selected.expiresAt(), true, 2);
+        assertThat(evaluator.evaluate(verified, tracker.observe(verified, cycle()).observation(), UTC_NOW.plusSeconds(20)).outcome())
+                .isEqualTo(outcome);
+        // A reset toward the first visit is regression, never automatic next-lap recovery.
+        var later = new BoardingTrackingSnapshot(1L, 0, BoardingSessionStatus.TRACKING, null, session.provider(),
+                session.routeId(), null, session.vehicleId(), NUMBER, traversal,
+                new BoardingCheckpoint("repeat", 40, 2, BoardingCheckpoint.Evidence.ID_ORDER, null,
+                    UTC_NOW, UTC_NOW.minusSeconds(1)), session.expiresAt(), true, 2);
+        when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "repeat", 10, flag, "20261020120019"));
+        var reset = tracker.observe(later, cycle());
+        assertThat(reset.reason() != null ? reset.reason() : evaluator.evaluate(later, reset.observation(), UTC_NOW.plusSeconds(20)).reason())
+                .isEqualTo(BoardingStateReason.PROGRESS_REGRESSION);
+    }
+
     @Test
     @DisplayName("서울은 요청 차량 ID와 전체 번호 및 최신 roster/detail을 함께 보존하며 같은 cycle의 조회를 공유한다")
     void share_raw_responses() {
@@ -106,7 +148,9 @@ class BoardingVehicleTrackerTest {
     @DisplayName("실제 서울 이동 중 detail 의미가 검증되지 않은 범위는 테스트 fixture의 검증된 진행과 구분한다")
     void unknown_flag_remains_unverified() {
         when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s1", 20, 2, "20261020120019"));
-        assertThat(tracker.observe(session, cycle()).observation().meaning()).isEqualTo(Meaning.UNVERIFIED);
+        var input = tracker.observe(session, cycle());
+        assertThat(input.reason()).isEqualTo(BoardingStateReason.STALE_PROGRESS);
+        assertThat(input.observation()).isNull();
     }
 
     @Test
@@ -115,7 +159,7 @@ class BoardingVehicleTrackerTest {
         when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s0", 10, 0, "20261020120019"));
         var input = tracker.observe(session, cycle());
         assertThat(input.reason()).isNull();
-        assertThat(input.observation().meaning()).isEqualTo(Meaning.VERIFIED_REFERENCE);
+        assertThat(input.observation().meaning()).isEqualTo(Meaning.VERIFIED_REACHED);
         var result = new BoardingProgressEvaluator(Duration.ofMinutes(2), Duration.ofSeconds(30))
                 .evaluate(session, input.observation(), UTC_NOW.plusSeconds(20));
         assertThat(result.outcome()).isEqualTo(BoardingTrackingDecision.Outcome.NO_CANDIDATE);
@@ -123,13 +167,16 @@ class BoardingVehicleTrackerTest {
     }
 
     @Test
-    @DisplayName("새 occurrence의 이동 응답은 checkpoint나 알림 없이 일시 보류하고 정상 정차 재검증을 허용한다")
-    void moving_forward_waits_for_stopped_detail() {
+    @DisplayName("새 occurrence의 이동 응답은 exact ID와 order 및 시각 검증 뒤 준비 알림 판단에 사용한다")
+    void moving_forward_uses_reached_reference() {
         when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s1", 20, 0, "20261020120019"));
         var input = tracker.observe(session, cycle());
-        assertThat(input.reason()).isEqualTo(BoardingStateReason.STALE_PROGRESS);
-        assertThat(input.reason().allowsAutomaticRevalidation()).isTrue();
-        assertThat(input.observation()).isNull();
+        assertThat(input.reason()).isNull();
+        assertThat(input.observation().meaning()).isEqualTo(Meaning.VERIFIED_REACHED);
+        var result = new BoardingProgressEvaluator(Duration.ofMinutes(2), Duration.ofSeconds(30))
+                .evaluate(session, input.observation(), UTC_NOW.plusSeconds(20));
+        assertThat(result.outcome()).isEqualTo(BoardingTrackingDecision.Outcome.PREPARE_ALIGHT);
+        assertThat(result.checkpoint().getIndex()).isEqualTo(1);
     }
 
     @ParameterizedTest

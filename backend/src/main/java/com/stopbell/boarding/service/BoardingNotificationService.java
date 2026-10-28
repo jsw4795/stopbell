@@ -8,10 +8,12 @@ import java.time.temporal.ChronoUnit;
 
 import com.stopbell.boarding.domain.BoardingTrackingDecision;
 import com.stopbell.boarding.domain.BoardingTrackingSnapshot;
+import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.boarding.entity.BoardingSession;
 import com.stopbell.boarding.entity.BoardingSessionStatus;
 import com.stopbell.notification.entity.BoardingNotificationEventType;
 import com.stopbell.notification.entity.NotificationDelivery;
+import com.stopbell.notification.entity.NotificationDeliveryStatus;
 import com.stopbell.notification.entity.NotificationEvent;
 import com.stopbell.notification.repository.DeviceRepository;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
@@ -51,8 +53,32 @@ public class BoardingNotificationService {
 
     /** Called only after current Session, metadata and a new checkpoint have been validated under lock. */
     public Long recordDecision(BoardingSession session, BoardingTrackingSnapshot expected, BoardingTrackingDecision decision) {
+        return recordDecision(session, expected, decision, false);
+    }
+
+    /** Current validated registration evidence, without synthesizing an earlier arrival. */
+    public Long recordInitialPreparation(BoardingSession session) {
+        var checkpoint = session.getCheckpoint();
+        int gap = session.getTraversal().targetIndex() - checkpoint.getIndex();
+        if (session.getNotificationOffsetStops() == null || session.getStateReason() != null
+                || checkpoint.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                || gap <= 0 || gap > session.getNotificationOffsetStops()) {
+            return null;
+        }
+        var expiry = Duration.between(checkpoint.getObservedAt(), session.getExpiresAt()).compareTo(prepareTtl) <= 0
+                ? session.getExpiresAt() : checkpoint.getObservedAt().plus(prepareTtl);
+        var decision = new BoardingTrackingDecision(BoardingTrackingDecision.Outcome.PREPARE_ALIGHT, checkpoint,
+                null, gap, checkpoint.getObservedAt(), expiry, now());
+        return recordDecision(session, BoardingTrackingSnapshot.from(session), decision, true);
+    }
+
+    private Long recordDecision(BoardingSession session, BoardingTrackingSnapshot expected,
+            BoardingTrackingDecision decision, boolean initial) {
         boolean destination = decision.outcome() == BoardingTrackingDecision.Outcome.ARRIVAL_OBSERVED
                 || decision.outcome() == BoardingTrackingDecision.Outcome.PASSED_OBSERVED;
+        if (destination && session.getNotificationOffsetStops() != null) {
+            return null; // New policy completes the Session without a destination Push.
+        }
         if (!destination && (decision.outcome() != BoardingTrackingDecision.Outcome.PREPARE_ALIGHT
                 || !session.isPrepareNotificationEnabled())) {
             return null;
@@ -64,10 +90,12 @@ public class BoardingNotificationService {
                 : BoardingNotificationEventType.PREPARE_ALIGHT;
         var checkpoint = decision.checkpoint();
         int gap = session.getTraversal().targetIndex() - session.getCheckpoint().getIndex();
+        int offset = session.getNotificationOffsetStops() == null ? 2 : session.getNotificationOffsetStops();
         if (checkpoint == null || !checkpoint.equals(session.getCheckpoint())
                 || !checkpoint.getObservedAt().equals(decision.observedAt())
-                || !checkpoint.getObservedAt().isAfter(expected.checkpoint().getObservedAt())
-                || expected.requiresConfirmation() || (destination ? gap > 0 : gap != 1 && gap != 2)
+                || (initial ? !expected.matches(session) || session.getNotificationOffsetStops() == null
+                    : !checkpoint.getObservedAt().isAfter(expected.checkpoint().getObservedAt()))
+                || expected.requiresConfirmation() || (destination ? gap > 0 : gap <= 0 || gap > offset)
                 || (destination && (session.getStateReason() != decision.reason()
                     || expected.checkpoint().getIndex() > session.getTraversal().targetIndex()))
                 || !Integer.valueOf(gap).equals(decision.remainingOccurrenceGap())) {
@@ -106,6 +134,25 @@ public class BoardingNotificationService {
             });
         }
         return event.getId();
+    }
+
+    public String preparationStatus(Long sessionId) {
+        var event = events.findByBoardingSessionIdAndBoardingEventType(sessionId, BoardingNotificationEventType.PREPARE_ALIGHT);
+        if (event.isEmpty()) {
+            return "NOT_CREATED";
+        }
+        var recipients = deliveries.findBoardingEventDeliveriesForRead(event.orElseThrow().getId());
+        if (recipients.isEmpty()) {
+            return "NO_RECIPIENT";
+        }
+        var statuses = recipients.stream().map(NotificationDelivery::getStatus).toList();
+        if (statuses.contains(NotificationDeliveryStatus.ACCEPTED)) {
+            return "ACCEPTED"; // Provider accepted, not proof of display on a phone.
+        }
+        if (statuses.contains(NotificationDeliveryStatus.PENDING)) {
+            return "PENDING";
+        }
+        return statuses.contains(NotificationDeliveryStatus.FAILED) ? "FAILED" : "EXPIRED";
     }
 
     /** Exact identity check in a fresh reconciliation transaction; never selects recipients. */

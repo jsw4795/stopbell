@@ -23,7 +23,7 @@ class NotificationSourceMigrationIntegrationTest {
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
 
     @Test
-    @DisplayName("V16부터 V19는 기존 Event·Delivery·Session을 보존하고 사전 알림 기본값과 UNIQUE를 유지한다")
+    @DisplayName("V16부터 V20은 기존 Event·Delivery·Session을 보존하고 사전 알림 기본값과 UNIQUE를 유지한다")
     void preserve_existing_events_deliveries_and_sessions() {
         var dataSource = new DriverManagerDataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword());
         Flyway.configure().dataSource(dataSource).target("14").load().migrate();
@@ -168,7 +168,7 @@ class NotificationSourceMigrationIntegrationTest {
         var pendingRows = jdbc.queryForList("select * from boarding_sessions where status='VERIFYING' order by id");
         var allEvents = jdbc.queryForList("select * from notification_events order by id");
         var allDeliveries = jdbc.queryForList("select * from notification_deliveries order by id");
-        var v19 = Flyway.configure().dataSource(dataSource).load();
+        var v19 = Flyway.configure().dataSource(dataSource).target("19").load();
         assertThat(v19.migrate().migrationsExecuted).isEqualTo(1);
         v19.validate();
         assertThat(v19.migrate().migrationsExecuted).isZero();
@@ -199,5 +199,26 @@ class NotificationSourceMigrationIntegrationTest {
         assertThat(jdbc.queryForMap("select * from boarding_sessions where id=?", sessionId)).isEqualTo(beforeV18.getFirst());
         assertThat(jdbc.queryForList("select * from notification_events order by id")).isEqualTo(allEvents);
         assertThat(jdbc.queryForList("select * from notification_deliveries order by id")).isEqualTo(allDeliveries);
+        var sessionsV19 = jdbc.queryForList("select * from boarding_sessions order by id");
+        var v20 = Flyway.configure().dataSource(dataSource).load();
+        assertThat(v20.migrate().migrationsExecuted).isEqualTo(1);
+        v20.validate();
+        assertThat(v20.migrate().migrationsExecuted).isZero();
+        var sessionsV20 = jdbc.queryForList("select * from boarding_sessions order by id");
+        for (int i = 0; i < sessionsV19.size(); i++) {
+            assertThat(sessionsV20.get(i)).containsAllEntriesOf(sessionsV19.get(i))
+                    .containsEntry("notification_offset_stops", null);
+        }
+        assertThat(jdbc.queryForList("select * from notification_events order by id")).isEqualTo(allEvents);
+        assertThat(jdbc.queryForList("select * from notification_deliveries order by id")).isEqualTo(allDeliveries);
+        for (int invalid : List.of(0, 3, -1)) {
+            assertThatThrownBy(() -> jdbc.update("update boarding_sessions set notification_offset_stops=? where id=?", invalid, sessionId))
+                    .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_boarding_sessions_notification_offset");
+        }
+        for (int offset : List.of(1, 2)) {
+            jdbc.update("update boarding_sessions set notification_offset_stops=? where id=?", offset, sessionId);
+            assertThatThrownBy(() -> jdbc.update("update boarding_sessions set prepare_notification_enabled=false where id=?", sessionId))
+                    .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_boarding_sessions_notification_offset");
+        }
     }
 }

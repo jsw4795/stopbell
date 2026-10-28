@@ -137,31 +137,24 @@ void main() {
   }
 
   testWidgets(
-    'preparation switch OFF reaches API and persisted session while destination remains enabled',
+    'one-stop timing reaches API and durable session without destination notification',
     (tester) async {
       await pump(tester);
       await prepare(tester);
-      await tester.ensureVisible(
-        find.byKey(const ValueKey('prepare-notification-enabled')),
-      );
-      await tester.tap(
-        find.byKey(const ValueKey('prepare-notification-enabled')),
-      );
+      await tester.ensureVisible(find.text('1정거장 전'));
+      await tester.tap(find.text('1정거장 전'));
       await tester.pumpAndSettle();
       sessionResponse = (request) async {
-        expect(jsonDecode(request.body)['prepareNotificationEnabled'], isFalse);
-        expect(
-          storage.records.values.single.prepareNotificationEnabled,
-          isFalse,
-        );
+        expect(jsonDecode(request.body)['notificationOffsetStops'], 1);
+        expect(storage.records.values.single.notificationOffsetStops, 1);
         return boardingJson({
           ...sessionJson(),
-          'prepareNotificationEnabled': false,
+          'notificationOffsetStops': 1,
         }, 201);
       };
       await tap(tester, '하차 알림 등록');
       await tap(tester, '알림 없이 계속');
-      expect(find.text('사전 알림: OFF · 목적지 알림: ON'), findsOneWidget);
+      expect(find.text('알림 시점: 1정거장 전 · 세션당 한 번'), findsOneWidget);
     },
   );
 

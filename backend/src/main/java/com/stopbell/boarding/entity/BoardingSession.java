@@ -63,6 +63,10 @@ public class BoardingSession {
     @Column(name = "prepare_notification_enabled", nullable = false, updatable = false)
     private boolean prepareNotificationEnabled;
 
+    // NULL identifies the immutable pre-V20 ON/OFF + destination policy.
+    @Column(name = "notification_offset_stops", updatable = false)
+    private Integer notificationOffsetStops;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "traversal_snapshot", nullable = false, updatable = false)
     private String traversalSnapshot;
@@ -151,6 +155,20 @@ public class BoardingSession {
                 ? BoardingStateReason.BASELINE_UNVERIFIED : null;
         this.updatedAt = this.createdAt;
     }
+
+    public BoardingSession(User user, String clientRequestId, String requestFingerprint,
+            String vehicleTrackingId, String vehicleNumber, String routeNumber, String targetName,
+            BoardingTraversalSnapshot traversal, BoardingCheckpoint checkpoint,
+            LocalDateTime createdAt, LocalDateTime expiresAt, int notificationOffsetStops) {
+        this(user, clientRequestId, requestFingerprint, vehicleTrackingId, vehicleNumber, routeNumber, targetName,
+                traversal, checkpoint, createdAt, expiresAt, true);
+        if (notificationOffsetStops != 1 && notificationOffsetStops != 2) {
+            throw new IllegalArgumentException("Notification offset must be 1 or 2");
+        }
+        this.notificationOffsetStops = notificationOffsetStops;
+    }
+
+    public Integer getNotificationOffsetStops() { return notificationOffsetStops; }
 
     public void cancel(long expectedRevision, LocalDateTime now) {
         if (!status.isOpen()) {

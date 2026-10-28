@@ -114,7 +114,20 @@ class BoardingSessionDetails extends StatelessWidget {
         Text('차량 ${s.vehicleNumber}'),
         Text('목적지 ${s.targetName} · 노선 순서 ${s.targetOrder}'),
         Text(
-          '사전 알림: ${s.prepareNotificationEnabled ? 'ON' : 'OFF'} · 목적지 알림: ON',
+          s.notificationOffsetStops == null
+              ? '기존 정책 · 사전 알림: ${s.prepareNotificationEnabled ? 'ON' : 'OFF'} · 목적지 알림: ON'
+              : '알림 시점: ${s.notificationOffsetStops}정거장 전 · 세션당 한 번',
+        ),
+        Text(
+          '준비 알림: ${switch (s.preparationNotificationStatus) {
+            'NOT_CREATED' => '아직 생성되지 않음',
+            'PENDING' => '발송 대기 중',
+            'ACCEPTED' => '전송 서비스 접수 완료 · 기기 표시 미확인',
+            'NO_RECIPIENT' => '알림 생성 · 수신 가능한 기기 없음',
+            'FAILED' => '발송 종료 · 실패',
+            'EXPIRED' => '발송 기한 만료',
+            _ => '발송 여부 확인 중',
+          }}',
         ),
         Text(
           '상태: ${switch (s.status) {

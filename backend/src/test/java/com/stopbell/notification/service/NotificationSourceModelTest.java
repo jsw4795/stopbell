@@ -44,7 +44,7 @@ class NotificationSourceModelTest {
         assertThat(target.eventType()).isNull();
         assertThat(target.validatedSession().revision()).isEqualTo(session.getRevision());
         assertThat(target.validatedSession().checkpoint()).isEqualTo(session.getCheckpoint());
-        assertThat(target.request()).isEqualTo(new NotificationSendRequest("private-fid", source, 2, NOW));
+        assertThat(target.request()).isEqualTo(new NotificationSendRequest("private-fid", source, 2, NOW, session.getTargetName()));
         assertThat(target.request().expiresAt()).isEqualTo(UTC_NOW.toInstant(ZoneOffset.UTC));
         for (String value : List.of(target.toString(), target.request().toString(),
                 new NotificationAttemptSnapshot(target, 1, UTC_NOW).toString())) {
