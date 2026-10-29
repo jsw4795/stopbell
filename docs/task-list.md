@@ -388,6 +388,14 @@ Future Consideration:
 
 각 항목의 처리 기록에는 재현 근거, 수정 또는 미수정 판단, 변경 범위, 방지 테스트와 결과, 남은 실측·실기기 검증 및 담당 Task를 남긴다. 미재현 추론·위험을 확인된 운영 장애로 승격하지 않는다. API·Domain·Authentication·DB 정책이나 공식 문서 간 설계 판단이 필요한 경우 개발자 결정 후 반영한다.
 
+AUD-03 처리 (2026-10-29): 알려진 서울 포함 노선유형은 노선-정류장 행이 없어도 `scope()`가 INCLUDE를 반환하고, 공통 snapshot은 빈 occurrence를 허용해 기존 occurrence 전체 삭제와 complete 성공 처리로 이어지는 경로를 확인했다. 수정 전 격리 CSV 테스트가 예외 미발생으로 실패해 현재 코드의 결함을 재현했다.
+
+- 수정 위치·기준: `SeoulCsvMetadataSource.fetchCompleteSnapshot()`에서 기존 scope 확정 뒤 포함 Route의 occurrence가 최소 1개인지 검증한다. 전체 실패 처리와 제한된 오류 로그의 실행 계약은 [Architecture의 transit 절](architecture.md#transit)을 따른다. 공통 snapshot·TAGO·Alarm·BoardingSession 로직과 기존 포함/제외 정책은 변경하지 않았다.
+- 데이터·상태 보존: 신규/기존 빈 Route와 정상/빈 Route 혼합 입력은 첫 DB 변경 전에 전체 거부해 기존 Route·Stop·occurrence의 모든 row와 `lastCompleteSyncAt`을 보존한다. 잘못된 신규 데이터·complete 상태를 생성하거나 성공 로그를 남기지 않으며, 동일 bootstrap/source에 정상 임시 CSV를 다시 제공하면 재시도에 성공한다. 기존 노선별 transaction 정책은 유지하며 DB 실패 노선은 rollback하고 cleanup·완료 시각 갱신을 차단한다. 이미 commit된 다른 Route까지 되돌리는 provider 전체 원자성을 새로 도입하지 않았다.
+- 추가 검증: Parser 2개·격리 MySQL 통합 10개를 추가했다. 7개 포함 유형의 0개 occurrence, 오류 예시 10개 제한, 기존 데이터 보존, 신규 빈 Route, 정상/비정상 혼합, occurrence 없는 경기·인천 제외 Route, 정상 metadata 갱신·삭제 대상 cleanup·ID/반복 방문 보존·1개 occurrence 허용, 실패 후 복구, 정류장 join 누락·CSV 파싱 오류, 실제 DB trigger로 occurrence 삭제 뒤 INSERT 실패 및 Stop UPDATE 실패의 rollback을 검증했다. 로그에서는 검증 실패·complete 미승인·DB 반영 미시작과 성공 로그 부재를 확인했다.
+- 선택 실행 결과: `SeoulCsvMetadataSourceTest` 13개, `SeoulCsvMetadataSyncIntegrationTest` 10개, `BusMetadataSyncTransactionIntegrationTest` 3개, `BusMetadataBootstrapServiceTest` 3개, `BusMetadataSyncServiceTest` 2개로 서로 다른 31개가 최종 통과했다. 최초 31개 중 28개 통과/3개 실패 후 신규 테스트의 MySQL trigger 생성 설정과 ID 비교 범위를 보정해 실패한 3개만 재실행했고 실패/오류/skip 없이 통과했다. Java/Gradle JVM 21·Wrapper 8.14.3과 Java compile을 확인했다. 변경 없는 성공 테스트는 반복 실행하지 않았다.
+- 잔여 실제 검증·범위: 실제 서울 3종 CSV의 전체 규모 import·처리 시간/메모리, 운영 파일 배포 중 누락·I/O 실패, DB 연결 단절·process 강제 종료/commit 응답 유실은 미검증이다. Backend/Flutter 전체 테스트, 관련 없는 Alarm·BoardingSession·TAGO 전체 테스트, 실제 Provider/FCM·개발 DB 변경·실제 CSV 수정·서버/터널 실행은 수행하지 않았다. Dependency·Migration·Schema 변경과 Git add/commit/push 없이 main을 유지한다. AUD-04·AUD-08 처리 기록과 다른 Task 상태는 유지하며 TASK-816은 `[ ]`를 유지한다.
+
 AUD-04 처리 (2026-10-29): 두 `@Scheduled`가 전용 Scheduler 없이 기본 단일 스레드 실행 자원을 공유하는 구성을 확인하고, [Monitoring/Dispatch 전용 단일 스레드 Scheduler](architecture.md#scheduler-실행-자원-분리-task-816--aud-04)로 분리했다. 기존 직렬 실행 guard·DB lock/commit·Session runtime gate·timeout/retry를 유지하고 Monitoring 종료 신호 처리를 추가했다. 신규 동시성 12개를 포함한 관련 10개 클래스 288개를 선택 검증했다. 최초 285개 통과/3개 실패 후 새 테스트의 transaction fixture를 수정했고, 해당 Dispatch 통합 73개와 Scheduler 5개가 재실행에서 모두 통과했다. 변경 없는 나머지 210개는 재실행하지 않았다. Backend·Flutter 전체 테스트, 실제 Provider/FCM·개발 DB 변경은 수행하지 않았다. 실제 부하 지연 분포와 운영 종료 budget·강제 종료 복구 검증은 TASK-810/811에 남는다. 당시 AUD-08은 미수정이며 TASK-816은 `[ ]`를 유지한다.
 
 AUD-08 처리 (2026-10-29): 재확인은 검증된 checkpoint만 저장하고 준비 판단을 누락하며, 다음 동일 관측은 새 진행이 아니어서 Event 기회를 놓치는 경로를 수정했다.

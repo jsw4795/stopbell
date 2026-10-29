@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -111,6 +112,36 @@ class SeoulCsvMetadataSourceTest {
         assertThat(snapshot.routes()).extracting("routeNumber").contains("N26");
         assertThat(snapshot.routes()).extracting("externalRouteId")
                 .doesNotContain("241006973", "300000001", "123000021");
+    }
+
+    @Test
+    @DisplayName("모든 포함 노선유형은 occurrence가 0개이면 complete snapshot 승인을 거부한다")
+    void reject_included_route_without_occurrences() {
+        for (String routeType : List.of("공항", "마을", "간선", "지선", "순환", "광역", "관광")) {
+            String routes = ROUTES + "empty-route,빈 노선," + routeType + ",1.0\n";
+
+            assertThatThrownBy(() -> source(routes, ROUTE_STOPS, STOPS).fetchCompleteSnapshot())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("no occurrences")
+                    .hasMessageContaining("empty-route");
+        }
+    }
+
+    @Test
+    @DisplayName("빈 occurrence 노선이 여러 개이면 전체 건수와 최대 10개 식별자만 오류에 남긴다")
+    void bound_empty_route_error_details() {
+        StringBuilder routes = new StringBuilder(ROUTES);
+        for (int index = 0; index < 12; index++) {
+            routes.append("empty-route-").append(index).append(",빈 노선,지선,1.0\n");
+        }
+
+        assertThatThrownBy(() -> source(routes.toString(), ROUTE_STOPS, STOPS).fetchCompleteSnapshot())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("routeCount=12")
+                .hasMessageContaining("empty-route-0")
+                .hasMessageContaining("empty-route-9")
+                .hasMessageNotContaining("empty-route-10")
+                .hasMessageNotContaining("empty-route-11");
     }
 
     @Test

@@ -22,6 +22,8 @@ import com.stopbell.transit.service.BusMetadataSource;
 import com.stopbell.transit.service.BusRouteMetadataSnapshot;
 import com.stopbell.transit.service.BusStopOccurrenceMetadataSnapshot;
 import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
 
 /**
@@ -31,6 +33,8 @@ import org.springframework.core.io.Resource;
  */
 public final class SeoulCsvMetadataSource implements BusMetadataSource {
 
+    private static final Logger log = LoggerFactory.getLogger(SeoulCsvMetadataSource.class);
+    private static final int INVALID_ROUTE_SAMPLE_LIMIT = 10;
     private static final List<String> ROUTE_HEADERS = List.of("노선ID", "노선명", "노선유형", "거리");
     private static final List<String> ROUTE_STOP_HEADERS = List.of("노선ID", "노드ID", "링크거리누계", "정류장순번");
     private static final List<String> STOP_HEADERS = List.of(
@@ -64,17 +68,30 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
     @Override
     public CompleteBusMetadataSnapshot fetchCompleteSnapshot() {
         CompleteSourceSnapshot sourceSnapshot = fetchCompleteSourceSnapshot();
+        List<SourceRouteSnapshot> includedRoutes = sourceSnapshot.routes().stream()
+                .filter(route -> scope(route) == Scope.INCLUDE)
+                .toList();
+        List<String> emptyRouteIds = includedRoutes.stream()
+                .filter(route -> route.occurrences().isEmpty())
+                .map(SourceRouteSnapshot::externalRouteId)
+                .toList();
+        if (!emptyRouteIds.isEmpty()) {
+            List<String> routeIdSample = emptyRouteIds.stream().limit(INVALID_ROUTE_SAMPLE_LIMIT).toList();
+            log.warn("Seoul CSV validation failed: reason=NO_OCCURRENCES, routeCount={}, routeIdSample={}, "
+                            + "completeSnapshotApproved=false, databaseSyncStarted=false",
+                    emptyRouteIds.size(), routeIdSample);
+            throw new IllegalStateException("Incomplete Seoul metadata snapshot: included routes have no occurrences"
+                    + "; routeCount=" + emptyRouteIds.size() + "; routeIdSample=" + routeIdSample);
+        }
         List<BusRouteMetadataSnapshot> routes = new ArrayList<>();
-        for (SourceRouteSnapshot route : sourceSnapshot.routes()) {
-            if (scope(route) == Scope.INCLUDE) {
-                routes.add(new BusRouteMetadataSnapshot(
-                        provider(),
-                        route.externalRouteId(),
-                        route.routeNumber(),
-                        null,
-                        route.occurrences().stream().map(SourceStopOccurrenceSnapshot::toMetadataSnapshot).toList()
-                ));
-            }
+        for (SourceRouteSnapshot route : includedRoutes) {
+            routes.add(new BusRouteMetadataSnapshot(
+                    provider(),
+                    route.externalRouteId(),
+                    route.routeNumber(),
+                    null,
+                    route.occurrences().stream().map(SourceStopOccurrenceSnapshot::toMetadataSnapshot).toList()
+            ));
         }
         return new CompleteBusMetadataSnapshot(provider(), routes);
     }
