@@ -305,6 +305,11 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 - [ ] TASK-813 Production deployment / migration / backup & recovery readiness
 - [ ] TASK-814 Production UTC time contract 및 timestamp consistency
 - [ ] TASK-815 iOS public App Store release readiness
+- [ ] TASK-816 프로젝트 종합 감사 후속 결함 수정
+  - 목적: 종합 감사에서 발견한 AUD-01~AUD-13을 중요도에 따라 검토·수정하고 관련 테스트와 문서를 보강한다. 하나의 상위 Task로 관리하며 실제 수정·필수 검증 완료 전까지 `[ ]`를 유지한다.
+  - 등록 범위 (2026-10-29): Task와 작업 계획만 추가한다. 이번 등록은 코드·Migration·테스트·Dependency·DB 변경이나 실제 Provider 호출·FCM 발송을 포함하지 않으며, 후속 지시 없이 수정에 착수하지 않는다. 기존 Task 번호와 완료 상태를 유지한다.
+
+### 기존 Phase 8 Task 상세 및 실행 dependency
 
 TASK-805는 structured log, 최소 operational metric, alerting contract를 함께 다룬다. metric은 Provider request outcome/latency, Observation staleness/UNKNOWN reason, ACTIVE/FOLLOW_UP Alarm 수, scheduler cycle duration·last completion·overlap, Notification pending 수와 oldest pending delivery age, no-recipient Event, delivery accepted/failure/retry/expired, metadata 마지막 complete sync 성공 age를 후보로 한다. `alarmId`, `deviceId`, `routeId`, `trackingCycleId`, `installationId`는 metric label에 넣지 않는다. Actuator/Micrometer 수준을 기본으로 하고 자체 Prometheus/Grafana stack을 V1 요구로 만들지 않으며 export와 alert destination은 deployment platform에서 정한다. log는 문맥에 필요한 correlation(`requestId`, `operationId`, provider, schedulerCycleId, alarmId, activation generation, trackingCycleId, notificationEventId, deliveryId, elapsedMs, outcome)만 기록한다. Access/Refresh Token, Google ID Token, Firebase credential, 원문 push targeting identifier·installationId, API key가 든 URL/query, 필요 이상의 GPS, raw Provider response 전체는 로그에 남기지 않는다.
 
@@ -360,6 +365,73 @@ Future Consideration:
 
 - CD 도입은 수동 배포 흐름을 이해한 뒤 검토한다.
 - Redis, external message broker, multiple backend instance, Kubernetes, Kafka, RabbitMQ, ELK cluster, self-hosted Prometheus/Grafana stack, Vault, distributed tracing platform, multi-region, read replica, CQRS, event sourcing, microservice split, blue/green deployment framework는 측정된 필요가 있을 때만 검토한다. Phase 7의 MySQL pending dispatch worker는 이미 기본 correctness 범위다.
+
+### TASK-816 감사 항목과 확인 수준
+
+2026-10-29 종합 감사 보고서의 식별자·우선순위·확인 수준을 유지한다. 아래 재현은 감사 당시의 임시 자동 재현이며 실제 서비스·실기기 재현과 구분한다. 이번 등록에서 새 재현이나 검증을 수행한 것은 아니다.
+
+| 식별자 | 우선순위 | 결함 및 후속 검토 범위 | 감사의 확인 수준 |
+|---|---|---|---|
+| AUD-01 | P1 | 최초 Alarm 생성·활성화 과정에서 Push 준비 절차 누락. create→activate에도 기존 준비 절차와 준비 실패 시 사용자 선택 연결 | 임시 Widget에서 활성화 1회·준비 hook 0회 재현. 실제 iPhone 검증과 구분 |
+| AUD-02 | P1 | 기존 Alarm의 동일·역행 Provider 시각에 대한 도착 판단 문제. ACTIVE/FOLLOW_UP의 시각 단조성·동일 시각 위치 충돌 검증 | 실제 평가기에 freshness 내 동일 시각·역행 시각 입력 시 ARRIVED 후보 생성 재현. 실운행 검증 아님 |
+| AUD-03 | P1 | 정류장 정보가 없는 서울 노선의 불완전한 metadata snapshot 승인. complete 승인 전 포함 노선의 occurrence 최소 조건 검증 | 임시 CSV로 알려진 포함 유형 노선의 occurrence 0개 complete 승인 재현. 기존 occurrence 삭제 연결은 sync 코드 확인이며 개발 DB 적용 없음 |
+| AUD-04 | P1 | Polling과 Notification Dispatch의 Scheduler 실행 자원 공유로 인한 지연 위험. 각 작업의 non-overlap을 유지하며 실행 자원 분리 | 기본 scheduling pool size 1과 구성·실행 경로 확인. 실제 부하의 발생 빈도·지연 분포는 미측정 |
+| AUD-05 | P2 | Alarm timeout 이후 늦은 401 응답에 의한 mutation 재전송. timeout 이후 늦은 refresh/replay 차단 | 임시 Flutter 재현에서 timeout 후 401 반환 시 요청 2회·refresh 1회 확인 |
+| AUD-06 | P2 | 인증 HTTP 요청의 timeout 부재. login·refresh·logout의 유한 종료 시간과 늦은 결과 반영 차단 검토 | 코드 경로 확인. 실제 네트워크 장기 정지는 미실측 |
+| AUD-07 | P2 | 서울 버스 후보 조회 시 순차 detail 호출로 인한 응답 지연 위험. 전체 budget·호출 수와 Client deadline 정합성 검토 | 조건부 성능 위험. 실제 현재 응답 지연은 미측정이며 병렬 처리·부분 결과 계약 등 해결 방식은 미확정 |
+| AUD-08 | P2 | BoardingSession 재확인 직후 준비 알림 판단 누락 가능성. 미소비 상태의 알림 구간 재확인과 다음 관측 전이 검토 | 정적 경로 확인에 따른 누락 시나리오. 실운행 재현 없음 |
+| AUD-09 | P2 | 서울 개별 차량 mapping 오류가 노선 전체 평가를 중단하는 문제. 정상 차량 관측·roster presence를 유지하며 차량별 실패 격리 | 잘못된 dataTm 등의 예외가 차량별 처리 경계를 벗어나는 코드 경로 확인 |
+| AUD-10 | P2 | 동일 신규 Google 사용자의 동시 최초 로그인 경쟁. identity UNIQUE 충돌 후 안전한 기존 사용자 재확인 검토 | 동시 실행 경로에 대한 추론. 실제 LoginService 경쟁 재현은 미실행 |
+| AUD-11 | P2 | 기존 사용자 데이터가 존재하는 V3→V4 Migration 업그레이드 문제. 지원할 과거 데이터 범위·적용 전제와 호환성 검토 | 격리 MySQL의 V3 사용자 2명 상태에서 V4 identity UNIQUE 중복키 실패 재현. 과거 업그레이드 호환성 문제이며 현재 V20 적용 실패가 확인된 것은 아님 |
+| AUD-12 | P2 | 일부 기존 timestamp의 Host Timezone 의존성. User·RefreshToken·Alarm callback과 UTC 저장 계약 차이 | 코드 확인. 기존 TASK-814 잔여 범위이며 구현·검증 책임은 TASK-814에 연결 |
+| AUD-13 | P2 | 기존 Alarm의 PASSED 위치 보조 정보가 Push 안내까지 전달되지 않는 문제. 검증된 optional 위치·지난 정거장 정보의 표시 연결 검토 | 코드·요구사항 대조 확인. Event의 stopsPastTarget 보존과 전송 입력·일반 PASSED 문구 사이의 누락 |
+
+각 항목의 처리 기록에는 재현 근거, 수정 또는 미수정 판단, 변경 범위, 방지 테스트와 결과, 남은 실측·실기기 검증 및 담당 Task를 남긴다. 미재현 추론·위험을 확인된 운영 장애로 승격하지 않는다. API·Domain·Authentication·DB 정책이나 공식 문서 간 설계 판단이 필요한 경우 개발자 결정 후 반영한다.
+
+### TASK-816 문서 불일치 후속 범위
+
+- `README.md`: Notification Worker·권한·Device 등록·tap·atomic decision·retry 등 이미 구현된 기능을 미구현으로 안내하는 설명 검토
+- Flutter 안내 문구: 목적지 이전 하차 준비 알림 정책과 달리 도달·통과 시 알림으로 안내하는 화면 문구 검토
+- `requirements.md`와 기존 Alarm Push 구현: PASSED 위치·지난 정거장 보조 안내 차이를 AUD-13과 함께 처리
+- UTC 저장 요구사항과 일부 Entity callback 차이: AUD-12로 추적하되 TASK-814의 구현·문서 동기화 결과를 연결하고 중복 구현·완료 처리 금지
+- `package-structure.md` 등 현행 책임 설명: 제거된 차량번호 수동 입력·전체 번호 대조 절차 검토
+- `requirements.md`와 `api.md`: 미확정으로 남은 정류장 표시 계약과 TASK-608A의 목적지·인접 정류장·순서 표시 계약 차이 검토. 표시 구분을 실제 운행 방향 증명으로 확대하지 않음
+- `roadmap.md`와 이 Task List: 구현 완료와 제품 E2E 미완료를 구분하고 TASK-706의 당시 Dispatch 활성화 제한 등 오래된 상태 설명 검토
+- `app/README.md`: 기본 생성 문구를 대신할 실행 안내 보강
+- `local-development.md`: 이미 정해진 profile·설정을 Future Consideration으로 남긴 설명 검토
+
+현재 정책을 잘못 안내하거나 실제 구현 상태를 오해하게 만드는 설명을 우선 대상으로 한다. 과거 연구 기록과 ADR의 역사적 내용은 현행 정책과 다르다는 이유만으로 변경하지 않는다. 특히 ADR-011·012와 TASK-908 증거 보고서의 번호 대조·VERIFYING·목적지 Push 기록은 명시된 대체 범위와 기록 시점을 보존한다. 문서·코드 충돌을 코드 기준으로 자동 해소하지 않는다.
+
+### TASK-816 권장 수정 순서와 독립 검증
+
+| 순서 | 작업 그룹 | 대상 | 검증 초점 |
+|---|---|---|---|
+| A | 알림 신뢰성 | AUD-04 Scheduler 실행 자원 분리 → AUD-08 재확인 후 준비 알림 판단 보완 | 느린 Polling/Dispatch 상호 지연·각 작업 non-overlap, 미소비 구간 재확인→동일 source/목적지 전이와 Event 소비·TTL 회귀 |
+| B | 데이터 및 도착 판단 정확성 | AUD-03 불완전한 metadata snapshot 차단 → AUD-02 Provider 시각 충돌 검증 → AUD-09 차량별 mapping 실패 격리 | 빈 occurrence complete 거부·기존 metadata 보존, freshness 내 동일/역행 시각, 오류 차량과 정상 차량 혼합 관측 |
+| C | Flutter 및 인증 안정성 | AUD-01 최초 Alarm Push 준비 연결 → AUD-05 timeout 이후 늦은 mutation 재전송 차단 → AUD-06 인증 요청의 유한 종료 시간 보장 | 최초 화면 create→activate 준비·사용자 선택, timeout→늦은 401, 완료되지 않는 인증 transport·늦은 결과와 기존 Refresh 회전/세션 보존 회귀 |
+| D | 기타 결함 및 개선 | AUD-07·10·11·12·13 및 관련 문서 불일치 | 누적 후보 조회 지연, 최초 로그인 경쟁, 지원 과거 DB 데이터 업그레이드, TASK-814 결과 연결, PASSED 정보의 계산→영속→전송 표시 |
+
+그룹은 관리·권장 구현 순서이며 한 번에 전체 코드 수정을 요구하지 않는다. 각 그룹 착수 시 변경 영향과 의존 관계를 확인하고 독립적으로 수정·검증할 수 있는 범위로 나눈다. 그룹 내 항목도 개별 처리·검증할 수 있다. P2라도 실제 서비스에 직접 영향을 미치는 근거가 있으면 우선순위를 재검토하고 사유를 기록한다. 성능 해결 방식·Schema·인증 정책을 등록 단계에서 확정하지 않는다.
+
+### TASK-816 완료 기준과 기존 Task 책임
+
+1. AUD-01~AUD-13을 각각 검토하고 처리 결과를 기록한다.
+2. 수정이 필요한 결함을 실제 코드에서 해결한다.
+3. 각 수정에 해당 문제를 재현하거나 방지할 수 있는 테스트를 보강한다.
+4. Backend·Flutter의 기존 주요 회귀 테스트를 통과한다.
+5. 문서와 코드의 주요 불일치를 해결한다.
+6. 기존 Alarm과 BoardingSession의 정책 및 동작을 유지한다.
+7. 기존 DB 데이터와 적용된 Migration의 호환성을 보존한다. AUD-11의 과거 데이터 지원 전제를 명시하며 사용자 identity를 임의 합성하거나 적용된 Migration을 임의 수정하지 않는다.
+8. 실제 Provider 또는 iPhone 검증이 필요한 항목을 자동 테스트와 구분해 기록한다.
+9. 수정하지 않기로 결정한 항목은 이유와 후속 관리 TASK를 명시한다.
+10. 모든 필수 결함의 처리와 검증이 완료된 경우에만 TASK-816을 `[x]`로 변경한다. 등록·부분 수정·자동 테스트 통과만으로 완료하지 않는다.
+
+- TASK-814: AUD-12 및 UTC 관련 문서 불일치의 구현·검증 책임을 유지한다. TASK-816은 해당 처리 결과·검증 근거를 연결하며 중복 구현하거나 TASK-814를 대신 완료 처리하지 않는다.
+- TASK-710: 실제 iPhone Notification 수신·tap 검증 책임과 현재 상태를 유지한다.
+- TASK-711: Notification 최종 E2E·regression 검증 책임과 현재 상태를 유지한다. 그룹별 방지 테스트는 이 최종 검증을 대체하지 않는다.
+- TASK-908: 실제 버스 탑승·하차 알림 E2E 검증 책임과 현재 상태를 유지한다.
+
+TASK-816은 감사 후속 결함 수정이며 기존 Task의 검증 책임을 대체하지 않는다. TASK-816 자동 테스트가 통과해도 실제 iPhone E2E 완료로 간주하지 않는다. 기존 Phase 8 실행 dependency는 유지하며, 위 A→B→C→D는 TASK-816 내부의 권장 순서다.
 
 ---
 
