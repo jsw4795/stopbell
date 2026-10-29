@@ -5,9 +5,12 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
 import java.util.List;
 
 import com.stopbell.transit.client.SeoulBusVehicleLocationRequestContext;
+import com.stopbell.transit.client.TransitProviderClientException;
 import com.stopbell.transit.client.VehicleLocationRequest;
 import com.stopbell.transit.domain.ArrivalEvidence;
 import com.stopbell.transit.domain.TransitObservation;
@@ -17,7 +20,9 @@ import com.stopbell.transit.dto.seoul.SeoulBusVehicleDetailResponse;
 
 public class SeoulBusTransitObservationMapper {
 
-    private static final DateTimeFormatter PROVIDER_DATA_TIME_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final String OPERATION = "getBusPosByVehIdItem";
+    private static final DateTimeFormatter PROVIDER_DATA_TIME_FORMAT = DateTimeFormatter.ofPattern("uuuuMMddHHmmss")
+            .withResolverStyle(ResolverStyle.STRICT);
     private static final ZoneId PROVIDER_ZONE = ZoneId.of("Asia/Seoul");
 
     private final Clock clock;
@@ -28,8 +33,12 @@ public class SeoulBusTransitObservationMapper {
 
     public List<TransitObservation> map(
             VehicleLocationRequest<SeoulBusVehicleLocationRequestContext> request,
+            String vehicleId,
             SeoulBusVehicleDetailResponse response
     ) {
+        if (vehicleId == null || vehicleId.isBlank()) {
+            throw new IllegalArgumentException("Requested vehicle ID must not be blank");
+        }
         Instant observedAt = clock.instant();
         if (response.body() == null || response.body().itemList() == null) {
             return List.of();
@@ -37,7 +46,12 @@ public class SeoulBusTransitObservationMapper {
         List<SeoulBusVehicleDetailItem> items = response.body().itemList();
 
         return items.stream()
-                .map(item -> mapItem(request.externalRouteId(), item, observedAt))
+                .map(item -> {
+                    if (item == null || !vehicleId.equals(item.vehId())) {
+                        throw TransitProviderClientException.protocol(TransitProvider.SEOUL_BUS, OPERATION, null);
+                    }
+                    return mapItem(request.externalRouteId(), item, observedAt);
+                })
                 .toList();
     }
 
@@ -77,9 +91,13 @@ public class SeoulBusTransitObservationMapper {
         if (dataTm == null || dataTm.isBlank()) {
             return null;
         }
-        return LocalDateTime.parse(dataTm, PROVIDER_DATA_TIME_FORMAT)
-                .atZone(PROVIDER_ZONE)
-                .toInstant();
+        try {
+            return LocalDateTime.parse(dataTm, PROVIDER_DATA_TIME_FORMAT)
+                    .atZone(PROVIDER_ZONE)
+                    .toInstant();
+        } catch (DateTimeParseException exception) {
+            throw TransitProviderClientException.protocol(TransitProvider.SEOUL_BUS, OPERATION, exception);
+        }
     }
 
     private String optional(String value) {

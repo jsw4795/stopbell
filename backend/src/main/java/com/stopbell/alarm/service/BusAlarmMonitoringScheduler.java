@@ -201,7 +201,7 @@ public class BusAlarmMonitoringScheduler {
         List<TransitObservation> observations = new ArrayList<>();
         for (String vehicleId : vehicleIds) {
             try {
-                observations.addAll(seoulMapper.map(request, cycle.detail(vehicleId).response()));
+                observations.addAll(seoulMapper.map(request, vehicleId, cycle.detail(vehicleId).response()));
             } catch (TransitProviderClientException exception) {
                 logProviderFailure(group, vehicleId, exception, retryTargets == null);
                 if (retryTargets != null) {
@@ -217,7 +217,7 @@ public class BusAlarmMonitoringScheduler {
                 target.group().key().externalRouteId(), new SeoulBusVehicleLocationRequestContext()
         );
         List<TransitObservation> observations = seoulMapper.map(
-                request, cycle.detail(target.vehicleId()).response()
+                request, target.vehicleId(), cycle.detail(target.vehicleId()).response()
         );
         if (observations.isEmpty()) {
             return;

@@ -48,6 +48,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BusAlarmMonitoringSchedulerTest {
 
@@ -166,6 +167,8 @@ class BusAlarmMonitoringSchedulerTest {
                 observations.capture(), any(Instant.class));
         assertThat(presentVehicleIds.getValue()).containsExactly("vehicle-1");
         assertThat(observations.getValue()).isEmpty();
+        verify(seoulDetailClient).fetchVehicleDetail("vehicle-1");
+        verify(evaluator, never()).evaluatePartial(any(), any(), anySet(), anyList(), any());
     }
 
     @Test
@@ -657,6 +660,307 @@ class BusAlarmMonitoringSchedulerTest {
             assertThat(event.providerDataTime()).isEqualTo(clock.instant().minusSeconds(10));
         });
         verify(detailClient, times(4)).fetchVehicleDetail("vehicle");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"A", "B", "C"})
+    @DisplayName("서울 첫째·중간·마지막 차량의 날짜 오류는 정상 차량 평가를 보존하고 실패 차량만 재시도한다")
+    void seoul_mapping_failure_isolates_vehicle(String failedVehicle) {
+        SeoulBusVehicleLocationClient rosterClient = mock(SeoulBusVehicleLocationClient.class);
+        SeoulBusVehicleDetailClient detailClient = mock(SeoulBusVehicleDetailClient.class);
+        BusAlarmMonitoringScheduler monitored = spy(seoulScheduler(rosterClient, detailClient));
+        Alarm alarm = seoulActiveAlarm(1L, "route-1");
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(seoulGroup(alarm, "route-1")));
+        when(rosterClient.fetchVehicleLocations(any())).thenReturn(seoulRoster("A", "B", "C"));
+        for (String vehicle : List.of("A", "B", "C")) {
+            if (vehicle.equals(failedVehicle)) {
+                when(detailClient.fetchVehicleDetail(vehicle))
+                        .thenReturn(timedSeoulDetail(vehicle, "invalid", "target", 20, 1), seoulDetail(vehicle));
+            } else {
+                when(detailClient.fetchVehicleDetail(vehicle)).thenReturn(seoulDetail(vehicle));
+            }
+        }
+        BusAlarmEvaluationState firstState = new BusAlarmEvaluationState(true, Map.of(), Map.of(), Map.of());
+        var result = new BusAlarmEvaluationResult(List.of(), firstState, false);
+        when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
+        when(evaluator.evaluatePartial(any(), any(), anySet(), anyList(), any())).thenReturn(result);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any())).thenAnswer(applied());
+
+        monitored.pollMonitoringAlarms();
+
+        ArgumentCaptor<List<TransitObservation>> observations = observationCaptor();
+        InOrder order = inOrder(evaluator, lifecycleService, monitored);
+        order.verify(evaluator).evaluate(eq(alarm), any(), eq(Set.of("A", "B", "C")),
+                observations.capture(), any());
+        assertThat(observations.getValue()).extracting(TransitObservation::vehicleTrackingId)
+                .containsExactlyElementsOf(List.of("A", "B", "C").stream()
+                        .filter(vehicle -> !vehicle.equals(failedVehicle)).toList());
+        order.verify(lifecycleService).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(result), any());
+        order.verify(monitored).waitBeforeRetry();
+        order.verify(evaluator).evaluatePartial(eq(alarm), eq(firstState), eq(Set.of(failedVehicle)),
+                observations.capture(), any());
+        assertThat(observations.getValue()).extracting(TransitObservation::vehicleTrackingId)
+                .containsExactly(failedVehicle);
+        verify(rosterClient).fetchVehicleLocations(any());
+        for (String vehicle : List.of("A", "B", "C")) {
+            verify(detailClient, times(vehicle.equals(failedVehicle) ? 2 : 1)).fetchVehicleDetail(vehicle);
+        }
+        verify(monitored).waitBeforeRetry();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"invalid-date", "mismatched-id", "missing-id", "null-item"})
+    @DisplayName("상세 응답 일부 item의 오류도 해당 차량 전체를 거부하고 다른 차량 관측은 보존한다")
+    void seoul_rejects_entire_invalid_detail(String invalidKind) {
+        var rosterClient = mock(SeoulBusVehicleLocationClient.class);
+        var detailClient = mock(SeoulBusVehicleDetailClient.class);
+        var monitored = spy(seoulScheduler(rosterClient, detailClient));
+        Alarm alarm = seoulActiveAlarm(1L, "route-1");
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(seoulGroup(alarm, "route-1")));
+        when(rosterClient.fetchVehicleLocations(any())).thenReturn(seoulRoster("A", "B", "C"));
+        when(detailClient.fetchVehicleDetail("A")).thenReturn(seoulDetail("A"));
+        when(detailClient.fetchVehicleDetail("C")).thenReturn(seoulDetail("C"));
+        SeoulBusVehicleDetailItem invalid = switch (invalidKind) {
+            case "invalid-date" -> new SeoulBusVehicleDetailItem("B", null, "target", 20, 1,
+                    "20260230090000", null, null);
+            case "mismatched-id" -> new SeoulBusVehicleDetailItem("A", null, "target", 20, 1, null, null, null);
+            case "missing-id" -> new SeoulBusVehicleDetailItem(null, null, "target", 20, 1, null, null, null);
+            case "null-item" -> null;
+            default -> throw new IllegalArgumentException(invalidKind);
+        };
+        var response = new SeoulBusVehicleDetailResponse(new SeoulBusVehicleDetailResponse.Header("0", "OK"),
+                new SeoulBusVehicleDetailResponse.Body(java.util.Arrays.asList(
+                        seoulDetail("B").body().itemList().getFirst(), invalid)));
+        when(detailClient.fetchVehicleDetail("B")).thenReturn(response);
+        var result = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
+        when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any())).thenAnswer(applied());
+
+        monitored.pollMonitoringAlarms();
+
+        var observations = observationCaptor();
+        verify(evaluator).evaluate(eq(alarm), any(), eq(Set.of("A", "B", "C")), observations.capture(), any());
+        assertThat(observations.getValue()).extracting(TransitObservation::vehicleTrackingId)
+                .containsExactly("A", "C");
+        verify(evaluator, never()).evaluatePartial(any(), any(), anySet(), anyList(), any());
+        verify(detailClient).fetchVehicleDetail("A");
+        verify(detailClient).fetchVehicleDetail("C");
+        verify(detailClient, times(2)).fetchVehicleDetail("B");
+        verify(rosterClient).fetchVehicleLocations(any());
+        verify(monitored).waitBeforeRetry();
+    }
+
+    @Test
+    @DisplayName("반복 Mapping 실패 중에도 실제 정상 이벤트와 위치 진행은 반영하고 오류 차량의 검증 위치·cycle과 presence를 보존한다")
+    void repeated_mapping_failure_preserves_tracking_and_normal_events() {
+        var rosterClient = mock(SeoulBusVehicleLocationClient.class);
+        var detailClient = mock(SeoulBusVehicleDetailClient.class);
+        var now = new java.util.concurrent.atomic.AtomicReference<>(clock.instant());
+        Clock advancingClock = mock(Clock.class);
+        when(advancingClock.instant()).thenAnswer(invocation -> now.get());
+        BusAlarmEvaluator realEvaluator = spy(new BusAlarmEvaluator(mock(BusRouteTraversalService.class)));
+        var monitored = realSeoulScheduler(rosterClient, detailClient, realEvaluator, advancingClock);
+        Alarm alarm = seoulEvaluationAlarm();
+        when(alarm.getBusAlarmTarget().isNotifyOneStopBefore()).thenReturn(true);
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(seoulGroup(alarm, "route-1")));
+        when(rosterClient.fetchVehicleLocations(any())).thenReturn(seoulRoster("A", "B", "C"));
+        when(detailClient.fetchVehicleDetail("A")).thenReturn(
+                timedSeoulDetail("A", "20260923085940", "stop-1", 1, 0),
+                timedSeoulDetail("A", "20260923085950", "predecessor", 10, 0),
+                timedSeoulDetail("A", "20260923090000", "predecessor", 10, 0));
+        when(detailClient.fetchVehicleDetail("B")).thenReturn(
+                timedSeoulDetail("B", "20260923085940", "stop-1", 1, 0),
+                timedSeoulDetail("B", "20260931090000", "target", 20, 1),
+                timedSeoulDetail("B", "20260931090000", "target", 20, 1),
+                timedSeoulDetail("B", "20260923090000", "stop-2", 2, 0));
+        when(detailClient.fetchVehicleDetail("C")).thenReturn(
+                timedSeoulDetail("C", "20260923085940", "stop-1", 1, 0),
+                timedSeoulDetail("C", "20260923085950", "stop-2", 2, 0),
+                timedSeoulDetail("C", "20260923090000", "stop-3", 3, 0));
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any())).thenAnswer(applied());
+
+        monitored.pollMonitoringAlarms();
+        now.set(clock.instant().plusSeconds(10));
+        monitored.pollMonitoringAlarms();
+        now.set(clock.instant().plusSeconds(20));
+        monitored.pollMonitoringAlarms();
+
+        ArgumentCaptor<BusAlarmEvaluationResult> results = ArgumentCaptor.forClass(BusAlarmEvaluationResult.class);
+        verify(lifecycleService, times(3)).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), results.capture(), any());
+        var baseline = results.getAllValues().getFirst();
+        var failed = results.getAllValues().get(1);
+        var recovered = results.getAllValues().getLast();
+        VehicleTrackingState original = baseline.nextState().trackedVehicles().get("B");
+        VehicleTrackingState preserved = failed.nextState().trackedVehicles().get("B");
+        assertThat(preserved.lastObservation()).isEqualTo(original.lastObservation());
+        assertThat(preserved.lastKnownProviderDataTime()).isEqualTo(original.lastKnownProviderDataTime());
+        assertThat(preserved.trackingCycleId()).isEqualTo(original.trackingCycleId());
+        assertThat(preserved.emittedEventTypes()).isEqualTo(original.emittedEventTypes());
+        assertThat(preserved.hasObservedBeforeTarget()).isTrue();
+        assertThat(preserved.lastSeenAt()).isEqualTo(clock.instant().plusSeconds(10));
+        assertThat(failed.nextState().trackedVehicles().get("C").lastObservation().currentStopOrder()).isEqualTo(2);
+        assertThat(failed.eventCandidates()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(TransitEventType.ONE_STOP_BEFORE);
+            assertThat(event.vehicleTrackingId()).isEqualTo("A");
+        });
+        assertThat(baseline.eventCandidates()).isEmpty();
+        assertThat(recovered.eventCandidates()).isEmpty();
+        assertThat(recovered.nextState().trackedVehicles().get("B").trackingCycleId())
+                .isEqualTo(original.trackingCycleId());
+        assertThat(recovered.nextState().trackedVehicles().get("B").lastObservation().currentStopOrder()).isEqualTo(2);
+        verify(realEvaluator, never()).evaluatePartial(any(), any(), anySet(), anyList(), any());
+        verify(detailClient, times(3)).fetchVehicleDetail("A");
+        verify(detailClient, times(3)).fetchVehicleDetail("C");
+        verify(detailClient, times(4)).fetchVehicleDetail("B");
+        verify(rosterClient, times(3)).fetchVehicleLocations(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"20260923085935", "20260923085940"})
+    @DisplayName("Mapping 실패 뒤 같은 시각·역행 시각의 재시도는 실제 평가기에서 거부하고 이후 정상 도착은 같은 cycle로 반영한다")
+    void mapping_retry_preserves_provider_time_validation(String retryTime) {
+        var rosterClient = mock(SeoulBusVehicleLocationClient.class);
+        var detailClient = mock(SeoulBusVehicleDetailClient.class);
+        var realEvaluator = spy(new BusAlarmEvaluator(mock(BusRouteTraversalService.class)));
+        var monitored = realSeoulScheduler(rosterClient, detailClient, realEvaluator, clock);
+        Alarm alarm = seoulEvaluationAlarm();
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(seoulGroup(alarm, "route-1")));
+        when(rosterClient.fetchVehicleLocations(any())).thenReturn(seoulRoster("B"));
+        when(detailClient.fetchVehicleDetail("B")).thenReturn(
+                timedSeoulDetail("B", "20260923085940", "predecessor", 10, 0),
+                timedSeoulDetail("B", "invalid", "target", 20, 1),
+                timedSeoulDetail("B", retryTime, "target", 20, 1),
+                timedSeoulDetail("B", "20260923085950", "target", 20, 1));
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any())).thenAnswer(applied());
+
+        monitored.pollMonitoringAlarms();
+        monitored.pollMonitoringAlarms();
+        monitored.pollMonitoringAlarms();
+
+        ArgumentCaptor<BusAlarmEvaluationResult> results = ArgumentCaptor.forClass(BusAlarmEvaluationResult.class);
+        verify(lifecycleService, times(4)).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), results.capture(), any());
+        var original = results.getAllValues().getFirst().nextState().trackedVehicles().get("B");
+        assertThat(results.getAllValues().subList(0, 3)).allSatisfy(result -> {
+            assertThat(result.eventCandidates()).isEmpty();
+            assertThat(result.nextState().trackedVehicles().get("B")).isEqualTo(original);
+        });
+        assertThat(results.getAllValues().getLast().eventCandidates()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(TransitEventType.ARRIVED);
+            assertThat(event.trackingCycleId()).isEqualTo(original.trackingCycleId());
+        });
+        verify(realEvaluator).evaluatePartial(eq(alarm), any(), eq(Set.of("B")), anyList(), any());
+        verify(detailClient, times(4)).fetchVehicleDetail("B");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("여러 Alarm·Route에 공유된 Mapping 실패는 정상 Route를 먼저 평가하고 차량별 재조회는 성공·실패 모두 한 번으로 제한한다")
+    void shares_mapping_failure_retry_across_routes(boolean retrySuccess) {
+        var rosterClient = mock(SeoulBusVehicleLocationClient.class);
+        var detailClient = mock(SeoulBusVehicleDetailClient.class);
+        var monitored = spy(seoulScheduler(rosterClient, detailClient));
+        Alarm first = seoulActiveAlarm(1L, "route-1");
+        Alarm sameRoute = seoulActiveAlarm(2L, "route-1");
+        Alarm second = seoulActiveAlarm(3L, "route-2");
+        Alarm healthy = seoulActiveAlarm(4L, "route-3");
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(
+                new BusAlarmPollingGroup(new BusPollingKey(TransitProvider.SEOUL_BUS, "route-1", null),
+                        List.of(first, sameRoute)), seoulGroup(second, "route-2"), seoulGroup(healthy, "route-3")));
+        when(rosterClient.fetchVehicleLocations(any())).thenAnswer(invocation -> {
+            com.stopbell.transit.client.VehicleLocationRequest<?> request = invocation.getArgument(0);
+            return switch (request.externalRouteId()) {
+                case "route-1" -> seoulRoster("A", "B");
+                case "route-2" -> seoulRoster("B", "C");
+                default -> seoulRoster("D");
+            };
+        });
+        for (String vehicle : List.of("A", "C", "D")) {
+            when(detailClient.fetchVehicleDetail(vehicle)).thenReturn(seoulDetail(vehicle));
+        }
+        var invalid = timedSeoulDetail("B", "invalid", "target", 20, 1);
+        when(detailClient.fetchVehicleDetail("B")).thenReturn(invalid, retrySuccess ? seoulDetail("B") : invalid);
+        var result = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
+        when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(result);
+        when(evaluator.evaluatePartial(any(), any(), anySet(), anyList(), any())).thenReturn(result);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any())).thenAnswer(applied());
+
+        monitored.pollMonitoringAlarms();
+
+        InOrder order = inOrder(evaluator, lifecycleService, monitored);
+        for (Alarm alarm : List.of(first, sameRoute, second, healthy)) {
+            var observations = observationCaptor();
+            order.verify(evaluator).evaluate(eq(alarm), any(), anySet(), observations.capture(), any());
+            String expectedVehicle = alarm == second ? "C" : alarm == healthy ? "D" : "A";
+            assertThat(observations.getValue()).singleElement().satisfies(observation -> {
+                assertThat(observation.vehicleTrackingId()).isEqualTo(expectedVehicle);
+                assertThat(observation.externalRouteId()).isEqualTo(alarm.getBusAlarmTarget().getExternalRouteId());
+            });
+            order.verify(lifecycleService).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), eq(result), any());
+        }
+        order.verify(monitored).waitBeforeRetry();
+        verify(evaluator, times(retrySuccess ? 3 : 0)).evaluatePartial(any(), any(), eq(Set.of("B")), anyList(), any());
+        verify(rosterClient, times(3)).fetchVehicleLocations(any());
+        verify(detailClient, times(2)).fetchVehicleDetail("B");
+        for (String vehicle : List.of("A", "C", "D")) {
+            verify(detailClient).fetchVehicleDetail(vehicle);
+        }
+        verify(monitored).waitBeforeRetry();
+    }
+
+    @Test
+    @DisplayName("같은 차량의 충돌 중복 관측은 실제 평가기의 UNKNOWN 정책을 유지하고 정상 차량 이벤트만 반영한다")
+    void duplicate_detail_keeps_existing_ambiguity_policy() {
+        var rosterClient = mock(SeoulBusVehicleLocationClient.class);
+        var detailClient = mock(SeoulBusVehicleDetailClient.class);
+        var realEvaluator = new BusAlarmEvaluator(mock(BusRouteTraversalService.class));
+        var monitored = spy(realSeoulScheduler(rosterClient, detailClient, realEvaluator, clock));
+        Alarm alarm = seoulEvaluationAlarm();
+        when(alarm.getBusAlarmTarget().isNotifyOneStopBefore()).thenReturn(true);
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(seoulGroup(alarm, "route-1")));
+        when(rosterClient.fetchVehicleLocations(any())).thenReturn(seoulRoster("A", "B"));
+        when(detailClient.fetchVehicleDetail("A"))
+                .thenReturn(timedSeoulDetail("A", "20260923085950", "predecessor", 10, 0));
+        when(detailClient.fetchVehicleDetail("B")).thenReturn(new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", "OK"), new SeoulBusVehicleDetailResponse.Body(List.of(
+                new SeoulBusVehicleDetailItem("B", null, "predecessor", 10, 0, "20260923085950", null, null),
+                new SeoulBusVehicleDetailItem("B", null, "target", 20, 1, "20260923085950", null, null)))));
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any())).thenAnswer(applied());
+
+        monitored.pollMonitoringAlarms();
+
+        ArgumentCaptor<BusAlarmEvaluationResult> result = ArgumentCaptor.forClass(BusAlarmEvaluationResult.class);
+        verify(lifecycleService).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), result.capture(), any());
+        assertThat(result.getValue().eventCandidates()).singleElement().satisfies(event -> {
+            assertThat(event.vehicleTrackingId()).isEqualTo("A");
+            assertThat(event.type()).isEqualTo(TransitEventType.ONE_STOP_BEFORE);
+        });
+        assertThat(result.getValue().nextState().trackedVehicles()).containsOnlyKeys("A");
+        verify(monitored, never()).waitBeforeRetry();
+        verify(detailClient).fetchVehicleDetail("B");
+    }
+
+    private static Alarm seoulEvaluationAlarm() {
+        Alarm alarm = seoulActiveAlarm(1L, "route-1");
+        when(alarm.getBusAlarmTarget().getExternalStopId()).thenReturn("target");
+        when(alarm.getBusAlarmTarget().getTargetStopOrder()).thenReturn(20);
+        when(alarm.getBusAlarmTarget().getPredecessorExternalStopId()).thenReturn("predecessor");
+        when(alarm.getBusAlarmTarget().getPredecessorStopOrder()).thenReturn(10);
+        return alarm;
+    }
+
+    private BusAlarmMonitoringScheduler realSeoulScheduler(SeoulBusVehicleLocationClient rosterClient,
+            SeoulBusVehicleDetailClient detailClient, BusAlarmEvaluator realEvaluator, Clock pollingClock) {
+        return new BusAlarmMonitoringScheduler(pollingService, realEvaluator, lifecycleService, tagoClient,
+                rosterClient, detailClient, new TagoTransitObservationMapper(pollingClock),
+                new SeoulBusTransitObservationMapper(pollingClock), pollingClock, Duration.ZERO,
+                mock(com.stopbell.boarding.service.BoardingSessionPollingService.class));
+    }
+
+    private static SeoulBusVehicleDetailResponse timedSeoulDetail(
+            String vehicleId, String dataTm, String stopId, int stopOrder, int stopFlag) {
+        return new SeoulBusVehicleDetailResponse(new SeoulBusVehicleDetailResponse.Header("0", "OK"),
+                new SeoulBusVehicleDetailResponse.Body(List.of(new SeoulBusVehicleDetailItem(
+                        vehicleId, null, stopId, stopOrder, stopFlag, dataTm, null, null))));
     }
 
     private BusAlarmMonitoringScheduler seoulScheduler(SeoulBusVehicleLocationClient rosterClient,
