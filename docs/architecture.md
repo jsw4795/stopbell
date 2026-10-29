@@ -452,6 +452,12 @@ Notification 전송 결정 또는 UNKNOWN 대기
 
 일반 tracking의 Event precedence는 target에서 도착을 충분히 관찰한 `ARRIVED`, target 이전에서 이후로 건너뛴 `PASSED`, `ONE_STOP_BEFORE` 순이다. ARRIVED 후 동일 차량 follow-up에서는 `ONE_STOP_AFTER`만 평가하며 PASSED로 재분류하지 않는다. Stop order는 같은 방향·Route traversal 문맥에서 비교할 수 있을 때만 사용한다.
 
+TASK-816/AUD-02는 기존 차량 state가 있는 ACTIVE/FOLLOW_UP에서 Event 평가와 위치 갱신 전에 시간·순서 단조성을 함께 검사한다. Stop order와 `observedAt`이 역행하면 거부하고, 현재와 마지막 유효 Provider 시각이 모두 있으면 현재 시각이 엄격히 증가해야 한다. 같은 위치에서 동일 Provider 시각의 arrival evidence만 달라진 경우도 새 도착 근거로 사용하지 않는다. `hasNewProgressEvidence()`는 이 검증과 엄격한 Stop order 증가를 함께 요구한다. 기존 freshness 60초·방향·Stop ID/order·GPS 검증 및 Provider별 Event 정책은 유지한다.
+
+TAGO Mapper의 Provider 시각은 NULL이고 서울 Mapper도 `dataTm` 누락/공백을 NULL로 보존한다. 비교할 Provider 시각이 없으면 기존의 시각 없는 관측을 허용하되 `observedAt`이 증가한 응답만 반영한다. 이는 수신 순서 검증이며 upstream freshness 보장이 아니다. `VehicleTrackingState.lastKnownProviderDataTime`은 마지막 검증 Provider 시각을 메모리에만 보존해 중간 NULL 관측 뒤 동일·역행 시각이 다시 들어오는 우회를 차단한다. 원본 Observation/Event의 NULL 시각은 보완하거나 합성하지 않는다.
+
+거부된 관측은 마지막 위치·유효 Provider 시각·before 이력·발행 Event 집합·cycle UUID를 유지하고, 기존 presence/missing grace 경로로 `lastSeenAt`만 갱신한다. FOLLOW_UP의 Stop ID/order 충돌도 위치와 시각 기준을 덮어쓰지 않는다. 이후 정상 관측은 보존된 기준으로 다시 평가하며 같은 cycle의 중복 방지를 유지한다. `baselineAfterVehicles`의 기존 억제·실제 부재 만료 정책도 유지한다. 이전 state가 없는 최초/신규 차량의 Baseline은 비교할 과거 시각을 만들지 않고 기존 서울 직접 ARRIVED·TAGO GPS 근거를 사용한다. FOLLOW_UP 메모리가 없는 복구도 기존 fresh successor 관측과 영속 UUID·만료 시각을 사용하며, restart 전 Provider 시각과의 비교까지 보장하지 않는다. BoardingSession, Scheduler 실행 자원, Lifecycle의 generation/transaction/재시도 및 Notification identity는 변경하지 않는다.
+
 ### Alarm과 Vehicle Tracking lifecycle
 
 Alarm 활성화 시 현재 Route 차량을 baseline으로 분류한다. Target 이전 차량은 추적 후보이고, before 옵션이 켜진 상태에서 정확히 predecessor인 차량은 즉시 ONE_STOP_BEFORE 후보가 된다. Target 차량은 충분한 근거가 있으면 즉시 ARRIVED이며, 이미 Target 이후인 차량은 기존 passed vehicle로 무시한다.

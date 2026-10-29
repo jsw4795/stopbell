@@ -14,6 +14,7 @@ import com.stopbell.transit.domain.TransitObservation;
 public record VehicleTrackingState(
         UUID trackingCycleId,
         TransitObservation lastObservation,
+        Instant lastKnownProviderDataTime,
         Instant lastSeenAt,
         boolean hasObservedBeforeTarget,
         Set<TransitEventType> emittedEventTypes
@@ -27,19 +28,21 @@ public record VehicleTrackingState(
     }
 
     public static VehicleTrackingState begin(TransitObservation observation, Instant seenAt) {
-        return new VehicleTrackingState(UUID.randomUUID(), observation, seenAt, false, Set.of());
+        return new VehicleTrackingState(UUID.randomUUID(), observation, observation.providerDataTime(), seenAt, false, Set.of());
     }
 
     public static VehicleTrackingState beginBeforeTarget(TransitObservation observation, Instant seenAt) {
-        return new VehicleTrackingState(UUID.randomUUID(), observation, seenAt, true, Set.of());
+        return new VehicleTrackingState(UUID.randomUUID(), observation, observation.providerDataTime(), seenAt, true, Set.of());
     }
 
     public static VehicleTrackingState restoreFollowUp(UUID trackingCycleId, TransitObservation observation, Instant seenAt) {
-        return new VehicleTrackingState(trackingCycleId, observation, seenAt, false, Set.of(TransitEventType.ARRIVED));
+        return new VehicleTrackingState(trackingCycleId, observation, observation.providerDataTime(), seenAt,
+                false, Set.of(TransitEventType.ARRIVED));
     }
 
     public VehicleTrackingState observe(TransitObservation observation, Instant seenAt) {
-        return new VehicleTrackingState(trackingCycleId, observation, seenAt, hasObservedBeforeTarget, emittedEventTypes);
+        return new VehicleTrackingState(trackingCycleId, observation, providerTimeAfter(observation), seenAt,
+                hasObservedBeforeTarget, emittedEventTypes);
     }
 
     public VehicleTrackingState emit(TransitEventType eventType, TransitObservation observation, Instant seenAt) {
@@ -47,7 +50,13 @@ public record VehicleTrackingState(
                 ? EnumSet.noneOf(TransitEventType.class)
                 : EnumSet.copyOf(emittedEventTypes);
         emitted.add(eventType);
-        return new VehicleTrackingState(trackingCycleId, observation, seenAt, hasObservedBeforeTarget, emitted);
+        return new VehicleTrackingState(trackingCycleId, observation, providerTimeAfter(observation), seenAt,
+                hasObservedBeforeTarget, emitted);
+    }
+
+    private Instant providerTimeAfter(TransitObservation observation) {
+        // A nullable source time must not erase the last validated provider clock.
+        return observation.providerDataTime() == null ? lastKnownProviderDataTime : observation.providerDataTime();
     }
 
     public boolean hasEmitted(TransitEventType eventType) {

@@ -23,6 +23,9 @@ import com.stopbell.transit.domain.TransitObservation;
 import com.stopbell.transit.domain.TransitProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BusAlarmEvaluatorTest {
 
@@ -421,6 +424,366 @@ class BusAlarmEvaluatorTest {
                 observation(TransitProvider.TAGO, "vehicle", "predecessor", 10, ArrivalEvidence.UNAVAILABLE, NOW)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("provider and route");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "SEOUL_BUS, target, 20, ARRIVED, 0", "SEOUL_BUS, target, 20, ARRIVED, -5",
+            "TAGO, target, 20, UNAVAILABLE, 0", "TAGO, target, 20, UNAVAILABLE, -5",
+            "SEOUL_BUS, later-stop, 90, MOVING, 0", "SEOUL_BUS, later-stop, 90, MOVING, -5",
+            "SEOUL_BUS, predecessor, 10, MOVING, 0", "SEOUL_BUS, predecessor, 10, MOVING, -5"
+    })
+    @DisplayName("동일하거나 역행한 Provider 시각의 정류장 진행은 이벤트 없이 검증된 상태를 보존하고 다음 정상 관측으로 복구한다")
+    void audit_rejects_conflicting_progress_and_recovers(TransitProvider provider, String stopId, int order,
+            ArrivalEvidence evidence, int providerSeconds) {
+        Alarm alarm = activeAlarm(provider);
+        TransitObservation before = timedObservation(provider, "vehicle", "earlier-stop", 5,
+                ArrivalEvidence.UNAVAILABLE, NOW, NOW);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), before).nextState();
+        VehicleTrackingState original = state.trackedVehicles().get("vehicle");
+        TransitObservation conflict = timedObservation(provider, "vehicle", stopId, order, evidence,
+                NOW.plusSeconds(10), NOW.plusSeconds(providerSeconds));
+
+        BusAlarmEvaluationResult rejected = evaluate(alarm, state, conflict);
+
+        assertThat(rejected.eventCandidates()).isEmpty();
+        assertThat(rejected.nextState().trackedVehicles().get("vehicle"))
+                .isEqualTo(original.observe(before, conflict.observedAt()));
+        assertThat(rejected.nextState().baselineAfterVehicles()).isEqualTo(state.baselineAfterVehicles());
+        assertThat(rejected.nextState().followUpVehicles()).isEmpty();
+
+        if (order > 20) {
+            when(routeTraversalService.stopsPastTarget(any(), any())).thenReturn(OptionalInt.of(2));
+        }
+        TransitObservation valid = timedObservation(provider, "vehicle", stopId, order, evidence,
+                NOW.plusSeconds(20), NOW.plusSeconds(15));
+        BusAlarmEvaluationResult recovered = evaluate(alarm, rejected.nextState(), valid);
+        TransitEventType expected = order == 20 ? TransitEventType.ARRIVED
+                : order > 20 ? TransitEventType.PASSED : TransitEventType.ONE_STOP_BEFORE;
+        assertThat(recovered.eventCandidates()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(expected);
+            assertThat(event.trackingCycleId()).isEqualTo(original.trackingCycleId());
+            assertThat(event.providerDataTime()).isEqualTo(valid.providerDataTime());
+        });
+        assertThat(evaluate(alarm, recovered.nextState(), valid).eventCandidates()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -5})
+    @DisplayName("FOLLOW_UP의 동일하거나 역행한 시각은 도달 근거와 추적 위치를 바꾸지 않고 정상 후속 관측을 기다린다")
+    void audit_rejects_follow_up_time_conflict_and_recovers(int providerSeconds) {
+        Alarm alarm = followUpAlarm();
+        TransitObservation atTarget = timedObservation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "target", 20,
+                ArrivalEvidence.ARRIVED, NOW, NOW);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), atTarget).nextState();
+        VehicleTrackingState original = state.followUpVehicles().get("follow-up-vehicle");
+        TransitObservation conflict = timedObservation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "successor", 35,
+                ArrivalEvidence.MOVING, NOW.plusSeconds(10), NOW.plusSeconds(providerSeconds));
+
+        BusAlarmEvaluationResult rejected = evaluate(alarm, state, conflict);
+
+        assertThat(rejected.eventCandidates()).isEmpty();
+        assertThat(rejected.nextState().followUpVehicles().get("follow-up-vehicle"))
+                .isEqualTo(original.observe(atTarget, conflict.observedAt()));
+        BusAlarmEvaluationResult recovered = evaluate(alarm, rejected.nextState(),
+                timedObservation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "successor", 35,
+                        ArrivalEvidence.MOVING, NOW.plusSeconds(20), NOW.plusSeconds(15)));
+        assertThat(recovered.eventCandidates()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(TransitEventType.ONE_STOP_AFTER);
+            assertThat(event.trackingCycleId()).isEqualTo(TRACKING_CYCLE_ID);
+        });
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -5})
+    @DisplayName("Provider 시각이 잠시 누락되어도 마지막 유효 시각보다 오래된 직접 도착 관측으로 우회하지 못한다")
+    void audit_rejects_time_regression_across_null_observation(int providerSeconds) {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        TransitObservation before = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "earlier-stop", 5,
+                ArrivalEvidence.MOVING, NOW, NOW);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), before).nextState();
+        TransitObservation withoutTime = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10,
+                ArrivalEvidence.MOVING, NOW.plusSeconds(10), null);
+        BusAlarmEvaluationResult missingTime = evaluate(alarm, state, withoutTime);
+        assertThat(missingTime.eventCandidates()).extracting(event -> event.type())
+                .containsExactly(TransitEventType.ONE_STOP_BEFORE);
+        assertThat(missingTime.nextState().trackedVehicles().get("vehicle").lastObservation()).isEqualTo(withoutTime);
+        assertThat(withoutTime.providerDataTime()).isNull();
+
+        BusAlarmEvaluationResult rejected = evaluate(alarm, missingTime.nextState(),
+                timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20,
+                        ArrivalEvidence.ARRIVED, NOW.plusSeconds(20), NOW.plusSeconds(providerSeconds)));
+
+        assertThat(rejected.eventCandidates()).isEmpty();
+        assertThat(rejected.nextState().trackedVehicles().get("vehicle").lastObservation()).isEqualTo(withoutTime);
+        BusAlarmEvaluationResult recovered = evaluate(alarm, rejected.nextState(),
+                timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20,
+                        ArrivalEvidence.ARRIVED, NOW.plusSeconds(30), NOW.plusSeconds(25)));
+        assertThat(recovered.eventCandidates()).extracting(event -> event.type()).containsExactly(TransitEventType.ARRIVED);
+    }
+
+    @Test
+    @DisplayName("같은 위치에서도 동일 Provider 시각의 도착 신호 변경은 새 근거가 아니며 시각이 증가하면 서울 직접 도착을 허용한다")
+    void audit_rejects_changed_arrival_evidence_at_same_provider_time() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        TransitObservation before = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10,
+                ArrivalEvidence.MOVING, NOW, NOW);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), before).nextState();
+        TransitObservation moving = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20,
+                ArrivalEvidence.MOVING, NOW.plusSeconds(10), NOW.plusSeconds(5));
+        state = evaluate(alarm, state, moving).nextState();
+
+        BusAlarmEvaluationResult rejected = evaluate(alarm, state,
+                timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20,
+                        ArrivalEvidence.ARRIVED, NOW.plusSeconds(20), NOW.plusSeconds(5)));
+
+        assertThat(rejected.eventCandidates()).isEmpty();
+        assertThat(rejected.nextState().trackedVehicles().get("vehicle").lastObservation()).isEqualTo(moving);
+        assertThat(evaluate(alarm, rejected.nextState(),
+                timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20,
+                        ArrivalEvidence.ARRIVED, NOW.plusSeconds(30), NOW.plusSeconds(25))).eventCandidates())
+                .extracting(event -> event.type()).containsExactly(TransitEventType.ARRIVED);
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {
+            "0, 10, 8, true", "0, 0, 8, false", "0, -5, 8, false", "0, 10, 4, false",
+            "0, 0, 5, false", "0, 10, 5, true", "NULL, NULL, 8, true", "NULL, 10, 8, true",
+            "0, NULL, 8, true", "NULL, NULL, 5, true"
+    }, nullValues = "NULL")
+    @DisplayName("정류장 순서와 실제 Provider 시각을 함께 검증하며 시각 누락은 기존 수신 순서에 따라 허용한다")
+    void audit_validates_order_and_time_matrix(Integer previousSeconds, Integer currentSeconds, int order,
+            boolean accepted) {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        TransitObservation previous = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "earlier-stop", 5,
+                ArrivalEvidence.MOVING, NOW, previousSeconds == null ? null : NOW.plusSeconds(previousSeconds));
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), previous).nextState();
+        TransitObservation current = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "earlier-stop", order,
+                ArrivalEvidence.MOVING, NOW.plusSeconds(20), currentSeconds == null ? null : NOW.plusSeconds(currentSeconds));
+
+        BusAlarmEvaluationResult result = evaluate(alarm, state, current);
+
+        assertThat(result.eventCandidates()).isEmpty();
+        VehicleTrackingState tracking = result.nextState().trackedVehicles().get("vehicle");
+        assertThat(tracking.lastObservation()).isEqualTo(accepted ? current : previous);
+        assertThat(tracking.lastSeenAt()).isEqualTo(current.observedAt());
+        assertThat(tracking.trackingCycleId()).isEqualTo(state.trackedVehicles().get("vehicle").trackingCycleId());
+        assertThat(tracking.hasObservedBeforeTarget()).isTrue();
+        assertThat(tracking.emittedEventTypes()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"0, 70", "70, 0", "71, 70", "70, 71"})
+    @DisplayName("수신 또는 Provider 시각이 freshness를 벗어나거나 미래이면 위치와 이벤트 이력을 유지한다")
+    void audit_preserves_tracking_for_stale_or_future_time(int observedSeconds, int providerSeconds) {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        TransitObservation previous = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10,
+                ArrivalEvidence.MOVING, NOW, NOW);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), previous).nextState();
+
+        BusAlarmEvaluationResult result = evaluate(alarm, state,
+                timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20,
+                        ArrivalEvidence.ARRIVED, NOW.plusSeconds(observedSeconds), NOW.plusSeconds(providerSeconds)),
+                NOW.plusSeconds(70));
+
+        assertThat(result.eventCandidates()).isEmpty();
+        assertThat(result.nextState().trackedVehicles().get("vehicle"))
+                .isEqualTo(state.trackedVehicles().get("vehicle").observe(previous, NOW.plusSeconds(70)));
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {"-1, 5", "0, NULL", "-1, NULL"}, nullValues = "NULL")
+    @DisplayName("시각이 없는 관측도 동일하거나 역행한 수신시각으로 정류장 진행을 주장할 수 없다")
+    void audit_rejects_non_advancing_receive_time(int observedSeconds, Integer providerSeconds) {
+        Alarm alarm = activeAlarm(TransitProvider.TAGO);
+        TransitObservation previous = timedObservation(TransitProvider.TAGO, "vehicle", "predecessor", 10,
+                ArrivalEvidence.UNAVAILABLE, NOW, null);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), previous).nextState();
+
+        BusAlarmEvaluationResult result = evaluate(alarm, state,
+                timedObservation(TransitProvider.TAGO, "vehicle", "target", 20, ArrivalEvidence.UNAVAILABLE,
+                        NOW.plusSeconds(observedSeconds), providerSeconds == null ? null : NOW.plusSeconds(providerSeconds)),
+                NOW.plusSeconds(10));
+
+        assertThat(result.eventCandidates()).isEmpty();
+        assertThat(result.nextState().trackedVehicles().get("vehicle").lastObservation()).isEqualTo(previous);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"TAGO, UNAVAILABLE", "SEOUL_BUS, ARRIVED"})
+    @DisplayName("Provider 시각이 없는 정상 진행도 기존 Provider별 ARRIVED와 동일 cycle을 유지한다")
+    void audit_keeps_arrival_compatibility_without_provider_time(TransitProvider provider, ArrivalEvidence evidence) {
+        Alarm alarm = activeAlarm(provider);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                observation(provider, "vehicle", "predecessor", 10, ArrivalEvidence.UNAVAILABLE, NOW)).nextState();
+
+        BusAlarmEvaluationResult result = evaluate(alarm, state,
+                observation(provider, "vehicle", "target", 20, evidence, NOW.plusSeconds(10)));
+
+        assertThat(result.eventCandidates()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(TransitEventType.ARRIVED);
+            assertThat(event.trackingCycleId()).isEqualTo(state.trackedVehicles().get("vehicle").trackingCycleId());
+            assertThat(event.providerDataTime()).isNull();
+        });
+    }
+
+    @ParameterizedTest
+    @CsvSource({"TAGO, UNAVAILABLE", "SEOUL_BUS, ARRIVED"})
+    @DisplayName("이전 추적이 없는 최초 및 신규 차량은 freshness 내 유효한 기존 Baseline 도착 근거를 그대로 사용한다")
+    void audit_keeps_direct_baseline_and_new_vehicle_arrival(TransitProvider provider, ArrivalEvidence evidence) {
+        Alarm alarm = activeAlarm(provider);
+        TransitObservation atTarget = timedObservation(provider, "vehicle", "target", 20, evidence,
+                NOW, NOW.minusSeconds(60));
+
+        BusAlarmEvaluationResult baseline = evaluate(alarm, BusAlarmEvaluationState.initial(), atTarget);
+        BusAlarmEvaluationState established = evaluate(alarm, BusAlarmEvaluationState.initial(), List.of(), NOW).nextState();
+        BusAlarmEvaluationResult newVehicle = evaluate(alarm, established, atTarget);
+
+        assertThat(baseline.eventCandidates()).extracting(event -> event.type()).containsExactly(TransitEventType.ARRIVED);
+        assertThat(newVehicle.eventCandidates()).extracting(event -> event.type()).containsExactly(TransitEventType.ARRIVED);
+    }
+
+    @Test
+    @DisplayName("Snapshot 안의 동일 차량 관측 충돌은 다른 차량 평가와 기존 cycle에 영향을 주지 않는다")
+    void audit_isolates_duplicate_vehicle_observations() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        TransitObservation previous = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10,
+                ArrivalEvidence.MOVING, NOW, NOW);
+        TransitObservation other = timedObservation(TransitProvider.SEOUL_BUS, "other", "predecessor", 10,
+                ArrivalEvidence.MOVING, NOW, NOW);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), List.of(previous, other), NOW)
+                .nextState();
+        TransitObservation atTarget = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20,
+                ArrivalEvidence.ARRIVED, NOW.plusSeconds(10), NOW.plusSeconds(5));
+        TransitObservation afterTarget = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "later-stop", 90,
+                ArrivalEvidence.MOVING, NOW.plusSeconds(10), NOW.plusSeconds(5));
+        TransitObservation otherArrived = timedObservation(TransitProvider.SEOUL_BUS, "other", "target", 20,
+                ArrivalEvidence.ARRIVED, NOW.plusSeconds(10), NOW.plusSeconds(5));
+
+        BusAlarmEvaluationResult result = evaluate(alarm, state, List.of(atTarget, afterTarget, otherArrived),
+                NOW.plusSeconds(10));
+
+        assertThat(result.eventCandidates()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(TransitEventType.ARRIVED);
+            assertThat(event.vehicleTrackingId()).isEqualTo("other");
+        });
+        assertThat(result.nextState().trackedVehicles().get("vehicle"))
+                .isEqualTo(state.trackedVehicles().get("vehicle").observe(previous, NOW.plusSeconds(10)));
+        assertThat(evaluate(alarm, result.nextState(), atTarget).eventCandidates())
+                .extracting(event -> event.type()).containsExactly(TransitEventType.ARRIVED);
+        assertThat(evaluate(alarm, BusAlarmEvaluationState.initial(), List.of(atTarget, afterTarget), NOW.plusSeconds(10))
+                .nextState().trackedVehicles()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("FOLLOW_UP 복원은 현재 관측과 원래 UUID를 사용하고 중복 Snapshot과 후속 이벤트 반복은 차단한다")
+    void audit_preserves_follow_up_recovery_and_deduplication() {
+        Alarm alarm = followUpAlarm();
+        TransitObservation atSuccessor = timedObservation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "successor", 35,
+                ArrivalEvidence.MOVING, NOW.plusSeconds(10), NOW.plusSeconds(5));
+        TransitObservation conflicting = timedObservation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "later-stop", 90,
+                ArrivalEvidence.MOVING, NOW.plusSeconds(10), NOW.plusSeconds(5));
+        BusAlarmEvaluationResult ambiguous = evaluate(alarm, BusAlarmEvaluationState.initial(),
+                List.of(atSuccessor, conflicting), NOW.plusSeconds(10));
+        assertThat(ambiguous.eventCandidates()).isEmpty();
+        assertThat(ambiguous.nextState().followUpVehicles()).isEmpty();
+
+        BusAlarmEvaluationResult restored = evaluate(alarm, ambiguous.nextState(), atSuccessor);
+
+        assertThat(restored.eventCandidates()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(TransitEventType.ONE_STOP_AFTER);
+            assertThat(event.trackingCycleId()).isEqualTo(TRACKING_CYCLE_ID);
+        });
+        assertThat(evaluate(alarm, restored.nextState(),
+                timedObservation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "later-stop", 90,
+                        ArrivalEvidence.MOVING, NOW.plusSeconds(20), NOW.plusSeconds(15))).eventCandidates()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("ARRIVED 상태의 FOLLOW_UP 이관 후에도 NULL 관측이 마지막 유효 Provider 시각을 지우지 않는다")
+    void audit_retains_provider_time_across_follow_up_transfer() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        TransitObservation atTarget = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20,
+                ArrivalEvidence.ARRIVED, NOW, NOW);
+        BusAlarmEvaluationResult arrived = evaluate(alarm, BusAlarmEvaluationState.initial(), atTarget);
+        UUID cycleId = arrived.eventCandidates().getFirst().trackingCycleId();
+        LocalDateTime start = LocalDateTime.of(2026, 9, 23, 3, 0);
+        alarm.startFollowUp("vehicle", cycleId, start, start.plusMinutes(5));
+        BusAlarmEvaluationState state = arrived.nextState().forFollowUp("vehicle");
+        TransitObservation withoutTime = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20,
+                ArrivalEvidence.MOVING, NOW.plusSeconds(10), null);
+        state = evaluate(alarm, state, withoutTime).nextState();
+        assertThat(state.followUpVehicles().get("vehicle").lastObservation()).isEqualTo(withoutTime);
+        assertThat(state.followUpVehicles().get("vehicle").lastKnownProviderDataTime()).isEqualTo(NOW);
+
+        BusAlarmEvaluationResult rejected = evaluate(alarm, state,
+                timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "successor", 35,
+                        ArrivalEvidence.MOVING, NOW.plusSeconds(20), NOW.minusSeconds(5)));
+
+        assertThat(rejected.eventCandidates()).isEmpty();
+        assertThat(rejected.nextState().followUpVehicles().get("vehicle").lastObservation()).isEqualTo(withoutTime);
+        assertThat(evaluate(alarm, rejected.nextState(),
+                timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "successor", 35,
+                        ArrivalEvidence.MOVING, NOW.plusSeconds(30), NOW.plusSeconds(25))).eventCandidates())
+                .singleElement().satisfies(event -> {
+                    assertThat(event.type()).isEqualTo(TransitEventType.ONE_STOP_AFTER);
+                    assertThat(event.trackingCycleId()).isEqualTo(cycleId);
+                });
+    }
+
+    @Test
+    @DisplayName("오래된 상세 관측만 반복되어도 roster presence는 유지하고 실제 부재 이후에만 새 cycle을 허용한다")
+    void audit_separates_stale_position_from_vehicle_presence() {
+        Alarm alarm = activeAlarm(TransitProvider.SEOUL_BUS);
+        TransitObservation previous = timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10,
+                ArrivalEvidence.MOVING, NOW, NOW);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), previous).nextState();
+        VehicleTrackingState original = state.trackedVehicles().get("vehicle");
+        for (int seconds : new int[] {61, 122}) {
+            BusAlarmEvaluationResult stale = evaluate(alarm, state,
+                    timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "target", 20, ArrivalEvidence.ARRIVED,
+                            NOW.plusSeconds(seconds), NOW), NOW.plusSeconds(seconds));
+            assertThat(stale.eventCandidates()).isEmpty();
+            assertThat(stale.nextState().trackedVehicles().get("vehicle"))
+                    .isEqualTo(original.observe(previous, NOW.plusSeconds(seconds)));
+            state = stale.nextState();
+        }
+        BusAlarmEvaluationResult absent = evaluate(alarm, state, List.of(), NOW.plusSeconds(183));
+        assertThat(absent.nextState().trackedVehicles()).isEmpty();
+        BusAlarmEvaluationResult returned = evaluate(alarm, absent.nextState(),
+                timedObservation(TransitProvider.SEOUL_BUS, "vehicle", "predecessor", 10, ArrivalEvidence.MOVING,
+                        NOW.plusSeconds(184), NOW.plusSeconds(180)));
+        assertThat(returned.nextState().trackedVehicles().get("vehicle").trackingCycleId())
+                .isNotEqualTo(original.trackingCycleId());
+    }
+
+    @Test
+    @DisplayName("FOLLOW_UP의 정류장 충돌 관측은 검증된 위치와 Provider 시각을 오염시키지 않아 이후 정상 도달을 막지 않는다")
+    void audit_preserves_follow_up_time_for_stop_conflict() {
+        Alarm alarm = followUpAlarm();
+        TransitObservation atTarget = timedObservation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "target", 20,
+                ArrivalEvidence.ARRIVED, NOW, NOW);
+        BusAlarmEvaluationState state = evaluate(alarm, BusAlarmEvaluationState.initial(), atTarget).nextState();
+
+        BusAlarmEvaluationResult conflict = evaluate(alarm, state,
+                timedObservation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "different-stop", 35,
+                        ArrivalEvidence.MOVING, NOW.plusSeconds(20), NOW.plusSeconds(15)));
+
+        assertThat(conflict.eventCandidates()).isEmpty();
+        assertThat(conflict.nextState().followUpVehicles().get("follow-up-vehicle"))
+                .isEqualTo(state.followUpVehicles().get("follow-up-vehicle").observe(atTarget, NOW.plusSeconds(20)));
+        BusAlarmEvaluationResult recovered = evaluate(alarm, conflict.nextState(),
+                timedObservation(TransitProvider.SEOUL_BUS, "follow-up-vehicle", "successor", 35,
+                        ArrivalEvidence.MOVING, NOW.plusSeconds(30), NOW.plusSeconds(10)));
+        assertThat(recovered.eventCandidates()).extracting(event -> event.type()).containsExactly(TransitEventType.ONE_STOP_AFTER);
+    }
+
+    private static TransitObservation timedObservation(TransitProvider provider, String vehicleId, String stopId,
+            int stopOrder, ArrivalEvidence evidence, Instant observedAt, Instant providerDataTime) {
+        TransitObservation observation = observation(provider, vehicleId, stopId, stopOrder, evidence, observedAt);
+        return new TransitObservation(provider, observation.externalRouteId(), vehicleId, stopId, stopOrder,
+                observation.currentStopName(), observation.directionContext(), observation.sectionContext(),
+                observation.latitude(), observation.longitude(), observedAt, providerDataTime, evidence);
     }
 
     private BusAlarmEvaluationResult evaluate(Alarm alarm, BusAlarmEvaluationState state, TransitObservation observation) {

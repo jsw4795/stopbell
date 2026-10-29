@@ -607,6 +607,58 @@ class BusAlarmMonitoringSchedulerTest {
         verify(evaluator, times(2)).evaluatePartial(any(), any(), anySet(), anyList(), any());
     }
 
+    @Test
+    @DisplayName("실제 평가기는 서울 detail 실패 후 오래된 재시도에서 이벤트를 차단하고 다음 정상 관측으로 같은 cycle의 도착을 판단한다")
+    void rejects_old_detail_retry_and_recovers_with_real_evaluator() {
+        SeoulBusVehicleLocationClient rosterClient = mock(SeoulBusVehicleLocationClient.class);
+        SeoulBusVehicleDetailClient detailClient = mock(SeoulBusVehicleDetailClient.class);
+        BusAlarmEvaluator realEvaluator = new BusAlarmEvaluator(mock(BusRouteTraversalService.class));
+        BusAlarmMonitoringScheduler monitored = new BusAlarmMonitoringScheduler(
+                pollingService, realEvaluator, lifecycleService, tagoClient, rosterClient, detailClient,
+                new TagoTransitObservationMapper(clock), new SeoulBusTransitObservationMapper(clock), clock,
+                Duration.ZERO, mock(com.stopbell.boarding.service.BoardingSessionPollingService.class));
+        Alarm alarm = seoulActiveAlarm(1L, "route-1");
+        when(alarm.getBusAlarmTarget().getExternalStopId()).thenReturn("target");
+        when(alarm.getBusAlarmTarget().getTargetStopOrder()).thenReturn(20);
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(seoulGroup(alarm, "route-1")));
+        when(rosterClient.fetchVehicleLocations(any())).thenReturn(seoulRoster("vehicle"));
+        SeoulBusVehicleDetailResponse before = new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", "OK"),
+                new SeoulBusVehicleDetailResponse.Body(List.of(new SeoulBusVehicleDetailItem(
+                        "vehicle", null, "predecessor", 10, 0, "20260923085940", null, null))));
+        SeoulBusVehicleDetailResponse olderArrival = new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", "OK"),
+                new SeoulBusVehicleDetailResponse.Body(List.of(new SeoulBusVehicleDetailItem(
+                        "vehicle", null, "target", 20, 1, "20260923085935", null, null))));
+        SeoulBusVehicleDetailResponse validArrival = new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", "OK"),
+                new SeoulBusVehicleDetailResponse.Body(List.of(new SeoulBusVehicleDetailItem(
+                        "vehicle", null, "target", 20, 1, "20260923085950", null, null))));
+        when(detailClient.fetchVehicleDetail("vehicle")).thenReturn(before)
+                .thenThrow(providerFailure(TransitProviderClientFailureKind.TRANSPORT))
+                .thenReturn(olderArrival, validArrival);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any(Instant.class))).thenAnswer(applied());
+
+        monitored.pollMonitoringAlarms();
+        monitored.pollMonitoringAlarms();
+        monitored.pollMonitoringAlarms();
+
+        ArgumentCaptor<BusAlarmEvaluationResult> results = ArgumentCaptor.forClass(BusAlarmEvaluationResult.class);
+        verify(lifecycleService, times(4)).applyIfCurrent(any(), eq(AlarmStatus.ACTIVE), results.capture(), any());
+        List<BusAlarmEvaluationResult> appliedResults = results.getAllValues();
+        VehicleTrackingState original = appliedResults.getFirst().nextState().trackedVehicles().get("vehicle");
+        assertThat(appliedResults.subList(0, 3)).allSatisfy(result -> {
+            assertThat(result.eventCandidates()).isEmpty();
+            assertThat(result.nextState().trackedVehicles().get("vehicle")).isEqualTo(original);
+        });
+        assertThat(appliedResults.getLast().eventCandidates()).singleElement().satisfies(event -> {
+            assertThat(event.type()).isEqualTo(TransitEventType.ARRIVED);
+            assertThat(event.trackingCycleId()).isEqualTo(original.trackingCycleId());
+            assertThat(event.providerDataTime()).isEqualTo(clock.instant().minusSeconds(10));
+        });
+        verify(detailClient, times(4)).fetchVehicleDetail("vehicle");
+    }
+
     private BusAlarmMonitoringScheduler seoulScheduler(SeoulBusVehicleLocationClient rosterClient,
             SeoulBusVehicleDetailClient detailClient) {
         return new BusAlarmMonitoringScheduler(pollingService, evaluator, lifecycleService, tagoClient,

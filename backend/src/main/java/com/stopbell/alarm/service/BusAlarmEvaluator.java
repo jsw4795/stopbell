@@ -195,7 +195,7 @@ public class BusAlarmEvaluator {
             return;
         }
 
-        if (!isMonotonic(tracking.lastObservation(), observation) || hasDirectionConflict(tracking.lastObservation(), observation)) {
+        if (!isMonotonic(tracking, observation) || hasDirectionConflict(tracking.lastObservation(), observation)) {
             next.trackedVehicles().put(vehicleId, tracking.observe(tracking.lastObservation(), now));
             return;
         }
@@ -213,7 +213,7 @@ public class BusAlarmEvaluator {
                 if (!tracking.hasEmitted(TransitEventType.PASSED)
                         && !tracking.hasEmitted(TransitEventType.ARRIVED)
                         && tracking.hasObservedBeforeTarget()
-                        && hasNewProgressEvidence(tracking.lastObservation(), observation)) {
+                        && hasNewProgressEvidence(tracking, observation)) {
                     OptionalInt stopsPastTarget = routeTraversalService.stopsPastTarget(target, observation);
                     emit(TransitEventType.PASSED, tracking, observation,
                             stopsPastTarget.isPresent() ? stopsPastTarget.getAsInt() : null, events);
@@ -266,7 +266,7 @@ public class BusAlarmEvaluator {
         }
 
         VehicleTrackingState tracking = next.followUpVehicles().get(followUpVehicleId);
-        if (tracking != null && (!isMonotonic(tracking.lastObservation(), observation)
+        if (tracking != null && (!isMonotonic(tracking, observation)
                 || hasDirectionConflict(tracking.lastObservation(), observation))) {
             next.followUpVehicles().put(followUpVehicleId, tracking.observe(tracking.lastObservation(), now));
             return new BusAlarmEvaluationResult(List.of(), next.freeze(), false);
@@ -275,7 +275,13 @@ public class BusAlarmEvaluator {
             tracking = VehicleTrackingState.restoreFollowUp(alarm.getFollowUpTrackingCycleId(), observation, now);
             next.followUpVehicles().put(followUpVehicleId, tracking);
         }
-        if (hasKnownStopConflict(target, observation) || !reachedSuccessor(target, observation)) {
+        if (hasKnownStopConflict(target, observation)) {
+            if (tracking != null) {
+                next.followUpVehicles().put(followUpVehicleId, tracking.observe(tracking.lastObservation(), now));
+            }
+            return new BusAlarmEvaluationResult(List.of(), next.freeze(), false);
+        }
+        if (!reachedSuccessor(target, observation)) {
             if (tracking != null) {
                 next.followUpVehicles().put(followUpVehicleId, tracking.observe(observation, now));
             }
@@ -329,7 +335,7 @@ public class BusAlarmEvaluator {
         }
         return tracking != null
                 && positionOf(target, tracking.lastObservation()) == PositionRelation.BEFORE_TARGET
-                && hasNewProgressEvidence(tracking.lastObservation(), observation);
+                && hasNewProgressEvidence(tracking, observation);
     }
 
     private static boolean reachedSuccessor(BusAlarmTarget target, TransitObservation observation) {
@@ -341,18 +347,24 @@ public class BusAlarmEvaluator {
                 && observation.currentStopOrder() > target.getSuccessorStopOrder();
     }
 
-    private static boolean isMonotonic(TransitObservation previous, TransitObservation current) {
-        return previous.currentStopOrder() != null
-                && current.currentStopOrder() != null
-                && current.currentStopOrder() >= previous.currentStopOrder();
-    }
-
-    private static boolean hasNewProgressEvidence(TransitObservation previous, TransitObservation current) {
-        if (!isMonotonic(previous, current) || previous.currentStopOrder().equals(current.currentStopOrder())) {
+    private static boolean isMonotonic(VehicleTrackingState tracking, TransitObservation current) {
+        TransitObservation previous = tracking.lastObservation();
+        if (previous.currentStopOrder() == null || current.currentStopOrder() == null
+                || current.currentStopOrder() < previous.currentStopOrder()
+                || current.observedAt().isBefore(previous.observedAt())) {
             return false;
         }
-        return previous.providerDataTime() == null || current.providerDataTime() == null
-                || !previous.providerDataTime().equals(current.providerDataTime());
+        Instant previousProviderTime = tracking.lastKnownProviderDataTime();
+        if (previousProviderTime != null && current.providerDataTime() != null) {
+            return current.providerDataTime().isAfter(previousProviderTime);
+        }
+        // Receive time orders responses when source time is unavailable; it does not prove upstream freshness.
+        return current.observedAt().isAfter(previous.observedAt());
+    }
+
+    private static boolean hasNewProgressEvidence(VehicleTrackingState tracking, TransitObservation current) {
+        return isMonotonic(tracking, current)
+                && current.currentStopOrder() > tracking.lastObservation().currentStopOrder();
     }
 
     private static boolean hasDirectionConflict(TransitObservation previous, TransitObservation current) {
