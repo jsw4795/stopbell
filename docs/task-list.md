@@ -388,6 +388,37 @@ Future Consideration:
 
 각 항목의 처리 기록에는 재현 근거, 수정 또는 미수정 판단, 변경 범위, 방지 테스트와 결과, 남은 실측·실기기 검증 및 담당 Task를 남긴다. 미재현 추론·위험을 확인된 운영 장애로 승격하지 않는다. API·Domain·Authentication·DB 정책이나 공식 문서 간 설계 판단이 필요한 경우 개발자 결정 후 반영한다.
 
+AUD-07 분석 (2026-10-30, 제품 수정 보류·설계 판단 필요): 서울 후보 조회의 순차 detail 지연과 Flutter 15초 예산 불일치를 실제 `BoardingCandidateService`·Mock Client·제어 가능한 Clock으로 재현했다. 운영 지연의 발생 빈도/실제 차량 수 분포를 측정한 것은 아니다. **Case A의 조건부 성능 위험은 확인됐으며 보호 장치가 충분한 Case B로 종결하지 않는다.** deadline 중단 시 미조회 차량의 응답 정책이 없어 제품 구현을 임의 변경하지 않았다.
+
+- 실제 코드 경로: Backend `transit/controller/BoardingCandidateController.java` → `service/BoardingCandidateMetadataService.java` → `service/BoardingCandidateService.java`의 `find()`/`fetchRoster()`/`fetchDetail()` → `client/SeoulBusVehicleLocationClient.java`·`SeoulBusVehicleDetailClient.java` → `SeoulBusResponseReader.java` → `mapper/BoardingCandidateMapper.java` → `dto/BoardingCandidatesResponse.java`·`service/BoardingCandidateReferenceStore.java`. Flutter는 `features/boarding/boarding_candidate_client.dart` → `boarding_stop_screen.dart`/`boarding_reconfirmation_screen.dart` → `boarding_candidates_view.dart`, 생성 전 freshness는 `boarding_session_controller.dart`다. 파일은 각각 `backend/src/main/java/com/stopbell/`, `app/lib/` 아래에 있다.
+- 호출 구조: `GET /api/v1/bus-routes/{routeId}/boarding-candidates`는 서울 roster `getBusPosByRtidList`(`/api/rest/buspos/getBusPosByRtid`, `busRouteId`) **1회**, 승차 occurrence가 있으면 식별·시각 검증을 통과한 고유 차량마다 detail `getBusPosByVehIdItem`(`/api/rest/buspos/getBusPosByVehId`, `vehId`) **최대 1회씩 순차 호출**한다. 대상은 전체 번호→ID 순서이며 결과는 기존 occurrence 간격 그룹/절댓값·번호 순서다. 승차 occurrence 없음·정상 empty는 detail 0회다. 동일 item 중복은 병합하고 누락/상충 ID·번호와 stale 차량은 호출하지 않는다. 차량 수 고정 상한·공유 cache·후보 조회 자체 retry/재호출/지연은 없다. Monitoring의 5초 후 1회 retry와 `VehiclePollingCycle` 공유는 이 API에 적용되지 않는다.
+- 시간 예산: 기본 Provider connect **2초**, response **5초**, metadata HTTP **30초**(이 후보 경로에서는 미사용), Backend 전체 deadline 없음, Flutter 인증 Refresh/최대 1회 Replay를 포함한 HTTP Future **15초**다. Spring Web 7.0.9의 실제 cached class에서 response timer가 응답/body를 감싸는 경로를 확인했으며 connect를 별도 2초로 중복 가산하지 않았다. 계산은 `로컬 처리 + roster + Σ detail`이다. DB·XML/JSON decoding·후보 mapping/정렬·reference 발급·직렬화 시간은 별도이며 실측/상한은 없다. 상세 runtime과 freshness 조건부 상한은 [Architecture](architecture.md#서울-후보-조회의-응답-예산-확인-task-816--aud-07)가 소유한다.
+
+| 분석 차량 수 | 정상 Mock: roster 1초 + detail 각 1초, detail 수 / 총 가상 시간 | timeout Mock: roster 5초 + detail 각 5초 실패, detail 수 / 총 가상 시간 |
+| --- | --- | --- |
+| 1 | 1회 / 2초 | 1회 / 10초 |
+| 5 | 5회 / 6초 | 5회 / 30초 |
+| 10 | 10회 / 11초 | 10회 / 55초 |
+| 20 | 20회 / 21초 | 13회 / 70초 |
+| 40 | 40회 / 41초 | 13회 / 70초 |
+
+- 표의 차량 수는 분석 입력이며 실제 분포가 아니다. 전체 HTTP 수는 각 detail 수에 roster 1회를 더한다. 각 Mock의 roster 제공시각은 roster 수신 시각, 정상 detail 제공시각은 해당 수신 시각으로 만들어 지연과 데이터 자체의 노후화를 구분했다. timeout은 가상 시계를 5초 전진한 뒤 `HttpTimeoutException` 원인의 `TRANSPORT` 실패를 전달하며 실제 TCP/HTTP timer를 기다리는 테스트는 아니다. 60초 freshness는 경계에서 여전히 유효해 timeout Mock이 roster 후 0·5·…·60초에 총 13개 detail을 시작하고 65초에 끝낸다. 뒤 차량은 stale로 생략되고 최종 평가에서는 모두 HELD다. 단순 `5 × (N+1)` 계산의 20대 105초/40대 205초를 실제 실행 결과로 보고하지 않는다. 반대로 빠른 80대 Mock(roster 1초·detail 10ms)은 **80회 / 1.8초**, 승차 occurrence 없는 80대는 **0회 / 1초**로 고정 호출 수 상한이 없음을 확인했다.
+- 추가 재현: 5대·roster 1초·평소 detail 100ms에서 중간 1대만 4.9초이면 **5회 / 6.3초**이고 뒤 차량의 시작도 지연된다(모두 정상이라면 계산상 1.5초). 중간 1대만 5초 timeout이면 **5회 / 6.4초**, 정상 4대 보존·실패 1대 HELD·PARTIAL이다. 4.9초 지연 1대·5초 timeout 1대·100ms protocol 실패 1대 혼합은 **5회 / 11.2초**, 정상 3대 보존·PARTIAL이다. 20대·각 성공 4.9초·13번째만 5초 timeout이면 **13회 / 64.8초**로 앞서 성공한 12대도 최종 roster freshness 만료로 참조를 발급하지 않는다. 20/40대 정상 Mock은 15초 이후에도 후속 detail을 시작한다. 이는 Client timeout 이후 서버가 계속 작업할 수 있는 코드 근거이며 실제 연결 단절·서버 취소 실험은 아니다.
+
+| 검토한 개선 | 장점 | 현재 판단/Trade-off |
+| --- | --- | --- |
+| 전체 deadline | 차량 수·느린 응답에 대한 응답 예산 통제 | Flutter 15초보다 작은 서버 예산·진행 중 호출의 잔여 timeout·미조회 차량 상태/사유 결정 필요. 호출 사이 시간 검사만으로는 진행 중 detail을 제한하지 못함 |
+| detail 대상 수 제한 | 요청당 비용 상한 | 전체 유효 고유 차량 detail 조회 계약 변경. 조용히 자르면 잘못된 완전 목록/유일성 표시 위험 |
+| 중복 제거 | 불필요한 호출 절감 | 동일 item 병합과 ID/번호 충돌 제외가 이미 있어 추가 결함 없음 |
+| 필요한 차량만 조회 | 승차 미선택 시 비용 최소화 | 이미 detail 0회. 승차 선택 시 간격을 미리 알 수 없어 coarse 위치로 선별하거나 임의 후보를 생략할 수 없음 |
+| 제한된 병렬화 | 순차 누적/느린 한 차량의 후속 시작 지연 완화 | 큰 N의 15초 보장은 별도 deadline 필요. 요청별 제한만으로는 다중 요청의 Provider 전체 동시성을 통제하지 못함. 공식 quota/허용 burst와 프로세스 전체 한도 근거 미확인 |
+| 응답 공유·cache | 반복 요청 비용 절감 | 현재 후보 API의 무cache 계약 변경. 원래 관측 시각·독립 reference·최종 최신 재검증을 보존하는 공유 범위/수명 결정 필요 |
+
+- 권장·보류 사유: 먼저 **15초 미만의 서버 전체 예산과 deadline에서 미조회/진행 중 차량을 어떻게 보류하며 정상 성공을 보존할지** 결정하고, 그 예산에 맞춘 제한된 동시성을 Provider quota·프로세스 전체 한도와 함께 검토한다. 단순 503 종료는 성공 후보까지 잃고, 미조회 차량을 DETAIL_EMPTY/DETAIL_NOT_REQUESTED/TRANSPORT 실패로 바꾸면 실제 원인을 왜곡한다. 기존 API에는 요청한 detail 실패/empty의 PARTIAL은 있지만 deadline 때문에 요청하지 않은 차량의 사유는 없다. 새 응답 정책이나 공식 호출 제한을 임의 확정하지 않는 요청에 따라 Executor·budget·reason code·Flutter 변경을 추가하지 않았다. 개선 전후 제품 호출 수/소요는 **동일**하며 개선 완료로 표시하지 않는다.
+- 정확성 보호: 신규 16개 재현은 유효 후보의 reference가 정확한 User/Route/목적·승차 occurrence 및 roster/detail ID·전체 번호에 연결되는지, selectionKey·진행 occurrence/gap·Provider 시각이 보존되는지 검증한다. 실패는 HELD·참조/선택 키 없음·PARTIAL, stale는 원래 시각을 유지하며 HELD다. 기존 31개 Service·9개 Reference Store 테스트의 정상 EMPTY·detail EMPTY와 실패 분류·중복/상호 충돌·정렬·freshness도 통과했다. 제품 Mapper·AUD-09 차량별 실패 격리·AUD-02 시각 단조성·AUD-05/06 HTTP 정책·세션 생성/재확인의 최신 선택 차량 검증은 변경하지 않았다. 세션 인접 테스트는 제품 코드에 직접 영향이 없어 추가 실행하지 않았다.
+- 선택 검증: Java/Gradle JVM **21.0.12.1**, Wrapper **8.14.3** 확인. `./gradlew test --offline`에 개별 `--tests`를 지정해 `BoardingCandidateLatencyTest` **16개(신규)**, `BoardingCandidateServiceTest` **31개**, `BoardingCandidateReferenceStoreTest` **9개**, `SeoulBusVehicleLocationClientTest` **11개**, `SeoulBusVehicleDetailClientTest` **6개**, `TransitClientPropertiesConfigurationTest` **3개**, `SeoulBusTransitObservationMapperTest` **19개**, 합계 **95개 모두 성공, 실패/오류/skip 0개**다. `git diff --check` 통과. 제품 변경 없는 분석/재현이므로 수정 전후 테스트 재실행은 하지 않았다.
+- 변경·미검증 범위: 신규 `backend/src/test/java/com/stopbell/transit/service/BoardingCandidateLatencyTest.java`와 `docs/architecture.md`·이 기록만 변경했다. 실 Provider의 지연/차량 수/생성시각 분포, XML/JSON mapping CPU·메모리, 동시 사용자 부하·quota/Rate Limit, 네트워크 timeout/body 종료·Flutter 15초 이후 실제 서버 작업 취소, iPhone 조회/재시도 UI는 미검증이다. Backend/Flutter 전체 suite·DB 통합 테스트·실제 서울/TAGO/FCM 호출·개발 MySQL 변경·서버/터널 실행은 하지 않았다. Dependency·설정·Schema·Migration·Credential·devlog와 기존 AUD 기록/다른 Task 상태를 보존한다. main 및 TASK-816 `[ ]` 유지, Git add/commit/push·reset/stash/clean/checkout·새 branch 생성 없이 AUD-07 보고 후 중단한다.
+
 AUD-06 처리 (2026-10-30): `BackendAuthClient._post()`에 Timeout이 없어 Login·Refresh·Logout의 HTTP Future가 끝나지 않고, `AuthSession._logout()`도 `_refreshInFlight`를 무기한 기다릴 수 있었다. 제품 수정 전 MockClient·Completer와 실제 BackendAuthClient/AuthSession을 연결한 **4개 재현이 모두 실패**했다. 가상 시계로 15초를 진행해도 세 인증 요청과 공유 Refresh 대기 중 Logout이 미완료임을 확인했다. 실제 Backend/네트워크 장기 정지 실측은 아니다.
 
 - 수정 범위·제한 시간: 제품 코드는 `backend_auth_client.dart`만 변경해 공통 `_post()`의 HTTP Future에 Login·Refresh·Logout 각각 기본 **15초**를 적용하고 생성자 `timeout` 주입을 허용했다. Alarm과 같은 지연 허용 수준을 선택했으며 Device API 8초·beforeLogout hook 10초와 별개다. Hook → Refresh HTTP 잔여 시간 → Logout HTTP 시간이 누적될 수 있고 Storage·일반 hook·Google SDK 대기는 보장 밖이다. 전체 Logout 시간 상한과 물리적 연결 취소를 보장하지 않는 실행 계약은 [Architecture](architecture.md#flutter-인증-http-timeout-task-816--aud-06)가 소유한다.

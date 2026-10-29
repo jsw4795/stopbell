@@ -227,6 +227,18 @@ TASK-503은 Spring `RestClient`와 JDK HTTP client로 TAGO `getRouteAcctoBusLcLi
 
 후보 조회는 기존 Alarm lifecycle·Evaluation·Notification 결정을 변경하지 않는다. 정상 응답의 최신 가용 데이터 수용과 물리 위치 시각 보장은 구분하며, 원본 시각 부재만으로 TAGO 추천을 차단하지 않는다. 기존 Polling/Freshness·timeout/retry 설정을 유지한다. 세션·후보 reference의 경계는 아래 TASK-903 계약을 따르며 후보 API 구현을 세션/Flutter 구현 완료로 취급하지 않는다.
 
+#### 서울 후보 조회의 응답 예산 확인 (TASK-816 / AUD-07)
+
+2026-10-30 코드·Mock 분석 기준으로 `BoardingCandidateService.find()`는 metadata transaction 종료 → roster 1회 → 중복 제거·전체 번호/ID 정렬·식별 충돌 검사 → 선택 승차 occurrence가 있으면 유효 차량별 detail 순차 조회 → detail 상호 충돌·최종 freshness 검사 → reference 발급·후보 정렬 순서다. 같은 item은 합치고 누락·충돌·오래된 차량은 detail 대상에서 제외한다. 고정 차량 수/요청 수 상한, 조회 전체 deadline, 후보 조회용 retry/delay·polling 응답 공유·cache는 없다. reference 저장소의 10,000개 상한은 Provider 호출 제한이 아니다. 승차 occurrence를 생략하면 차량 수와 무관하게 roster 1회만 호출한다. 세션 생성·재확인은 별도의 최신 roster와 선택 차량 detail을 검증하므로 후보 조회 결과로 이를 대체하지 않는다.
+
+기본 connect 2초·response 5초는 각 HTTP 호출의 제한이다. 사용 중인 Spring Web 7.0.9의 `JdkClientHttpRequest`는 `setReadTimeout` 값을 `sendAsync()` 뒤 시작하는 timeout handler에 전달해 응답 대기와 body stream을 감싸므로 분석에서 connect 2초를 response 5초에 다시 더하지 않는다. DTO XML/JSON decoding·후보 mapping·metadata DB 조회·정렬·reference 발급·서버 응답 직렬화에는 이 HTTP timer가 적용되지 않는다. Backend 전체 소요는 이 로컬 처리 시간 + roster 시간 + 순차 detail 시간의 합이며 엄격한 전체 상한은 없다.
+
+detail 직전에도 동일 roster의 원래 시각에 60초 freshness를 검사하므로 지연이 계속되면 후속 호출은 생략된다. 단조롭게 진행하는 Clock·로컬 처리 0초·최신 roster·각 HTTP 최대 5초 모델에서 detail 대기는 최대 `min(5 × 차량 수, 65)`초, roster까지 최대 `5 + min(5 × 차량 수, 65)`초다. 정확히 60초 경계에서 시작한 마지막 호출이 추가 5초를 사용할 수 있다. 이는 freshness에 따른 조건부 대기 계산이며 전체 deadline/실환경 SLA가 아니다. 실제 Provider 시각이 이미 오래되면 더 일찍 생략되고 최종 평가에서는 먼저 성공한 차량도 만료될 수 있다. 원래 관측 시각을 갱신하거나 stale 후보를 선택 가능하게 만들지 않는다.
+
+Flutter `BoardingCandidateClient.find()`는 최초 HTTP·공유 Refresh 대기·최대 1회 인증 Replay에 합쳐 15초를 적용하며 JSON parsing은 그 뒤다. Timeout 뒤 요청 active를 닫아 늦은 401의 Refresh/Replay와 화면 반영을 막지만 서버 취소 신호는 보내지 않는다. 동기 Backend 후보 조회에도 Client 연결 종료를 검사하는 경계가 없어 15초 뒤 후속 detail을 계속 호출할 수 있다. 화면은 timeout·network·503을 구분하고 수동 재조회를 제공한다. 목록 선택은 세션 생성이 아니며 생성 전 원래 관측/제공시각의 60초 freshness 및 Backend 최종 재검증을 유지한다.
+
+AUD-07은 실제 운영 장애가 아닌 **Mock으로 재현한 응답 예산 불일치**다. 전체 고유 차량 detail 조회 계약과 부분 결과의 의미는 [API](api.md#후보-조회)를 유지한다. deadline에서 미조회/진행 중인 차량의 상태·사유와 성공 결과 보존 방식, Provider 및 프로세스 전체 호출 제한을 결정하기 전에는 임의 호출 절단·부분 성공·병렬화·cache를 추가하지 않는다. 개선 대안·재현 수치·선택 테스트·실환경 미검증 항목은 [TASK-816 AUD-07 기록](task-list.md#task-816-감사-항목과-확인-수준)에 둔다.
+
 Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync에서 받아 StopBell DB의 현재 상태로 보관한다. 경기 GBIS route/routeStation bulk는 전체 TAGO traversal이 검증된 Route의 destination 표시값만 보강하며 Provider identity와 realtime routing은 TAGO를 유지한다. 사용자 Route/Stop 조회와 Alarm 생성은 DB metadata를 사용하고, Alarm 생성 시 필요한 값은 `BusAlarmTarget` snapshot으로 복사한다. Alarm target은 metadata Entity를 FK로 장기 참조하지 않으므로 subsequent sync가 기존 Alarm을 변경하지 않는다.
 
 TASK-513의 source adapter는 서울의 노선마스터·정류장마스터·노선-정류장마스터 CSV와 경기의 TAGO city별 Route·Route Stop pagination을 검증해 normalized metadata snapshot으로 만든 뒤 기존 reconciliation service에 전달한다. 실제 CSV header, encoding, GPS column은 fixture 또는 source 파일을 확인한 구현 시점에 확정한다. source 일부 fetch 실패, parser failure, pagination 미완료, required source 누락, provider request 일부 실패와 검증되지 않은 empty result는 complete provider snapshot이 아니므로 absence/deletion으로 해석하지 않으며 provider-level cleanup을 실행하지 않는다. Typed boundary, completeness token/result, destructive method visibility 제한 또는 동등한 구조적 보호로 검증된 complete snapshot만 cleanup 경로에 들어가게 하며 구체 type 이름은 TASK-513에서 정한다.
