@@ -9,6 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -29,6 +31,10 @@ import com.stopbell.boarding.entity.BoardingStateReason;
 import com.stopbell.boarding.repository.BoardingSessionRepository;
 import com.stopbell.boarding.service.BoardingSessionService;
 import com.stopbell.boarding.service.BoardingSessionStartValidator;
+import com.stopbell.boarding.domain.BoardingTrackingSnapshot;
+import com.stopbell.boarding.service.BoardingTrackingStore;
+import com.stopbell.notification.entity.*;
+import com.stopbell.notification.repository.*;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.client.*;
@@ -75,7 +81,7 @@ import tools.jackson.databind.json.JsonMapper;
 class BoardingSessionApiIntegrationTest {
     @Container @ServiceConnection
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
-    @Autowired private com.stopbell.boarding.service.BoardingNotificationService notifications;
+    @MockitoSpyBean private com.stopbell.boarding.service.BoardingNotificationService notifications;
     @Autowired private MockMvc mvc;
     @Autowired private JwtTokenService jwt;
     @Autowired private UserRepository users;
@@ -91,6 +97,11 @@ class BoardingSessionApiIntegrationTest {
     @Autowired private com.stopbell.boarding.service.BoardingSessionProperties properties;
     @Autowired private PlatformTransactionManager manager;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private DeviceRepository devices;
+    @Autowired private BoardingTrackingStore trackingStore;
+    @Autowired private jakarta.persistence.EntityManager entityManager;
+    @MockitoSpyBean private NotificationEventRepository events;
+    @MockitoSpyBean private NotificationDeliveryRepository deliveries;
     @MockitoSpyBean private BoardingSessionStartValidator validator;
     @MockitoBean(name = "transitMetadataClock") private Clock clock;
     @MockitoBean private SeoulBusVehicleLocationClient seoul;
@@ -108,6 +119,7 @@ class BoardingSessionApiIntegrationTest {
     void set_up() {
         jdbc.update("delete from notification_deliveries");
         jdbc.update("delete from notification_events");
+        devices.deleteAll();
         sessions.deleteAll();
         occurrences.deleteAll();
         routes.deleteAll();
@@ -833,6 +845,435 @@ class BoardingSessionApiIntegrationTest {
     void reconfirm_invalid_body(String body) throws Exception {
         mvc.perform(auth(post("/api/v1/boarding-sessions/1/reconfirm").contentType("application/json").content(body), owner))
                 .andExpect(status().isBadRequest());
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"2,1,1", "2,2,1", "1,1,0", "1,2,1", "2,0,0"})
+    @DisplayName("AUD-08 실제 Validator 재확인은 현재 offset 구간에서만 준비 Event와 eligible Device별 Delivery를 원자 생성한다")
+    void aud08_reconfirmation_window(int offset, int index, int count) {
+        long id = aud08Suspended(offset);
+        device(owner);
+        device(owner);
+        device(other);
+        liveObservation(index);
+        var response = service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, candidateRef(), null));
+        assertThat(response.status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(response.revision()).isEqualTo(2);
+        assertThat(response.evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
+        assertThat(response.remainingOccurrenceGap()).isEqualTo(3 - index);
+        assertThat(events.count()).isEqualTo(count);
+        assertThat(deliveries.count()).isEqualTo(count * 2L);
+        if (count == 1) {
+            var event = events.findAll().getFirst();
+            assertThat(event.getBoardingEventType()).isEqualTo(BoardingNotificationEventType.PREPARE_ALIGHT);
+            assertThat(event.getObservedAt()).isEqualTo(LocalDateTime.ofInstant(time.get(), ZoneOffset.UTC));
+        }
+        // Same source data after reconfirmation is not new progress and must not duplicate the Event.
+        polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+        assertThat(events.count()).isEqualTo(count);
+        time.set(time.get().plusSeconds(5));
+        liveObservation(2);
+        polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+        assertThat(events.count()).isEqualTo(1);
+        assertThat(deliveries.count()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("AUD-08 같은 위치·시각도 재확인한 유효 baseline이면 새 물리적 진행 없이 원래 TTL로 즉시 판단한다")
+    void aud08_revalidated_baseline_without_new_progress() {
+        long id = aud08Suspended(2);
+        var start = aud08Start(1);
+        new TransactionTemplate(manager).executeWithoutResult(status -> {
+            var session = sessions.findForUpdate(id).orElseThrow();
+            session.reconfirm(1, start.checkpoint(), UTC_NOW.plusSeconds(20));
+            session.suspend(2, BoardingStateReason.VEHICLE_MISSING, UTC_NOW.plusSeconds(20));
+        });
+        time.set(NOW.plusSeconds(25));
+        doReturn(start).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        var response = service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(3, "ref", null));
+        assertThat(response.evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
+        var event = events.findAll().getFirst();
+        assertThat(event.getObservedAt()).isEqualTo(UTC_NOW.plusSeconds(20));
+        assertThat(event.getExpiresAt()).isEqualTo(UTC_NOW.plusSeconds(50));
+        assertThat(event.getProviderDataTime()).isEqualTo(start.checkpoint().getProviderDataTime());
+        assertThat(events.count()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"identity", "occurrence", "stale", "provider-regression", "same-provider", "same-received", "run-end"})
+    @DisplayName("AUD-08 실제 후보 재검증의 식별·occurrence·freshness·제공/수신시각·운행 모순은 재확인 알림 근거가 되지 않는다")
+    void aud08_real_validator_rejects_unsafe_evidence(String scenario) {
+        long id = aud08Suspended(2);
+        liveObservation(1);
+        String originalDataTime = liveDataTime();
+        String ref = candidateRef();
+        if (!scenario.equals("same-received")) {
+            time.set(time.get().plusSeconds(scenario.equals("stale") ? 61 : 5));
+        }
+        liveObservation(2);
+        if (scenario.equals("run-end")) {
+            when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                    "vehicle-id", NUMBER, 999, "coarse", 1, liveDataTime(), null, null, null, "0", null)));
+        } else {
+            String dataTime = scenario.equals("provider-regression") ? "20261020120019"
+                    : scenario.equals("same-provider") || scenario.equals("stale") ? originalDataTime : liveDataTime();
+            when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(new SeoulBusVehicleDetailResponse(
+                    new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
+                            new SeoulBusVehicleDetailItem("vehicle-id", scenario.equals("identity") ? "다른번호" : NUMBER,
+                                    scenario.equals("occurrence") ? "unknown-stop" : "s3", 30, 0, dataTime, null, null)))));
+        }
+        assertThatThrownBy(() -> service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, ref, null)))
+                .isInstanceOf(ApiException.class);
+        assertThat(sessions.findById(id).orElseThrow().getRevision()).isEqualTo(1);
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {3, 4})
+    @DisplayName("AUD-08 목적지 도달·통과 위치는 기존 미검증 재개 정책을 유지하며 준비 알림을 소급 생성하지 않는다")
+    void aud08_destination_is_not_late_preparation(int index) {
+        long id = aud08Suspended(2);
+        liveObservation(1);
+        String ref = candidateRef();
+        time.set(time.get().plusSeconds(5));
+        liveObservation(index);
+        var response = service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, ref, null));
+        assertThat(response.status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(response.evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING);
+        assertThat(events.count()).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"old-received", "old-provider", "same-received-conflict", "same-provider-conflict",
+            "regressed-index", "direction-conflict", "unverified", "stale", "future"})
+    @DisplayName("AUD-08 과거 checkpoint와 충돌하거나 미검증·오래된 재확인 근거로 즉시 알림을 만들지 않는다")
+    void aud08_conflicting_evidence_does_not_notify(String scenario) {
+        long id = aud08Suspended(2);
+        var start = aud08Start(1);
+        var at = LocalDateTime.ofInstant(time.get(), ZoneOffset.UTC);
+        var received = scenario.equals("old-received") ? UTC_NOW.minusSeconds(1)
+                : scenario.equals("same-received-conflict") ? UTC_NOW
+                : scenario.equals("stale") ? at.minusSeconds(61)
+                : scenario.equals("future") ? at.plusSeconds(1) : at;
+        var provider = scenario.equals("old-provider") ? UTC_NOW.minusSeconds(2)
+                : scenario.equals("same-provider-conflict") ? UTC_NOW.minusSeconds(1)
+                : received.minusSeconds(1);
+        if (scenario.equals("regressed-index")) {
+            var checkpoint = aud08Start(2).checkpoint();
+            new TransactionTemplate(manager).executeWithoutResult(status -> {
+                var session = sessions.findForUpdate(id).orElseThrow();
+                session.reconfirm(1, checkpoint, at);
+                session.suspend(2, BoardingStateReason.PROGRESS_REGRESSION, at);
+            });
+            start = aud08Start(1);
+        }
+        var cp = new BoardingCheckpoint(start.checkpoint().getStopExternalId(), start.checkpoint().getStopOrder(),
+                start.checkpoint().getIndex(), scenario.equals("unverified") ? BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                        : BoardingCheckpoint.Evidence.ID_ORDER,
+                scenario.equals("direction-conflict") ? "conflicting-direction" : null, received, provider);
+        var changed = new VerifiedBoardingStart(start.metadata(), start.traversal(), cp, start.referenceExpiresAt(),
+                start.vehicleTrackingId(), NUMBER, start.routeNumber(), start.targetName());
+        doReturn(changed).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        long revision = sessions.findById(id).orElseThrow().getRevision();
+        var request = new ReconfirmBoardingSessionRequest(revision, "ref", null);
+        if (scenario.equals("stale") || scenario.equals("future")) {
+            assertThatThrownBy(() -> service.reconfirm(owner.getId(), id, request)).isInstanceOf(ApiException.class);
+        } else {
+            service.reconfirm(owner.getId(), id, request);
+        }
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("AUD-08 최초 INSERT 전 준비 TTL·Session 수명이 끝나면 Event 기회를 소비하지 않는다")
+    void aud08_expiry_before_event_insert(boolean sessionExpiry) {
+        long id = aud08Suspended(2);
+        var start = aud08Start(1);
+        if (sessionExpiry) {
+            jdbc.update("update boarding_sessions set expires_at=? where id=?", UTC_NOW.plusSeconds(21), id);
+        }
+        doReturn(start).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        // Advance after checkpoint/revision flush and before the first Event INSERT.
+        com.stopbell.boarding.service.BoardingNotificationService targetNotifications =
+                org.springframework.test.util.AopTestUtils.getUltimateTargetObject(notifications);
+        doAnswer(invocation -> {
+            time.set(sessionExpiry ? NOW.plusSeconds(21) : NOW.plusSeconds(50));
+            return invocation.callRealMethod();
+        }).when(targetNotifications)
+                .recordReconfirmedPreparation(any(BoardingSession.class), any(BoardingTrackingSnapshot.class));
+        service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, "ref", null));
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+        if (!sessionExpiry) {
+            liveObservation(2);
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            assertThat(events.count()).isEqualTo(1);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("AUD-08 Event 저장 뒤 FK 오류·두 번째 Delivery UNIQUE 오류는 checkpoint·revision·전체 fan-out을 rollback한다")
+    void aud08_atomic_failure(boolean eventFailure) {
+        long id = aud08Suspended(2);
+        device(owner);
+        device(owner);
+        doReturn(aud08Start(1)).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        if (eventFailure) {
+            doAnswer(invocation -> {
+                NotificationEvent event = invocation.getArgument(0);
+                entityManager.persist(event);
+                entityManager.flush();
+                jdbc.update("update notification_events set user_id=-1 where id=?", event.getId());
+                return event;
+            }).when(events).saveAndFlush(any(NotificationEvent.class));
+        } else {
+            var firstDelivery = new AtomicReference<NotificationDelivery>();
+            doAnswer(invocation -> {
+                NotificationDelivery delivery = invocation.getArgument(0);
+                if (firstDelivery.get() == null) {
+                    firstDelivery.set(delivery);
+                    entityManager.persist(delivery);
+                    entityManager.flush();
+                    return delivery;
+                }
+                var duplicate = firstDelivery.get();
+                return deliveries.saveAndFlush(new NotificationDelivery(duplicate.getNotificationEvent(),
+                        duplicate.getDevice(), duplicate.getRecipientOwnershipGeneration(), duplicate.getExpiresAt(),
+                        LocalDateTime.ofInstant(time.get(), ZoneOffset.UTC)));
+            }).when(deliveries).save(any(NotificationDelivery.class));
+        }
+        assertThatThrownBy(() -> service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, "ref", null)))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+        var current = sessions.findById(id).orElseThrow();
+        assertThat(current.getRevision()).isEqualTo(1);
+        assertThat(current.getCheckpoint().getObservedAt()).isEqualTo(UTC_NOW);
+        assertThat(runtime.isReady(BoardingTrackingSnapshot.from(current), UTC_NOW.plusSeconds(20))).isFalse();
+    }
+
+    @Test
+    @DisplayName("AUD-08 재확인 0 recipients Event는 소비되며 나중 Device에 소급 Delivery를 만들지 않는다")
+    void aud08_no_recipient_is_consumed() {
+        long id = aud08Suspended(2);
+        doReturn(aud08Start(1)).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        assertThat(service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, "ref", null))
+                .preparationNotificationStatus()).isEqualTo("NO_RECIPIENT");
+        device(owner);
+        new TransactionTemplate(manager).executeWithoutResult(status -> sessions.findForUpdate(id).orElseThrow()
+                .suspend(2, BoardingStateReason.VEHICLE_MISSING, UTC_NOW.plusSeconds(20)));
+        time.set(NOW.plusSeconds(25));
+        doReturn(aud08Start(2)).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(3, "ref", null));
+        assertThat(events.count()).isEqualTo(1);
+        assertThat(deliveries.count()).isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("AUD-08 commit 응답 유실은 정확한 checkpoint·Event를 확인하며 rollback된 Event·Delivery를 재적용하지 않는다")
+    void aud08_commit_reconciliation(boolean persisted) {
+        long id = aud08Suspended(2);
+        device(owner);
+        doReturn(aud08Start(1)).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        var counter = new java.util.concurrent.atomic.AtomicInteger();
+        PlatformTransactionManager uncertain = new PlatformTransactionManager() {
+            public TransactionStatus getTransaction(TransactionDefinition definition) { return manager.getTransaction(definition); }
+            public void commit(TransactionStatus status) {
+                if (counter.incrementAndGet() == 2) {
+                    if (persisted) { manager.commit(status); } else { manager.rollback(status); }
+                    throw new TransactionSystemException("controlled acknowledgement loss");
+                }
+                manager.commit(status);
+            }
+            public void rollback(TransactionStatus status) { manager.rollback(status); }
+        };
+        var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, uncertain, clock, runtime, notifications);
+        var request = new ReconfirmBoardingSessionRequest(1, "ref", null);
+        if (persisted) {
+            assertThat(tested.reconfirm(owner.getId(), id, request).preparationNotificationStatus()).isEqualTo("PENDING");
+            assertThatThrownBy(() -> service.reconfirm(owner.getId(), id, request))
+                    .isInstanceOfSatisfying(ApiException.class, exception ->
+                            assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.BOARDING_REVISION_CONFLICT));
+        } else {
+            assertThatThrownBy(() -> tested.reconfirm(owner.getId(), id, request)).isInstanceOf(TransactionSystemException.class);
+        }
+        assertThat(events.count()).isEqualTo(persisted ? 1 : 0);
+        assertThat(deliveries.count()).isEqualTo(persisted ? 1 : 0);
+        var current = sessions.findById(id).orElseThrow();
+        assertThat(current.getRevision()).isEqualTo(persisted ? 2 : 1);
+        assertThat(runtime.isReady(BoardingTrackingSnapshot.from(current), UTC_NOW.plusSeconds(20))).isEqualTo(persisted);
+    }
+
+    @Test
+    @DisplayName("AUD-08 두 재확인과 늦은 Polling 결과가 경합해도 새 revision의 Event·Delivery만 한 번 저장한다")
+    void aud08_concurrent_reconfirmation_and_polling() throws Exception {
+        long id = aud08Suspended(2);
+        device(owner);
+        var suspended = BoardingTrackingSnapshot.from(sessions.findById(id).orElseThrow());
+        var start = aud08Start(1);
+        var both = new CountDownLatch(2);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            both.countDown();
+            assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
+            return start;
+        }).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            java.util.concurrent.Callable<String> reconfirm = () -> {
+                try { service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, "ref", null)); return "SUCCESS"; }
+                catch (ApiException exception) { return exception.getErrorCode().name(); }
+            };
+            var a = pool.submit(reconfirm);
+            var b = pool.submit(reconfirm);
+            assertThat(both.await(5, TimeUnit.SECONDS)).isTrue();
+            // A cycle while Provider revalidation is in flight must preserve the suspended revision.
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            release.countDown();
+            assertThat(List.of(a.get(15, TimeUnit.SECONDS), b.get(15, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder("SUCCESS", "BOARDING_REVISION_CONFLICT");
+            assertThat(trackingStore.apply(suspended,
+                    com.stopbell.boarding.domain.BoardingTrackingDecision.held(suspended.reason())).accepted()).isFalse();
+        } finally { release.countDown(); }
+        assertThat(events.count()).isEqualTo(1);
+        assertThat(deliveries.count()).isEqualTo(1);
+        assertThat(sessions.findById(id).orElseThrow().getRevision()).isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("AUD-08 재확인 Provider I/O 중 취소·Session 만료는 새 Event·Delivery를 생성하지 않는다")
+    void aud08_terminal_during_reconfirmation(boolean expired) {
+        long id = aud08Suspended(2);
+        var start = aud08Start(1);
+        doAnswer(invocation -> {
+            if (expired) { time.set(NOW.plusSeconds(14400)); }
+            else { service.cancel(owner.getId(), id, 1); }
+            return start;
+        }).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        assertThatThrownBy(() -> service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, "ref", null)))
+                .isInstanceOf(ApiException.class);
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+        assertThat(sessions.findById(id).orElseThrow().getStatus())
+                .isEqualTo(expired ? BoardingSessionStatus.EXPIRED : BoardingSessionStatus.CANCELLED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    @DisplayName("AUD-08 NULL offset의 기존 준비 ON/OFF·소비·Delivery와 목적지 Event를 보존한다")
+    void aud08_legacy_policy(boolean prepare) {
+        long id = aud08Suspended(null);
+        jdbc.update("update boarding_sessions set prepare_notification_enabled=? where id=?", prepare, id);
+        device(owner);
+        liveObservation(1);
+        service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, candidateRef(), null));
+        assertThat(events.count()).isZero(); // No baseline notification for the legacy policy.
+        time.set(time.get().plusSeconds(5));
+        liveObservation(2);
+        polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+        assertThat(events.count()).isEqualTo(prepare ? 1 : 0);
+        Long preparationId = prepare ? events.findAll().getFirst().getId() : null;
+        Long deliveryId = prepare ? deliveries.findAll().getFirst().getId() : null;
+        long revision = sessions.findById(id).orElseThrow().getRevision();
+        new TransactionTemplate(manager).executeWithoutResult(status -> sessions.findForUpdate(id).orElseThrow()
+                .suspend(revision, BoardingStateReason.VEHICLE_MISSING, UTC_NOW.plusSeconds(25)));
+        time.set(time.get().plusSeconds(5));
+        service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(revision + 1, candidateRef(), null));
+        assertThat(events.count()).isEqualTo(prepare ? 1 : 0);
+        if (prepare) {
+            assertThat(events.findById(preparationId)).isPresent();
+            assertThat(deliveries.findById(deliveryId)).isPresent();
+        }
+        time.set(time.get().plusSeconds(5));
+        liveObservation(3);
+        polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+        assertThat(sessions.findById(id).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.COMPLETED);
+        assertThat(jdbc.queryForList("select boarding_event_type from notification_events order by id", String.class))
+                .containsExactlyElementsOf(prepare ? List.of("PREPARE_ALIGHT", "DESTINATION_REACHED")
+                        : List.of("DESTINATION_REACHED"));
+        assertThat(deliveries.count()).isEqualTo(prepare ? 2 : 1);
+    }
+
+    @Test
+    @DisplayName("AUD-08 checkpoint·Event·Delivery 저장 중에는 gate를 닫고 commit 확인 후 같은 revision만 READY로 공개한다")
+    void aud08_gate_after_atomic_commit() {
+        long id = aud08Suspended(2);
+        device(owner);
+        doReturn(aud08Start(1)).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        var checked = new java.util.concurrent.atomic.AtomicBoolean();
+        doAnswer(invocation -> {
+            NotificationEvent event = invocation.getArgument(0);
+            entityManager.persist(event);
+            entityManager.flush();
+            var snapshot = BoardingTrackingSnapshot.from(sessions.findForUpdate(id).orElseThrow());
+            assertThat(snapshot.revision()).isEqualTo(2);
+            assertThat(runtime.isReady(snapshot, UTC_NOW.plusSeconds(20))).isFalse();
+            TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void beforeCommit(boolean readOnly) {
+                            assertThat(events.count()).isEqualTo(1);
+                            assertThat(deliveries.count()).isEqualTo(1);
+                            assertThat(runtime.isReady(snapshot, UTC_NOW.plusSeconds(20))).isFalse();
+                        }
+
+                        @Override
+                        public void afterCommit() {
+                            assertThat(runtime.isReady(snapshot, UTC_NOW.plusSeconds(20))).isFalse();
+                            checked.set(true);
+                        }
+                    });
+            return event;
+        }).when(events).saveAndFlush(any(NotificationEvent.class));
+        var response = service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, "ref", null));
+        assertThat(checked).isTrue();
+        assertThat(response.evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
+        assertThat(response.preparationNotificationStatus()).isEqualTo("PENDING");
+    }
+
+    private long aud08Suspended(Integer offset) {
+        target = occurrence("s4", 40);
+        occurrence("s5", 50);
+        var start = verified(metadata.read(route.getId(), target.getId(), first.getId()));
+        var session = new BoardingSession(owner, REQUEST_ID, "a".repeat(64), start.vehicleTrackingId(), NUMBER,
+                start.routeNumber(), start.targetName(), start.traversal(), start.checkpoint(), UTC_NOW, UTC_NOW.plusHours(4));
+        if (offset != null) {
+            session = new BoardingSession(owner, REQUEST_ID, "a".repeat(64), start.vehicleTrackingId(), NUMBER,
+                    start.routeNumber(), start.targetName(), start.traversal(), start.checkpoint(), UTC_NOW,
+                    UTC_NOW.plusHours(4), offset);
+        }
+        session.suspend(0, BoardingStateReason.CONTINUITY_GAP_EXCEEDED, UTC_NOW);
+        long id = sessions.saveAndFlush(session).getId();
+        runtime.committed(id, 1, false);
+        time.set(NOW.plusSeconds(20));
+        return id;
+    }
+
+    private VerifiedBoardingStart aud08Start(int index) {
+        var start = freshStart();
+        var occurrence = start.traversal().occurrences().get(index);
+        var at = LocalDateTime.ofInstant(time.get(), ZoneOffset.UTC);
+        return new VerifiedBoardingStart(start.metadata(), start.traversal(),
+                new BoardingCheckpoint(occurrence.externalStopId(), occurrence.order(), index,
+                        BoardingCheckpoint.Evidence.ID_ORDER, null, at, at.minusSeconds(1)), start.referenceExpiresAt(),
+                start.vehicleTrackingId(), NUMBER, start.routeNumber(), start.targetName());
+    }
+
+    private void liveObservation(int index) {
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                "vehicle-id", NUMBER, 999, "coarse", 1, liveDataTime(), null, null, null, null, null)));
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(liveProgress("s" + (index + 1), (index + 1) * 10, 0));
+    }
+
+    private void device(User user) {
+        devices.saveAndFlush(new Device(user, UUID.randomUUID().toString(), "a".repeat(64), DevicePlatform.IOS,
+                UUID.randomUUID().toString(), 0, UTC_NOW));
     }
 
     private long suspendedFixture() {

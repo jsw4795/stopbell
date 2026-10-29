@@ -239,7 +239,7 @@ public class BoardingSessionService {
                 || !start.traversal().sameTrackingPath(expected.traversal())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
-        var attempted = new AtomicReference<BoardingTrackingSnapshot>();
+        var attempted = new AtomicReference<ReconfirmationCommit>();
         BoardingTrackingSnapshot committed;
         try {
             committed = transaction.execute(status -> {
@@ -259,10 +259,13 @@ public class BoardingSessionService {
                 if (!latest.fingerprint().equals(start.metadata().fingerprint()) || !fresh(start, now())) {
                     throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
                 }
+                runtime.committed(id, session.getRevision(), false);
                 session.reconfirm(request.expectedRevision(), start.checkpoint(), now());
                 sessions.flush();
+                Long eventId = notifications.recordReconfirmedPreparation(session, current);
+                sessions.flush();
                 var result = BoardingTrackingSnapshot.from(session);
-                attempted.set(result);
+                attempted.set(new ReconfirmationCommit(result, eventId));
                 return result;
             });
         } catch (DataAccessException | TransactionException exception) {
@@ -274,7 +277,10 @@ public class BoardingSessionService {
                 var current = owned(userId, id);
                 var latest = metadata.read(start.metadata().routeId(), start.metadata().targetOccurrenceId(),
                         start.metadata().boardingOccurrenceId());
-                if (!attempted.get().matches(current) || !latest.fingerprint().equals(start.metadata().fingerprint())
+                var original = attempted.get();
+                if (!original.snapshot().matches(current)
+                        || (original.eventId() != null && !notifications.exists(id, original.eventId()))
+                        || !latest.fingerprint().equals(start.metadata().fingerprint())
                         || !fresh(start, now()) || !now().isBefore(current.getExpiresAt())) {
                     throw exception;
                 }
@@ -288,6 +294,8 @@ public class BoardingSessionService {
         runtime.verified(committed);
         return find(userId, id);
     }
+
+    private record ReconfirmationCommit(BoardingTrackingSnapshot snapshot, Long eventId) { }
 
     private static void requireReconfirmation(BoardingTrackingSnapshot session, long revision) {
         if (session.revision() != revision) {

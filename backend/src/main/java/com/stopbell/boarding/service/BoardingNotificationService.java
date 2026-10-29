@@ -72,6 +72,25 @@ public class BoardingNotificationService {
         return recordDecision(session, BoardingTrackingSnapshot.from(session), decision, true);
     }
 
+    /** A newly validated baseline can justify preparation without claiming progress across a suspension. */
+    public Long recordReconfirmedPreparation(BoardingSession session, BoardingTrackingSnapshot previous) {
+        var checkpoint = session.getCheckpoint();
+        var before = previous.checkpoint();
+        // Reconfirmation may reset a baseline, but conflicting old/new evidence cannot justify an immediate Push.
+        if (checkpoint.getObservedAt().isBefore(before.getObservedAt())
+                || checkpoint.getIndex() < before.getIndex()
+                || !java.util.Objects.equals(checkpoint.getDirectionContext(), before.getDirectionContext())
+                || (before.getProviderDataTime() != null && (checkpoint.getProviderDataTime() == null
+                    || checkpoint.getProviderDataTime().isBefore(before.getProviderDataTime())))
+                || (checkpoint.getIndex() != before.getIndex()
+                    && (checkpoint.getObservedAt().equals(before.getObservedAt())
+                        || (checkpoint.getProviderDataTime() != null
+                            && checkpoint.getProviderDataTime().equals(before.getProviderDataTime()))))) {
+            return null;
+        }
+        return recordInitialPreparation(session);
+    }
+
     private Long recordDecision(BoardingSession session, BoardingTrackingSnapshot expected,
             BoardingTrackingDecision decision, boolean initial) {
         boolean destination = decision.outcome() == BoardingTrackingDecision.Outcome.ARRIVAL_OBSERVED
