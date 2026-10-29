@@ -4,6 +4,40 @@ import 'package:stopbell/features/boarding/boarding_candidates.dart';
 import 'boarding_test_fakes.dart';
 
 void main() {
+  test('deadline reasons parse without losing valid partial candidates', () {
+    for (final reason in [
+      'DETAIL_DEADLINE_NOT_STARTED',
+      'DETAIL_DEADLINE_INCOMPLETE',
+    ]) {
+      final result = BoardingCandidates.fromJson(
+        candidatesJson(
+          status: 'PARTIAL',
+          candidates: [
+            candidateJson(),
+            {
+              ...candidateJson(confirmation: 'HELD', tracking: 'HELD'),
+              'candidateRef': null,
+              'selectionKey': null,
+              'progress': null,
+              'boardingOccurrenceGap': null,
+              'reasonCode': reason,
+              'trackingReasonCode': reason,
+              'limitations': [reason],
+            },
+          ],
+        ),
+      );
+      expect(result.candidateSetStatus, CandidateSetStatus.partial);
+      expect(result.candidates.first.canRequestConfirmation, isTrue);
+      final held = result.candidates.last;
+      expect(held.reasonCode, reason);
+      expect(held.trackingReasonCode, reason);
+      expect(held.canRequestConfirmation, isFalse);
+      expect(held.candidateRef, isNull);
+      expect(held.selectionKey, isNull);
+      expect(held.progress, isNull);
+    }
+  });
   test(
     'fresh identified candidate remains selectable with normal empty detail',
     () {

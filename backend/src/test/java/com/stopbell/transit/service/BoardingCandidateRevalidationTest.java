@@ -31,7 +31,14 @@ class BoardingCandidateRevalidationTest {
     private final SeoulBusVehicleDetailClient details = mock(SeoulBusVehicleDetailClient.class);
     private final MutableClock clock = new MutableClock();
     private final BoardingCandidateReferenceStore references = new BoardingCandidateReferenceStore(clock);
-    private final BoardingCandidateService service = new BoardingCandidateService(metadata, tago, seoul, details, references, clock);
+    private final BoardingCandidateDetailExecutor executor = new BoardingCandidateDetailExecutor();
+
+    @org.junit.jupiter.api.AfterEach
+    void tear_down() {
+        executor.close();
+    }
+
+    private final BoardingCandidateService service = new BoardingCandidateService(metadata, tago, seoul, details, references, clock, executor);
     private BoardingRouteSnapshot route;
     private Snapshot original;
 

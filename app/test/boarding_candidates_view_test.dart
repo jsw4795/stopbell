@@ -26,6 +26,61 @@ void main() {
   }
 
   testWidgets(
+    'deadline partial explains both held reasons and allows only valid selection',
+    (tester) async {
+      final selected = <BoardingCandidate>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: BoardingCandidatesView(
+                result: BoardingCandidates.fromJson(
+                  candidatesJson(
+                    status: 'PARTIAL',
+                    candidates: [
+                      candidateJson(),
+                      for (final reason in [
+                        'DETAIL_DEADLINE_NOT_STARTED',
+                        'DETAIL_DEADLINE_INCOMPLETE',
+                      ])
+                        {
+                          ...candidateJson(
+                            confirmation: 'HELD',
+                            tracking: 'HELD',
+                          ),
+                          'candidateRef': null,
+                          'selectionKey': null,
+                          'progress': null,
+                          'boardingOccurrenceGap': null,
+                          'reasonCode': reason,
+                          'trackingReasonCode': reason,
+                          'limitations': [reason],
+                        },
+                    ],
+                  ),
+                ),
+                receivedAt: DateTime.utc(2026),
+                onSelect: selected.add,
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(selected, isEmpty);
+      expect(find.textContaining('상세 조회를 시작하지 못했어요'), findsOneWidget);
+      expect(find.textContaining('상세 정보를 확인하지 못했어요'), findsOneWidget);
+      final buttons = tester
+          .widgetList<OutlinedButton>(find.byType(OutlinedButton))
+          .toList();
+      expect(buttons.first.onPressed, isNotNull);
+      expect(buttons.skip(1).every((b) => b.onPressed == null), isTrue);
+      await tester.ensureVisible(find.text('이 차량 선택'));
+      await tester.tap(find.text('이 차량 선택'));
+      expect(selected, hasLength(1));
+    },
+  );
+
+  testWidgets(
     'multiple candidates keep server order, full numbers and no automatic selection or session action',
     (tester) async {
       await show(

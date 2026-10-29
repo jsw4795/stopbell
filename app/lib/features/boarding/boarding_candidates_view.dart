@@ -160,6 +160,9 @@ String _reasonMessage(String code) => switch (code) {
   'STALE_OBSERVATION' => '차량 정보가 오래되어 다시 확인해야 해요.',
   'FUTURE_OBSERVATION' => '관측 시각이 미래여서 최신 정보로 사용할 수 없어요.',
   'DETAIL_NOT_REQUESTED' => '상세 진행 정보는 조회하지 않았어요.',
+  'DETAIL_DEADLINE_NOT_STARTED' =>
+    '조회 시간 안에 상세 조회를 시작하지 못했어요. 필요하면 다시 조회해 주세요.',
+  'DETAIL_DEADLINE_INCOMPLETE' => '조회 시간 안에 상세 정보를 확인하지 못했어요. 필요하면 다시 조회해 주세요.',
   'DETAIL_EMPTY' => '추가 진행 정보가 제공되지 않았어요.',
   'DETAIL_HTTP_FAILURE' => '상세 정보 서버 요청에 실패했어요.',
   'DETAIL_TRANSPORT_FAILURE' => '상세 정보 통신에 실패했어요.',

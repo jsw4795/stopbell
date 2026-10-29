@@ -46,11 +46,13 @@ public class BoardingCandidateService {
     private final SeoulBusVehicleDetailClient detailClient;
     private final BoardingCandidateReferenceStore references;
     private final Clock clock;
+    private final BoardingCandidateDetailExecutor detailExecutor;
 
     public BoardingCandidateService(
             BoardingCandidateMetadataService metadataService, TagoVehicleLocationClient tagoClient,
             SeoulBusVehicleLocationClient seoulClient, SeoulBusVehicleDetailClient detailClient,
-            BoardingCandidateReferenceStore references, @Qualifier("transitMetadataClock") Clock clock
+            BoardingCandidateReferenceStore references, @Qualifier("transitMetadataClock") Clock clock,
+            BoardingCandidateDetailExecutor detailExecutor
     ) {
         this.metadataService = metadataService;
         this.tagoClient = tagoClient;
@@ -58,9 +60,11 @@ public class BoardingCandidateService {
         this.detailClient = detailClient;
         this.references = references;
         this.clock = clock;
+        this.detailExecutor = detailExecutor;
     }
 
     public BoardingCandidatesResponse find(Long userId, Long routeId, Long targetId, Long boardingId) {
+        var deadline = detailExecutor.deadline();
         BoardingRouteSnapshot route = metadataService.read(routeId, targetId, boardingId);
         Context context = new Context(userId, routeId, targetId, boardingId);
         Roster roster;
@@ -79,16 +83,28 @@ public class BoardingCandidateService {
                 .toList();
         Set<String> conflictingIds = conflictingIds(vehicles);
         List<Detail> details = new ArrayList<>();
-        // With no boarding occurrence, number checking needs only roster. Otherwise each valid,
-        // unique vehicle needs at most one detail for the requested progress/gap display.
-        for (Vehicle vehicle : vehicles) {
+        List<Integer> requested = new ArrayList<>();
+        // Only immutable provider evidence is computed on workers. References and final
+        // validation remain on this request thread after collection has closed.
+        for (int index = 0; index < vehicles.size(); index++) {
+            Vehicle vehicle = vehicles.get(index);
             if (route.provider() == TransitProvider.SEOUL_BUS && boardingId != null
                     && identityIssue(vehicle, conflictingIds) == null && timeIssue(vehicle, clock.instant()) == null) {
-                details.add(fetchDetail(vehicle));
-            } else {
-                details.add(new Detail(null, route.provider() == TransitProvider.SEOUL_BUS
-                        ? ReasonCode.DETAIL_NOT_REQUESTED : null));
+                requested.add(index);
             }
+            details.add(new Detail(null, route.provider() == TransitProvider.SEOUL_BUS
+                    ? ReasonCode.DETAIL_NOT_REQUESTED : null));
+        }
+        var results = detailExecutor.collect(requested, deadline, index -> {
+            Vehicle vehicle = vehicles.get(index);
+            ReasonCode issue = timeIssue(vehicle, clock.instant());
+            return issue == null ? fetchDetail(vehicle) : new Detail(null, issue);
+        });
+        for (int index = 0; index < requested.size(); index++) {
+            var result = results.get(index);
+            details.set(requested.get(index), result.value() != null ? result.value()
+                    : new Detail(null, result.started() ? ReasonCode.DETAIL_DEADLINE_INCOMPLETE
+                            : ReasonCode.DETAIL_DEADLINE_NOT_STARTED));
         }
         includeDetailConflicts(vehicles, details, conflictingIds);
         references.replace(context);

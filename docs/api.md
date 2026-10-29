@@ -395,7 +395,7 @@ TASK-904의 후보 응답 상세는 다음과 같다. `confirmationStatus=AVAILA
 | `trackingSupport`, `trackingReasonCode` | CONDITIONAL/HELD. 서울 식별 가능한 후보는 진행 기준점 부족 시에도 CONDITIONAL이며 등록 시 최신 식별·freshness 재검증 필수. TAGO는 TAGO_ALIGHT_UNVERIFIED와 HELD 유지 |
 | `limitations` | 복수 불확실성·지원 제한 reason code 배열. 위치가 없다는 이유만으로 식별 가능한 번호 후보를 제거하지 않음 |
 
-최상위 `observedAt`은 roster 수신 시각이다. 최상위 `providerDataTime`은 모든 후보의 제공시각이 같을 때만 그 값이며, 서로 다르거나 후보가 없으면 null이다. 차량별 시각은 각 후보에서 확인한다. TAGO는 원본 생성시각이 없어 null이며 upstream age·물리 위치 시각을 보장하지 않는다. `candidateSetStatus=PARTIAL`은 보류 항목 또는 요청한 detail의 실패/empty를 포함한다. 요청하지 않은 detail이나 단순 위치 누락은 그 사실만으로 PARTIAL을 만들지 않는다. 목록 전체 실패·TAGO 개수 불일치는 503 `TRANSIT_TEMPORARILY_UNAVAILABLE`이다.
+최상위 `observedAt`은 roster 수신 시각이다. 최상위 `providerDataTime`은 모든 후보의 제공시각이 같을 때만 그 값이며, 서로 다르거나 후보가 없으면 null이다. 차량별 시각은 각 후보에서 확인한다. TAGO는 원본 생성시각이 없어 null이며 upstream age·물리 위치 시각을 보장하지 않는다. `candidateSetStatus=PARTIAL`은 보류 항목 또는 요청한 detail의 실패/empty와 deadline에 따른 미시작·미완료를 포함한다. PARTIAL은 전체 detail 조회 완료를 의미하지 않으며 비어 있지 않은 roster의 모든 차량이 HELD여도 EMPTY로 바꾸지 않는다. 정상적으로 요청할 필요가 없는 detail(DETAIL_NOT_REQUESTED)이나 단순 위치 누락은 그 사실만으로 PARTIAL을 만들지 않는다. 목록 전체 실패·TAGO 개수 불일치는 503 `TRANSIT_TEMPORARILY_UNAVAILABLE`이다.
 
 `reasonCode`/`limitations`는 다음 값으로 불확실 범위를 구분한다.
 
@@ -403,11 +403,21 @@ TASK-904의 후보 응답 상세는 다음과 같다. `confirmationStatus=AVAILA
 - 시각: PROVIDER_TIME_MISSING, PROVIDER_TIME_INVALID, STALE_OBSERVATION, FUTURE_OBSERVATION
 - 위치/metadata: POSITION_UNAVAILABLE, METADATA_MISMATCH, DETAIL_NOT_REQUESTED, DETAIL_EMPTY
 - 상세 실패: DETAIL_HTTP_FAILURE, DETAIL_TRANSPORT_FAILURE, DETAIL_PROVIDER_FAILURE, DETAIL_PROTOCOL_FAILURE
+- 상세 deadline: DETAIL_DEADLINE_NOT_STARTED, DETAIL_DEADLINE_INCOMPLETE
 - 추적 제한: TAGO_ALIGHT_UNVERIFIED, TARGET_NOT_AHEAD, REVALIDATION_REQUIRED
+
+서울 후보 조회는 metadata 조회 전 시작한 단일 12초 목표 예산으로 detail 시작·대기를 제한하며 Flutter HTTP Timeout은 15초를 유지한다. 정확한 강제 범위와 동기 단계/직렬화의 예외는 [Architecture](architecture.md#서울-후보-조회의-응답-예산-확인-task-816--aud-07)를 따른다.
+
+| Deadline ReasonCode | 의미 |
+| --- | --- |
+| `DETAIL_DEADLINE_NOT_STARTED` | 정상 roster의 detail 대상이지만 남은 전체 예산/후보 전용 실행 자리 대기 때문에 조회를 시작하지 못함 |
+| `DETAIL_DEADLINE_INCOMPLETE` | detail을 시작했지만 deadline 전 유효한 결과를 확보하지 못함. 늦은 완료는 해당 응답에 반영하지 않음 |
+
+두 사유는 `confirmationStatus=HELD`, `trackingSupport=HELD`, `candidateRef=null`, `selectionKey=null`, `progress=null`, `boardingOccurrenceGap=null`로 반환한다. 전체 차량번호, roster의 원래 `observedAt`·`providerDataTime`은 보존한다. DETAIL_NOT_REQUESTED는 정상적으로 detail을 요구하지 않은 경우에만 유지하고, deadline 전 실제 확인한 HTTP/transport/provider/protocol 실패는 기존 개별 실패 코드로 반환한다. deadline 전 확보한 정상 후보는 최종 identity/collision/metadata/60초 freshness 검증을 통과한 경우 기존 reference/selectionKey와 함께 보존한다. 정상 empty roster는 EMPTY, roster 자체 실패는 기존 503이며 일부 또는 전체 HELD를 정상 empty로 위장하지 않는다. 후보 자동 확정은 없고 세션 생성·재확인은 기존 최신 roster/detail 재검증을 유지한다.
 
 위치 미확인 후보는 간격이 있는 후보 뒤에 표시하고 같은 간격은 번호 순으로 표시한다. 이 순서는 탑승 가능성·신뢰도 우열이나 자동 선택을 뜻하지 않는다. raw Provider ID/GPS/fingerprint는 응답에 노출하지 않는다. 같은 Route 소속이 아닌 occurrence는 400 INVALID_REQUEST, 존재하지 않는 목적/승차 occurrence는 기존 404 TARGET_STOP_OCCURRENCE_NOT_FOUND다.
 
-서울 번호 확인만 필요한 승차 occurrence 미입력 조회는 roster 1회이며 detail을 요청하지 않는다. 승차 occurrence가 있으면 간격 표시를 위해 roster에서 식별·시각 검증을 통과한 고유 차량만 각각 detail 1회 조회한다. 충돌·누락·stale 차량에는 detail을 호출하지 않고 동일 item의 중복은 합친다. 일부 detail이 실패해도 정상 후보를 제공하며 전체 유일성을 주장하지 않는다. 후보 API 자체는 재시도·추가 polling·관측 캐시를 도입하지 않는다.
+서울 번호 확인만 필요한 승차 occurrence 미입력 조회는 roster 1회이며 detail을 요청하지 않는다. 승차 occurrence가 있으면 간격 표시를 위해 roster에서 식별·시각 검증을 통과한 고유 차량만 전체 예산 안에서 각각 detail 최대 1회 조회한다. 충돌·누락·stale 차량에는 detail을 호출하지 않고 동일 item의 중복은 합친다. 일부 detail이 실패해도 정상 후보를 제공하며 전체 유일성을 주장하지 않는다. 후보 API 자체는 재시도·추가 polling·관측 캐시를 도입하지 않는다.
 
 reference의 메모리 상한·eviction은 [Architecture](architecture.md#확정과-평가-transaction)를 따른다. 동일 User·Route·목적/선택 승차 occurrence 재조회는 기존 문맥의 reference를 교체한다. 실패한 전체 roster 조회는 기존 관측을 새로 갱신하지 않는다. 원래 관측 및 제공시각의 60초 freshness를 넘거나 restart/eviction된 reference는 재조회가 필요하며 화면 선택 자체로 세션을 만들지 않는다. TASK-905의 내부 resolve는 인증 User와 reference로 원래 roster/detail·typed Route·구조 fingerprint snapshot을 찾아 원래 노선/목적 문맥을 서버에서 복원한다. 문맥을 이미 가진 호출자는 User·Route·목적/승차 occurrence 전체 일치도 요구할 수 있다. 실제 확정에는 최신 metadata와 Provider 재검증이 여전히 필요하다.
 

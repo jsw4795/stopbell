@@ -57,7 +57,7 @@ final class BoardingCandidateTestFixtures {
     }
 
     static final class MutableClock extends Clock {
-        Instant now = NOW;
+        volatile Instant now = NOW;
 
         @Override
         public ZoneId getZone() {
