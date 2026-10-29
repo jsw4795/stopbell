@@ -122,6 +122,16 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 
 세부 결정과 재검토 조건은 `adr/ADR-005-authentication-and-user-identity-strategy.md`를 따른다.
 
+### Google 최초 로그인 경쟁 복구 (TASK-816 / AUD-10)
+
+`LoginService.login()`은 Spring `PlatformTransactionManager`의 `REQUIRES_NEW` `TransactionTemplate`으로 User 조회/생성·Access Token 생성·Refresh Token 저장을 함께 실행한다. 반환값은 commit 성공 뒤에만 호출자에게 전달한다. Session 저장이나 commit 전 실패 시 신규 User와 Session을 함께 rollback하며 기존 Session은 유지한다. 외부 Transaction이 있으면 중단·복원하고 로그인은 독립적으로 commit/rollback한다. 현재 Controller는 외부 Transaction 없이 호출한다. 별도 transactional component는 추가하지 않으며 annotation self-invocation에 Transaction 경계를 의존하지 않는다.
+
+신규 User의 `saveAndFlush()`에서만 Hibernate의 UNIQUE 종류와 `uk_users_auth_provider_provider_user_id` 제약 메타데이터를 확인한다. MySQL의 `users.` 한정 이름도 허용하며 원문 오류 메시지를 파싱하거나 기록하지 않는다. 제약 식별 실패·다른 제약·연결/Timeout 오류와 조회·Token 발급·commit 단계의 오류는 복구하지 않고 전파한다. Schema/Identity 계약은 [Database](database.md#users)와 ADR-005를 유지한다.
+
+식별된 Identity INSERT 충돌은 내부 예외로 Transaction 밖까지 전파한다. `execute()`의 rollback과 실패 EntityManager 정리가 끝난 뒤 새 `REQUIRES_NEW` Transaction에서 검증된 원래 `(authProvider, providerUserId)`로 한 번만 재조회한다. 반환 User의 두 Identity 값과 양의 내부 ID까지 일치해야 Token을 발급하며, 없거나 불일치하면 원래 DB 오류로 실패한다. 복구는 기존 User 조회만 허용하고 INSERT를 재시도하지 않는다. 복구 중 DB/Token 오류도 그대로 실패하므로 최대 두 Transaction이며 무한 재시도는 없다. 이메일이나 다른 Provider의 동일 문자열 ID로 연결하지 않는다.
+
+동시 로그인 각각은 동일 User를 참조하는 별도 Refresh Session을 저장하며 기존 Rotation·재사용 거부·Session별 Logout 정책을 유지한다. User INSERT를 먼저 별도 commit하는 방식 대신 로그인 전체를 rollback 후 재조회하는 구조로 기존 User/Session 원자성을 보존한다. 실제 MySQL 경쟁·실패 Transaction 종료 검증과 Mock 분기 검증의 구분 및 실환경 미검증 사항은 [TASK-816 AUD-10 처리 기록](task-list.md#task-816-감사-항목과-확인-수준)을 따른다.
+
 ### Flutter 인증 HTTP Timeout (TASK-816 / AUD-06)
 
 `BackendAuthClient`의 공통 `_post()`는 `POST /auth/google`·`POST /auth/refresh`·`POST /auth/logout` 각각에 기본 **15초**의 `Future.timeout()`을 적용한다. 생성자의 `timeout`으로 테스트용 제한 시간을 주입할 수 있으며 기존 생성 코드는 기본값을 사용한다. Alarm HTTP와 같은 15초를 사용해 응답 지연 허용 수준을 맞추되, Google SDK의 계정 선택·네이티브 인증 시간은 이 Backend HTTP 예산에 포함하지 않는다. Timeout은 `TimeoutException` 그대로 전달해 HTTP 401·5xx 및 network 오류와 구분하며, 기존 로그인 화면은 민감한 오류 원문 대신 재시도 가능한 로그인 실패 안내로 대기를 끝낸다.
