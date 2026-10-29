@@ -53,7 +53,7 @@ public class NotificationDispatchWorker {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${notification.dispatch.fixed-delay:PT1S}")
+    @Scheduled(scheduler = "notificationDispatchScheduler", fixedDelayString = "${notification.dispatch.fixed-delay:PT1S}")
     public void dispatchPending() {
         if (!properties.enabled() || stopping || !running.compareAndSet(false, true)) {
             return;

@@ -281,7 +281,7 @@ AlarmService.delete는 기존 인증/소유권 검증과 Alarm PESSIMISTIC_WRITE
 
 #### Notification dispatch worker 구현 (TASK-706)
 
-`notification.service.NotificationDispatchWorker`는 기존 `findDuePendingIds(now, PageRequest.of(0, batchSize))`를 사용해 `nextAttemptAt ASC, id ASC`의 ALARM source PENDING ID만 제한 조회하고 순차 처리한다. TASK-906 1단계의 source 제한은 LIMIT 전에 적용한다. Alarm의 expired/capped PENDING을 조회에서 제외하지 않으며 recipient fan-out, 새 Event/Delivery 생성, Alarm lifecycle 변경을 수행하지 않는다. MySQL이 pending source이고 memory queue, 별도 thread pool, worker sleep/retry loop는 없다.
+`notification.service.NotificationDispatchWorker`는 기존 `findDuePendingIds(now, PageRequest.of(0, batchSize))`를 사용해 `nextAttemptAt ASC, id ASC`의 ALARM source PENDING ID만 제한 조회하고 순차 처리한다. TASK-906 1단계의 source 제한은 LIMIT 전에 적용한다. Alarm의 expired/capped PENDING을 조회에서 제외하지 않으며 recipient fan-out, 새 Event/Delivery 생성, Alarm lifecycle 변경을 수행하지 않는다. MySQL이 pending source이며 [전용 Scheduler](#scheduler-실행-자원-분리-task-816--aud-04)에서 동기 실행하고, memory queue, 추가 비동기 executor, worker sleep/retry loop는 없다.
 
 `notification.dispatch.enabled=false`가 기본이다. FCM provider의 `notification.fcm.enabled` 및 명시적 local Smoke와 독립된 설정이다. `batch-size=50`, `fixed-delay=PT1S`는 provisional 개발값이며 운영 확정값이 아니다. TASK-709에서는 batch 1~1,000, delay 1ms~1분으로 유한 범위를 검증한다. 기존 Spring scheduling의 fixed-delay와 Worker의 `AtomicBoolean.compareAndSet` guard로 동일 인스턴스의 실행 중첩을 막는다. context close 뒤 새 cycle/후속 후보는 시작하지 않는다. 다중 Backend 안전성을 제공하지 않는다.
 
@@ -374,7 +374,7 @@ TASK-906 3단계는 임시 ALARM-only 차단을 source-aware dispatch로 교체�
 
 단일 Backend·단일 non-overlapping Worker가 전제다. 메모리 gate는 세션별 `{sessionId, validatedRevision, validatedObservedAt}`의 현재 프로세스 허용 근거이며 기본은 차단이다. Session 생성/복구의 DB commit 확인 후만 열고, 재시작 시 이전 허용 근거를 복원하지 않는다. 오래된 revision의 after-commit 결과가 새 취소/보류를 덮어 열지 못하게 한다. gate는 영속 Source of Truth·claim/lease가 아니며 여러 Backend의 dispatch 안전성을 제공하지 않는다.
 
-Worker cycle은 기존 batch-size를 각 bounded 조회의 상한으로 사용하고 다음 순서로 실행한다. 별도 worker/thread/queue는 없다.
+Worker cycle은 기존 batch-size를 각 bounded 조회의 상한으로 사용하고 다음 순서로 실행한다. 세션 전용 worker/thread/queue는 없다.
 
 1. **만료 정리:** ALARM, BOARDING_SESSION 각각의 expired PENDING을 독립 제한 조회해 EXPIRED로 종료한다. gate·nextAttemptAt과 무관하며 CONFIGURATION 차단 중에도 두 source의 예산을 유지한다.
 2. **Alarm 조회/전달:** ALARM due 조회는 기존 순서·자격·bounded 예산을 유지한다. 세션 대기/세션 만료 row가 이 LIMIT을 점유하지 않는다.
@@ -419,6 +419,14 @@ V1의 기본 Provider polling key는 TAGO의 `(provider, externalRouteId, cityCo
 TASK-508은 JPA `EntityGraph`로 BUS `ACTIVE`/`FOLLOW_UP` Alarm과 `BusAlarmTarget`을 함께 조회한 뒤 Java에서 polling key별로 그룹화한다. `INACTIVE`는 조회 대상이 아니며, target 누락이나 provider request context가 깨진 monitoring Alarm을 query에서 누락·보정하지 않고 명시적으로 실패시킨다. 실제 Provider 호출, Observation 평가, Scheduler와 Provider failure의 `UNKNOWN` 처리는 후속 Task의 책임이다.
 
 TASK-510 Scheduler는 단일 Spring instance에서 Spring Scheduler의 synchronous/fixed-delay 방식으로 실행한다. `transit.monitoring.enabled=false`가 기본이며, 명시적으로 enabled일 때만 `PT20S` 기본 delay가 이전 polling cycle 완료 뒤 적용되어 invocation이 겹치지 않는다. Provider HTTP I/O는 DB transaction 또는 row lock 밖에서 수행한다. 결과 반영 직전에만 Alarm을 `PESSIMISTIC_WRITE`로 다시 읽어 polling 시작 snapshot의 status와 activation generation을 검증하고, 삭제·deactivate·reactivate 등으로 달라졌으면 lifecycle과 memory state를 모두 버린다. API activate/deactivate/delete도 같은 짧은 row-lock transaction을 사용한다. `@Version`, CAS, optimistic locking은 함께 사용하지 않는다. Scheduler memory state key는 `(alarmId, activationGeneration)`이고, 매 cycle의 ACTIVE/FOLLOW_UP 집합 밖 key는 정리한다. TAGO는 Route Location 응답 하나를 group에 공유하며 그 Observation의 vehicle ID 전체를 현재 존재 집합으로 사용한다. 서울은 roster 하나 뒤 baseline/tracked/new/FOLLOW_UP vehicle만 detail 조회하고, roster `vehId` 전체를 detail Observation과 별도로 Evaluator에 전달한다. roster에 존재하지만 detail이 normal empty인 차량은 존재만 갱신하며 위치·Event를 추측하지 않는다. Alarm별 Event 후보는 ACTIVE에서 `ARRIVED`·`PASSED`·`ONE_STOP_BEFORE` 우선순위, 같은 type이면 `vehicleTrackingId` 오름차순으로 하나만 채택하고 FOLLOW_UP에서는 `ONE_STOP_AFTER`만 사용한다. current ARRIVED가 after option으로 FOLLOW_UP을 시작하면 해당 차량의 memory tracking state와 `trackingCycleId`만 이어가며, `followUpStartedAt`/`followUpExpiresAt`은 Event `observedAt`의 UTC와 5분 timeout으로 정한다.
+
+### Scheduler 실행 자원 분리 (TASK-816 / AUD-04)
+
+`SchedulingConfiguration`은 pool size가 각각 1인 두 `ThreadPoolTaskScheduler`를 제공한다. `BusAlarmMonitoringScheduler.pollMonitoringAlarms`는 `@Scheduled(scheduler="transitMonitoringScheduler")`로 Alarm·BoardingSession polling 전체를 `transit-monitoring-` 스레드에 연결하고, `NotificationDispatchWorker.dispatchPending`는 `notificationDispatchScheduler`의 `notification-dispatch-` 스레드에서 실행한다. Provider 대기와 FCM 대기가 서로의 Scheduler를 점유하지 않는다. 추가 queue/비동기 executor나 전역 lock은 도입하지 않는다.
+
+기존 enabled 기본값 false와 fixed-delay(각각 PT20S/PT1S)를 유지한다. 각 작업은 단일 스레드에서 이전 invocation 완료 뒤 delay를 적용하며, Monitoring 메서드의 `synchronized`와 Dispatch의 `AtomicBoolean` guard도 유지한다. 실행 자원 분리는 여러 Backend나 여러 Dispatch Worker를 허용하는 변경이 아니다. DB commit/current locking read, Session mutation 전 gate 차단·commit 확인 후 공개 및 전송 직전 검증은 [기존 Session dispatch 경계](#복구-후에도-적용하는-session-dispatch-검증)를 그대로 따른다.
+
+Context close 시 Scheduler는 새 제출·반복·지연 작업을 차단하고 취소된 task를 queue에서 제거한다. Spring의 coordinated lifecycle stop으로 실행 중 작업이 끝나기를 기다린 뒤 의존 Bean을 종료한다. `waitForTasksToCompleteOnShutdown=true`에 의한 늦은 종료 대신 기본 lifecycle 대기 경로를 사용한다. Monitoring은 종료 신호 뒤 새 cycle/후속 polling group·Boarding polling·retry를 시작하지 않고, Dispatch는 기존대로 후속 후보를 시작하지 않으며 진행 중 FCM의 결과 transaction을 마친다. Provider/FCM timeout·retry는 변경하지 않는다. lifecycle shutdown budget 초과나 강제 종료의 recovery/중복 한계와 운영 budget 검증은 기존 TASK-811 범위에 남는다.
 
 ## 8. 알림 평가
 

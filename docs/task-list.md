@@ -388,6 +388,8 @@ Future Consideration:
 
 각 항목의 처리 기록에는 재현 근거, 수정 또는 미수정 판단, 변경 범위, 방지 테스트와 결과, 남은 실측·실기기 검증 및 담당 Task를 남긴다. 미재현 추론·위험을 확인된 운영 장애로 승격하지 않는다. API·Domain·Authentication·DB 정책이나 공식 문서 간 설계 판단이 필요한 경우 개발자 결정 후 반영한다.
 
+AUD-04 처리 (2026-10-29): 두 `@Scheduled`가 전용 Scheduler 없이 기본 단일 스레드 실행 자원을 공유하는 구성을 확인하고, [Monitoring/Dispatch 전용 단일 스레드 Scheduler](architecture.md#scheduler-실행-자원-분리-task-816--aud-04)로 분리했다. 기존 직렬 실행 guard·DB lock/commit·Session runtime gate·timeout/retry를 유지하고 Monitoring 종료 신호 처리를 추가했다. 신규 동시성 12개를 포함한 관련 10개 클래스 288개를 선택 검증했다. 최초 285개 통과/3개 실패 후 새 테스트의 transaction fixture를 수정했고, 해당 Dispatch 통합 73개와 Scheduler 5개가 재실행에서 모두 통과했다. 변경 없는 나머지 210개는 재실행하지 않았다. Backend·Flutter 전체 테스트, 실제 Provider/FCM·개발 DB 변경은 수행하지 않았다. 실제 부하 지연 분포와 운영 종료 budget·강제 종료 복구 검증은 TASK-810/811에 남는다. AUD-08은 미수정이며 TASK-816은 `[ ]`를 유지한다.
+
 ### TASK-816 문서 불일치 후속 범위
 
 - `README.md`: Notification Worker·권한·Device 등록·tap·atomic decision·retry 등 이미 구현된 기능을 미구현으로 안내하는 설명 검토

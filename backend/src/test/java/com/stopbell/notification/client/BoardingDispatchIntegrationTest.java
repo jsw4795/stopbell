@@ -55,7 +55,9 @@ class BoardingDispatchIntegrationTest {
     @Autowired private NotificationEventRepository events;
     @Autowired private BoardingTrackingRuntime runtime;
     @Autowired private BoardingSessionService api;
-    @Autowired private BoardingNotificationService notifications;
+    @MockitoSpyBean private BoardingNotificationService notifications;
+    @MockitoSpyBean private BoardingTrackingMetadata trackingMetadata;
+    @Autowired private BoardingTrackingStore tracking;
     @Autowired private PlatformTransactionManager manager;
     @MockitoBean(name = "transitMetadataClock") private Clock clock;
     private final AtomicReference<Instant> time = new AtomicReference<>();
@@ -204,6 +206,169 @@ class BoardingDispatchIntegrationTest {
         assertThat(attempts.allowsBeforeSend(attempt)).isFalse();
         assertThat(row(fixture).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
         assertThat(events.findAll()).hasSize(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    @DisplayName("Polling의 미확정 Event와 Delivery는 전송하지 않고 commit된 새 revision만 한 번 전송한다")
+    void polling_transaction_and_dispatch(boolean commit) throws Exception {
+        var fixture = fixture(true);
+        jdbc.update("delete from notification_deliveries where id=?", fixture.deliveryId());
+        jdbc.update("delete from notification_events where id=?", fixture.eventId());
+        var expected = snapshot(fixture);
+        time.set(NOW.plusSeconds(1));
+        doReturn(true).when(trackingMetadata).matches(any());
+        var inserted = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(call -> {
+            var result = call.callRealMethod();
+            entityManager.flush();
+            inserted.countDown();
+            await(release);
+            if (!commit) {
+                throw new IllegalStateException("synthetic polling rollback");
+            }
+            return result;
+        }).when((BoardingNotificationService) org.springframework.test.util.AopTestUtils
+                .getUltimateTargetObject(notifications)).recordDecision(any(), any(), any());
+        var failure = new AtomicReference<Throwable>();
+        var polling = Thread.startVirtualThread(() -> {
+            try { tracking.apply(expected, progressDecision(1)); }
+            catch (Throwable exception) { failure.set(exception); }
+        });
+        try {
+            await(inserted);
+            assertThat(runtime.isReady(expected, utc())).isFalse();
+            assertThat(events.count()).isZero();
+            assertThat(deliveries.count()).isZero();
+            worker(attempts, provider, 5).dispatchPending();
+            verifyNoInteractions(provider);
+        } finally {
+            release.countDown();
+            polling.join(5000);
+        }
+        assertThat(polling.isAlive()).isFalse();
+        if (commit) {
+            assertThat(failure.get()).isNull();
+            assertThat(snapshot(fixture).revision()).isEqualTo(1);
+            assertThat(runtime.isReady(snapshot(fixture), utc())).isTrue();
+            worker(attempts, provider, 5).dispatchPending();
+            worker(attempts, provider, 5).dispatchPending();
+            verify(provider, times(1)).send(any());
+            assertThat(deliveries.findAll()).singleElement()
+                    .extracting(NotificationDelivery::getStatus).isEqualTo(NotificationDeliveryStatus.ACCEPTED);
+        } else {
+            assertThat(failure.get()).isInstanceOf(IllegalStateException.class);
+            assertThat(events.count()).isZero();
+            assertThat(deliveries.count()).isZero();
+            assertThat(snapshot(fixture).revision()).isZero();
+            assertThat(runtime.isReady(expected, utc())).isFalse();
+            worker(attempts, provider, 5).dispatchPending();
+            verifyNoInteractions(provider);
+        }
+    }
+
+    enum ConcurrentChange { CANCEL, REVISION, HOLD, COMPLETE }
+
+    @ParameterizedTest
+    @EnumSource(ConcurrentChange.class)
+    @DisplayName("전송 준비 commit 후 다른 스레드의 취소·Polling revision·보류·완료는 이전 attempt의 FCM을 차단한다")
+    void concurrent_change_before_send(ConcurrentChange change) throws Exception {
+        var fixture = fixture(true);
+        var old = snapshot(fixture);
+        doReturn(true).when(trackingMetadata).matches(any());
+        var prepared = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var wrapped = spy(attempts);
+        doAnswer(call -> {
+            var result = call.callRealMethod();
+            prepared.countDown();
+            await(release);
+            return result;
+        }).when(wrapped).beginAttempt(fixture.deliveryId());
+        var dispatch = worker(wrapped, provider, 5);
+        var failure = new AtomicReference<Throwable>();
+        var sending = Thread.startVirtualThread(() -> {
+            try { dispatch.dispatchPending(); }
+            catch (Throwable exception) { failure.set(exception); }
+        });
+        try {
+            await(prepared);
+            time.set(NOW.plusSeconds(1));
+            switch (change) {
+                case CANCEL -> api.cancel(fixture.ownerId(), fixture.sessionId(), old.revision());
+                case REVISION -> tracking.apply(old, progressDecision(1));
+                case HOLD -> tracking.apply(old, com.stopbell.boarding.domain.BoardingTrackingDecision.held(
+                        BoardingStateReason.TEMPORARY_PROVIDER_FAILURE));
+                case COMPLETE -> tracking.apply(old, progressDecision(2));
+            }
+        } finally {
+            release.countDown();
+            sending.join(5000);
+        }
+        assertThat(sending.isAlive()).isFalse();
+        assertThat(failure.get()).isNull();
+        verifyNoInteractions(provider);
+        assertThat(row(fixture).getAttemptCount()).isOne();
+        assertThat(row(fixture).getLastProviderResult()).isNull();
+        assertThat(row(fixture).getStatus()).isEqualTo(change == ConcurrentChange.CANCEL || change == ConcurrentChange.COMPLETE
+                ? NotificationDeliveryStatus.FAILED : NotificationDeliveryStatus.PENDING);
+        if (change == ConcurrentChange.COMPLETE) {
+            assertThat(snapshot(fixture).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
+            var destinationId = tx().execute(status -> events.findByBoardingSessionIdAndBoardingEventType(fixture.sessionId(),
+                    BoardingNotificationEventType.DESTINATION_REACHED).orElseThrow().getId());
+            assertThat(deliveries.findAllByNotificationEventIdOrderByIdAsc(destinationId)).singleElement()
+                    .extracting(NotificationDelivery::getStatus).isEqualTo(NotificationDeliveryStatus.PENDING);
+            dispatch.dispatchPending();
+            verify(provider, times(1)).send(argThat(request -> request.source().boardingEventType()
+                    == BoardingNotificationEventType.DESTINATION_REACHED));
+        }
+    }
+
+    @Test
+    @DisplayName("느린 FCM 중 중복 Worker 호출은 재발송하지 않고 동시 완료가 종료한 준비 Delivery를 되살리지 않는다")
+    void slow_fcm_with_concurrent_completion() throws Exception {
+        var fixture = fixture(true);
+        var old = snapshot(fixture);
+        doReturn(true).when(trackingMetadata).matches(any());
+        var started = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        when(provider.send(any())).thenAnswer(call -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            started.countDown();
+            await(release);
+            return result(NotificationProviderResult.ACCEPTED);
+        });
+        var dispatch = worker(attempts, provider, 5);
+        var sending = Thread.startVirtualThread(dispatch::dispatchPending);
+        try {
+            await(started);
+            dispatch.dispatchPending();
+            verify(provider, times(1)).send(any());
+            time.set(NOW.plusSeconds(1));
+            assertThat(tracking.apply(old, progressDecision(2)).accepted()).isTrue();
+            assertThat(row(fixture).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+        } finally {
+            release.countDown();
+            sending.join(5000);
+        }
+        assertThat(sending.isAlive()).isFalse();
+        assertThat(row(fixture).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+        assertThat(row(fixture).getAttemptCount()).isOne();
+        assertThat(row(fixture).getLastProviderResult()).isNull();
+        verify(provider, times(1)).send(any());
+    }
+
+    private com.stopbell.boarding.domain.BoardingTrackingDecision progressDecision(int index) {
+        var item = metadata().traversal().get(index);
+        var checkpoint = new BoardingCheckpoint(item.externalStopId(), item.order(), index,
+                BoardingCheckpoint.Evidence.ID_ORDER, null, utc(), utc());
+        boolean completed = index == 2;
+        return new com.stopbell.boarding.domain.BoardingTrackingDecision(completed
+                ? com.stopbell.boarding.domain.BoardingTrackingDecision.Outcome.ARRIVAL_OBSERVED
+                : com.stopbell.boarding.domain.BoardingTrackingDecision.Outcome.PREPARE_ALIGHT,
+                checkpoint, completed ? BoardingStateReason.ARRIVAL_OBSERVED : null, 2 - index,
+                utc(), utc().plusSeconds(30), utc());
     }
 
     @Test

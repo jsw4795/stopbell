@@ -33,6 +33,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -58,6 +60,7 @@ public class BusAlarmMonitoringScheduler {
     private final Duration failureRetryDelay;
     private final Map<AlarmEvaluationKey, BusAlarmEvaluationState> evaluationStates = new HashMap<>();
     private final Map<AlarmEvaluationKey, PendingDecision> pendingDecisions = new HashMap<>();
+    private volatile boolean stopping;
 
     public BusAlarmMonitoringScheduler(
             BusAlarmPollingService pollingService,
@@ -88,8 +91,11 @@ public class BusAlarmMonitoringScheduler {
         this.failureRetryDelay = failureRetryDelay;
     }
 
-    @Scheduled(fixedDelayString = "${transit.monitoring.fixed-delay:PT20S}")
+    @Scheduled(scheduler = "transitMonitoringScheduler", fixedDelayString = "${transit.monitoring.fixed-delay:PT20S}")
     public synchronized void pollMonitoringAlarms() {
+        if (stopping || Thread.currentThread().isInterrupted()) {
+            return;
+        }
         VehiclePollingCycle cycle = new VehiclePollingCycle(tagoVehicleLocationClient, seoulBusVehicleLocationClient,
                 seoulBusVehicleDetailClient, clock);
         // Reconcile before loading monitoring groups: an ambiguous ARRIVED/after commit may already be INACTIVE.
@@ -101,6 +107,9 @@ public class BusAlarmMonitoringScheduler {
         retainCurrentEvaluationStates(groups);
         List<RetryTarget> retryTargets = new ArrayList<>();
         for (BusAlarmPollingGroup group : groups) {
+            if (stopping || Thread.currentThread().isInterrupted()) {
+                return;
+            }
             List<RetryTarget> groupRetries = new ArrayList<>();
             try {
                 pollGroup(group, groupRetries, cycle);
@@ -113,17 +122,23 @@ public class BusAlarmMonitoringScheduler {
                         group.key().provider(), group.key().externalRouteId(), exception);
             }
         }
+        if (stopping || Thread.currentThread().isInterrupted()) {
+            return;
+        }
         try {
             boardingPolling.poll(cycle);
         } catch (RuntimeException exception) {
             log.warn("Boarding polling cycle failed: failureType={}", exception.getClass().getSimpleName());
         }
-        if (retryTargets.isEmpty() || !waitBeforeRetry()) {
+        if (stopping || retryTargets.isEmpty() || !waitBeforeRetry()) {
             return;
         }
         VehiclePollingCycle retryCycle = new VehiclePollingCycle(tagoVehicleLocationClient,
                 seoulBusVehicleLocationClient, seoulBusVehicleDetailClient, clock);
         for (RetryTarget target : retryTargets) {
+            if (stopping || Thread.currentThread().isInterrupted()) {
+                return;
+            }
             try {
                 if (target.vehicleId() == null) {
                     pollGroup(target.group(), null, retryCycle);
@@ -137,6 +152,11 @@ public class BusAlarmMonitoringScheduler {
                         target.group().key().provider(), target.group().key().externalRouteId(), exception);
             }
         }
+    }
+
+    @EventListener(ContextClosedEvent.class)
+    public void stop() {
+        stopping = true;
     }
 
     boolean waitBeforeRetry() {
