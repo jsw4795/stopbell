@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,114 @@ import 'package:stopbell/features/auth/backend_auth_client.dart';
 
 void main() {
   final baseUrl = Uri.parse('http://localhost:8080');
+
+  for (final operation in ['login', 'refresh', 'logout']) {
+    testWidgets('$operation no response times out and ignores late success', (
+      tester,
+    ) async {
+      final response = Completer<http.Response>();
+      var requests = 0;
+      final transport = MockClient((_) {
+        requests++;
+        return response.future;
+      });
+      addTearDown(transport.close);
+      final client = BackendAuthClient(apiBaseUrl: baseUrl, client: transport);
+      final Future<Object?> pending = switch (operation) {
+        'login' => client.login('fixture-id'),
+        'refresh' => client.refresh('fixture-refresh'),
+        _ => client.logout('fixture-refresh'),
+      };
+      var completions = 0;
+      Object? failure;
+      final settled = pending.then<void>(
+        (_) => completions++,
+        onError: (Object error) {
+          failure = error;
+          completions++;
+        },
+      );
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 15));
+      final completedAtDeadline = completions == 1;
+      final deadlineFailure = failure;
+      response.complete(
+        operation == 'logout'
+            ? http.Response('', 204)
+            : http.Response(
+                jsonEncode({
+                  'accessToken': 'late-access',
+                  'refreshToken': 'late-refresh',
+                }),
+                200,
+              ),
+      );
+      await tester.pump();
+      await settled;
+
+      expect(
+        completedAtDeadline,
+        isTrue,
+        reason: '$operation still pending after 15 seconds',
+      );
+      expect(deadlineFailure, isA<TimeoutException>());
+      expect(failure, same(deadlineFailure));
+      expect(completions, 1);
+      expect(requests, 1);
+      for (final secret in [
+        'fixture-id',
+        'fixture-refresh',
+        'late-access',
+        'late-refresh',
+      ]) {
+        expect(failure.toString(), isNot(contains(secret)));
+      }
+    });
+
+    for (final lateFailure in ['HTTP 401', 'network error']) {
+      testWidgets('$operation ignores late $lateFailure with custom timeout', (
+        tester,
+      ) async {
+        final response = Completer<http.Response>();
+        var requests = 0;
+        final transport = MockClient((_) {
+          requests++;
+          return response.future;
+        });
+        addTearDown(transport.close);
+        const timeout = Duration(seconds: 2);
+        final client = BackendAuthClient(
+          apiBaseUrl: baseUrl,
+          client: transport,
+          timeout: timeout,
+        );
+        final Future<Object?> pending = switch (operation) {
+          'login' => client.login('fixture-id'),
+          'refresh' => client.refresh('fixture-refresh'),
+          _ => client.logout('fixture-refresh'),
+        };
+        var completed = false;
+        final result = expectLater(
+          pending.whenComplete(() => completed = true),
+          throwsA(isA<TimeoutException>()),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(completed, isFalse);
+        await tester.pump(const Duration(seconds: 1));
+        await result;
+        expect(completed, isTrue);
+        if (lateFailure == 'HTTP 401') {
+          response.complete(http.Response('fixture-refresh', 401));
+        } else {
+          response.completeError(http.ClientException('late network failure'));
+        }
+        await tester.pump();
+        expect(requests, 1);
+        expect(tester.takeException(), isNull);
+      });
+    }
+  }
 
   test('login sends Google ID token JSON and returns a Token Pair', () async {
     final client = BackendAuthClient(

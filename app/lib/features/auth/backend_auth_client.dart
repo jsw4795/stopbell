@@ -5,10 +5,14 @@ import 'package:http/http.dart' as http;
 import 'token_pair.dart';
 
 class BackendAuthClient {
-  BackendAuthClient({required this.apiBaseUrl, http.Client? client})
-    : _client = client ?? http.Client();
+  BackendAuthClient({
+    required this.apiBaseUrl,
+    http.Client? client,
+    this.timeout = const Duration(seconds: 15),
+  }) : _client = client ?? http.Client();
 
   final Uri apiBaseUrl;
+  final Duration timeout;
   final http.Client _client;
 
   Future<TokenPair> login(String idToken) =>
@@ -59,11 +63,15 @@ class BackendAuthClient {
   }
 
   Future<http.Response> _post(String path, Map<String, String> body) {
-    return _client.post(
-      apiBaseUrl.resolve(path),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(body),
-    );
+    // Bound the HTTP result before parsing tokens or changing session state.
+    // This ignores late results; it does not cancel server work or retry POSTs.
+    return _client
+        .post(
+          apiBaseUrl.resolve(path),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        )
+        .timeout(timeout);
   }
 }
 

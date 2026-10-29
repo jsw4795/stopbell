@@ -122,6 +122,18 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 
 세부 결정과 재검토 조건은 `adr/ADR-005-authentication-and-user-identity-strategy.md`를 따른다.
 
+### Flutter 인증 HTTP Timeout (TASK-816 / AUD-06)
+
+`BackendAuthClient`의 공통 `_post()`는 `POST /auth/google`·`POST /auth/refresh`·`POST /auth/logout` 각각에 기본 **15초**의 `Future.timeout()`을 적용한다. 생성자의 `timeout`으로 테스트용 제한 시간을 주입할 수 있으며 기존 생성 코드는 기본값을 사용한다. Alarm HTTP와 같은 15초를 사용해 응답 지연 허용 수준을 맞추되, Google SDK의 계정 선택·네이티브 인증 시간은 이 Backend HTTP 예산에 포함하지 않는다. Timeout은 `TimeoutException` 그대로 전달해 HTTP 401·5xx 및 network 오류와 구분하며, 기존 로그인 화면은 민감한 오류 원문 대신 재시도 가능한 로그인 실패 안내로 대기를 끝낸다.
+
+제한 시간은 Token Pair 파싱 이전의 HTTP Future 경계에 적용한다. Timeout 뒤 늦은 성공·HTTP 오류·transport 오류는 이 경계를 통과하지 못하므로 실패한 Login이 새 Pair를 저장하거나 새 login identity를 만들지 않고, 만료된 Refresh가 Pair 교체·저장·보호 API Replay를 실행하지 않는다. 요청별 자동 POST 재전송은 없으며 공유 `http.Client`를 닫지 않는다. 이는 논리적 요청 종료이며 실제 TCP 연결 종료·서버 처리 중단·Rollback을 보장하지 않는다.
+
+Auth Session의 기존 상태 전이는 유지한다. Refresh Timeout은 서버가 Token을 확실히 거부했다는 의미가 아니므로 기존 Pair·Secure Storage·generation·login identity를 유지하고 `_refreshInFlight`를 `finally`로 정리한다. concurrent 401은 HTTP Refresh 한 번을 공유하며, 그 HTTP가 Timeout이면 모든 대기자에게 같은 오류가 전달되고 Replay하지 않는다. 제한 시간 내 정상 Rotation은 새 Pair를 저장하고 generation·identity를 보존해 유효한 요청만 최대 한 번 Replay한다. Refresh 401의 인증 제거, 5xx/network의 일시적 오류 및 Token 저장·삭제 실패 정책은 변경하지 않는다. Alarm 요청 A만 만료되고 공유 Refresh HTTP는 아직 유효하다면 B는 계속 결과를 사용할 수 있는 [AUD-05 요청별 수명](#flutter-alarm-http-요청-수명과-timeout-task-816--aud-05)을 유지한다.
+
+Logout은 기존 `beforeLogout` → generation 무효화 → 진행 중 Refresh 대기 → 확인 가능한 Refresh Token 선택 → Secure Storage 삭제 → 메모리 인증 제거 → Backend Logout 순서를 유지한다. Refresh HTTP 무응답은 그 요청의 남은 15초 예산 뒤 대기를 해제한다. 그 전에 Rotation이 성공하면 기존 `_rotatedRefreshTokenForLogout`으로 새 Token을 revoke하고 Pair를 저장하지 않는다. Backend Logout 무응답은 별도 15초 뒤 `BackendLogoutCleanupException`으로 전달하며 로컬 비인증 상태를 유지하고 `_logoutInFlight`·`_loggingOut`을 정리해 새 Login이 가능하다. 기존 Device API의 8초·`PushRegistrationService.beforeLogout`의 queue 대기 포함 10초는 별도 예산이다. Hook 10초 + Refresh HTTP 잔여 최대 15초 + Logout HTTP 15초의 대기가 누적될 수 있으며, Hook 일반 구현·Secure Storage·Google SDK 자체의 무응답은 이 변경의 보장 밖이므로 전체 Logout의 15초 또는 40초 종료를 보장하지 않는다.
+
+서버가 Refresh Token을 이미 회전시킨 뒤 응답이 유실되면 기존 Token이 무효화됐을 수 있다. Timeout 뒤 Pair 보존은 Token 유효성 보장이 아니며, 별도 복구 계약이 없으므로 Token 합성·추측·자동 재전송을 하지 않는다. 이후 Logout은 확인 가능한 기존 Token만 제시하며, Backend는 제시된 Hash의 Session 하나만 삭제하고 없는 Token도 204로 처리하므로 알 수 없는 새 Token의 서버 측 revocation을 보장할 수 없다. Logout 자체의 Timeout도 서버 정리 성공 또는 확실한 실패로 단정하지 않는다. 자동 재현·회귀 결과와 실환경 미검증 사항은 [TASK-816 처리 기록](task-list.md#task-816-감사-항목과-확인-수준)에 남긴다.
+
 ### Flutter 도착 Alarm 최초 생성과 Push 준비 (TASK-816 / AUD-01)
 
 `main.dart`의 기존 `prepareAlarmPush()` 콜백을 `AlarmHome`이 상세 화면과 `BusRouteStopScreen`에 전달한다. 최초 `알람 시작`은 중복 입력을 막은 뒤 Push 준비·사용자 선택 → Create → Activate 순서로 실행하며, 같은 동작의 Activate 직전에는 준비를 반복하지 않는다. 미결정 권한은 도착 알림 안내 뒤 사용자가 선택할 때만 요청하고, 취소·Dialog 닫기는 Create 전에 종료한다. 권한 거부·기기 등록 실패는 기존 설정 안내와 명시적 계속 진행/취소를 유지하며 Alarm 사용 자체를 강제 차단하지 않는다. 콜백이 없는 환경의 기존 생성 계약과 BoardingSession 준비 UX는 유지한다.
@@ -134,7 +146,7 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 
 기존 `AuthenticatedApiClient`는 최초 응답 수신 직후 Refresh 시작 전, Refresh 완료 후 Replay 전, Replay 응답 수신 후에 generation과 요청 유효성을 검사한다. 따라서 Timeout 뒤 늦은 401은 새 Refresh/Replay로 이어지지 않고, 이미 Refresh가 시작됐어도 만료된 요청의 Replay는 차단한다. 한 요청의 Timeout은 Auth Session이나 공유 Refresh를 취소하지 않으며, 다른 유효한 요청은 동일 Refresh 결과를 계속 사용한다. Token rotation·Secure Storage·login identity·Refresh 401의 인증 실패 정책과 제한 시간 내 정상 401의 최대 1회 Replay는 기존 Auth Session 계약을 유지한다.
 
-TimeoutException은 기존대로 호출자에게 전달한다. 늦은 성공을 새 UI 성공이나 후속 Activate로 반영하지 않으며, Create Unknown Outcome의 목록 확인·자동 Create 금지와 Create 성공/Activate 실패 시 원래 ID로 복구하는 UX를 유지한다. 이미 서버에 전달된 Mutation의 실행 취소·Rollback이나 물리적 HTTP 연결 종료를 보장하지 않는다. BoardingSession·Device의 기존 요청 유효성 패턴은 변경하지 않으며 인증 HTTP 자체의 Timeout 부재(AUD-06)는 별도 미해결 범위다. 재현·선택 테스트와 실환경 미검증 사항은 [TASK-816 처리 기록](task-list.md#task-816-감사-항목과-확인-수준)을 따른다.
+TimeoutException은 기존대로 호출자에게 전달한다. 늦은 성공을 새 UI 성공이나 후속 Activate로 반영하지 않으며, Create Unknown Outcome의 목록 확인·자동 Create 금지와 Create 성공/Activate 실패 시 원래 ID로 복구하는 UX를 유지한다. 이미 서버에 전달된 Mutation의 실행 취소·Rollback이나 물리적 HTTP 연결 종료를 보장하지 않는다. BoardingSession·Device의 기존 요청 유효성 패턴은 변경하지 않으며 인증 HTTP 자체의 예산은 [AUD-06](#flutter-인증-http-timeout-task-816--aud-06)을 따른다. 재현·선택 테스트와 실환경 미검증 사항은 [TASK-816 처리 기록](task-list.md#task-816-감사-항목과-확인-수준)을 따른다.
 
 ### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
 

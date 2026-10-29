@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -65,6 +66,73 @@ Future<AuthSession> session(FakeStorage storage, FakeBackend backend) async {
 }
 
 void main() {
+  testWidgets(
+    'shared backend refresh HTTP timeout fails both protected requests without replay',
+    (tester) async {
+      final refresh = Completer<http.Response>();
+      final requests = <http.Request>[];
+      final transport = MockClient((request) async {
+        requests.add(request);
+        return request.url.path == '/auth/refresh'
+            ? refresh.future
+            : http.Response('', 401);
+      });
+      addTearDown(transport.close);
+      final storage = FakeStorage(oldPair);
+      final auth = AuthSession(
+        authenticator: FakeAuthenticator(),
+        backend: BackendAuthClient(apiBaseUrl: baseUrl, client: transport),
+        tokenStorage: storage,
+      );
+      addTearDown(auth.dispose);
+      await auth.initialize();
+      final client = AuthenticatedApiClient(
+        apiBaseUrl: baseUrl,
+        authSession: auth,
+        client: transport,
+      );
+      final first = expectLater(
+        client.request('POST', '/api/v1/fixture', body: '{"value":1}'),
+        throwsA(isA<TimeoutException>()),
+      );
+      final second = expectLater(
+        client.request('GET', '/api/v1/fixture'),
+        throwsA(isA<TimeoutException>()),
+      );
+      await tester.pump();
+      expect(
+        requests.where((r) => r.url.path == '/auth/refresh'),
+        hasLength(1),
+      );
+      await tester.pump(const Duration(seconds: 15));
+      await first;
+      await second;
+      refresh.complete(
+        http.Response(
+          jsonEncode({
+            'accessToken': newPair.accessToken,
+            'refreshToken': newPair.refreshToken,
+          }),
+          200,
+        ),
+      );
+      await tester.pump();
+      expect(
+        requests.where((r) => r.url.path == '/auth/refresh'),
+        hasLength(1),
+      );
+      expect(
+        requests
+            .where((r) => r.url.path == '/api/v1/fixture')
+            .map((r) => r.method),
+        ['POST', 'GET'],
+      );
+      expect(storage.pair, same(oldPair));
+      expect(auth.currentPair, same(oldPair));
+      expect(auth.state, AuthState.authenticated);
+    },
+  );
+
   test(
     'current token overrides caller header and JSON body passes through',
     () async {

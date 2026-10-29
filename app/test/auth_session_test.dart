@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:stopbell/core/app_config.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
 import 'package:stopbell/features/auth/backend_auth_client.dart';
 import 'package:stopbell/features/auth/google_auth_service.dart';
@@ -72,7 +76,375 @@ class FakeBackend extends BackendAuthClient {
   }
 }
 
+AuthSession httpSession(BackendAuthClient backend, FakeStorage storage) {
+  final session = AuthSession(
+    authenticator: GoogleAuthService(
+      config: const AppConfig(
+        apiBaseUrl: 'http://localhost:8080',
+        googleIosClientId: 'fixture-ios',
+        googleServerClientId: 'fixture-server',
+      ),
+      backend: backend,
+      googleIdTokenProvider: () async => 'fixture-google-id',
+    ),
+    backend: backend,
+    tokenStorage: storage,
+  );
+  addTearDown(session.dispose);
+  return session;
+}
+
+http.Response tokenResponse(TokenPair pair) => http.Response(
+  jsonEncode({
+    'accessToken': pair.accessToken,
+    'refreshToken': pair.refreshToken,
+  }),
+  200,
+);
+
 void main() {
+  testWidgets('unresponsive shared refresh releases logout at HTTP deadline', (
+    tester,
+  ) async {
+    final response = Completer<http.Response>();
+    final requests = <http.Request>[];
+    final transport = MockClient((request) async {
+      requests.add(request);
+      return request.url.path == '/auth/refresh'
+          ? response.future
+          : http.Response('', 204);
+    });
+    addTearDown(transport.close);
+    final storage = FakeStorage(pair: oldPair);
+    final session = AuthSession(
+      authenticator: FakeAuthenticator(),
+      backend: BackendAuthClient(
+        apiBaseUrl: Uri.parse('http://localhost:8080'),
+        client: transport,
+      ),
+      tokenStorage: storage,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    final failures = <Object>[];
+    Future<void> refresh() => session
+        .refreshAfterUnauthorized('old-access')
+        .then<void>(
+          (_) => fail('unresponsive refresh must fail'),
+          onError: (Object error) => failures.add(error),
+        );
+    final first = refresh();
+    final second = refresh();
+    await tester.pump();
+    var loggedOut = false;
+    final logout = session.logout().then((_) => loggedOut = true);
+    await tester.pump();
+    expect(requests.map((r) => r.url.path), ['/auth/refresh']);
+    expect(session.isLoggingOut, isTrue);
+    await tester.pump(const Duration(seconds: 15));
+    final completedAtDeadline = loggedOut;
+    final failuresAtDeadline = List<Object>.of(failures);
+    response.complete(
+      http.Response(
+        jsonEncode({
+          'accessToken': 'late-access',
+          'refreshToken': 'late-refresh',
+        }),
+        200,
+      ),
+    );
+    await tester.pump();
+    await Future.wait([first, second, logout]);
+
+    expect(
+      completedAtDeadline,
+      isTrue,
+      reason: 'logout still waiting for unresponsive refresh',
+    );
+    expect(failuresAtDeadline, hasLength(2));
+    expect(failuresAtDeadline, everyElement(isA<TimeoutException>()));
+    expect(requests.map((r) => r.url.path), ['/auth/refresh', '/auth/logout']);
+    expect(jsonDecode(requests.last.body), {
+      'refreshToken': oldPair.refreshToken,
+    });
+    expect(storage.saves, 0);
+    expect(storage.deletes, 1);
+    expect(storage.pair, isNull);
+    expect(session.currentPair, isNull);
+    expect(session.state, AuthState.unauthenticated);
+    expect(session.isLoggingOut, isFalse);
+  });
+
+  for (final lateBeforeLogin in [true, false]) {
+    testWidgets(
+      'login timeout ignores late result before new login: $lateBeforeLogin',
+      (tester) async {
+        final lateLogin = Completer<http.Response>();
+        var requests = 0;
+        final transport = MockClient((request) async {
+          expectSync(request.url.path, '/auth/google');
+          expectSync(jsonDecode(request.body), {
+            'idToken': 'fixture-google-id',
+          });
+          requests++;
+          return requests == 1 ? lateLogin.future : tokenResponse(newPair);
+        });
+        addTearDown(transport.close);
+        final storage = FakeStorage();
+        final session = httpSession(
+          BackendAuthClient(
+            apiBaseUrl: Uri.parse('http://localhost:8080'),
+            client: transport,
+          ),
+          storage,
+        );
+        await session.initialize();
+        final initialGeneration = session.generation;
+        final initialIdentity = session.sessionIdentity;
+        final failed = expectLater(
+          session.login(),
+          throwsA(isA<TimeoutException>()),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 15));
+        await failed;
+        expect(session.state, AuthState.unauthenticated);
+        expect(session.currentPair, isNull);
+        expect(storage.pair, isNull);
+        expect(storage.saves, 0);
+        expect(session.generation, initialGeneration);
+        expect(session.sessionIdentity, initialIdentity);
+        expect(requests, 1);
+
+        if (lateBeforeLogin) {
+          lateLogin.complete(tokenResponse(oldPair));
+          await tester.pump();
+          expect(session.state, AuthState.unauthenticated);
+          expect(session.currentPair, isNull);
+          expect(storage.pair, isNull);
+          expect(storage.saves, 0);
+          expect(session.generation, initialGeneration);
+          expect(session.sessionIdentity, initialIdentity);
+        }
+        // A user starts a new login; the expired HTTP result must not replace it.
+        await session.login();
+        final identity = session.sessionIdentity;
+        final generation = session.generation;
+        expect(identity, isNot(initialIdentity));
+        expect(generation, initialGeneration + 1);
+        if (!lateBeforeLogin) lateLogin.complete(tokenResponse(oldPair));
+        await tester.pump();
+        expect(session.state, AuthState.authenticated);
+        expect(session.accessToken, newPair.accessToken);
+        expect(storage.pair?.refreshToken, newPair.refreshToken);
+        expect(storage.saves, 1);
+        expect(session.sessionIdentity, identity);
+        expect(storage.pair?.sessionIdentity, identity);
+        expect(session.generation, generation);
+        expect(requests, 2);
+      },
+    );
+  }
+
+  for (final lateResult in ['success', 'HTTP 401', 'network error']) {
+    testWidgets(
+      'shared refresh timeout preserves pair and clears flight before late $lateResult',
+      (tester) async {
+        final oldRefresh = Completer<http.Response>();
+        final nextRefresh = Completer<http.Response>();
+        var requests = 0;
+        final transport = MockClient((request) {
+          expectSync(request.url.path, '/auth/refresh');
+          expectSync(jsonDecode(request.body), {
+            'refreshToken': oldPair.refreshToken,
+          });
+          requests++;
+          return requests == 1 ? oldRefresh.future : nextRefresh.future;
+        });
+        addTearDown(transport.close);
+        final storage = FakeStorage(pair: oldPair);
+        final session = httpSession(
+          BackendAuthClient(
+            apiBaseUrl: Uri.parse('http://localhost:8080'),
+            client: transport,
+          ),
+          storage,
+        );
+        await session.initialize();
+        final generation = session.generation;
+        final identity = session.sessionIdentity;
+        final failures = <Object>[];
+        Future<void> refresh() => session
+            .refreshAfterUnauthorized('old-access')
+            .then<void>(
+              (_) => fail('unresponsive refresh must fail'),
+              onError: (Object error) => failures.add(error),
+            );
+        final first = refresh();
+        final second = refresh();
+        await tester.pump();
+        expect(requests, 1);
+        await tester.pump(const Duration(seconds: 15));
+        await Future.wait([first, second]);
+        expect(failures, hasLength(2));
+        expect(failures, everyElement(isA<TimeoutException>()));
+        expect(failures.first, same(failures.last));
+        expect(requests, 1); // No automatic POST retry.
+        expect(session.currentPair, same(oldPair));
+        expect(storage.pair, same(oldPair));
+        expect(storage.saves, 0);
+        expect(storage.deletes, 0);
+        expect(session.state, AuthState.authenticated);
+        expect(session.generation, generation);
+        expect(session.sessionIdentity, identity);
+
+        // A separate caller can start a new flight. This is not an automatic retry
+        // or a guarantee that the old refresh token is still valid on the server.
+        final next = session.refreshAfterUnauthorized('old-access');
+        await tester.pump();
+        expect(requests, 2);
+        switch (lateResult) {
+          case 'success':
+            oldRefresh.complete(
+              tokenResponse(
+                const TokenPair(
+                  accessToken: 'late-access',
+                  refreshToken: 'late-refresh',
+                ),
+              ),
+            );
+          case 'HTTP 401':
+            oldRefresh.complete(http.Response('', 401));
+          default:
+            oldRefresh.completeError(http.ClientException('late offline'));
+        }
+        await tester.pump();
+        expect(session.currentPair, same(oldPair));
+        expect(storage.pair, same(oldPair));
+        expect(storage.saves, 0);
+        expect(storage.deletes, 0);
+        nextRefresh.complete(tokenResponse(newPair));
+        await tester.pump();
+        expect((await next).refreshToken, newPair.refreshToken);
+        expect(storage.saves, 1);
+        expect(storage.pair?.refreshToken, newPair.refreshToken);
+        expect(storage.pair?.sessionIdentity, identity);
+        expect(session.accessToken, newPair.accessToken);
+        expect(session.generation, generation);
+        expect(session.sessionIdentity, identity);
+        expect(requests, 2);
+      },
+    );
+  }
+
+  testWidgets(
+    'logout HTTP timeout keeps local logout and allows fresh login before late completion',
+    (tester) async {
+      final lateLogout = Completer<http.Response>();
+      final requests = <http.Request>[];
+      final transport = MockClient((request) async {
+        requests.add(request);
+        return request.url.path == '/auth/logout'
+            ? lateLogout.future
+            : tokenResponse(newPair);
+      });
+      addTearDown(transport.close);
+      final storage = FakeStorage(pair: oldPair);
+      final session = httpSession(
+        BackendAuthClient(
+          apiBaseUrl: Uri.parse('http://localhost:8080'),
+          client: transport,
+        ),
+        storage,
+      );
+      await session.initialize();
+      final identity = session.sessionIdentity;
+      final generation = session.generation;
+      final logout = session.logout();
+      expect(session.logout(), same(logout));
+      final failed = expectLater(
+        logout,
+        throwsA(isA<BackendLogoutCleanupException>()),
+      );
+      await tester.pump();
+      expect(session.state, AuthState.unauthenticated);
+      expect(session.currentPair, isNull);
+      expect(storage.pair, isNull);
+      expect(session.accessToken, isNull);
+      expect(session.isLoggingOut, isTrue);
+      await tester.pump(const Duration(seconds: 15));
+      await failed;
+      expect(session.isLoggingOut, isFalse);
+      expect(storage.deletes, 1);
+      expect(requests.map((r) => r.url.path), ['/auth/logout']);
+      // Duplicate logout after failure does not send another POST.
+      await session.logout();
+      await session.login(); // Also verifies _loggingOut was cleared.
+      final freshIdentity = session.sessionIdentity;
+      expect(freshIdentity, isNot(identity));
+      expect(session.generation, greaterThan(generation));
+      lateLogout.complete(http.Response('', 204));
+      await tester.pump();
+      expect(session.state, AuthState.authenticated);
+      expect(session.accessToken, newPair.accessToken);
+      expect(session.sessionIdentity, freshIdentity);
+      expect(storage.pair?.sessionIdentity, freshIdentity);
+      expect(storage.pair?.refreshToken, newPair.refreshToken);
+      expect(storage.saves, 1);
+      expect(storage.deletes, 1);
+      expect(requests.map((r) => r.url.path), ['/auth/logout', '/auth/google']);
+    },
+  );
+
+  testWidgets(
+    'logout waits for in-budget HTTP rotation and revokes rotated token without saving it',
+    (tester) async {
+      final response = Completer<http.Response>();
+      final requests = <http.Request>[];
+      final transport = MockClient((request) async {
+        requests.add(request);
+        return request.url.path == '/auth/refresh'
+            ? response.future
+            : http.Response('', 204);
+      });
+      addTearDown(transport.close);
+      final storage = FakeStorage(pair: oldPair);
+      final session = httpSession(
+        BackendAuthClient(
+          apiBaseUrl: Uri.parse('http://localhost:8080'),
+          client: transport,
+        ),
+        storage,
+      );
+      await session.initialize();
+      final failedRefresh = expectLater(
+        session.refreshAfterUnauthorized('old-access'),
+        throwsA(isA<StaleSessionException>()),
+      );
+      final logout = session.logout();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 14));
+      expect(requests, hasLength(1));
+      response.complete(tokenResponse(newPair));
+      await tester.pump();
+      await failedRefresh;
+      await logout;
+      expect(requests.map((r) => r.url.path), [
+        '/auth/refresh',
+        '/auth/logout',
+      ]);
+      expect(jsonDecode(requests.last.body), {
+        'refreshToken': newPair.refreshToken,
+      });
+      expect(storage.saves, 0);
+      expect(storage.deletes, 1);
+      expect(storage.pair, isNull);
+      expect(session.currentPair, isNull);
+      expect(session.state, AuthState.unauthenticated);
+      expect(session.isLoggingOut, isFalse);
+    },
+  );
+
   test(
     '기존 저장 Token Pair는 durable login identity를 한 번 보강하고 재시작에 보존한다',
     () async {

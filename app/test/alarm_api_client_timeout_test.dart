@@ -234,20 +234,25 @@ void main() {
   testWidgets('timeout during shared refresh blocks only the expired request', (
     tester,
   ) async {
+    final initial = Completer<http.Response>();
     final refresh = Completer<http.Response>();
     final f = _Fixture()
       ..refresh = (() => refresh.future)
       ..respond = (request) async =>
           request.headers['authorization'] == 'Bearer old-access'
-          ? http.Response('', 401)
+          ? initial.future
           : _alarm(200);
     await f.initialize();
     final identity = f.auth.sessionIdentity;
     final generation = f.auth.generation;
     final expired = expectLater(f.call(), throwsA(isA<TimeoutException>()));
     await tester.pump();
+    // Start Refresh at t=1 so A's t=15 deadline precedes auth HTTP's t=16.
+    await tester.pump(const Duration(seconds: 1));
+    initial.complete(http.Response('', 401));
+    await tester.pump();
     expect(f.refreshes, 1);
-    await tester.pump(const Duration(seconds: 10));
+    await tester.pump(const Duration(seconds: 9));
     // B uses the same AlarmApiClient and still has ten seconds left when A expires.
     final current = f.client.findById(15);
     await tester.pump();
@@ -271,6 +276,45 @@ void main() {
     expect(f.auth.sessionIdentity, identity);
     expect(f.storage.pair?.refreshToken, _rotated.refreshToken);
   });
+
+  testWidgets(
+    'backend refresh deadline fails still-current B as well as expired A',
+    (tester) async {
+      final refresh = Completer<http.Response>();
+      final f = _Fixture()
+        ..refresh = (() => refresh.future)
+        ..respond = (_) async => http.Response('', 401);
+      await f.initialize();
+      final first = expectLater(f.call(), throwsA(isA<TimeoutException>()));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 10));
+      var secondFinished = false;
+      final second = expectLater(
+        f.client.findById(15),
+        throwsA(isA<TimeoutException>()),
+      ).then((_) => secondFinished = true);
+      await tester.pump();
+      expect(f.refreshes, 1);
+      expect(secondFinished, isFalse);
+      // A and Refresh expire at t=15; B's own Alarm deadline would be t=25.
+      await tester.pump(const Duration(seconds: 5));
+      await first;
+      await second;
+      expect(secondFinished, isTrue);
+      refresh.complete(
+        _json({
+          'accessToken': _rotated.accessToken,
+          'refreshToken': _rotated.refreshToken,
+        }),
+      );
+      await tester.pump();
+      expect(f.requests.map((r) => r.method), ['POST', 'GET']);
+      expect(f.refreshes, 1);
+      expect(f.storage.pair, same(_pair));
+      expect(f.auth.currentPair, same(_pair));
+      expect(f.auth.state, AuthState.authenticated);
+    },
+  );
 
   testWidgets('late 401 of timed out A does not invalidate pending B', (
     tester,
@@ -398,15 +442,20 @@ void main() {
   testWidgets('shared refresh 401 after timeout keeps auth rejection policy', (
     tester,
   ) async {
+    final initial = Completer<http.Response>();
     final refresh = Completer<http.Response>();
     final f = _Fixture()
       ..refresh = (() => refresh.future)
-      ..respond = (_) async => http.Response('', 401);
+      ..respond = (_) => initial.future;
     await f.initialize();
     final result = expectLater(f.call(), throwsA(isA<TimeoutException>()));
     await tester.pump();
+    // The Alarm times out first; Refresh is still inside its own HTTP budget.
+    await tester.pump(const Duration(seconds: 1));
+    initial.complete(http.Response('', 401));
+    await tester.pump();
     expect(f.refreshes, 1);
-    await tester.pump(_deadline);
+    await tester.pump(const Duration(seconds: 14));
     await result;
     refresh.complete(http.Response('', 401));
     await tester.pump();
