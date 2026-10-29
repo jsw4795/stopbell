@@ -128,6 +128,14 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 
 준비 완료 뒤와 각 API 응답 뒤에는 화면 수명·요청 generation·선택 Route/occurrence·Client 및 `AlarmHome`의 Auth generation·User/login session identity·navigation epoch를 재검증한다. Logout/계정 전환·화면 이동·Route 교체로 무효화된 요청은 후속 Create/Activate나 상세 이동을 실행하지 않는다. 이미 서버에 전달된 요청을 취소한다는 의미는 아니다. 준비 단계 예외는 재시도 가능한 준비 오류이며 Create 결과 불명확과 구분한다. Create 성공 뒤 Activate 실패는 원래 ID의 INACTIVE 상세로 복구하고 수동 활성화 시 다시 Push를 준비한다. Create 결과 불명확은 자동 POST 재전송 없이 목록 확인으로 복구하는 TASK-608B 계약을 유지한다.
 
+### Flutter Alarm HTTP 요청 수명과 Timeout (TASK-816 / AUD-05)
+
+`AlarmApiClient`의 Create·목록·상세·Activate·Deactivate·Delete는 공통 `_request()` 경계를 사용한다. 각 논리적 요청은 독립적인 `active`와 시작 시 Auth generation을 보존하고, 기존 `AuthenticatedApiClient.request()`에 `expectedGeneration`과 `isRequestCurrent`를 전달한다. 유효성은 해당 요청의 active·현재 Auth generation·Logout 진행 여부로 검사한다. 최초 HTTP 요청·공유 Refresh 대기·최대 1회 Replay 전체에 기존 **15초 Timeout을 한 번만** 적용하며 단계마다 예산을 초기화하지 않는다. 성공·실패·Timeout으로 경계를 벗어날 때 `finally`에서 해당 요청만 무효화한다.
+
+기존 `AuthenticatedApiClient`는 최초 응답 수신 직후 Refresh 시작 전, Refresh 완료 후 Replay 전, Replay 응답 수신 후에 generation과 요청 유효성을 검사한다. 따라서 Timeout 뒤 늦은 401은 새 Refresh/Replay로 이어지지 않고, 이미 Refresh가 시작됐어도 만료된 요청의 Replay는 차단한다. 한 요청의 Timeout은 Auth Session이나 공유 Refresh를 취소하지 않으며, 다른 유효한 요청은 동일 Refresh 결과를 계속 사용한다. Token rotation·Secure Storage·login identity·Refresh 401의 인증 실패 정책과 제한 시간 내 정상 401의 최대 1회 Replay는 기존 Auth Session 계약을 유지한다.
+
+TimeoutException은 기존대로 호출자에게 전달한다. 늦은 성공을 새 UI 성공이나 후속 Activate로 반영하지 않으며, Create Unknown Outcome의 목록 확인·자동 Create 금지와 Create 성공/Activate 실패 시 원래 ID로 복구하는 UX를 유지한다. 이미 서버에 전달된 Mutation의 실행 취소·Rollback이나 물리적 HTTP 연결 종료를 보장하지 않는다. BoardingSession·Device의 기존 요청 유효성 패턴은 변경하지 않으며 인증 HTTP 자체의 Timeout 부재(AUD-06)는 별도 미해결 범위다. 재현·선택 테스트와 실환경 미검증 사항은 [TASK-816 처리 기록](task-list.md#task-816-감사-항목과-확인-수준)을 따른다.
+
 ### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
 
 로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 목적·선택 승차 지점을 선택한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.

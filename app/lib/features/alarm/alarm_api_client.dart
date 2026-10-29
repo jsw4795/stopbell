@@ -1,6 +1,9 @@
 import 'dart:convert';
 
+import 'package:http/http.dart' as http;
+
 import '../../core/authenticated_api_client.dart';
+import '../auth/auth_session.dart';
 import 'alarm.dart';
 
 abstract class AlarmClient {
@@ -33,26 +36,22 @@ class AlarmApiClient implements AlarmClient {
         'targetStopOccurrenceId',
       );
     }
-    final response = await apiClient
-        .request(
-          'POST',
-          '/api/v1/alarms',
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'targetStopOccurrenceId': targetStopOccurrenceId,
-            'notifyOneStopBefore': notifyOneStopBefore,
-            'notifyOneStopAfter': notifyOneStopAfter,
-          }),
-        )
-        .timeout(const Duration(seconds: 15));
+    final response = await _request(
+      'POST',
+      '/api/v1/alarms',
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'targetStopOccurrenceId': targetStopOccurrenceId,
+        'notifyOneStopBefore': notifyOneStopBefore,
+        'notifyOneStopAfter': notifyOneStopAfter,
+      }),
+    );
     return _alarm(response.statusCode, response.bodyBytes, 201);
   }
 
   @override
   Future<List<Alarm>> findAll() async {
-    final response = await apiClient
-        .request('GET', '/api/v1/alarms')
-        .timeout(const Duration(seconds: 15));
+    final response = await _request('GET', '/api/v1/alarms');
     _checkStatus(response.statusCode, response.bodyBytes, 200);
     try {
       final decoded = jsonDecode(utf8.decode(response.bodyBytes));
@@ -74,17 +73,43 @@ class AlarmApiClient implements AlarmClient {
 
   @override
   Future<void> delete(int alarmId) async {
-    final response = await apiClient
-        .request('DELETE', _path(alarmId))
-        .timeout(const Duration(seconds: 15));
+    final response = await _request('DELETE', _path(alarmId));
     _checkStatus(response.statusCode, response.bodyBytes, 204);
   }
 
   Future<Alarm> _getAlarm(String method, String path, int status) async {
-    final response = await apiClient
-        .request(method, path)
-        .timeout(const Duration(seconds: 15));
+    final response = await _request(method, path);
     return _alarm(response.statusCode, response.bodyBytes, status);
+  }
+
+  Future<http.Response> _request(
+    String method,
+    String path, {
+    Map<String, String> headers = const {},
+    String? body,
+  }) async {
+    var active = true;
+    final auth = apiClient.authSession;
+    final generation = auth.generation;
+    bool valid() =>
+        active && auth.isCurrentGeneration(generation) && !auth.isLoggingOut;
+    if (!valid()) throw const StaleSessionException();
+    try {
+      // One budget covers the initial request, shared refresh, and replay.
+      return await apiClient
+          .request(
+            method,
+            path,
+            headers: headers,
+            body: body,
+            expectedGeneration: generation,
+            isRequestCurrent: valid,
+          )
+          .timeout(const Duration(seconds: 15));
+    } finally {
+      // A timeout must also invalidate the still-running request below us.
+      active = false;
+    }
   }
 
   String _path(int id) {
