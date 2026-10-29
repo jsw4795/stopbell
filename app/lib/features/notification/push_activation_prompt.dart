@@ -58,11 +58,11 @@ Future<bool> _preparePush(
       final request = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('하차 알림 받기'),
+          title: Text(boarding ? '하차 알림 받기' : '버스 도착 알림 받기'),
           content: Text(
             boarding
                 ? '하차 준비 알림을 받으려면 알림 권한과 기기 등록이 필요해요. 실제 수신 시점은 보장되지 않아요.'
-                : '버스 하차 시점을 알려드리기 위해 알림 권한이 필요합니다.',
+                : '버스 도착을 알려드리기 위해 알림 권한과 기기 등록이 필요합니다.',
           ),
           actions: [
             TextButton(
@@ -77,6 +77,7 @@ Future<bool> _preparePush(
         ),
       );
       if (!context.mounted || !current()) return false;
+      if (!boarding && request != true) return false;
       if (request == true) await service.provider.permission(request: true);
     }
     if (!context.mounted || !current()) return false;
@@ -100,13 +101,14 @@ Future<bool> _preparePush(
   final denied =
       result == PushReadiness.denied ||
       result == PushReadiness.permissionRequired;
+  final notification = boarding ? '하차 알림' : '버스 도착 알림';
   final proceed = await showDialog<bool>(
     context: context,
     builder: (dialogContext) => AlertDialog(
       title: const Text('이 기기의 알림 수신 준비가 필요합니다'),
       content: Text(
         denied
-            ? '알림 권한이 없어 이 기기에서 하차 알림을 받기 어렵습니다. iPhone 설정에서 알림을 허용할 수 있습니다. $continuation'
+            ? '알림 권한이 없어 이 기기에서 $notification을 받기 어렵습니다. iPhone 설정에서 알림을 허용할 수 있습니다. $continuation'
             : result == PushReadiness.backendFailed
             ? '서버에 기기 등록을 완료하지 못했습니다. 네트워크를 확인하고 다시 시도해 주세요. $continuation'
             : '알림 수신 준비를 완료하지 못했습니다. 네트워크와 알림 권한을 확인하고 다시 시도해 주세요. $continuation',

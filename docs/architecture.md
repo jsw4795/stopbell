@@ -122,6 +122,12 @@ logout과 refresh는 같은 Auth Session coordination으로 직렬화한다. log
 
 세부 결정과 재검토 조건은 `adr/ADR-005-authentication-and-user-identity-strategy.md`를 따른다.
 
+### Flutter 도착 Alarm 최초 생성과 Push 준비 (TASK-816 / AUD-01)
+
+`main.dart`의 기존 `prepareAlarmPush()` 콜백을 `AlarmHome`이 상세 화면과 `BusRouteStopScreen`에 전달한다. 최초 `알람 시작`은 중복 입력을 막은 뒤 Push 준비·사용자 선택 → Create → Activate 순서로 실행하며, 같은 동작의 Activate 직전에는 준비를 반복하지 않는다. 미결정 권한은 도착 알림 안내 뒤 사용자가 선택할 때만 요청하고, 취소·Dialog 닫기는 Create 전에 종료한다. 권한 거부·기기 등록 실패는 기존 설정 안내와 명시적 계속 진행/취소를 유지하며 Alarm 사용 자체를 강제 차단하지 않는다. 콜백이 없는 환경의 기존 생성 계약과 BoardingSession 준비 UX는 유지한다.
+
+준비 완료 뒤와 각 API 응답 뒤에는 화면 수명·요청 generation·선택 Route/occurrence·Client 및 `AlarmHome`의 Auth generation·User/login session identity·navigation epoch를 재검증한다. Logout/계정 전환·화면 이동·Route 교체로 무효화된 요청은 후속 Create/Activate나 상세 이동을 실행하지 않는다. 이미 서버에 전달된 요청을 취소한다는 의미는 아니다. 준비 단계 예외는 재시도 가능한 준비 오류이며 Create 결과 불명확과 구분한다. Create 성공 뒤 Activate 실패는 원래 ID의 INACTIVE 상세로 복구하고 수동 활성화 시 다시 Push를 준비한다. Create 결과 불명확은 자동 POST 재전송 없이 목록 확인으로 복구하는 TASK-608B 계약을 유지한다.
+
 ### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
 
 로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 목적·선택 승차 지점을 선택한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.

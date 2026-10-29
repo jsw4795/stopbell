@@ -16,6 +16,8 @@ class BusRouteStopScreen extends StatefulWidget {
     required this.alarmClient,
     required this.onCreated,
     required this.onShowAlarms,
+    this.beforeActivate,
+    this.isRequestCurrent,
   });
 
   final BusRoute route;
@@ -24,6 +26,8 @@ class BusRouteStopScreen extends StatefulWidget {
   final AlarmClient alarmClient;
   final ValueChanged<Alarm> onCreated;
   final VoidCallback onShowAlarms;
+  final Future<bool> Function(BuildContext context)? beforeActivate;
+  final bool Function()? isRequestCurrent;
 
   @override
   State<BusRouteStopScreen> createState() => _BusRouteStopScreenState();
@@ -49,7 +53,12 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
   @override
   void didUpdateWidget(covariant BusRouteStopScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.route.id != widget.route.id) _load();
+    if (oldWidget.route.id != widget.route.id) {
+      _creating = false;
+      _outcomeUnknown = false;
+      _createMessage = null;
+      _load();
+    }
   }
 
   @override
@@ -95,7 +104,22 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
 
   Future<void> _create() async {
     final id = _selectedOccurrenceId;
-    if (_creating || _outcomeUnknown || id == null) return;
+    if (_creating ||
+        _outcomeUnknown ||
+        id == null ||
+        !(widget.isRequestCurrent?.call() ?? true)) {
+      return;
+    }
+    final request = ++_requestGeneration;
+    final routeId = widget.route.id;
+    final client = widget.alarmClient;
+    bool current() =>
+        mounted &&
+        request == _requestGeneration &&
+        widget.route.id == routeId &&
+        _selectedOccurrenceId == id &&
+        identical(widget.alarmClient, client) &&
+        (widget.isRequestCurrent?.call() ?? true);
     final before = _notifyOneStopBefore;
     final after = _notifyOneStopAfter;
     setState(() {
@@ -103,21 +127,33 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
       _createMessage = null;
     });
     try {
-      final createdAlarm = await widget.alarmClient.create(
+      try {
+        if (widget.beforeActivate != null &&
+            !await widget.beforeActivate!(context)) {
+          return;
+        }
+      } catch (_) {
+        if (current()) {
+          setState(() => _createMessage = '알림 수신 준비를 확인하지 못했습니다. 다시 시도해 주세요.');
+        }
+        return;
+      }
+      if (!current()) return;
+      final createdAlarm = await client.create(
         targetStopOccurrenceId: id,
         notifyOneStopBefore: before,
         notifyOneStopAfter: after,
       );
-      if (!mounted) return;
+      if (!current()) return;
       var alarm = createdAlarm;
       try {
-        alarm = await widget.alarmClient.activate(createdAlarm.id);
+        alarm = await client.activate(createdAlarm.id);
       } catch (_) {
         // Creation succeeded; recover in detail without creating another alarm.
       }
-      if (mounted) widget.onCreated(alarm);
+      if (current()) widget.onCreated(alarm);
     } on AlarmApiException catch (error) {
-      if (!mounted) return;
+      if (!current()) return;
       if (error.isStaleTarget) {
         setState(() {
           _creating = false;
@@ -140,7 +176,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
         setState(() => _createMessage = '알람을 생성하지 못했습니다.');
       }
     } catch (_) {
-      if (mounted) {
+      if (current()) {
         setState(() {
           _outcomeUnknown = true;
           _createMessage =
@@ -148,7 +184,9 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
         });
       }
     } finally {
-      if (mounted) setState(() => _creating = false);
+      if (mounted && request == _requestGeneration) {
+        setState(() => _creating = false);
+      }
     }
   }
 

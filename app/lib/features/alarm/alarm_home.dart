@@ -260,9 +260,13 @@ class _AlarmHomeState extends State<AlarmHome> {
         ],
       ),
       _Page.stops => BusRouteStopScreen(
+        key: ValueKey(('stops', epoch)),
         route: _route!,
         findStops: widget.findStops,
         alarmClient: widget.client,
+        beforeActivate: widget.beforeActivate,
+        isRequestCurrent: () =>
+            _current && epoch == _navigationEpoch && _page == _Page.stops,
         onBack: () {
           if (_current) {
             setState(() {
@@ -273,7 +277,7 @@ class _AlarmHomeState extends State<AlarmHome> {
         },
         onShowAlarms: _showList,
         onCreated: (alarm) {
-          if (!_current) return;
+          if (!_current || epoch != _navigationEpoch) return;
           setState(() {
             _navigationEpoch++;
             _alarmId = alarm.id;

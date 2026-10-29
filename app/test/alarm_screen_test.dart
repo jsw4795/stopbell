@@ -92,12 +92,14 @@ Widget detailScreen(
   StubAlarms client, {
   Alarm? created,
   VoidCallback? onBack,
+  Future<bool> Function(BuildContext)? beforeActivate,
 }) => MaterialApp(
   home: Scaffold(
     body: AlarmDetailScreen(
       alarmId: 15,
       client: client,
       createdAlarm: created,
+      beforeActivate: beforeActivate,
       onBack: onBack ?? () {},
     ),
   ),
@@ -108,12 +110,14 @@ Widget stopScreen(
   Future<List<BusRouteStopOccurrence>> Function(int) findStops, {
   void Function(Alarm)? onCreated,
   VoidCallback? onShowAlarms,
+  Future<bool> Function(BuildContext)? beforeActivate,
 }) => MaterialApp(
   home: Scaffold(
     body: BusRouteStopScreen(
       route: const BusRoute(id: 754, routeNumber: '7000', regionName: '수원시'),
       findStops: findStops,
       alarmClient: client,
+      beforeActivate: beforeActivate,
       onBack: () {},
       onCreated: onCreated ?? (_) {},
       onShowAlarms: onShowAlarms ?? () {},
@@ -326,12 +330,17 @@ void main() {
           ..createAlarm = (_, _, _) async => throw failure;
         var createdCalls = 0;
         var showList = 0;
+        var preparations = 0;
         await tester.pumpWidget(
           stopScreen(
             client,
             (_) async => [stop],
             onShowAlarms: () => showList++,
             onCreated: (_) => createdCalls++,
+            beforeActivate: (_) async {
+              preparations++;
+              return true;
+            },
           ),
         );
         await tester.pumpAndSettle();
@@ -345,6 +354,7 @@ void main() {
         expect(client.createCalls, 1);
         expect(client.activateCalls, 0);
         expect(createdCalls, 0);
+        expect(preparations, 1);
         expect(
           tester.widget<ListTile>(find.byKey(const ValueKey(12345))).onTap,
           isNull,
@@ -398,6 +408,12 @@ void main() {
         client.activateAlarm = (_) async => throw failure;
         Alarm? created;
         var createdCalls = 0;
+        var preparations = 0;
+        Future<bool> prepare(BuildContext _) async {
+          preparations++;
+          return true;
+        }
+
         await tester.pumpWidget(
           stopScreen(
             client,
@@ -406,6 +422,7 @@ void main() {
               created = alarm;
               createdCalls++;
             },
+            beforeActivate: prepare,
           ),
         );
         await tester.pumpAndSettle();
@@ -418,8 +435,11 @@ void main() {
         expect(createdCalls, 1);
         expect(created, same(sample));
         expect(created?.status, AlarmStatus.inactive);
+        expect(preparations, 1);
         expect(find.textContaining('알람 생성 결과를 확인할 수 없습니다.'), findsNothing);
-        await tester.pumpWidget(detailScreen(client, created: created));
+        await tester.pumpWidget(
+          detailScreen(client, created: created, beforeActivate: prepare),
+        );
         expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
         expect(find.text('활성화'), findsOneWidget);
         client.activateAlarm = (id) async {
@@ -431,6 +451,7 @@ void main() {
         expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
         expect(client.createCalls, 1);
         expect(client.activateCalls, 2);
+        expect(preparations, 2);
       },
     );
   }

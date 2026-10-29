@@ -159,7 +159,7 @@ void main() {
     // Activation remains busy behind the permission dialog. Advance its animation only.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('하차 알림 받기'), findsOneWidget);
+    expect(find.text('버스 도착 알림 받기'), findsOneWidget);
     expect(f.provider.requests, 0);
     await tester.tap(find.text('계속'));
     await tester.pumpAndSettle();
