@@ -307,7 +307,7 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 - [ ] TASK-813 Production deployment / migration / backup & recovery readiness
 - [ ] TASK-814 Production UTC time contract 및 timestamp consistency
 - [ ] TASK-815 iOS public App Store release readiness
-- [ ] TASK-816 프로젝트 종합 감사 후속 결함 수정
+- [x] TASK-816 프로젝트 종합 감사 후속 결함 수정
   - 목적: 종합 감사에서 발견한 AUD-01~AUD-13을 중요도에 따라 검토·수정하고 관련 테스트와 문서를 보강한다. 하나의 상위 Task로 관리하며 실제 수정·필수 검증 완료 전까지 `[ ]`를 유지한다.
   - 등록 범위 (2026-10-29): Task와 작업 계획만 추가한다. 이번 등록은 코드·Migration·테스트·Dependency·DB 변경이나 실제 Provider 호출·FCM 발송을 포함하지 않으며, 후속 지시 없이 수정에 착수하지 않는다. 기존 Task 번호와 완료 상태를 유지한다.
 
@@ -948,6 +948,35 @@ Backend 전체 회귀는 위 단계 통과 후 최종 1회 실행했고 **BUILD 
 AUD-12의 Host 의존 callback 5곳은 미수정이며 TASK-814의 시간 원천/타입 선택·JDBC/다중 zone/DST·기존 데이터 호환 정책 책임이 남는다. 실제 Provider/iPhone 및 운영 restart는 자동 테스트로 대체하지 않으며 TASK-710/711/908/811, 전체 API 오류 계약은 TASK-804가 계속 소유한다. TASK-804/814/816을 포함한 모든 체크박스를 그대로 유지하며 Git add/commit/push·branch/reset/stash/clean/checkout/pull/fetch는 수행하지 않는다. Backend 전체 통과 여부와 별개로 AUD-12의 완료 기준 2 책임 분리 및 TASK-816 완료 여부는 사용자 최종 판단으로 남긴다.
 
 이전 완료 기준 중 4(주요 회귀)는 이번 Backend 1,272개 통과와 제품 변경 없는 기존 Flutter 549개 통과 근거로 PASS, 6(Alarm·Boarding 정책 보존)은 정상 FOLLOW_UP DB/Event 경로와 전체 관련 회귀 통과로 PASS로 재평가한다. 조건 2는 AUD-12 제품 미수정/책임 분리 판단으로 PENDING이며 조건 10도 최종 판단 전 PENDING이다. 나머지 기존 PASS 근거는 보존한다. 이 변화는 이전 감사 표의 당시 BLOCKED/NOT READY 기록을 삭제하거나 TASK-816을 완료 처리하는 것이 아니다.
+
+### TASK-816 최종 완료 결정 (2026-10-30)
+
+사용자 승인에 따라 AUD-12의 실제 제품 수정을 TASK-814의 독립 완료 조건으로 분리하고 TASK-816의 감사·수정·검증 범위를 완료한다. AUD-01~13은 각각 검토하고 처리 결과와 후속 책임을 기록했다. TASK-816이 직접 수정하기로 확정한 필수 제품 결함은 수정과 회귀 검증을 마쳤으며, Flutter 안내 문구와 두 Controller의 API 500 오류 응답 계약 수정도 반영했다. AUD-11의 지원 범위와 Migration 제한, 기존 Alarm·BoardingSession 정책을 보존하고 주요 문서 정합성을 검증했다.
+
+이전 최종 감사의 NOT READY 판정은 당시 결과로 유지한다. 이후 `TransitMonitoringIntegrationTest.seoul_arrival_then_same_vehicle_one_stop_after_completes_follow_up()`과 `RepositoryIntegrationTest.login_existing_google_identity_reuses_user()`의 Fixture를 보정하고 직접 검증 및 Backend 전체 회귀를 통과해 두 회귀 차단 조건을 해소했다. 제품 계약은 변경하지 않았다. Backend 전체는 1,272/1,272 통과, 실패·오류·Skip 0이다. Flutter는 이전 최종 감사 실행에서 analyze No issues와 전체 549/549 통과, 실패·오류·Skip 0을 확인했으며 마지막 Backend Fixture 보정 후 재실행하지 않았다. 이번 최종 문서 작업에서는 테스트를 실행하지 않았다.
+
+AUD-12에서 User의 `onPrePersist`·`onPreUpdate`, RefreshToken의 `onPrePersist`, Alarm의 `onPrePersist`·`onPreUpdate`에 남은 인자 없는 `LocalDateTime.now()`의 Host Timezone 의존성을 재현하고 MySQL 저장·Timezone 특성, 기존 UTC 경로와의 차이 및 기존 데이터 위험을 분석했다. **제품 결함은 아직 수정되지 않았으며 TASK-816 완료는 그 해결을 의미하지 않는다.** UTC 시간 원천 결정과 Callback 제품 수정, JDBC/JPA/MySQL 계약 및 다중 Timezone·DST 검증, 기존 저장 데이터의 시간 의미와 호환성·운영 Migration 정책 결정, 최종 UTC 회귀는 미완료 TASK-814의 독립 책임이다.
+
+기존 완료 기준 10개는 유지한다. 기준 2와 10은 TASK-816이 직접 수정하기로 확정한 필수 결함의 수정·검증 완료, AUD-11의 지원 범위 및 제한 확정, AUD-12의 재현·분석과 TASK-814로의 명시적 제품 수정 책임 이관을 함께 고려해 충족으로 판정한다. 이는 AUD-12 결함을 면제하거나 삭제하는 결정이 아니다. 다른 Task가 소유한 실제 Provider·FCM·iPhone E2E는 자동 회귀와 구분하며 미검증 상태를 유지한다.
+
+- TASK-804 `[ ]`: 전체 API validation/error matrix, Security/401, 예상 밖 Exception 및 최종 regression 검증
+- TASK-814 `[ ]`: AUD-12 UTC 제품 수정과 위 시간·데이터·Migration 계약의 결정 및 검증
+- TASK-710 `[ ]`: 실제 iPhone Notification 수신·표시·tap 검증
+- TASK-711 `[ ]`: Notification 최종 E2E·regression 검증
+- TASK-908 `[ ]`: 실제 Provider와 버스를 이용한 탑승·하차 알림 및 iPhone E2E 검증
+- TASK-811 `[ ]`: 실제 restart·graceful shutdown·recovery 운영 검증
+
+최종 판정:
+
+```text
+TASK-816: COMPLETED
+
+Backend: 1272 / 1272 PASS
+Flutter: 549 / 549 PASS (prior full regression)
+AUD-01~13: 감사 처리 및 후속 책임 정리 완료
+AUD-12 UTC 제품 수정: TASK-814로 이관, 미완료
+실제 Provider/FCM/iPhone E2E: 별도 Task에서 검증 예정
+```
 
 ### TASK-816 권장 수정 순서와 독립 검증
 
