@@ -577,6 +577,8 @@ deployment와 SIGTERM 때는 새 polling/notification dispatch cycle을 시작�
 
 첫 production 적용 뒤 Flyway migration file은 수정하지 않고 변경을 새 migration으로 추가한다. 배포 전 migration 영향과 backup/restore point를 확인하고 migration 실패 instance는 ready가 되어서는 안 된다. DB downgrade는 임의로 하지 않으며 application rollback은 새 Schema와 old application compatibility를 확인한 경우만 한다. 공개 사용자 데이터를 받기 전 자동 DB backup 또는 platform snapshot, 가능하면 PITR, deploy 전 restore point와 실제 restore drill 최소 1회를 검증한다. Alarm/User/BusAlarmTarget은 복구 중요도가 높고 Transit metadata는 source에서 재생성할 수 있으며 pending notification은 freshness policy를 고려한다. Restore 뒤에는 outbound polling/notification dispatch를 격리한 상태에서 Flyway/schema, RefreshToken 복구 정책, Device ownership/registration, metadata sync, Alarm recovery baseline, stale pending Notification expiry/cutoff를 순서대로 확인한 뒤 worker/scheduler와 public readiness를 재개한다. Restore epoch나 별도 recovery subsystem은 요구하지 않는다.
 
+V3→V4 Legacy 업그레이드는 [Database 지원 범위](database.md#v3v4-legacy-user-업그레이드-지원-범위-task-816--aud-11)와 [실행 전 점검](local-development.md#v4-미적용-db의-read-only-preflight-task-816--aud-11)을 따른다. V3에는 외부 Identity 근거가 없으므로 기존 User를 자동 변환하거나 다른 Google 계정에 연결하지 않는다. V4 미적용 DB는 User 0명 조건을 확인한 뒤 기존 startup Flyway 경로로 적용하며, User가 있으면 실행 전에 중단하고 별도 이관 판단을 받는다. 사용자 한 명에서는 SQL 자체가 성공할 수 있어 Flyway 실패를 사전 차단 장치로 의존하지 않는다. 이 작업에서는 startup 순서 변경·자동 차단 코드·DB 수정 callback·새 Dependency를 추가하지 않으며, 적용 전 수동 Preflight를 필수 절차로 둔다. 이미 적용된 V4와 History는 수정하지 않는다.
+
 Kubernetes, multi-region, read replica, blue/green deployment framework는 V1 기본 요구가 아니다.
 
 ## 12. 아키텍처 원칙

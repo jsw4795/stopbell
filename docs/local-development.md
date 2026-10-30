@@ -183,6 +183,45 @@ Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{
 
 ------------------------------------------------------------------------
 
+### V4 미적용 DB의 Read-only Preflight (TASK-816 / AUD-11)
+
+애플리케이션 시작으로 Flyway가 실행되기 **전**, 변경 대상 DB를 식별하고 쓰기 작업과 Backend를 중지한 점검 구간에서 수행한다. 다음은 수동 확인용 read-only SQL이며 AUD-11 작업에서 실제 개발 DB에 실행한 명령이 아니다. Credential은 기존 비공개 접속 방식을 사용하고 출력에 노출하지 않는다.
+
+```sql
+SELECT DATABASE(), VERSION(), @@SESSION.sql_mode;
+SELECT table_name FROM information_schema.tables
+WHERE table_schema = DATABASE()
+  AND table_name IN ('flyway_schema_history', 'users', 'alarms', 'notification_history');
+```
+
+먼저 테이블 존재 여부를 확인한 뒤 **존재하는 테이블에만** 다음 SQL을 실행한다. History가 없는데 기존 테이블/데이터가 있으면 Fresh DB로 간주하거나 임의 Baseline하지 않고 중단한다.
+
+```sql
+SELECT installed_rank, version, description, script, checksum, success
+FROM flyway_schema_history ORDER BY installed_rank;
+SELECT version, success FROM flyway_schema_history WHERE version = '4';
+SELECT COUNT(*) AS user_count FROM users;
+SELECT COUNT(*) AS alarm_count, COUNT(DISTINCT user_id) AS alarm_owner_count FROM alarms;
+SELECT COUNT(*) AS notification_history_count FROM notification_history;
+SELECT COUNT(*) AS orphan_alarm_count FROM alarms a
+LEFT JOIN users u ON u.id = a.user_id WHERE u.id IS NULL;
+SELECT COUNT(*) AS orphan_history_count FROM notification_history n
+LEFT JOIN alarms a ON a.id = n.alarm_id WHERE a.id IS NULL;
+SELECT column_name, column_type, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_schema = DATABASE() AND table_name = 'users';
+SHOW CREATE TABLE users;
+SHOW CREATE TABLE alarms;
+SHOW CREATE TABLE notification_history;
+```
+
+- Fresh DB는 기존 데이터/Schema가 없는 별도 DB임을 확인하고 V1→최신 정상 Flyway 경로를 사용한다. V3에서 User 0명이면 정상 FK 아래 Alarm·History도 0명이어야 한다. FK 비활성화 등으로 고아 데이터가 있으면 중단한다. 이후 Migration의 다른 사전 조건도 확인한다.
+- V4 미적용이고 User가 1명 이상이면 **자동 업그레이드 지원 범위 밖**이므로 startup을 실행하지 않는다. [Database 정책](database.md#v3v4-legacy-user-업그레이드-지원-범위-task-816--aud-11)에 따라 외부 Identity 매핑 근거·데이터 보존 필요성과 Backup/Restore 가능 여부를 확인하고 별도 이관 계획을 수립한다. User가 한 명이어도 허용하지 않는다.
+- V4 성공 기록이 있으면 두 Identity 컬럼과 복합 UNIQUE의 실제 상태를 확인한다. 컬럼이 있을 때만 `SELECT COUNT(*) FROM users WHERE auth_provider IS NULL OR auth_provider = '' OR provider_user_id IS NULL OR provider_user_id = '';`로 부적합 행을 점검한다. 0건이어도 실제 `sub`의 소유자 매핑 정확성을 증명하지 않으므로 이관 근거도 확인한다. 실패 History·Schema 불일치·잘못된 Identity가 있으면 시작을 중단한다.
+- Backup 위치·생성 시각·접근 가능 여부와 실제 Restore 검증 결과를 점검 기록으로 남긴다. 개발 데이터 초기화는 Backup 여부 확인과 명시적 사용자 승인 뒤 별도 작업으로만 수행하며 이 절차에는 삭제 명령을 포함하지 않는다.
+
+실패 뒤에는 재시작을 반복하기 전에 Backup과 위 History·`SHOW CREATE TABLE`·컬럼/UNIQUE/FK·원본 행/시각/소유권을 확인한다. MySQL DDL을 일반 DML Transaction처럼 되돌릴 수 있다고 가정하지 않는다. **Flyway Repair는 데이터 복구가 아니며**, 부분 Schema나 Identity 부재를 고치지 않는다. Repair/Clean/Baseline·History 편집·User 삭제·UNIQUE 제거를 자동 실행하지 않고 관측 상태에 맞는 별도 복구/이관 결정을 받는다. 원본을 보존한 채 검증된 Backup 복원 또는 별도 수동 이관을 계획하며, 이 문서는 범용 복구 SQL을 제공하지 않는다.
+
 # Test Strategy
 
 Alarm 상태 전이 같은 순수 Domain Business Rule은 Spring Context, Database, Docker 없이 JUnit Unit Test로 검증한다.

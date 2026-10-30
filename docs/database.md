@@ -31,6 +31,18 @@ Migration 파일은 `backend/src/main/resources/db/migration/`에 `V{version}__{
 
 첫 production 적용 뒤 이미 적용된 Migration file은 수정하지 않고 Schema 변경은 새 Migration으로 추가한다. single-instance V1에서는 application startup Flyway migration을 유지할 수 있으나, 배포 전 migration 영향과 backup/restore point를 확인한다. migration 실패 instance는 ready가 되어서는 안 되며 DB를 임의 downgrade하지 않는다. application rollback은 새 Schema와 old application compatibility가 검증된 경우만 허용한다.
 
+### V3→V4 Legacy User 업그레이드 지원 범위 (TASK-816 / AUD-11)
+
+V1의 `users`는 내부 ID와 생성·수정 시각만 가진다. V2는 `alarms.user_id → users.id`, V3는 `notification_history.alarm_id → alarms.id` FK를 추가한다. V4는 `auth_provider`, `provider_user_id`를 `NOT NULL`로 추가하고 두 컬럼의 복합 UNIQUE를 생성한다. V5부터 Refresh Session과 이후 Device·NotificationEvent·BoardingSession도 내부 User ID를 참조하므로 Identity 연결과 소유권 보존을 함께 확인해야 한다.
+
+**일반 자동 업그레이드는 V4 미적용 DB의 기존 User가 0명인 경우만 지원한다.** V3 Schema와 저장소에는 기존 내부 User ID를 검증된 Google `sub`와 연결하는 신뢰 가능한 매핑이 없다. Timestamp나 User가 한 명이라는 사실로 Identity를 복원할 수 없으며 SQL 성공만으로 안전한 인증 계정이 되지 않는다. Fresh DB의 V1→최신 경로와 정상 Identity로 이미 V4 이후가 적용된 DB는 계속 지원한다. 다른 Migration의 개별 사전 조건도 충족해야 한다.
+
+기존 User가 있으면 자동 업그레이드를 중단하고 보존 필요성을 확인한다. 보존해야 하는 데이터는 **별도 수동 이관 설계**가 필요하다. 검증된 원본 매핑 근거, Provider/외부 ID 정확성·중복 검사, 기존 User ID와 Alarm·History 등 FK/행/시각 보존, Backup 및 실제 Restore 검증, 이관 후 로그인·소유권 검증을 전제로 한다. 매핑이 없으면 안전한 인증 계정 변환을 지원하지 않는다. 개발 데이터 초기화도 Backup 여부 확인과 명시적 승인 후 별도 작업으로만 수행한다.
+
+내부 User ID·UUID를 Google `sub`처럼 합성하거나 동일 ID를 일괄 부여하지 않는다. 이메일·이름·최초 Google 로그인으로 기존 User를 자동 연결하지 않으며 User 삭제·새 User 대체·소유권 이전으로 Migration을 통과시키지 않는다. 이미 잘못된 빈 Identity로 V4가 성공한 경우도 지원 대상인 정상 최신 DB로 취급하지 않는다.
+
+V1~V4를 포함한 기존 Migration과 Checksum은 유지한다. V4 뒤 신규 Migration은 V4가 먼저 실패하면 실행되지 않으므로 이 문제의 해결 수단이 아니다. 이번에는 Schema 변경이나 신규 Migration 없이 지원 전제·사전 점검·실제 MySQL 회귀 테스트로 처리한다. 구체 점검과 실패 후 확인은 [Local Development](local-development.md#v4-미적용-db의-read-only-preflight-task-816--aud-11), 사용자 수별 관측 결과는 [Task List](task-list.md#aud-11-처리-2026-10-30)를 따른다.
+
 ## 4. 모델링 원칙
 
 - 명확한 관계형 제약 조건을 우선한다.
