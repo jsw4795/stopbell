@@ -8,10 +8,10 @@
 | --- | --- | --- |
 | Phase 6 Flutter | TASK-601~609 완료: Google 로그인·Auth 복원/갱신·노선/정류장 선택·Alarm 관리, TASK-608A 표시 계약 반영 | Notification·Boarding의 후행 실기기 검증과 구분 |
 | Phase 7 Notification | TASK-701~709 완료: iOS 기본 연동·권한/Device lifecycle·FCM Client·Event/Delivery·atomic decision·Dispatch·retry/expiry·durable PENDING recovery | TASK-710은 일부 iPhone 수신/tap PASS이나 미완료, TASK-711 최종 E2E·regression 미완료 |
-| Phase 8 Quality | AUD-01~13의 수정 또는 감사·검증/후속 책임 연결 기록 존재 | TASK-816 최종 상호 정합성·회귀 검증, AUD-12 UTC 제품 결함의 TASK-814 수정·검증 및 기존 운영 Task 잔여 범위 |
+| Phase 8 Quality | TASK-816 감사·수정·회귀와 후속 책임 연결 완료. TASK-814 UTC callback 수정·다중 timezone/DST·전체 Backend 회귀 및 기존 데이터 무변환 정책 확정 | 실제 운영 데이터의 시간대/정렬 영향과 배포·백업/복구 확인은 TASK-813 운영 적용 조건, 기타 기존 운영 Task 잔여 범위 |
 | Phase 9 BoardingSession | TASK-903 설계와 TASK-904~907 구현 완료. TASK-908 변경으로 번호 입력 없는 명시적 차량 선택·즉시 TRACKING·2정거장 전(기본)/1정거장 전 준비 알림 구현 | 서울 조건부 지원·TAGO 정확한 하차 추적 보류. TASK-908 실제 버스/iPhone E2E 미완료 |
 
-TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 검증을 대체하지 않는다. 상세 결과는 [Local Development](local-development.md#task-710-실제-iphone-수신-및-tap-검증), TASK-908의 정책 변경과 실측 경계는 [증거 보고서 §28](research/TASK-908-provider-evidence.md#28-하차-전-단일-알림과-이동-진행-평가-2026-10-29)을 따른다. TASK-814/816은 모두 미완료다.
+TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 검증을 대체하지 않는다. 상세 결과는 [Local Development](local-development.md#task-710-실제-iphone-수신-및-tap-검증), TASK-908의 정책 변경과 실측 경계는 [증거 보고서 §28](research/TASK-908-provider-evidence.md#28-하차-전-단일-알림과-이동-진행-평가-2026-10-29)을 따른다. TASK-814/816은 완료이며, UTC의 구현·검증 범위와 운영 데이터 미확인 조건은 [TASK-814 결과](task-list.md#task-814-utc-구현-및-검증-결과-2026-10-30)를 따른다.
 
 ## Phase 0 — 조사 및 PoC
 

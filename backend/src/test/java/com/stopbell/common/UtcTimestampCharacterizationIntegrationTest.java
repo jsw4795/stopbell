@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mockStatic;
 
 import java.sql.ResultSet;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -36,6 +37,9 @@ import com.stopbell.user.repository.RefreshTokenRepository;
 import jakarta.persistence.EntityManager;
 import org.hibernate.Session;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -48,9 +52,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 /**
- * AUD-12 characterization, not the desired UTC contract. TASK-814 must replace the host-local expectations.
+ * TASK-814 UTC regression contract, replacing the AUD-12 host-local characterization expectations.
  * Run in separate test JVMs with -Duser.timezone=UTC, Asia/Seoul and America/Los_Angeles.
- * Never changes TimeZone.setDefault(). Only the callback thread's Clock.systemDefaultZone() is fixed;
+ * Never changes TimeZone.setDefault(). Only the callback thread's Clock factories are fixed;
  * LocalDateTime.now(), JPA callbacks, Hibernate, Connector/J and MySQL remain real.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
@@ -72,72 +76,160 @@ class UtcTimestampCharacterizationIntegrationTest {
     @Autowired private BusAlarmEvaluator evaluator;
 
     @Test
-    @DisplayName("기존 User·RefreshToken·Alarm 콜백은 같은 Instant를 JVM 기본 시간대의 DATETIME으로 저장한다")
-    void characterize_host_local_callbacks() {
-        User user = new User(AuthProvider.GOOGLE, "audit-callback-user");
-        Alarm alarm = new Alarm(user, TransitType.SUBWAY);
-        RefreshToken token = new RefreshToken(user, "a".repeat(64), UTC.plusDays(30));
-        atHostTime(NOW, () -> {
-            em.persist(user);
-            em.persist(alarm);
-            em.persist(token);
+    @DisplayName("테스트 Worker의 기본 시간대는 JVM 시작 시 전달한 검증 시간대와 일치한다")
+    void verifies_worker_timezone() {
+        ZoneId actual = ZoneId.systemDefault();
+        String expected = System.getProperty("task814.expectedTimezone", System.getProperty("user.timezone"));
+        assertThat(actual).isEqualTo(ZoneId.of(expected));
+        assertThat(System.getProperty("user.timezone")).isEqualTo(expected);
+        System.out.println("TASK-814 test worker timezone=" + actual + ", expected=" + expected);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"2026-10-30T00:00:00Z", "2026-10-30T00:00:00.123456Z"})
+    @DisplayName("User·RefreshToken·Alarm 콜백은 JVM 시간대와 무관하게 UTC를 생성하고 저장 및 복원한다")
+    void persists_utc_callbacks(String value) {
+        Instant instant = Instant.parse(value);
+        LocalDateTime utcNow = LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+        AuditSample sample = persistAuditSample("callback", instant);
+        assertAuditSample(sample, utcNow, utcNow);
+        assertThat(sample.token().getExpiresAt()).isEqualTo(utcNow.plusDays(30));
+
+        atFixedTime(instant.plusSeconds(60), () -> {
+            // User has no public update operation; force dirty state for real @PreUpdate.
+            User user = em.find(User.class, sample.user().getId());
+            Alarm alarm = em.find(Alarm.class, sample.alarm().getId());
+            ReflectionTestUtils.setField(user, "providerUserId", "audit-updated-user");
+            alarm.activate();
+            em.flush();
+            assertThat(user.getUpdatedAt()).isEqualTo(utcNow.plusMinutes(1));
+            assertThat(alarm.getUpdatedAt()).isEqualTo(utcNow.plusMinutes(1));
+        });
+        assertAuditSample(sample, utcNow, utcNow.plusMinutes(1));
+        atFixedTime(instant.plusSeconds(120), () -> {
+            em.find(Alarm.class, sample.alarm().getId()).activate();
             em.flush();
         });
-        em.clear();
+        assertAuditSample(sample, utcNow, utcNow.plusMinutes(1));
+    }
 
-        User storedUser = em.find(User.class, user.getId());
-        Alarm storedAlarm = em.find(Alarm.class, alarm.getId());
-        RefreshToken storedToken = em.find(RefreshToken.class, token.getId());
-        LocalDateTime hostNow = LocalDateTime.ofInstant(NOW, ZoneId.systemDefault());
-        assertThat(storedUser.getCreatedAt()).isEqualTo(hostNow);
-        assertThat(storedUser.getUpdatedAt()).isEqualTo(hostNow);
-        assertThat(storedAlarm.getCreatedAt()).isEqualTo(hostNow);
-        assertThat(storedAlarm.getUpdatedAt()).isEqualTo(hostNow);
-        assertThat(storedToken.getCreatedAt()).isEqualTo(hostNow);
-        assertThat(storedToken.getExpiresAt()).isEqualTo(UTC.plusDays(30));
-        assertThat(rawTime("users", "created_at", "id", user.getId())).isEqualTo(hostNow);
-        assertThat(rawTime("alarms", "created_at", "id", alarm.getId())).isEqualTo(hostNow);
-        assertThat(rawTime("refresh_tokens", "created_at", "id", token.getId())).isEqualTo(hostNow);
-
-        atHostTime(NOW.plusSeconds(60), () -> {
-            // User currently has no public update operation; force a dirty field to exercise real @PreUpdate.
-            ReflectionTestUtils.setField(storedUser, "providerUserId", "audit-updated-user");
-            storedAlarm.activate();
+    @ParameterizedTest
+    @CsvSource({
+            "2026-03-08T09:59:59Z, 2026-03-08T10:00:00Z, 2026-03-08T01:59:59, 2026-03-08T03:00:00",
+            "2026-11-01T08:59:59Z, 2026-11-01T09:00:00Z, 2026-11-01T01:59:59, 2026-11-01T01:00:00",
+            "2026-11-01T08:30:00Z, 2026-11-01T09:30:00Z, 2026-11-01T01:30:00, 2026-11-01T01:30:00"
+    })
+    @DisplayName("LA의 실제 DST 누락과 중첩 구간에서도 서로 다른 순간을 UTC로 구분해 저장한다")
+    void preserves_distinct_instants_across_dst(String firstValue, String secondValue,
+            String firstLocal, String secondLocal) {
+        Instant first = Instant.parse(firstValue);
+        Instant second = Instant.parse(secondValue);
+        ZoneId losAngeles = ZoneId.of("America/Los_Angeles");
+        // Check the fixture against the runtime ZoneRules rather than guessing a DST date.
+        assertThat(first.atZone(losAngeles).toLocalDateTime()).isEqualTo(LocalDateTime.parse(firstLocal));
+        assertThat(second.atZone(losAngeles).toLocalDateTime()).isEqualTo(LocalDateTime.parse(secondLocal));
+        assertThat(first.atZone(losAngeles).getOffset()).isNotEqualTo(second.atZone(losAngeles).getOffset());
+        LocalDateTime firstUtc = LocalDateTime.ofInstant(first, ZoneOffset.UTC);
+        LocalDateTime secondUtc = LocalDateTime.ofInstant(second, ZoneOffset.UTC);
+        AuditSample before = persistAuditSample("dst-before", first);
+        assertAuditSample(before, firstUtc, firstUtc);
+        AuditSample after = persistAuditSample("dst-after", second);
+        assertAuditSample(after, secondUtc, secondUtc);
+        assertThat(Duration.between(
+                rawTime("alarms", "created_at", "id", before.alarm().getId()),
+                rawTime("alarms", "created_at", "id", after.alarm().getId())))
+                .isEqualTo(Duration.between(first, second)).isPositive();
+        atFixedTime(second, () -> {
+            User user = em.find(User.class, before.user().getId());
+            ReflectionTestUtils.setField(user, "providerUserId", "dst-updated-user");
+            em.find(Alarm.class, before.alarm().getId()).activate();
             em.flush();
+            assertThat(user.getUpdatedAt()).isEqualTo(secondUtc);
         });
-        em.clear();
-        assertThat(em.find(User.class, user.getId()).getUpdatedAt()).isEqualTo(hostNow.plusMinutes(1));
-        assertThat(em.find(Alarm.class, alarm.getId()).getUpdatedAt()).isEqualTo(hostNow.plusMinutes(1));
-        assertThat(rawTime("users", "updated_at", "id", user.getId())).isEqualTo(hostNow.plusMinutes(1));
-        assertThat(rawTime("alarms", "updated_at", "id", alarm.getId())).isEqualTo(hostNow.plusMinutes(1));
+        assertAuditSample(before, firstUtc, secondUtc);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "2026-10-30T00:00:00.123456789Z, 2026-10-30T00:00:00.123457",
+            "2026-10-30T23:59:59.999999999Z, 2026-10-31T00:00:00"
+    })
+    @DisplayName("나노초 감사 시각은 기존 DATETIME 마이크로초 반올림과 날짜 경계 처리를 유지한다")
+    void preserves_datetime_microsecond_binding(String instantValue, String storedValue) {
+        Instant instant = Instant.parse(instantValue);
+        AuditSample sample = persistAuditSample("precision", instant);
+        LocalDateTime stored = LocalDateTime.parse(storedValue);
+        assertAuditSample(sample, stored, stored);
     }
 
     @Test
-    @DisplayName("Refresh의 UTC 만료 경계·Rotation·Logout은 Host 시각의 createdAt을 판단에 사용하지 않는다")
-    void characterize_refresh_expiry_and_rotation() {
+    @DisplayName("기존 Host 감사 값과 UTC 만료는 읽기 시 보정하지 않고 새 수정 시각만 UTC로 갱신한다")
+    void preserves_legacy_values_without_conversion() {
+        AuditSample sample = persistAuditSample("legacy", NOW);
+        LocalDateTime legacy = UTC.plusHours(9);
+        em.createNativeQuery("update users set created_at=:legacy, updated_at=:legacy where id=:id")
+                .setParameter("legacy", legacy).setParameter("id", sample.user().getId()).executeUpdate();
+        em.createNativeQuery("update alarms set created_at=:legacy, updated_at=:legacy where id=:id")
+                .setParameter("legacy", legacy).setParameter("id", sample.alarm().getId()).executeUpdate();
+        em.createNativeQuery("update refresh_tokens set created_at=:legacy where id=:id")
+                .setParameter("legacy", legacy).setParameter("id", sample.token().getId()).executeUpdate();
+        em.clear();
+        User user = em.find(User.class, sample.user().getId());
+        Alarm alarm = em.find(Alarm.class, sample.alarm().getId());
+        RefreshToken token = em.find(RefreshToken.class, sample.token().getId());
+        assertThat(user.getCreatedAt()).isEqualTo(legacy);
+        assertThat(user.getUpdatedAt()).isEqualTo(legacy);
+        assertThat(alarm.getCreatedAt()).isEqualTo(legacy);
+        assertThat(alarm.getUpdatedAt()).isEqualTo(legacy);
+        assertThat(token.getCreatedAt()).isEqualTo(legacy);
+        assertThat(token.getExpiresAt()).isEqualTo(UTC.plusDays(30));
+        em.flush();
+        assertThat(rawTime("users", "updated_at", "id", user.getId())).isEqualTo(legacy);
+        assertThat(rawTime("alarms", "updated_at", "id", alarm.getId())).isEqualTo(legacy);
+        atFixedTime(NOW.plusSeconds(60), () -> {
+            ReflectionTestUtils.setField(user, "providerUserId", "legacy-updated-user");
+            alarm.activate();
+            em.flush();
+        });
+        em.clear();
+        assertThat(em.find(User.class, user.getId()).getCreatedAt()).isEqualTo(legacy);
+        assertThat(em.find(User.class, user.getId()).getUpdatedAt()).isEqualTo(UTC.plusMinutes(1));
+        assertThat(em.find(Alarm.class, alarm.getId()).getCreatedAt()).isEqualTo(legacy);
+        assertThat(em.find(Alarm.class, alarm.getId()).getUpdatedAt()).isEqualTo(UTC.plusMinutes(1));
+        assertThat(rawTime("users", "created_at", "id", user.getId())).isEqualTo(legacy);
+        assertThat(rawTime("users", "updated_at", "id", user.getId())).isEqualTo(UTC.plusMinutes(1));
+        assertThat(rawTime("alarms", "created_at", "id", alarm.getId())).isEqualTo(legacy);
+        assertThat(rawTime("alarms", "updated_at", "id", alarm.getId())).isEqualTo(UTC.plusMinutes(1));
+        assertThat(rawTime("refresh_tokens", "created_at", "id", token.getId())).isEqualTo(legacy);
+        assertThat(rawTime("refresh_tokens", "expires_at", "id", token.getId())).isEqualTo(UTC.plusDays(30));
+    }
+
+    @Test
+    @DisplayName("UTC 감사 시각 수정 후에도 Refresh 만료 경계와 Rotation 및 Logout을 보존한다")
+    void preserves_refresh_expiry_and_rotation() {
         User user = new User(AuthProvider.GOOGLE, "audit-refresh-user");
-        atHostTime(NOW, () -> em.persist(user));
+        atFixedTime(NOW, () -> em.persist(user));
         RefreshTokenService issuing = refreshService(NOW);
         String[] issued = new String[2];
-        atHostTime(NOW, () -> {
+        atFixedTime(NOW, () -> {
             issued[0] = issuing.issue(user);
             issued[1] = issuing.issue(user);
             em.flush();
         });
         assertThat(tokens.findAll()).allSatisfy(token -> {
-            assertThat(token.getCreatedAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneId.systemDefault()));
+            assertThat(token.getCreatedAt()).isEqualTo(UTC);
             assertThat(token.getExpiresAt()).isEqualTo(UTC.plusDays(30));
         });
 
-        Instant beforeExpiry = NOW.plusSeconds(30L * 86400 - 1);
-        atHostTime(beforeExpiry, () -> {
+        Instant beforeExpiry = NOW.plusSeconds(30L * 86400).minusNanos(1_000);
+        atFixedTime(beforeExpiry, () -> {
             var rotated = refreshService(beforeExpiry).refresh(issued[0]);
             assertThat(rotated.refreshToken()).isNotBlank().isNotEqualTo(issued[0]);
             assertThatThrownBy(() -> issuing.refresh(issued[0])).isInstanceOf(InvalidRefreshTokenException.class);
             em.flush();
         });
         assertThat(tokens.findAll()).anySatisfy(token ->
-                assertThat(token.getExpiresAt()).isEqualTo(UTC.plusDays(60).minusSeconds(1)));
+                assertThat(token.getExpiresAt()).isEqualTo(UTC.plusDays(60).minusNanos(1_000)));
         assertThatThrownBy(() -> refreshService(NOW.plusSeconds(30L * 86400)).refresh(issued[1]))
                 .isInstanceOf(InvalidRefreshTokenException.class);
         // Logout of a token already expired by the service clock still deletes by hash only.
@@ -147,13 +239,13 @@ class UtcTimestampCharacterizationIntegrationTest {
     }
 
     @Test
-    @DisplayName("FOLLOW_UP은 Host 감사 시각과 별도로 UTC 시작·5분 만료를 저장하고 재조회 뒤 같은 경계로 만료한다")
-    void characterize_follow_up_utc_and_reload() {
+    @DisplayName("FOLLOW_UP은 관측 UTC 기준 시작과 5분 만료를 저장하고 재조회 뒤 같은 경계로 만료한다")
+    void preserves_follow_up_utc_and_reload() {
         User user = new User(AuthProvider.GOOGLE, "audit-follow-up-user");
         BusAlarmTarget target = new BusAlarmTarget(TransitProvider.SEOUL_BUS, "route", "target", 2,
                 "100", "목적지", null, null, null, null, new AdjacentStopSnapshot("after", 3));
         Alarm alarm = new Alarm(user, target);
-        atHostTime(NOW, () -> {
+        atFixedTime(NOW, () -> {
             em.persist(user);
             em.persist(alarm);
             alarm.activate();
@@ -165,21 +257,23 @@ class UtcTimestampCharacterizationIntegrationTest {
         });
         em.clear();
         Alarm reloaded = em.find(Alarm.class, alarm.getId());
-        assertThat(reloaded.getCreatedAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneId.systemDefault()));
+        assertThat(reloaded.getCreatedAt()).isEqualTo(UTC);
         assertThat(reloaded.getFollowUpStartedAt()).isEqualTo(UTC);
         assertThat(reloaded.getFollowUpExpiresAt()).isEqualTo(UTC.plusMinutes(5));
         assertThat(rawTime("alarms", "follow_up_started_at", "id", alarm.getId())).isEqualTo(UTC);
         assertThat(rawTime("alarms", "follow_up_expires_at", "id", alarm.getId())).isEqualTo(UTC.plusMinutes(5));
-        assertThat(evaluator.evaluate(reloaded, BusAlarmEvaluationState.initial(), List.of(), NOW.plusSeconds(299))
+        assertThat(evaluator.evaluate(reloaded, BusAlarmEvaluationState.initial(), List.of(), NOW.plusSeconds(300).minusNanos(1_000))
                 .followUpExpired()).isFalse();
         assertThat(evaluator.evaluate(reloaded, BusAlarmEvaluationState.initial(), List.of(), NOW.plusSeconds(300))
+                .followUpExpired()).isTrue();
+        assertThat(evaluator.evaluate(reloaded, BusAlarmEvaluationState.initial(), List.of(), NOW.plusSeconds(300).plusNanos(1_000))
                 .followUpExpired()).isTrue();
     }
 
     @Test
     @DisplayName("실제 MySQL에서 DATETIME·TIMESTAMP·JDBC 해석을 구분하고 UTC Instant metadata를 왕복한다")
-    void characterize_mysql_datetime_and_instant_boundary() {
-        // This SQL literal is identical in all three JVMs, unlike the host-generated callback values.
+    void preserves_mysql_datetime_and_instant_boundary() {
+        // The same UTC SQL literal must retain its fields in every JVM.
         em.createNativeQuery("insert into users (auth_provider, provider_user_id, created_at, updated_at) "
                 + "values ('GOOGLE', 'audit-literal-user', '2026-10-30 00:00:00', '2026-10-30 00:00:00')")
                 .executeUpdate();
@@ -237,14 +331,57 @@ class UtcTimestampCharacterizationIntegrationTest {
         });
     }
 
+    private AuditSample persistAuditSample(String identity, Instant instant) {
+        LocalDateTime utc = LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
+        User user = new User(AuthProvider.GOOGLE, "audit-" + identity);
+        Alarm alarm = new Alarm(user, TransitType.SUBWAY);
+        // Distinct token hashes for multiple samples in the same DST transaction.
+        String tokenHash = (identity.equals("dst-after") ? "b" : "a").repeat(64);
+        RefreshToken token = new RefreshToken(user, tokenHash, utc.plusDays(30));
+        atFixedTime(instant, () -> {
+            em.persist(user);
+            em.persist(alarm);
+            em.persist(token);
+            em.flush();
+            assertThat(user.getCreatedAt()).isEqualTo(utc);
+            assertThat(user.getUpdatedAt()).isEqualTo(utc);
+            assertThat(alarm.getCreatedAt()).isEqualTo(utc);
+            assertThat(alarm.getUpdatedAt()).isEqualTo(utc);
+            assertThat(token.getCreatedAt()).isEqualTo(utc);
+        });
+        return new AuditSample(user, alarm, token);
+    }
+
+    private void assertAuditSample(AuditSample sample, LocalDateTime createdAt, LocalDateTime updatedAt) {
+        em.clear();
+        User user = em.find(User.class, sample.user().getId());
+        Alarm alarm = em.find(Alarm.class, sample.alarm().getId());
+        RefreshToken token = em.find(RefreshToken.class, sample.token().getId());
+        assertThat(user.getCreatedAt()).isEqualTo(createdAt);
+        assertThat(user.getUpdatedAt()).isEqualTo(updatedAt);
+        assertThat(alarm.getCreatedAt()).isEqualTo(createdAt);
+        assertThat(alarm.getUpdatedAt()).isEqualTo(updatedAt);
+        assertThat(token.getCreatedAt()).isEqualTo(createdAt);
+        assertThat(rawTime("users", "created_at", "id", user.getId())).isEqualTo(createdAt);
+        assertThat(rawTime("users", "updated_at", "id", user.getId())).isEqualTo(updatedAt);
+        assertThat(rawTime("alarms", "created_at", "id", alarm.getId())).isEqualTo(createdAt);
+        assertThat(rawTime("alarms", "updated_at", "id", alarm.getId())).isEqualTo(updatedAt);
+        assertThat(rawTime("refresh_tokens", "created_at", "id", token.getId())).isEqualTo(createdAt);
+    }
+
+    private record AuditSample(User user, Alarm alarm, RefreshToken token) { }
+
     private RefreshTokenService refreshService(Instant instant) {
         return new RefreshTokenService(tokens, mock(JwtTokenService.class), Clock.fixed(instant, ZoneId.systemDefault()));
     }
 
-    private void atHostTime(Instant instant, Runnable work) {
+    private void atFixedTime(Instant instant, Runnable work) {
         Clock fixedHostClock = Clock.fixed(instant, ZoneId.systemDefault());
+        Clock fixedUtcClock = Clock.fixed(instant, ZoneOffset.UTC);
         try (var clocks = mockStatic(Clock.class, CALLS_REAL_METHODS)) {
             clocks.when(Clock::systemDefaultZone).thenReturn(fixedHostClock);
+            // LocalDateTime.now(ZoneOffset.UTC) calls this factory in Java 21.
+            clocks.when(() -> Clock.system(ZoneOffset.UTC)).thenReturn(fixedUtcClock);
             work.run();
         }
     }

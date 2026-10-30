@@ -1,6 +1,7 @@
 package com.stopbell.alarm.entity;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import com.stopbell.user.entity.User;
@@ -88,7 +89,7 @@ public class Alarm {
     @PrePersist
     private void onPrePersist() {
         validateLifecycleState();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
         createdAt = now;
         updatedAt = now;
     }
@@ -96,7 +97,7 @@ public class Alarm {
     @PreUpdate
     private void onPreUpdate() {
         validateLifecycleState();
-        updatedAt = LocalDateTime.now();
+        updatedAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 
     public Long getId() {

@@ -82,9 +82,9 @@ JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 �
 
 ### UTC 계약 감사와 구현 책임 (TASK-816 / AUD-12 → TASK-814)
 
-persisted operational time의 UTC 목표는 유지한다. AUD-12는 기존 User·RefreshToken·Alarm callback의 Host Timezone 의존성과 실제 Java↔Hibernate/JDBC↔MySQL 저장 경계를 감사하고, 미완료 TASK-814의 수정·검증 범위를 연결한다. AUD-12의 Characterization Test 통과는 현 결함 재현의 성공이며 UTC 제품 수정 완료가 아니다. TASK-814와 TASK-816의 상태는 모두 `[ ]`를 유지한다.
+AUD-12 당시에는 기존 User·RefreshToken·Alarm callback의 Host Timezone 의존성과 실제 Java↔Hibernate/JDBC↔MySQL 저장 경계를 확인하고 제품 수정을 TASK-814로 이관했다. 당시 Characterization Test 통과는 결함 재현의 성공이었다. TASK-816은 감사 처리·후속 책임 연결과 회귀 검증을 마쳐 `[x]`이며, 당시 기록은 보존한다.
 
-TASK-814는 callback 원천 통일, 기존 UTC Service/Provider/Scheduler/Notification/BoardingSession 경로와의 일관성, JDBC 경계 및 기존 데이터 해석·이관 정책을 최종 검증한다. UTC `LocalDateTime`/`DATETIME(6)` 유지와 `Instant` 중심 전환의 선택은 Schema·DTO·Query·호환성 비용을 확인한 뒤 결정하며, 이번 감사에서는 타입 전환·공통 Clock 구조·운영 timezone 설정·Migration을 도입하지 않는다. 저장 의미와 기존 데이터 제약은 [Database](database.md#utc-목표와-현재-저장-경계-task-816--aud-12), 재현·실제 영향·설계 대안·후속 acceptance는 [AUD-12 기록](task-list.md#aud-12-처리-2026-10-30)이 소유한다. AUD-10 로그인 TransactionTemplate/Session 원자성과 AUD-11 Migration 호환성 정책은 유지한다.
+TASK-814는 A안인 기존 UTC `LocalDateTime`/`DATETIME(6)`을 유지하고 callback 5곳에 `ZoneOffset.UTC`를 명시했다. 기존 UTC Service/Provider/Scheduler/Notification/BoardingSession/Device/metadata 경로와 API·Query·Lifecycle은 유지한다. 공통 Clock Framework·타입 전환·운영 timezone 설정·Migration은 도입하지 않았다. scoped Clock factory 고정으로 실제 callback을 통과시키는 UTC 회귀와 독립 JVM timezone/DST·MySQL 왕복 검증은 [TASK-814 구현 결과](task-list.md#task-814-utc-구현-및-검증-결과-2026-10-30)를 따른다. 현재 저장 의미·기존 값 원문 보존·운영 적용 조건은 [Database](database.md#utc-목표와-현재-저장-경계-task-816--aud-12), 수정 전 재현 근거는 [AUD-12 기록](task-list.md#aud-12-처리-2026-10-30)이 소유한다. AUD-10 로그인 TransactionTemplate/Session 원자성과 AUD-11 Migration 호환성 정책은 유지한다.
 
 ## 5. Authentication Architecture
 
