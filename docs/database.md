@@ -67,13 +67,13 @@ V1~V4를 포함한 기존 Migration과 Checksum은 유지한다. V4 뒤 신규 M
 
 ## 5. Persistence Strategy
 
-JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, Phase 7의 Notification event/delivery persistence, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`는 Repository 기반으로 관리한다. `BusAlarmTarget`은 Alarm aggregate를 통해 persist/remove한다. Bus metadata는 source-neutral route snapshot을 한 Route 단위로 reconciliation한다.
+JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `boarding_sessions`, Phase 7의 Notification event/delivery persistence, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`, `bus_metadata_sync_states`는 Repository 기반으로 관리한다. `BusAlarmTarget`은 Alarm aggregate를 통해 persist/remove한다. Bus metadata는 source-neutral route snapshot을 한 Route 단위로 reconciliation한다.
 
 현재 구현된 Query는 JPA로 충분하며 MyBatis Mapper, Mapper XML, MyBatis 전용 production 설정과 starter를 유지하지 않는다. Route/Stop 검색, Alarm grouping, 대량 조회 성능에서 명시적 SQL 제어의 실제 필요가 확인되면 MyBatis 도입을 다시 결정한다. 그때에도 Domain Entity의 상태 관리 책임을 SQL Query Model로 옮기지 않는다.
 
 ## 6. 핵심 테이블
 
-`users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `notification_events`, `notification_deliveries`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`의 현재 physical Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 TASK-702의 V13, NotificationEvent/Delivery와 FOLLOW_UP UUID는 TASK-707의 `V14__create_notification_outbox.sql`로 추가됐다. 구형 notification_history의 조건부 보존은 아래 legacy 정책을 따른다. Alarm activation generation은 TASK-510의 V11 Migration으로 `alarms`에 추가됐다.
+`users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, `boarding_sessions`, `notification_events`, `notification_deliveries`, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`, `bus_metadata_sync_states`의 현재 physical Schema는 아래 정의와 Flyway Migration으로 관리한다. `devices`는 TASK-702의 V13, NotificationEvent/Delivery와 FOLLOW_UP UUID는 TASK-707의 `V14__create_notification_outbox.sql`로 추가됐다. 구형 notification_history의 조건부 보존은 아래 legacy 정책을 따른다. Alarm activation generation은 TASK-510의 V11 Migration으로 `alarms`에 추가됐다.
 
 ### users
 
@@ -281,7 +281,7 @@ TASK-707에서 초기 NotificationHistory를 전환할 때 없는 generation/cyc
 
 하나의 lifecycle 처리 transaction은 current Alarm lifecycle/activation generation을 검증하고 lifecycle transition, NotificationEvent insert와 그 시점에 eligible한 Device별 Delivery 생성을 함께 commit한다. eligible Device가 0개여도 이미 발생한 logical NotificationEvent는 저장하고 Delivery는 0개로 두며 no-recipient log/metric으로 관찰한다. 이미 freshness가 끝난 recipient row는 아래 계약대로 EXPIRED로 생성한다. 이후 등록된 Device에 과거 Event의 Delivery를 생성하지 않는다. 단일 Spring Backend의 fixed-delay, non-overlapping worker가 기존 Delivery를 제한 조회하고 recipient를 다시 선정하지 않는다. 전송 전 재검증/attempt commit 및 결과 반영은 [Architecture](architecture.md#notification-dispatch와-result-transaction-task-709)를 따른다. Provider I/O를 lifecycle transaction 안에서 수행하거나 non-durable after-commit callback만을 유일한 전달 보장으로 사용하지 않는다.
 
-Lifecycle/Provider result는 [Domain invariant](domain-model.md#delivery-result-semantics), failure/retry 결정은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-failureretryexpiry-설계-2026-10-09)가 소유한다. 아래 Schema와 due Repository는 TASK-707에서 적용했다. Provider 결과 처리/attempt 시작/retry/expiry 운영 실행은 TASK-709 implementation에 남는다. append-only attempt table, raw FID 복제, claim/lease column은 추가하지 않는다. Operational data는 장기 Analytics와 별도 책임이며 Analytics persistence는 TASK-812에서 필요성을 결정한다.
+Lifecycle/Provider result는 [Domain invariant](domain-model.md#delivery-result-semantics), failure/retry 결정은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-failureretryexpiry-설계-2026-10-09)가 소유한다. 아래 Schema와 due Repository는 TASK-707에서 적용했다. Provider 결과 처리/attempt 시작/retry/expiry는 TASK-709에서 구현했다. 실제 Firebase/iPhone 최종 E2E와 운영 검증은 TASK-710/711에 남는다. append-only attempt table, raw FID 복제, claim/lease column은 추가하지 않는다. Operational data는 장기 Analytics와 별도 책임이며 Analytics persistence는 TASK-812에서 필요성을 결정한다.
 
 #### NotificationEvent freshness time (TASK-709)
 
@@ -293,7 +293,7 @@ Lifecycle/Provider result는 [Domain invariant](domain-model.md#delivery-result-
 | `event_detected_at` | `DATETIME(6) NOT NULL` | candidate 최초 선택 시 서버 Clock 값, 불변 |
 | `created_at` | `DATETIME(6) NOT NULL` | Event row 생성 시 서버 Clock 값, 불변 |
 
-`notificationEventCreatedAt`은 Event의 createdAt 별칭이며 별도 중복 column이 아니다. Provider data time은 이번 freshness용 필수 column으로 추가하지 않고, TASK-707 payload/evidence 저장에서 필요하면 실제 존재하는 값만 optional로 보존한다. 물리 Event time을 추정하지 않는다. 시간 역행은 application에서 거부/관찰하며 cross-row CHECK로 가짜 순서를 강제하지 않는다.
+`notificationEventCreatedAt`은 Event의 createdAt 별칭이며 별도 중복 column이 아니다. Provider data time은 위 evidence의 nullable `provider_data_time`에 실제 존재하는 값만 보존하며 freshness 계산용 필수 시각으로 합성하지 않는다. 물리 Event time을 추정하지 않는다. 시간 역행은 application에서 거부/관찰하며 cross-row CHECK로 가짜 순서를 강제하지 않는다.
 
 #### NotificationDelivery operational Schema (TASK-709)
 
@@ -387,7 +387,7 @@ Route snapshot sync는 동일 Route/Stop identity의 display·operational metada
 
 `destination_name`은 V12 nullable migration으로 추가한 사용자 표시 metadata다. 동일 occurrence의 목적지만 변경되거나 검증 실패로 null이 되면 기존 내부 ID를 유지하며 current snapshot 값으로 갱신한다. GBIS ID나 방향 raw field는 영속하지 않는다.
 
-TASK-513은 provider별 최소 persisted metadata sync state로 `provider`, `lastCompleteSyncAt` 의미를 저장해 fresh DB bootstrap 완료, readiness와 last successful complete sync age를 판단한다. 구체 table/column/type은 구현 시 정하며 sync/checksum history, staging table, error journal은 요구하지 않는다.
+TASK-513은 V10의 `bus_metadata_sync_states`에 `provider VARCHAR(20)` PK와 `last_complete_sync_at DATETIME(6) NOT NULL`을 저장한다. `BusMetadataSyncState`는 Java `Instant`로 매핑하며 complete sync 성공 뒤에만 갱신한다. fresh DB bootstrap 완료와 마지막 complete sync 성공 age의 근거이며 readiness 연계의 최종 검증은 TASK-807에 남는다. sync/checksum history, staging table, error journal은 추가하지 않았다.
 
 ### Phase 9 Boarding persistence contract (TASK-903)
 

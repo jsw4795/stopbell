@@ -1,5 +1,18 @@
 # 로드맵
 
+## 현재 진행 상태 (2026-10-30)
+
+아래 초기 Phase 0/1 체크리스트와 dependency diagram은 당시 계획·단계 관계를 보존한다. 현재 구현 완료 여부는 이 요약과 [Task List](task-list.md)를 기준으로 확인하며 초기 미체크 항목을 모두 미구현으로 읽지 않는다. 이번 문서 정리에서는 기존 체크박스를 변경하지 않는다.
+
+| 영역 | 구현 상태 | 남은 검증·책임 |
+| --- | --- | --- |
+| Phase 6 Flutter | TASK-601~609 완료: Google 로그인·Auth 복원/갱신·노선/정류장 선택·Alarm 관리, TASK-608A 표시 계약 반영 | Notification·Boarding의 후행 실기기 검증과 구분 |
+| Phase 7 Notification | TASK-701~709 완료: iOS 기본 연동·권한/Device lifecycle·FCM Client·Event/Delivery·atomic decision·Dispatch·retry/expiry·durable PENDING recovery | TASK-710은 일부 iPhone 수신/tap PASS이나 미완료, TASK-711 최종 E2E·regression 미완료 |
+| Phase 8 Quality | AUD-01~13의 수정 또는 감사·검증/후속 책임 연결 기록 존재 | TASK-816 최종 상호 정합성·회귀 검증, AUD-12 UTC 제품 결함의 TASK-814 수정·검증 및 기존 운영 Task 잔여 범위 |
+| Phase 9 BoardingSession | TASK-903 설계와 TASK-904~907 구현 완료. TASK-908 변경으로 번호 입력 없는 명시적 차량 선택·즉시 TRACKING·2정거장 전(기본)/1정거장 전 준비 알림 구현 | 서울 조건부 지원·TAGO 정확한 하차 추적 보류. TASK-908 실제 버스/iPhone E2E 미완료 |
+
+TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 검증을 대체하지 않는다. 상세 결과는 [Local Development](local-development.md#task-710-실제-iphone-수신-및-tap-검증), TASK-908의 정책 변경과 실측 경계는 [증거 보고서 §28](research/TASK-908-provider-evidence.md#28-하차-전-단일-알림과-이동-진행-평가-2026-10-29)을 따른다. TASK-814/816은 모두 미완료다.
+
 ## Phase 0 — 조사 및 PoC
 
 목표: 핵심 아이디어가 기술적으로 실현 가능한지 증명한다.
@@ -42,7 +55,7 @@ TASK-305 Transit 관측 모델 및 Alarm Transit Target 계약 결정
 
 Transit Foundation Phase 3의 TASK-301~305는 모두 완료됐다.
 
-TASK-304는 경기 TAGO를 Route/Stop metadata·realtime Location·Arrival 보조 Provider로, 서울특별시 버스위치정보조회 서비스를 realtime Location Provider로 결정했다. 서울 static Route/Stop metadata source의 초기 노선정보조회 서비스 결정은 PoC와 ADR-009에서 서울 T Data CSV full import로 대체됐다. Provider external identifier는 `TAGO`, `SEOUL_BUS` namespace 안의 opaque String으로 처리한다. TASK-305는 provider-neutral Observation, Alarm Transit Target, ARRIVED·PASSED·UNKNOWN과 before/after 및 Vehicle tracking lifecycle 계약을 확정했다. TASK-401은 BusAlarmTarget snapshot Schema와 INACTIVE/ACTIVE/FOLLOW_UP lifecycle 및 재시작 가능한 after follow-up runtime을 구현했다. API, mapping, Evaluation, Scheduler는 Phase 4~5의 후속 Task에서 구현한다.
+TASK-304는 경기 TAGO를 Route/Stop metadata·realtime Location·Arrival 보조 Provider로, 서울특별시 버스위치정보조회 서비스를 realtime Location Provider로 결정했다. 서울 static Route/Stop metadata source의 초기 노선정보조회 서비스 결정은 PoC와 ADR-009에서 서울 T Data CSV full import로 대체됐다. Provider external identifier는 `TAGO`, `SEOUL_BUS` namespace 안의 opaque String으로 처리한다. TASK-305는 provider-neutral Observation, Alarm Transit Target, ARRIVED·PASSED·UNKNOWN과 before/after 및 Vehicle tracking lifecycle 계약을 확정했다. TASK-401은 BusAlarmTarget snapshot Schema와 INACTIVE/ACTIVE/FOLLOW_UP lifecycle 및 재시작 가능한 after follow-up runtime을 구현했다. API, mapping, Evaluation, Scheduler는 Phase 4~5에서 구현했다.
 
 ## Phase 1 — 버스 알림 MVP
 
@@ -112,7 +125,7 @@ TASK-508 → TASK-509 → TASK-510 → TASK-511 → TASK-512
 
 ## Phase 6 — Flutter Client 의존성
 
-Phase 6의 현재 목표는 iOS 개발 및 실제 기기 vertical slice다. TASK-601~605 Authentication lane은 Backend Authentication이 준비되어 있으므로 Phase 5와 병행할 수 있다. TASK-601 구현 전에는 bundle ID, Google iOS client ID, Backend server/web client ID, API origin 등 필요한 개발 설정을 검증한다. Apple Login과 App Store 계정 삭제 요건은 이 계약에서 확정하지 않고 별도 release readiness에서 재검토한다.
+Phase 6은 iOS 개발 및 실제 기기 vertical slice를 목표로 진행했고 TASK-601~609를 완료했다. 아래는 당시 실행 dependency와 구현 원칙이다. TASK-601~605 Authentication lane은 Backend Authentication이 준비되어 있으므로 Phase 5와 병행할 수 있다. TASK-601 구현 전에는 bundle ID, Google iOS client ID, Backend server/web client ID, API origin 등 필요한 개발 설정을 검증한다. Apple Login과 App Store 계정 삭제 요건은 이 계약에서 확정하지 않고 별도 release readiness에서 재검토한다.
 
 ```text
 Authentication lane (Phase 5와 병행 가능)
@@ -151,6 +164,8 @@ TASK-710 iPhone foreground/background/terminated/tap 검증
                                   ↓
 TASK-711 최종 E2E/regression
 ```
+
+TASK-701~709의 구현과 개별 correctness 검증은 완료됐다. TASK-706 당시 handler 부재 제한은 TASK-709의 production Handler·FCM 정적 설정 gate로 대체했으며 dispatch는 여전히 기본 false다. 실제 iPhone 전체 검증 TASK-710과 최종 E2E/regression TASK-711은 미완료다.
 
 각 Task는 자기 correctness test를 함께 작성한다. TASK-711은 테스트를 몰아서 처음 작성하는 Task가 아니라 최종 E2E/regression 보강이다. Phase 7에서 logical DB uniqueness, stale activation 보호, Event 시점의 multi-device recipient 확정, durable pending recovery, invalid registration conditional cleanup, bounded retry와 실제 iOS 상태별/tap 검증을 갖추며 Phase 8에 미루지 않는다.
 
@@ -191,6 +206,12 @@ TASK-808은 production topology가 아닌 재현 가능한 Backend runtime image
 TASK-814는 persisted operational time을 UTC 의미로 통일하고 host timezone 의존을 제거한다. 다만 그 전 TASK에서 새로 추가하는 timestamp도 처음부터 UTC 의미, test 가능한 Clock과 명시적 Provider timezone parsing을 적용한다. TASK-811은 memory ACTIVE tracking의 safe rebaseline, persisted FOLLOW_UP, durable outbox recovery와 FCM ambiguous acceptance를 restart/shutdown 경계에서 검증한다. 단일 non-overlapping worker는 restart 뒤 PENDING Delivery를 다시 처리하며, FCM accepted 뒤 DB update 전 crash에서는 duplicate 가능성을 허용한다. TASK-810은 Provider freshness, evaluation, outbox, FCM, Backend observable latency를 분리하고 실제 iPhone foreground/background/terminated 반복 측정으로 체감 지연을 보완한다.
 
 TASK-812 Analytics는 실제 제품 질문과 보존 근거가 있을 때만 최소 구현하며 public V1 release blocker가 아니다. `NotificationEvent`/`NotificationDelivery`는 operational correctness 데이터이지 장기 Analytics Source of Truth가 아니다. TASK-815는 public App Store 제출 전에만 실행하는 release blocker이며, 제출 시점의 Apple login/account deletion/privacy disclosure 요건을 검토한다. 이는 Phase 6의 iOS actual-device vertical slice를 막지 않는다.
+
+## Phase 9 — BoardingSession 현재 흐름
+
+노선 → 목적/선택적 승차 occurrence → 후보 조회 → 사용자의 차량 선택 → 준비 알림 시점 설정·등록 → 즉시 TRACKING 순서다. 단일 후보도 자동 확정하지 않으며 번호 입력·수동 대조는 요구하지 않는다. 기존 세션 조회·취소·동일 차량 재확인과 checkpoint 복구·Notification 연결은 구현되어 있다.
+
+새 세션은 목적지 이전 준비 알림을 한 번 생성하고 목적지 도달·통과는 추적 완료에 사용한다. 기존 NULL offset 세션의 ON/OFF·목적지 Push는 호환 정책으로 보존한다. 실제 탑승·정차·하차 사실을 검증하지 않는다. 상세 계약은 [요구사항](requirements.md#phase-9-탑승-세션과-하차-준비-알림)과 [API](api.md#탑승-세션-api-task-903)가 소유하며 TASK-908 현장 검증은 남아 있다.
 
 ## Phase 2 — 지하철 기상 알림
 

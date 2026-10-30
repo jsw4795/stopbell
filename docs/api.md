@@ -2,15 +2,15 @@
 
 ## 1. 상태
 
-이 문서는 초기 API 형태만 정의한다. 교통 데이터 제공자가 확정된 후 관련 엔드포인트는 변경될 수 있다.
+이 문서는 현재 구현된 V1 HTTP 계약을 정의한다. Transit Provider는 `SEOUL_BUS`와 `TAGO`이며 metadata source와 지원 제한은 [요구사항](requirements.md#v1-transit-provider)과 아래 세션 API 계약을 따른다. 구현 완료와 실제 Provider/iPhone 최종 E2E 검증은 구분한다.
 
-StopBell Application API의 기본 접두사 후보:
+StopBell Application API의 기본 접두사:
 
 ```text
 /api/v1
 ```
 
-운영·관리 endpoint는 Application API와 분리하여 `/actuator/*`에 둔다.
+인증 endpoint는 기존 `/auth/google`, `/auth/refresh`, `/auth/logout` 경로를 사용한다. 운영·관리 endpoint는 Application API와 분리하여 `/actuator/*`에 둔다.
 
 ## 2. 설계 규칙
 
@@ -96,7 +96,7 @@ JWT Access Token이 필요한 Application API다. `{routeId}`는 Route 검색 re
 
 `id`는 current metadata의 `BusRouteStopOccurrence.id`이며 Alarm 생성 Request의 `targetStopOccurrenceId`와 같은 selection reference다. `name`은 연결된 `BusStop.stopName`이고 `order`는 `BusRouteStopOccurrence.stopOrder`다. `canNotifyOneStopBefore`와 `canNotifyOneStopAfter`는 정렬된 현재 Route traversal에서 실제 predecessor/successor occurrence 존재 여부를 나타내며, `order`의 산술 증감으로 계산하지 않는다. 같은 `BusStop`이 Route에 여러 번 나타나도 occurrence를 dedup하지 않고 각각 반환한다.
 
-`destinationName`은 검증된 경기 GBIS traversal에서 계산한 사용자용 목적지이며 서울 또는 검증 실패 경기 Route에서는 `null`이다. `previousStopName`/`nextStopName`은 저장된 traversal의 실제 앞뒤 occurrence 이름이고 양 끝에서는 각각 `null`이다. Client는 같은 이름 occurrence를 `destinationName`의 `○○ 방면`, 인접 Stop 문맥, 마지막으로 `order`로 구분한다. `order`는 표시용 최종 구분값이며 Alarm 선택 identity는 `id`다.
+`destinationName`은 검증된 경기 GBIS traversal에서 계산한 사용자용 목적지이며 서울 또는 검증 실패 경기 Route에서는 `null`이다. `previousStopName`/`nextStopName`은 저장된 traversal의 실제 앞뒤 occurrence 이름이고 양 끝에서는 각각 `null`이다. Client는 같은 이름 occurrence를 `destinationName`의 `○○ 방면`, 인접 Stop 문맥, 마지막으로 `order`로 구분한다. `order`는 표시용 최종 구분값이며 Alarm·BoardingSession의 정류장 선택 reference는 `id`다. `destinationName`과 `order`는 실제 차량의 실시간 운행 방향을 증명하지 않는다.
 
 Route가 current metadata에 없으면 `404 Not Found`와 `BUS_ROUTE_NOT_FOUND` (`Bus route was not found.`)를 반환한다. Long으로 변환할 수 없거나 양수가 아닌 `{routeId}`는 `400 Bad Request`와 `INVALID_REQUEST`를 반환한다. Route에는 하나 이상의 occurrence가 있어야 한다는 metadata invariant를 유지하며, 이 상태가 깨진 Route를 정상적인 빈 선택 결과나 Route 없음으로 처리하지 않는다.
 
@@ -375,7 +375,7 @@ TASK-816/AUD-13은 ALARM PASSED의 표시 Body만 보강하며 위 네 string da
 
 다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904, 세션 Persistence와 생성·조회·취소 API 경계는 TASK-905 1단계에서 구현했다. TASK-905는 특정 차량 polling·준비 후보·종료 판정, checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API까지 구현했다. TASK-906은 Backend Notification dispatch를 연결했으며 Flutter 후보·세션 조회/취소/재확인은 TASK-907 1·2단계에서 연결했고 TASK-908에서 번호 입력 없는 차량 선택·등록으로 변경했다. 세션 Push 수신/tap은 3단계에서 연결했다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
 
-**지원 경계 (TASK-908 즉시 추적):** 서울 차량 선택은 최신 roster/detail의 유일한 vehId·전체 Provider 번호 대응, freshness, 노선 metadata·운행 종료·시각/진행 모순을 검증한다. 정차·이동·위치 근거 유무와 무관하게 즉시 TRACKING으로 접수한다. 위치 필드 누락과 정상 empty detail은 신선한 roster의 동일 ID/번호 대응이 확인되면 허용한다. empty detail에 원래 위치 reference가 있으면 두 원래 시각과 함께 미검증으로만 보존하며 새 도착 근거로 갱신하지 않는다. ID/order가 metadata와 모순되거나 차량 identity가 바뀌면 거부하며 다른 차량으로 대체하지 않는다. 목적지가 이미 현재/이후인 관측도 등록할 수 있으나 신뢰할 목적지 이전 기준점으로 승격하거나 소급 알림을 만들지 않는다. 최신 exact stId/stOrd가 하나의 occurrence로 대응한 정차·이동 detail을 검증 checkpoint로 사용한다. TAGO 정확한 하차 추적은 미지원이며 sectOrd·order-only·회차 의미를 추정하지 않는다. 이동 중 기준점도 최신 시각·단조성·연속성 검증이 필요하며 정차 응답을 기다리는 조건은 없다. flag별 의미는 실측 기반 가정이고 실제 무정차 stOrd 갱신은 미검증이다. 상세 진행 규칙과 이동 관측만 계속되는 한계는 [Domain](domain-model.md#snapshot-and-progress)을 따른다. 자동 테스트 성공과 실제 Provider/iPhone 성공은 구분한다.
+**지원 경계 (TASK-908 즉시 추적):** 서울 차량 선택은 최신 roster/detail의 유일한 vehId·전체 Provider 번호 대응, freshness, 노선 metadata·운행 종료·시각/진행 모순을 검증한다. 정차·이동·위치 근거 유무와 무관하게 즉시 TRACKING으로 접수한다. 위치 필드 누락과 정상 empty detail은 신선한 roster의 동일 ID/번호 대응이 확인되면 허용한다. empty detail에 원래 위치 reference가 있으면 두 원래 시각과 함께 미검증으로만 보존하며 새 도착 근거로 갱신하지 않는다. ID/order가 metadata와 모순되거나 차량 identity가 바뀌면 거부하며 다른 차량으로 대체하지 않는다. 목적지가 이미 현재/이후인 관측도 등록할 수 있으나 신뢰할 목적지 이전 기준점으로 승격하거나 소급 알림을 만들지 않는다. 최신 exact stId/stOrd가 하나의 occurrence로 대응한 정차·이동 detail을 검증 checkpoint로 사용한다. TAGO 정확한 하차 추적은 미지원이며 sectOrd·order-only·회차 의미를 추정하지 않는다. 이동 중 기준점도 최신 시각·단조성·연속성 검증이 필요하며 정차 응답을 기다리는 조건은 없다. flag별 의미는 실측 기반 가정이고 실제 무정차 stOrd 갱신은 미검증이다. 상세 진행 규칙과 위치 근거 부족·운행 모호성의 보류 조건은 [Domain](domain-model.md#snapshot-and-progress)을 따른다. 자동 테스트 성공과 실제 Provider/iPhone 성공은 구분한다.
 
 조회는 Provider 재호출이나 polling을 실행하지 않는다. 현재 프로세스에서 최신 생성 baseline 또는 polling·복구·재확인의 관측 검증·commit을 확인하고 허용 revision/checkpoint가 현재 DB 상태와 일치하며 시각이 유효한 TRACKING만 `evaluationStatus=READY`와 검증된 `remainingOccurrenceGap`을 반환한다. TRACKING 중 검증된 위치 기준점이 없으면 null과 VERIFICATION_PENDING, 기준점은 있으나 생성 검증 commit이 이 프로세스에 공개되지 않았거나 재시작 후 미복구·일시 장애·freshness 만료이면 null과 RECOVERY_PENDING, SUSPENDED는 null과 HELD, terminal은 null과 ENDED다. VERIFICATION_PENDING은 세션 상태가 아니라 위치 근거 상태이며 TRACKING을 유지한다. 과거 checkpoint 시각은 마지막 검증 근거로 보존하며 현재 위치를 뜻하지 않는다. 조회·취소·중복 요청 확인·생성 transaction과 enabled Scheduler cycle은 수명이 끝난 세션을 EXPIRED로 반영한다. 재시작 직후에는 기존 TRACKING을 일괄 변경하지 않고 RECOVERY_PENDING으로 반환한다. 기존 Scheduler에서 새 관측의 자동 복구 검증·commit이 확인된 뒤 READY가 될 수 있다. GET 자체는 복구를 실행하지 않는다.
 
@@ -480,7 +480,7 @@ cancel body는 `expectedRevision`이다. current revision이 일치하는 미종
 
 #### 세션 오류
 
-기존 code/message 두 필드 형식과 JWT 401을 유지한다. 아래는 후속 추가 계약이며 error message는 안전한 고정 영문 문구로 제공하고 Provider 원문·다른 User 상태를 노출하지 않는다.
+기존 code/message 두 필드 형식과 JWT 401을 유지한다. 아래는 구현된 세션 API 오류 계약이며 error message는 안전한 고정 영문 문구로 제공하고 Provider 원문·다른 User 상태를 노출하지 않는다.
 
 | Code | HTTP | 의미 |
 | --- | --- | --- |

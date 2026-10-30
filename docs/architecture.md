@@ -28,7 +28,7 @@
         │        │
         │        ├──────────────► 교통 데이터 API
         │
-        ├───────────────────────► 푸시 제공자(FCM 후보)
+        ├───────────────────────► 푸시 제공자(FCM HTTP v1)
         │
         ▼
       MySQL
@@ -120,7 +120,7 @@ Controller가 JWT를 직접 parsing하거나 Client가 전달한 `userId`를 신
 
 Refresh Token은 SecureRandom으로 생성한 256-bit opaque token이며, 서버가 저장한 SHA-256 Hash와 비교해 Access Token 재발급과 현재 Session Logout에 사용한다. Rotation 시 기존 Token을 삭제하고 새 Access Token과 새 Refresh Token을 함께 발급하며, 새 Refresh Token은 다시 30일 동안 유효하다. Logout은 Access Token 인증 없이 제시된 Token Hash의 Session 하나만 삭제하고 `204 No Content`를 반환한다. Access Token blacklist, Redis 등 추가 인프라는 현재 도입하지 않으므로 이미 발급된 Access Token은 만료 시점까지 유효할 수 있다.
 
-Flutter에서는 login, bootstrap, authenticated HTTP interceptor, logout이 Token을 각각 독립적으로 변경하지 않는다. 하나의 Auth Session 책임이 current Access/Refresh Token Pair, `initializing`/`authenticated`/`unauthenticated` 상태, refresh single-flight, Token Pair 교체와 Secure Storage 반영을 소유한다. Token Pair는 V1에서 pair 단위로 함께 저장하는 것을 기본으로 하며, 구체적인 storage serialization API는 구현 시 결정한다.
+Flutter에서는 login, bootstrap, authenticated HTTP interceptor, logout이 Token을 각각 독립적으로 변경하지 않는다. 하나의 Auth Session 책임이 current Access/Refresh Token Pair, `initializing`/`authenticated`/`unauthenticated` 상태, refresh single-flight, Token Pair 교체와 Secure Storage 반영을 소유한다. Token Pair와 durable login identity는 `SecureTokenPairStorage`가 OS Secure Storage의 단일 JSON 레코드로 함께 저장한다.
 
 iOS startup은 TASK-704 설치본 marker/secure 레코드를 먼저 확인해 재설치 시 잔존 Keychain Token Pair를 지운 다음 Auth Session을 복구한다. Token Pair에는 재로그인마다 새로 생성하고 rotation/복원 동안 유지하는 durable login identity를 함께 저장한다. startup은 Auth Session을 통해 저장된 Token Pair를 읽고 인증 상태를 복구한다. Access Token 만료 또는 보호 요청의 인증 실패는 같은 session 안에서 refresh를 한 번만 실행하며 concurrent `401`은 single-flight 결과를 공유한다. refresh 성공 뒤 각 보호 요청은 최대 한 번만 재시도한다. `/auth/google`, `/auth/refresh`, `/auth/logout`는 refresh 대상 또는 재시도 대상으로 취급하지 않아 refresh loop에 들어가지 않는다. refresh `401`은 Token Pair를 제거하고 unauthenticated로 전환하지만 network/offline/5xx는 저장된 장기 session을 즉시 제거하지 않는다.
 
@@ -221,7 +221,7 @@ common
 
 ### boarding
 
-독립 BoardingSession의 snapshot·checkpoint·수명·revision과 생성·조회·취소, 특정 차량 진행 판정을 담당한다. Transit 후보 검증을 재사용하고 기존 Alarm 생명주기는 유지한다. 현재 구현과 후속 추적·판정·복구의 경계는 [탑승 세션 실행](#탑승-세션-실행과-notification-연계-task-903)을 따른다.
+독립 BoardingSession의 snapshot·checkpoint·수명·revision과 생성·조회·취소, 특정 차량 진행 판정을 담당한다. Transit 후보 검증을 재사용하고 기존 Alarm 생명주기는 유지한다. 현재 구현된 추적·판정·복구·Notification 연결의 경계는 [탑승 세션 실행](#탑승-세션-실행과-notification-연계-task-903)을 따른다.
 
 ### transit
 
@@ -263,11 +263,11 @@ Flutter `BoardingCandidateClient.find()`의 최초 HTTP·공유 Refresh·최대 
 
 Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync에서 받아 StopBell DB의 현재 상태로 보관한다. 경기 GBIS route/routeStation bulk는 전체 TAGO traversal이 검증된 Route의 destination 표시값만 보강하며 Provider identity와 realtime routing은 TAGO를 유지한다. 사용자 Route/Stop 조회와 Alarm 생성은 DB metadata를 사용하고, Alarm 생성 시 필요한 값은 `BusAlarmTarget` snapshot으로 복사한다. Alarm target은 metadata Entity를 FK로 장기 참조하지 않으므로 subsequent sync가 기존 Alarm을 변경하지 않는다.
 
-TASK-513의 source adapter는 서울의 노선마스터·정류장마스터·노선-정류장마스터 CSV와 경기의 TAGO city별 Route·Route Stop pagination을 검증해 normalized metadata snapshot으로 만든 뒤 기존 reconciliation service에 전달한다. 실제 CSV header, encoding, GPS column은 fixture 또는 source 파일을 확인한 구현 시점에 확정한다. source 일부 fetch 실패, parser failure, pagination 미완료, required source 누락, provider request 일부 실패와 검증되지 않은 empty result는 complete provider snapshot이 아니므로 absence/deletion으로 해석하지 않으며 provider-level cleanup을 실행하지 않는다. Typed boundary, completeness token/result, destructive method visibility 제한 또는 동등한 구조적 보호로 검증된 complete snapshot만 cleanup 경로에 들어가게 하며 구체 type 이름은 TASK-513에서 정한다.
+TASK-513의 source adapter는 서울의 노선마스터·정류장마스터·노선-정류장마스터 CSV와 경기의 TAGO city별 Route·Route Stop pagination을 검증해 normalized metadata snapshot으로 만든 뒤 기존 reconciliation service에 전달한다. 서울 CSV header·UTF-8 BOM·좌표 column은 source와 fixture를 확인해 parser에 반영했으며 [ADR-009의 TASK-513 구현 기록](adr/ADR-009-bus-transit-metadata-persistence-and-diff-sync-strategy.md#후속-구현-경계-task-513)을 따른다. source 일부 fetch 실패, parser failure, pagination 미완료, required source 누락, provider request 일부 실패와 검증되지 않은 empty result는 complete provider snapshot이 아니므로 absence/deletion으로 해석하지 않으며 provider-level cleanup을 실행하지 않는다. `BusMetadataSource`가 검증된 `CompleteBusMetadataSnapshot`을 반환하고 `BusMetadataBootstrapService`가 이를 `BusMetadataSyncService.syncCompleteProviderSnapshot()`에 전달한다. 검증되지 않은 부분 수집 결과는 cleanup 경로에 들어가지 않는다.
 
 서울 `SeoulCsvMetadataSource.fetchCompleteSnapshot()`은 CSV 전체 파싱·join 검증과 기존 노선유형 scope 판정 뒤, 포함 대상으로 확정된 모든 Route에 occurrence가 최소 1개 있는지 확인한다(TASK-816 / AUD-03). 하나라도 0개이면 complete snapshot 생성을 거부하고 예외를 전파하므로 첫 Route DB 반영·provider cleanup·`lastCompleteSyncAt` 갱신을 모두 시작하지 않는다. 정상/빈 Route가 섞여도 전체 입력을 거부하며 빈 Route만 제외해 성공시키지 않는다. 기존 경기·인천 및 null 유형의 선착장 Route 제외 정책, null 유형의 빈 occurrence 거부 정책과 TAGO 정책은 유지한다. occurrence의 정류장 연결·식별자·양수/중복 순번 등은 기존 parser와 snapshot 검증을 재사용한다. 0개 occurrence 실패는 검증 단계·complete 미승인·DB 반영 미시작을 나타내는 로그에 전체 건수와 최대 10개 Route ID 예시만 남긴다.
 
-최초 metadata bootstrap은 일반 Backend startup에 강제로 연결하지 않는 명시적 one-shot import/sync 실행을 기본으로 한다. Provider별 최소 persisted sync state는 `provider`, `lastCompleteSyncAt` 의미를 보존해 bootstrap 완료, readiness와 마지막 complete sync 성공 age를 판단한다. 필요하면 in-progress/failure 정보를 확장할 수 있지만 sync/checksum history, staging table, error journal은 요구하지 않는다. 자동 refresh 주기는 이번 결정에 포함하지 않는다. 단일 Backend에서는 같은 Provider full sync의 동시 실행을 막고, Provider 전체를 하나의 장시간 DB transaction으로 묶지 않는다. 기존 Route 단위 transaction과 complete snapshot 성공 뒤 cleanup을 유지하며, ingestion 구현 시 Route reconciliation의 Stop lazy-loading N+1 여부를 확인·개선한다. DB 반영 중 오류는 실패한 Route의 metadata 변경·occurrence 교체를 함께 rollback하고 후속 cleanup·완료 시각 갱신을 차단하지만, 앞서 commit된 다른 Route까지 rollback하는 계약은 아니다. source 검증 실패와 DB 반영 실패 모두 bootstrap의 single-flight guard를 해제하므로 정상 입력으로 재시도할 수 있다. Redis, distributed lock, queue는 V1 범위가 아니다.
+최초 metadata bootstrap은 일반 Backend startup에 강제로 연결하지 않는 명시적 one-shot import/sync 실행을 기본으로 한다. Provider별 `BusMetadataSyncState`는 `provider`, `lastCompleteSyncAt`을 저장해 bootstrap 완료와 마지막 complete sync 성공 age의 근거를 보존한다. readiness 연계의 최종 검증은 TASK-807에 남는다. 필요하면 in-progress/failure 정보를 확장할 수 있지만 sync/checksum history, staging table, error journal은 요구하지 않는다. 자동 refresh 주기는 이번 결정에 포함하지 않는다. 단일 Backend에서는 같은 Provider full sync의 동시 실행을 막고, Provider 전체를 하나의 장시간 DB transaction으로 묶지 않는다. 기존 Route 단위 transaction과 complete snapshot 성공 뒤 cleanup을 유지하며, ingestion 구현 시 Route reconciliation의 Stop lazy-loading N+1 여부를 확인·개선한다. DB 반영 중 오류는 실패한 Route의 metadata 변경·occurrence 교체를 함께 rollback하고 후속 cleanup·완료 시각 갱신을 차단하지만, 앞서 commit된 다른 Route까지 rollback하는 계약은 아니다. source 검증 실패와 DB 반영 실패 모두 bootstrap의 single-flight guard를 해제하므로 정상 입력으로 재시도할 수 있다. Redis, distributed lock, queue는 V1 범위가 아니다.
 
 선택된 Provider와 identifier 정책의 근거·제약은 `adr/ADR-006-v1-transit-provider-and-external-identifier-strategy.md`를 따른다.
 
@@ -331,7 +331,7 @@ TASK-708의 `BusAlarmDecisionResult`는 COMMITTED/DUPLICATE/STALE/RETRY_REQUIRED
 
 Scheduler는 미확인 결정을 `(alarmId, activationGeneration)`별 immutable pending result/expectedStatus/detectedAt으로 메모리에 보관한다. 다음 cycle에서 monitoring group 조회보다 먼저 재확인하므로 응답 유실 뒤 Alarm이 INACTIVE가 되어도 원래 candidate를 잃지 않는다. 재확인 실패 중에는 새 평가를 생략하고 memory nextState를 publish하지 않는다. 이 pending buffer는 process restart 내구성을 주장하지 않으며 ACTIVE의 Phase 5 restart 한계는 그대로다.
 
-`notification.service.NotificationDecisionTtlPolicy`는 `notification.decision.ttl.one-stop-before`, `.arrived`, `.passed`, `.one-stop-after`의 독립 Duration 설정을 제공한다. 네 기본값은 모두 **provisional 개발값 `PT60S`**이며 운영 확정값은 TASK-709/latency 검증 책임이다. 양수·유한하고 DATETIME(6)에서 사라지지 않는 최소 microsecond 정밀도를 요구하며 overflow 값은 거부한다. FOLLOW_UP의 5분 tracking timeout과 별개다. `expiresAt = original observedAt + TTL(type)`이고 DB retry 시 observed/detected 시각과 기한을 변경하지 않는다. 이미 만료된 유효 결정도 lifecycle/Event/recipient identity를 보존하며 Delivery만 최초 EXPIRED로 생성한다. 이 결정 정책은 dispatch/retry scheduling을 수행하지 않는다.
+`notification.service.NotificationDecisionTtlPolicy`는 `notification.decision.ttl.one-stop-before`, `.arrived`, `.passed`, `.one-stop-after`의 독립 Duration 설정을 제공한다. 네 기본값은 모두 **provisional 개발값 `PT60S`**이며 TASK-709 구현 설정으로 유지한다. 운영값 검증·조정은 TASK-710/711/810에 남는다. 양수·유한하고 DATETIME(6)에서 사라지지 않는 최소 microsecond 정밀도를 요구하며 overflow 값은 거부한다. FOLLOW_UP의 5분 tracking timeout과 별개다. `expiresAt = original observedAt + TTL(type)`이고 DB retry 시 observed/detected 시각과 기한을 변경하지 않는다. 이미 만료된 유효 결정도 lifecycle/Event/recipient identity를 보존하며 Delivery만 최초 EXPIRED로 생성한다. 이 결정 정책은 dispatch/retry scheduling을 수행하지 않는다.
 
 TASK-707은 persistence primitive와 제약을, TASK-708은 위 결정 transaction·dedup/retry 연결·UUID 복원을 구현했다. TASK-706은 commit된 pending Delivery worker를 소유한다. 책임 분담·삭제 제약·현재 recovery 한계는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-708-중복-방지-설계-2026-10-09)을 따른다.
 
@@ -339,7 +339,7 @@ TASK-707은 persistence primitive와 제약을, TASK-708은 위 결정 transacti
 
 AlarmService.delete는 기존 인증/소유권 검증과 Alarm PESSIMISTIC_WRITE 조회를 유지한다. 같은 transaction에서 해당 원본 alarmId의 PENDING Delivery를 ID 순서로 PESSIMISTIC_WRITE 조회하고 FAILED/DISPATCH_NOT_ALLOWED, nextAttemptAt=null로 종료한 뒤 Alarm/BusAlarmTarget을 hard delete한다. Event/Delivery는 보존하고 기존 attempt/result 및 terminal row는 변경하지 않는다. flush/commit 실패는 모두 rollback한다.
 
-삭제는 Alarm → Event join/Delivery ID 순서로 lock을 얻고 Device lock을 추가하지 않는다. 신규 결정은 같은 Alarm lock 뒤 Event → Device 순서이므로 삭제와 직렬화하며, 삭제 후 Scheduler/Event candidate는 TASK-708의 Alarm 부재 검증으로 거부한다. Worker는 Delivery → Device만 잠그고 뒤에 Alarm/Event write lock을 추가하지 않으므로 역순 lock cycle을 만들지 않는다. Worker preflight가 먼저 commit됐다면 I/O 직전 삭제 경쟁과 진행 중 FCM 요청의 회수는 보장하지 않는다. 삭제가 종료한 terminal row에는 후속 Worker가 새 호출을 시작하거나 late result로 PENDING을 복구하지 않는다. TASK-706은 이 Worker 경계를 구현했고 실제 result 정책은 TASK-709에 남는다.
+삭제는 Alarm → Event join/Delivery ID 순서로 lock을 얻고 Device lock을 추가하지 않는다. 신규 결정은 같은 Alarm lock 뒤 Event → Device 순서이므로 삭제와 직렬화하며, 삭제 후 Scheduler/Event candidate는 TASK-708의 Alarm 부재 검증으로 거부한다. Worker는 Delivery → Device만 잠그고 뒤에 Alarm/Event write lock을 추가하지 않으므로 역순 lock cycle을 만들지 않는다. Worker preflight가 먼저 commit됐다면 I/O 직전 삭제 경쟁과 진행 중 FCM 요청의 회수는 보장하지 않는다. 삭제가 종료한 terminal row에는 후속 Worker가 새 호출을 시작하거나 late result로 PENDING을 복구하지 않는다. TASK-706은 이 Worker 경계를, TASK-709는 실제 result 정책을 구현했다.
 
 #### PASSED 위치 보조 정보 전달 (TASK-816 / AUD-13)
 
@@ -429,7 +429,7 @@ TASK-906 1단계는 V16, 두 source의 Event Entity와 identity Repository, 공�
 
 알려진 `uk_notification_events_boarding_identity`의 MySQL 1062만 전체 rollback 후 새 persistence context에서 Session과 원래 Event identity를 한 번 확인하며 checkpoint나 recipient를 재적용하지 않는다. 다른 UNIQUE/FK/CHECK는 전파한다. commit 응답 유실은 원래 반영 결과의 정확한 Session snapshot과 Event ID를 새 transaction에서 확인한 경우만 runtime에 공개한다. rollback·최신 상태 변경·재확인 실패에서는 gate를 닫고 새 Event나 recipient를 생성하지 않는다. Device 변경 경합 등 MySQL deadlock도 결정 전체 rollback 경계를 유지하고 즉시 Provider 재호출·blind replay 없이 다음 정상 cycle에서 새 snapshot/관측으로 판단한다.
 
-`BoardingSessionService`의 공통 expire 경계는 상세/current/clientRequestId 조회·기존 생성 요청/현재 세션 확인·취소·재확인을 모두 포함한다. 취소와 `BoardingTrackingStore`의 만료·재확인이 필요한 연속성 상실은 같은 transaction에서 Session source PENDING을 종료한다. 완료는 준비 PENDING만 종료하고 함께 저장한 목적지 PENDING을 보존한다. TEMPORARY_PROVIDER_FAILURE/STALE_PROGRESS 및 기존 자동 재검증 사유 METADATA_CHANGED는 PENDING을 유지하며 후속 전송 gate가 판단한다. terminal/attempt/result를 보존하고 실제 기한 만료를 명시 종료보다 우선한다. lifecycle은 Session → exact Session Event current lock → Event ID별 PENDING Delivery current lock 순서다. Event와 Delivery를 분리 조회해 API 인증이 먼저 연 REPEATABLE READ snapshot 때문에 새로 commit된 Event를 join에서 놓치지 않으며, 기존 Alarm lock/query는 변경하지 않는다. Provider 지원 제한은 유지한다.
+`BoardingSessionService`의 공통 expire 경계는 상세/current/clientRequestId 조회·기존 생성 요청/현재 세션 확인·취소·재확인을 모두 포함한다. 취소와 `BoardingTrackingStore`의 만료·재확인이 필요한 연속성 상실은 같은 transaction에서 Session source PENDING을 종료한다. 완료는 준비 PENDING만 종료하며, 기존 NULL offset 세션에서 함께 저장한 목적지 PENDING을 보존한다. TEMPORARY_PROVIDER_FAILURE/STALE_PROGRESS 및 기존 자동 재검증 사유 METADATA_CHANGED는 PENDING을 유지하며 후속 전송 gate가 판단한다. terminal/attempt/result를 보존하고 실제 기한 만료를 명시 종료보다 우선한다. lifecycle은 Session → exact Session Event current lock → Event ID별 PENDING Delivery current lock 순서다. Event와 Delivery를 분리 조회해 API 인증이 먼저 연 REPEATABLE READ snapshot 때문에 새로 commit된 Event를 join에서 놓치지 않으며, 기존 Alarm lock/query는 변경하지 않는다. Provider 지원 제한은 유지한다.
 
 TASK-906 3단계는 임시 ALARM-only 차단을 source-aware dispatch로 교체했다. `NotificationSourceHint`는 ALARM/BOARDING_SESSION 두 분기만 검증하며 `NotificationDispatchTarget`·`NotificationSendRequest`가 공유한다. 기존 Alarm 생성자·네 Event Type·payload는 유지하고, 공통 FID/Event ID/expiresAt와 Target의 Delivery/Device/owner/generation/registration revision을 보존한다.
 
@@ -474,7 +474,7 @@ TASK-905는 checkpoint/복구와 lifecycle 판단을, TASK-906은 위 atomic Not
 
 ## 7. 모니터링 모델
 
-첫 구현에서는 Spring 스케줄 작업으로 활성 알림을 주기적으로 평가할 수 있다.
+현재 V1은 Spring 스케줄 작업으로 ACTIVE/FOLLOW_UP Alarm과 미종료 BoardingSession을 주기적으로 관측·평가한다.
 
 다만 다음과 같은 단순한 모델은 피해야 한다.
 
@@ -482,11 +482,11 @@ TASK-905는 checkpoint/복구와 lifecycle 판단을, TASK-906은 위 atomic Not
 활성 사용자 알림 하나 = 외부 API 요청 하나
 ```
 
-여러 알림이 같은 교통 조회에 의존한다면, 요청은 궁극적으로 중복 제거하거나 그룹화해야 한다.
+같은 Route의 Alarm은 polling key로 그룹화하며, BoardingSession도 같은 Scheduler cycle의 `VehiclePollingCycle` 원본 응답을 공유한다.
 
 V1의 기본 Provider polling key는 TAGO의 `(provider, externalRouteId, cityCode)`와 서울의 `(provider, externalRouteId)`다. `cityCode`는 Route identity가 아니라 TAGO request context이지만 동일 polling request 재현에는 필요하다. 같은 Route를 사용하는 여러 사용자·target Stop·ACTIVE Alarm·FOLLOW_UP Alarm은 가능한 한 하나의 Route polling response를 공유한다. Alarm별 Provider 호출이나 MyBatis 도입은 기본 구조로 삼지 않는다.
 
-TASK-508은 JPA `EntityGraph`로 BUS `ACTIVE`/`FOLLOW_UP` Alarm과 `BusAlarmTarget`을 함께 조회한 뒤 Java에서 polling key별로 그룹화한다. `INACTIVE`는 조회 대상이 아니며, target 누락이나 provider request context가 깨진 monitoring Alarm을 query에서 누락·보정하지 않고 명시적으로 실패시킨다. 실제 Provider 호출, Observation 평가, Scheduler와 Provider failure의 `UNKNOWN` 처리는 후속 Task의 책임이다.
+TASK-508은 JPA `EntityGraph`로 BUS `ACTIVE`/`FOLLOW_UP` Alarm과 `BusAlarmTarget`을 함께 조회한 뒤 Java에서 polling key별로 그룹화한다. `INACTIVE`는 조회 대상이 아니며, target 누락이나 provider request context가 깨진 monitoring Alarm을 query에서 누락·보정하지 않고 명시적으로 실패시킨다. 실제 Provider 호출·Observation 평가·Scheduler·실패 시 Event 없는 `UNKNOWN` 처리는 TASK-509~511에서 구현했다.
 
 TASK-510 Scheduler는 단일 Spring instance에서 Spring Scheduler의 synchronous/fixed-delay 방식으로 실행한다. `transit.monitoring.enabled=false`가 기본이며, 명시적으로 enabled일 때만 `PT20S` 기본 delay가 이전 polling cycle 완료 뒤 적용되어 invocation이 겹치지 않는다. Provider HTTP I/O는 DB transaction 또는 row lock 밖에서 수행한다. 결과 반영 직전에만 Alarm을 `PESSIMISTIC_WRITE`로 다시 읽어 polling 시작 snapshot의 status와 activation generation을 검증하고, 삭제·deactivate·reactivate 등으로 달라졌으면 lifecycle과 memory state를 모두 버린다. API activate/deactivate/delete도 같은 짧은 row-lock transaction을 사용한다. `@Version`, CAS, optimistic locking은 함께 사용하지 않는다. Scheduler memory state key는 `(alarmId, activationGeneration)`이고, 매 cycle의 ACTIVE/FOLLOW_UP 집합 밖 key는 정리한다. TAGO는 Route Location 응답 하나를 group에 공유하며 그 Observation의 vehicle ID 전체를 현재 존재 집합으로 사용한다. 서울은 roster 하나 뒤 baseline/tracked/new/FOLLOW_UP vehicle만 detail 조회하고, roster `vehId` 전체를 detail Observation과 별도로 Evaluator에 전달한다. roster에 존재하지만 detail이 normal empty인 차량은 존재만 갱신하며 위치·Event를 추측하지 않는다. Alarm별 Event 후보는 ACTIVE에서 `ARRIVED`·`PASSED`·`ONE_STOP_BEFORE` 우선순위, 같은 type이면 `vehicleTrackingId` 오름차순으로 하나만 채택하고 FOLLOW_UP에서는 `ONE_STOP_AFTER`만 사용한다. current ARRIVED가 after option으로 FOLLOW_UP을 시작하면 해당 차량의 memory tracking state와 `trackingCycleId`만 이어가며, `followUpStartedAt`/`followUpExpiresAt`은 Event `observedAt`의 UTC와 5분 timeout으로 정한다.
 
@@ -538,9 +538,9 @@ PASSED는 해당 Vehicle tracking만 종료하고 Alarm은 ACTIVE로 유지한�
 
 FOLLOW_UP 중 같은 Alarm의 새 activation은 persisted activation generation을 증가시켜 이전 cycle을 supersede한다. 기존 follow-up runtime을 지우고 ACTIVE 상태의 새 baseline과 monitoring cycle을 시작한다. 비활성화·follow-up 완료도 runtime을 지우며 Alarm 삭제는 runtime과 BusAlarmTarget을 함께 제거한다. FOLLOW_UP runtime은 서버 restart 뒤에도 저장된 vehicle tracking ID와 유효 기간으로 재사용한다. 반면 ACTIVE의 차량별 observation/event state는 V1에서 memory 기반일 수 있다. `trackingCycleId` 또는 동등한 값은 transaction ID가 아니라 logical vehicle tracking cycle identity로 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction이 deadlock/optimistic conflict로 retry되어도 identity를 다시 만들지 않으며 retry로 Notification dedup uniqueness를 우회해서는 안 된다. TransitEvent가 생기면 이를 durable NotificationEvent에 복사할 수 있다. restart 뒤에는 이전 memory tracking을 새 cycle과 연결하지 않고 안전한 recovery baseline을 만들며, restart 전 observation으로 PASSED를 추론하거나 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 일부 Event 누락보다 false-positive 방지를 우선하고 모든 raw Provider observation 저장이나 event sourcing은 도입하지 않으며, restart continuity 충족 여부는 TASK-811에서 검증한다.
 
-반복 `TransitObservation`과 중복 `TransitEvent` candidate의 억제는 Phase 5 tracking/Evaluation 책임이다. 동일 logical Notification의 중복은 Phase 7 persistence 책임이며 identity는 `(alarmId, activationGeneration, trackingCycleId, eventType)`이다. TASK-708 설계에서 확정한 [DB UNIQUE Schema](database.md#phase-7-notification-persistence-contract)는 TASK-707에서 적용한다.
+반복 `TransitObservation`과 중복 `TransitEvent` candidate의 억제는 Phase 5 tracking/Evaluation 책임이다. 동일 logical Notification의 중복은 Phase 7 persistence 책임이며 identity는 `(alarmId, activationGeneration, trackingCycleId, eventType)`이다. TASK-708 설계에서 확정한 [DB UNIQUE Schema](database.md#phase-7-notification-persistence-contract)는 TASK-707에서 적용했다.
 
-TASK-707은 FOLLOW_UP에 원래 cycle UUID 저장/제거와 ARRIVED 연결을 구현했다. 원래 UUID를 사용하는 평가기 재시작 복원은 TASK-708 implementation에 남는다. 이는 위 현재 TASK-510의 memory continuity를 보완하는 후속 계약이며 [Alarm Domain](domain-model.md#alarm-lifecycle)과 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#follow_up-cycle-continuity-결정)을 따른다. ACTIVE baseline 정책은 변경하지 않으며 기존 restart 재발행 억제 방향과 현재 evaluator의 차이는 ADR-010 조사 결과에 기록한다. logical DB uniqueness가 ACTIVE restart 전후의 서로 다른 UUID cycle까지 합치지는 않는다.
+TASK-707은 FOLLOW_UP에 원래 cycle UUID 저장/제거와 ARRIVED 연결을 구현했고 TASK-708은 원래 UUID를 사용하는 평가기 재시작 복원을 구현했다. 현재 FOLLOW_UP은 이 영속 UUID로 복원하며 [Alarm Domain](domain-model.md#alarm-lifecycle)과 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#follow_up-cycle-continuity-결정)을 따른다. ACTIVE baseline 정책은 변경하지 않으며 기존 restart 재발행 억제 방향과 현재 evaluator의 차이는 ADR-010 조사 결과에 기록한다. logical DB uniqueness가 ACTIVE restart 전후의 서로 다른 UUID cycle까지 합치지는 않는다.
 
 구체적인 Observation과 Event 의미는 `adr/ADR-007-bus-alarm-transit-observation-and-event-semantics.md`를 따른다.
 
@@ -555,9 +555,9 @@ FCM request                       → bounded retry로 여러 번 가능
 실제 Device 표시                  → exactly once 보장하지 않음
 ```
 
-Provider `accepted`는 요청 접수를 뜻하며 실제 표시 성공을 뜻하지 않는다. Timeout은 Provider가 접수했는지 알 수 없는 ambiguous 결과다. retry 가능한 Provider result는 `PENDING` Delivery의 attemptCount와 nextAttemptAt으로 재시도하며, 최대 횟수·간격·freshness TTL은 TASK-709에서 실제 smoke 결과와 함께 정한다. 모든 attempt를 append-only row로 저장하거나 generic retry framework를 도입하지 않는다.
+Provider `accepted`는 요청 접수를 뜻하며 실제 표시 성공을 뜻하지 않는다. Timeout은 Provider가 접수했는지 알 수 없는 ambiguous 결과다. retry 가능한 Provider result는 `PENDING` Delivery의 attemptCount와 nextAttemptAt으로 재시도한다. 최대 횟수·간격·freshness TTL의 개발 기본값과 상한은 TASK-709에서 구현했으며 [설정 계약](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-구현-설정과-검증-2026-10-13)을 따른다. 실제 지연·운영 적합성 검증은 TASK-710/711/810에 남는다. 모든 attempt를 append-only row로 저장하거나 generic retry framework를 도입하지 않는다.
 
-Push payload는 navigation hint에 필요한 최소 정보만 포함하고 권한 근거로 사용하지 않는다. Flutter는 Auth Session 초기화 뒤 Alarm ID navigation entry를 사용해 Backend에서 ownership/current state를 재확인한다. Permission이 없어도 다른 Device가 수신할 수 있으므로 Alarm 생성·활성화를 금지하지 않는다. 현재 installation logout은 Device unsubscribe/disable을 시도한 뒤 기존 Auth logout과 local session 종료를 수행하되, offline에서는 Backend disable을 즉시 보장하지 않는다.
+Push payload는 navigation hint에 필요한 최소 정보만 포함하고 권한 근거로 사용하지 않는다. Flutter는 Auth Session 초기화 뒤 source별 Alarm/BoardingSession ID navigation entry를 사용해 Backend의 정확한 ID 상세 API에서 ownership/current state를 재확인한다. Permission이 없어도 다른 Device가 수신할 수 있으므로 Alarm 생성·활성화를 금지하지 않는다. 현재 installation logout은 Device unsubscribe/disable을 시도한 뒤 기존 Auth logout과 local session 종료를 수행하되, offline에서는 Backend disable을 즉시 보장하지 않는다.
 
 세부 결정은 `adr/ADR-010-notification-device-and-durable-delivery.md`를 따른다.
 

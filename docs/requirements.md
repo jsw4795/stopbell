@@ -30,7 +30,7 @@ V1은 기존 버스 도착·통과 Alarm과 선택한 특정 차량의 하차 �
 
 정류장 선택 UI는 Backend가 전달한 `canNotifyOneStopBefore`와 `canNotifyOneStopAfter`를 사용해 각각 사용할 수 없는 before/after option을 비활성화한다. Stop order를 산술적으로 증감해 인접 정류장을 추측하지 않는다.
 
-사용자는 Route traversal 안에서 선택할 Stop occurrence를 충분히 구분할 수 있어야 하며, 동일 정류장명이나 왕복·순환·회차로 방향 구분이 필요한 경우 UI는 Backend가 제공하는 검증된 metadata/계약을 사용해야 한다. 방향/traversal 식별 정보는 Stop order, 정류장명 또는 다른 표시 metadata로 추측하지 않으며, 현재 display contract가 확정되지 않아 후속 UX/metadata 작업에서 결정한다.
+사용자는 Route traversal 안에서 선택할 Stop occurrence를 충분히 구분할 수 있어야 하며, 동일 정류장명이나 왕복·순환·회차로 방향 구분이 필요한 경우 UI는 Backend가 제공하는 검증된 metadata/계약을 사용해야 한다. TASK-608A의 표시 계약은 검증된 경기 GBIS traversal의 `destinationName`(서울·검증 실패 경기 Route는 null), 실제 인접 occurrence의 `previousStopName`/`nextStopName`, 마지막 구분값인 `order`를 사용한다. 반복 occurrence는 각각의 `id`로 선택한다. 이 표시 정보로 실제 차량의 실시간 운행 방향을 증명하거나 추측하지 않는다. 필드와 nullable 조건은 [Stop API](api.md#버스-노선의-정류장-조회)를 따른다.
 
 ### FR-003 알림 생성
 
@@ -111,19 +111,19 @@ Provider external Route/Stop ID는 provider namespace 안의 opaque String이다
 
 ### Phase 9 탑승 차량 추천과 확인
 
-TASK-908의 사전 등록 요구사항을 반영한다. 기존 정류장 도착 알림과 별도로 사용자가 선택한 차량 하나의 목적 occurrence 도달·통과 알림을 지원하며 실제 탑승 여부를 검증하지 않는다.
+TASK-908의 사전 등록과 하차 전 단일 알림 요구사항을 반영한다. 기존 정류장 도착 Alarm과 별도로 사용자가 선택한 차량 하나의 목적지 이전 하차 준비 알림을 제공하며, 목적 occurrence 도달·통과는 세션 완료에 사용한다. 실제 탑승 여부를 검증하지 않는다.
 
-- 사용자는 노선·승차·목적 정류장을 선택하고 운행 차량 목록에서 원하는 차량을 직접 선택한 뒤 2정거장 전(기본)/1정거장 전 알림 시점과 함께 등록한다. 전체 차량번호 입력·수동 대조·실제 탑승 확인은 요구하지 않는다. 버스 도착 전·이동 중에도 등록할 수 있으며 단일 후보도 자동 선택하지 않는다.
+- 사용자는 노선·목적 정류장과 선택적 승차 정류장을 선택하고 운행 차량 목록에서 원하는 차량을 직접 선택한 뒤 2정거장 전(기본)/1정거장 전 알림 시점과 함께 등록한다. 전체 차량번호 입력·수동 대조·실제 탑승 확인은 요구하지 않는다. 버스 도착 전·이동 중에도 등록할 수 있으며 단일 후보도 자동 선택하지 않는다.
 - 승차 정류장과 관측 진행 지점의 노선상 간격과 앞/같음/이후 관계는 선택 보조 정보다. 실제 남은 정차 수·거리·ETA·실제 운행 방향으로 과장하지 않으며 위치 불확실성과 관측 시각을 표시한다.
 - 정상 호출한 Provider 응답은 해당 조회 시점의 최신 가용 데이터로 사용한다. TAGO 원본 생성시각 부재만으로 추천을 보류하지 않는다. 조회 시각과 실제 물리 위치의 일치는 보장하지 않으며, 식별 충돌·진행 모순·불완전 응답 등은 구분해 보류한다.
 - 조회 시각·선택적 제공시각, 확인 가능한 진행 정보와 불확실 사유를 구분해 표시한다. 정상 후보 없음과 Provider 실패를 혼동하지 않으며 실제 탑승 사실을 검증했다고 표현하지 않는다.
 - 단말 GPS·위치 권한·Provider GPS 좌표에 의존하지 않는다. 재조회로 확정 차량을 바꾸지 않으며, 소실·식별 연속성 상실 때 다른 차량에 자동 연결하지 않는다.
 
-추천 알고리즘·Provider별 지원 범위·정상/예외 사례와 결정 근거는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. Polling과 Observation Freshness는 별개이며 기존 설정과 기존 도착 알림의 기능·판정·상태 전이는 유지한다. 후속 세션 계약은 아래 TASK-903 설계를 따른다.
+추천 알고리즘·Provider별 지원 범위·정상/예외 사례와 결정 근거는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다. Polling과 Observation Freshness는 별개이며 기존 설정과 기존 도착 알림의 기능·판정·상태 전이는 유지한다. 현행 세션 계약은 아래 TASK-903 설계와 TASK-908 후행 변경을 따른다.
 
 ### Phase 9 탑승 세션과 하차 준비 알림
 
-TASK-903에서 승인한 후속 구현 요구사항이다. [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 설계 완료는 Backend/Flutter·DB 구현이나 실측 지원 완료를 의미하지 않는다.
+TASK-903의 설계에 TASK-908의 현행 정책을 반영한 요구사항이다. Backend·DB·Flutter 및 Notification 연결은 TASK-905~907과 TASK-908의 변경 구현에 반영됐으며, 실제 버스/iPhone 최종 E2E는 미완료다. [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 당시 결정과 후행 변경, [세션 API의 Provider 지원 경계](api.md#탑승-세션-api-task-903)를 구분한다.
 
 - 차량 선택 요청에서 최신 차량 ID·Provider 전체 번호·노선·후보 freshness와 목적 occurrence를 검증한다. 정차·이동·위치 근거 유무와 관계없이 즉시 TRACKING으로 등록하고 선택한 같은 차량을 관측한다. TRACKING은 관측 시작을 뜻하며 실제 탑승·정확한 현재 위치 검증을 뜻하지 않는다. 일시적 위치 부족·Provider 장애는 TRACKING을 유지하며 다음 관측을 기다리고, 신뢰할 진행 근거가 없으면 NotificationEvent·Delivery를 생성하지 않는다. 별도 Start API/CONFIRMED 상태는 없다.
 - User당 미종료 세션은 하나이며 확정 차량만 추적한다. 다른 차량·노선·목적지로 자동 전환하지 않는다. 후보 조회나 화면 선택 자체는 추적을 시작하지 않는다.

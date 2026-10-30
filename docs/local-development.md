@@ -58,7 +58,7 @@ Apple Silicon (ARM64) 환경에서 확인할 사항:
 
 ## Project Run
 
-Backend 디렉터리에서 Gradle Wrapper를 사용해 실행한다. 기본 profile은 `local`이다.
+Backend 디렉터리에서 Gradle Wrapper 8.14.3을 사용해 실행한다. Java toolchain은 21이며 `java -version`, `./gradlew --version`으로 실제 JVM을 확인한다. 기본 profile은 `local`이고 명시하려면 `--args='--spring.profiles.active=local'`을 사용한다.
 
 ```text
 cd backend
@@ -124,9 +124,10 @@ Local profile은 `backend/src/main/resources/application-local.yml`에서 위 �
 DB_PASSWORD
 JWT_SECRET
 GOOGLE_SERVER_CLIENT_ID
-TRANSIT_API_KEY
-FCM_SERVICE_CREDENTIAL
-OAUTH_CLIENT_SECRET
+PUBLIC_DATA_SERVICE_KEY
+SEOUL_BUS_SERVICE_KEY
+FCM_PROJECT_ID
+GOOGLE_APPLICATION_CREDENTIALS
 ```
 
 `.env.example` 또는 동등한 placeholder file에는 값이 아닌 필요한 key만 기록한다.
@@ -228,7 +229,7 @@ Alarm 상태 전이 같은 순수 Domain Business Rule은 Spring Context, Databa
 
 JPA Entity Mapping과 Repository 동작은 H2 또는 Local Development MySQL이 아닌 MySQL Testcontainers 기반 Integration Test로 검증한다. Testcontainer는 MySQL `8.4.11` image를 사용하고, Spring Boot의 `@ServiceConnection`으로 Test DataSource에 연결한다.
 
-Test Schema는 Hibernate가 자동 생성하지 않는다. Test에서도 `ddl-auto: none`을 유지하며, 빈 MySQL Testcontainer에 Flyway Migration을 적용한다. Integration Test 실행에는 Docker Runtime이 필요하다.
+Test Schema는 Hibernate가 자동 생성하지 않는다. 기본 `ddl-auto: none` 또는 개별 통합 테스트의 `validate`를 사용하며, 빈 MySQL Testcontainer에 Flyway Migration을 적용한다. Integration Test 실행에는 Docker Runtime이 필요하다. Backend 테스트는 `backend`에서 `./gradlew test`로 실행하며 실제 개발 DB를 테스트 대상으로 사용하지 않는다.
 
 ------------------------------------------------------------------------
 
@@ -241,6 +242,7 @@ Flutter SDK와 iOS platform toolchain을 준비하고, `app/config/local.example
 Flutter 기본 Dart define 파일로 설정을 주입한다. `app` 디렉터리에서 실행한다.
 
 ```text
+flutter pub get
 flutter run --dart-define-from-file=config/local.json
 ```
 
@@ -248,7 +250,9 @@ flutter run --dart-define-from-file=config/local.json
 
 실제 Device 또는 emulator/simulator를 연결한다.
 
-Push notification 검증은 실제 Device에서 수행해야 한다. emulator/simulator 지원 범위와 iOS/Android 차이는 Future Consideration이다.
+현재 iOS deployment target은 15.0이고 Push registration과 Notification Lifecycle은 iOS 경로에 연결돼 있다. Push 수신·표시/tap 검증은 실제 iPhone에서 수행한다. Simulator의 API/UI 확인을 실기기 Push 검증으로 대체하지 않으며 Android Push 연동·실기기 검증은 완료되지 않았다.
+
+Flutter/Dart 설치 버전과 toolchain은 `flutter --version`, `flutter doctor`로 확인한다. `app`에서 `flutter analyze`, `flutter test`를 실행하며 앱별 안내는 [app/README](../app/README.md)를 따른다.
 
 ## Firebase iOS early smoke (TASK-701)
 
@@ -468,7 +472,7 @@ Backend의 외부 요청 Client·설정·주입 경로와 서울 metadata source
 
 ## TASK-908 iPhone Boarding E2E 준비 (2026-10-28)
 
-실제 143번 Provider 생성/추적 결과는 [증거 보고서 §24](research/TASK-908-provider-evidence.md#24-실제-서울-143번-생성진행notification-검증-2026-10-28)를 따른다. TASK-908은 번호 입력 없이 즉시 TRACKING 등록을 구현했으며 지원 경계는 [API](api.md#탑승-세션-api-task-903)를 따른다. **Backend·터널·Flutter 앱은 중지 상태를 유지하며 아래 절차는 다음 사용자 재실행 지시 후에만 수행한다.**
+이 절의 준비 상태·검증 결과는 당시 기록이며 아래 사용자 실행 순서는 TASK-908 하차 전 단일 알림 정책으로 갱신했다. 실제 143번 Provider 생성/추적 결과는 [증거 보고서 §24](research/TASK-908-provider-evidence.md#24-실제-서울-143번-생성진행notification-검증-2026-10-28)를 따른다. TASK-908은 번호 입력 없이 즉시 TRACKING 등록을 구현했으며 지원 경계는 [API](api.md#탑승-세션-api-task-903)를 따른다. **Backend·터널·Flutter 앱은 중지 상태를 유지하며 아래 절차는 다음 사용자 재실행 지시 후에만 수행한다.**
 
 2026-10-28 준비 당시 확인한 상태:
 
@@ -479,7 +483,7 @@ Backend의 외부 요청 Client·설정·주입 경로와 서울 metadata source
 - 유선 iPhone 13 Pro Max/iOS 27.0.1, paired/Developer Mode enabled 확인. 새 HTTPS 주소로 signed release 빌드 성공, `codesign --verify --deep --strict` 통과. 실제 서명의 APNs entitlement=development, 기존 provisioning에 연결 기기 포함·만료일 2027-10-07 확인. 기기 설치/실행/권한 변경은 수행하지 않음
 - DB의 기존 Device는 enabled/FID 있음까지만 확인. 현재 설치본의 APNs/FID·로그인 owner·알림 권한·OS 수신은 앱을 실행해 Push 준비를 완료해야 다시 확인 가능. 원문 FID/JWT/credential을 출력하지 않음
 
-완료 목적지의 Worker 경로는 TRACKING 준비 gate와 분리되어 있다. 완료 transaction은 준비 PENDING만 종료하고 목적지 PENDING을 보존한다. Worker는 COMPLETED 목적지를 선정하고 불변 완료 checkpoint·Event 대응·owner·freshness·원래 기한을 검증한 후 전달한다. 취소/만료는 허용하지 않는다. 격리 MySQL과 loopback HTTP v1에서 준비/목적지 payload·정확한 Session/Event ID·FID·APNs expiration·두 번 Worker 실행의 단일 요청·ACCEPTED 저장을 확인했다. 실제 Firebase 접수/기기 수신 결과는 아니다.
+기존 NULL offset 세션의 완료 목적지 Worker 경로는 TRACKING 준비 gate와 분리되어 있다. 신규 세션은 목적지 Event/Push를 만들지 않는다. 아래 목적지 전달 검증은 당시 기존 정책의 기록이다. 완료 transaction은 준비 PENDING만 종료하고 목적지 PENDING을 보존한다. Worker는 COMPLETED 목적지를 선정하고 불변 완료 checkpoint·Event 대응·owner·freshness·원래 기한을 검증한 후 전달한다. 취소/만료는 허용하지 않는다. 격리 MySQL과 loopback HTTP v1에서 준비/목적지 payload·정확한 Session/Event ID·FID·APNs expiration·두 번 Worker 실행의 단일 요청·ACCEPTED 저장을 확인했다. 실제 Firebase 접수/기기 수신 결과는 아니다.
 
 ### 사용자 실행 순서
 
@@ -490,7 +494,7 @@ Backend의 외부 요청 Client·설정·주입 경로와 서울 metadata source
    ```
 
    안전 모드에서도 후보/확정 요청은 실제 Provider를 호출하므로 다음 실측 승인 범위 안에서만 수행한다. 자동 polling·알림은 OFF다. 터널 주소가 바뀌면 앱 재빌드가 필요하다.
-2. `app`에서 `flutter devices`로 실제 기기를 선택하고 아래 release 명령을 실행한다. 기존 signed 산출물은 `app/build/ios/iphoneos/Runner.app`에 준비돼 있다. 앱 삭제·Firebase installation 초기화는 필요 없다.
+2. `app`에서 `flutter devices`로 실제 기기를 선택하고 아래 release 명령을 실행한다. 과거 signed 산출물을 현행 정책 검증에 재사용하지 않고 현재 소스·유효한 API 주소로 빌드한다. 앱 삭제·Firebase installation 초기화는 필요 없다.
 
    ```sh
    flutter run --release --no-pub --dart-define-from-file=config/local.json -d <실제-iPhone-ID>
@@ -503,16 +507,16 @@ Backend의 외부 요청 Client·설정·주입 경로와 서울 metadata source
    env -u JAVA_HOME ./gradlew bootRun --args='--server.address=127.0.0.1 --transit.monitoring.enabled=true --notification.dispatch.enabled=true --notification.fcm.enabled=true --notification.fcm.smoke=false'
    ```
 
-5. 서울 143번 → 승차·목적 occurrence → 차량 후보 조회 → 원하는 차량 선택 → 사전 ON/OFF → 하차 알림 등록 순서다. 차량번호 입력은 없으며 도착 전·이동 중 등록할 수 있다. 등록 성공 즉시 TRACKING 화면으로 이동한다. 최초 위치 근거가 부족하면 TRACKING/VERIFICATION_PENDING으로 차량 위치 확인 중을 표시한다. 후속 신뢰할 관측에서 TRACKING/READY와 진행 갱신·알림을 확인한다. 이동 관측만으로 새 occurrence를 확정할 수 없는 한계는 Domain을 따른다. Push 준비 중 후보 만료는 같은 selectionKey의 차량만 재조회하며 실패 시 재선택한다. 실제 Session ID와 상태·비식별 reason을 확인한다. 새 Backend 실행 시 V18·V19가 필요하며 이번 작업에서는 기존 개발 DB에 적용하지 않았다.
-6. ON에서는 준비 한 번·목적지 한 번, OFF에서는 목적지만 기대한다. 매 시험은 새 세션으로 foreground/background/terminated 상태를 나누고 수신·tap을 확인한다. foreground는 앱 안내의 사용자 선택으로, background/terminated는 알림 tap으로 **정확한 Session ID의 상세**가 열려야 한다. 목적지 수신 시 COMPLETED/ENDED 상세는 정상이다.
+5. 서울 143번 → 목적/선택적 승차 occurrence → 차량 후보 조회 → 원하는 차량 명시적 선택 → 2정거장 전(기본)/1정거장 전 설정 → 하차 알림 등록 순서다. 차량번호 입력은 없으며 도착 전·이동 중 등록할 수 있다. 등록 성공 즉시 TRACKING 화면으로 이동한다. 최초 위치 근거가 부족하면 TRACKING/VERIFICATION_PENDING으로 차량 위치 확인 중을 표시한다. 후속 신뢰할 관측에서 TRACKING/READY와 진행 갱신·준비 알림을 확인한다. 위치·진행 근거가 불확실하면 판단을 보류한다. Push 준비 중 후보 만료는 같은 selectionKey의 차량만 재조회하며 실패 시 재선택한다. 실제 Session ID와 상태·비식별 reason을 확인한다. 새 정책 검증에는 V20까지의 Schema가 필요하며 기존 개발 DB 적용 여부는 아래 실행 경계와 실행 전 점검을 따른다.
+6. 새 세션은 선택한 시점의 목적지 이전 준비 알림 한 번을 기대하며 별도 목적지 Push는 없어야 한다. 2정거장 전 관측을 놓친 경우 1정거장 전 대체와 목적지 현재/이후 소급 준비 알림 없음도 구분한다. 매 시험은 새 세션으로 foreground/background/terminated 상태를 나누고 수신·tap을 확인한다. foreground는 앱 안내의 사용자 선택으로, background/terminated는 알림 tap으로 **정확한 Session ID의 상세**가 열려야 한다. 이후 목적지 도달·통과로 COMPLETED/ENDED가 된 상세도 정상이다. 기존 NULL offset 세션은 이전 정책이므로 별도 호환 검증으로 구분한다.
 7. 서버에서 같은 Session의 Event 종류·Delivery 상태·attempt/result와 실제 기기 표시를 대조한다. ACCEPTED는 Firebase 접수일 뿐 실수신과 별도로 기록한다. 통상 반복 polling/Worker에서는 Event 중복·추가 발송이 없어야 하나 접수 후 응답 유실/crash의 OS exactly-once는 보장하지 않는다. 취소 시험은 목적지 이전에 별도 세션으로 수행한다.
 8. 시험 종료 뒤 Flutter 실행·터널·Backend를 정상 종료하고 8080 listener와 관련 실행 프로세스 부재를 확인한다. 안전 모드 Backend도 상시 실행해 두지 않는다. Docker/MySQL·Volume·DB·설정 파일은 보존한다. TASK-908/710/711은 각 실제 검증 완료 전까지 미완료로 유지한다.
 
-이번 검증: Backend 발송 관련 **109개**와 Flutter 전체 **437개** 실패/오류/skip 없이 통과, `flutter analyze` 통과 및 signed release 빌드/서명 검증 성공. production 발송 코드는 이미 완료 목적지를 지원하므로 변경하지 않았으며 테스트만 보강했다. 실제 서울 API 추가 호출·FCM 전송·기기 설치/조작은 0회다.
+2026-10-28 당시 검증: Backend 발송 관련 **109개**와 Flutter 전체 **437개** 실패/오류/skip 없이 통과, `flutter analyze` 통과 및 signed release 빌드/서명 검증 성공. production 발송 코드는 이미 완료 목적지를 지원하므로 변경하지 않았으며 테스트만 보강했다. 실제 서울 API 추가 호출·FCM 전송·기기 설치/조작은 0회다.
 
 ## Backend Connection
 
-Mac에서 Backend를 실행하는 iPhone Simulator의 Local `API_BASE_URL`은 `http://localhost:8080`이다. 실제 iPhone의 `localhost`는 Mac을 가리키지 않으므로, 실제 기기 검증 시에는 Mac의 접근 가능한 Local 주소 또는 개발 서버 주소를 사용한다.
+Mac에서 Backend를 실행하는 iPhone Simulator의 Local `API_BASE_URL`은 `http://localhost:8080`이다. 실제 iPhone의 `localhost`는 Mac을 가리키지 않으므로 Mac의 접근 가능한 주소 또는 개발 서버 주소를 사용한다. 기존 실기기 검증은 Mac Backend를 가리키는 임시 HTTPS 터널을 사용했다. 주소가 만료·변경되면 `app/config/local.json`의 `API_BASE_URL`을 갱신해 재빌드하며, 과거 기록의 터널 주소를 유효한 주소로 가정하지 않는다. Google Server Client ID는 Backend와 일치해야 한다. 실행 순서와 승인 경계는 [TASK-908 사용자 실행 순서](#사용자-실행-순서)를 따른다.
 
 ------------------------------------------------------------------------
 
@@ -550,10 +554,10 @@ Compose file은 저장소 루트에 있으며, 서비스 이름은 `mysql`이다
 
 ## Future Consideration
 
-- Local Development profile의 정확한 이름과 구성
 - Database seed data 및 fixture 제공 방식
 - API mock 또는 Transit provider sandbox 사용 여부
-- Local Push notification credential 관리 방식
+
+Local profile은 위 Backend Setup, 외부 Service Account 경로와 opt-in FCM/dispatch는 TASK-705/709 절에 확정된 실행 계약이 있다. 운영 Secret 주입과 배포 준비는 TASK-806/813에서 검증한다.
 
 
 ### TASK-908 하차 전 단일 알림 변경의 실행 경계 (2026-10-29)

@@ -249,6 +249,8 @@ Phase 6은 Phase 7에 안정적인 Auth Session state, 자동 refresh를 포함�
 
 Alarm 조건 충족 시 logical Event와 Event×Device Delivery의 DB uniqueness를 보장하고 실제 기기로 Push notification 전달을 시도한다. FCM request는 bounded retry로 여러 번 발생할 수 있으며 실제 Device 표시 exactly-once는 보장하지 않는다.
 
+현재 상태 (2026-10-30): TASK-701~709 구현 완료, TASK-710/711 최종 검증 미완료다. 아래 TASK-706의 handler 부재·자동 활성화 불가와 TASK-707/708의 후속 구현 표기는 각 완료 당시 기록이다. 이후 TASK-709에서 production Handler·retry/expiry/cleanup을 연결했고 FCM 정적 설정 gate 아래 명시적 dispatch 활성화를 지원한다. 기본 false와 최종 실기기 검증 책임은 유지한다.
+
 - [x] TASK-701 FCM iOS 지원 적합성 및 targeting contract 확정: 실제 사용할 FlutterFire/firebase_messaging, Firebase iOS SDK, Java Firebase Admin SDK 버전을 확인하고 현재 지원되는 targeting identifier와 local unregister 동작을 확정한다. Firebase→실제 iPhone early smoke를 수행하며 APNs token을 StopBell Device identity로 사용하지 않는다.
 - [x] TASK-702 Device Domain/Schema 및 registration/logout contract 정의: 내부 PK + client-generated installationId + current push targeting identifier를 분리한다. `installationId`는 User-scoped가 아닌 앱 installation identity로 두고 동시에 current owner가 최대 한 명이 되도록 하며, User 전환 시 atomic ownership takeover 또는 동등한 계약으로 두 ownership이 함께 enabled 상태로 남지 않게 한다. Multi-device, registration rotation, monotonic revision 또는 동등한 stale-write 방지, 별도 authenticated disable/unregister lifecycle을 정의한다. V13 Device/Platform 매핑과 단일 Firebase Project의 case-sensitive nullable FID UNIQUE를 추가했다. 별도 installation credential hash와 서버 ownership generation으로 권한 없는 이전·old-owner 요청을 차단하는 계약을 확정했다. RefreshToken FK와 단일 Device 제한은 두지 않는다. 실제 API/동시성 구현은 TASK-703 책임이다.
 - [x] TASK-703 Device registration/disable API 구현: TASK-702의 JWT + 설치본 자격증명, 등록·상태 조회·disable 계약과 엄격한 입력 검증을 구현했다. write lock과 UNIQUE 충돌 rollback/새 transaction 재확인으로 최초 등록 race 및 FID 충돌을 처리한다. revision·ownership generation, A→B→A 지연 요청 차단, 이전 응답 유실 재전송과 무변경 멱등성, 민감정보 비노출을 집중 MySQL API 테스트 12개로 검증했다. V13/Dependency/Auth logout/Alarm/Flutter는 변경하지 않았다.
@@ -657,6 +659,8 @@ allprojects {
 
 ### TASK-816 문서 불일치 후속 범위
 
+다음은 감사 당시 확인한 문서 불일치 목록이다. 1단계 정리 결과와 제품 코드에 남은 항목은 아래 후속 조건에서 구분한다.
+
 - `README.md`: Notification Worker·권한·Device 등록·tap·atomic decision·retry 등 이미 구현된 기능을 미구현으로 안내하는 설명 검토
 - Flutter 안내 문구: 목적지 이전 하차 준비 알림 정책과 달리 도달·통과 시 알림으로 안내하는 화면 문구 검토
 - `requirements.md`와 기존 Alarm Push 구현: PASSED 위치·지난 정거장 보조 안내 차이를 AUD-13과 함께 처리
@@ -668,6 +672,21 @@ allprojects {
 - `local-development.md`: 이미 정해진 profile·설정을 Future Consideration으로 남긴 설명 검토
 
 현재 정책을 잘못 안내하거나 실제 구현 상태를 오해하게 만드는 설명을 우선 대상으로 한다. 과거 연구 기록과 ADR의 역사적 내용은 현행 정책과 다르다는 이유만으로 변경하지 않는다. 특히 ADR-011·012와 TASK-908 증거 보고서의 번호 대조·VERIFYING·목적지 Push 기록은 명시된 대체 범위와 기록 시점을 보존한다. 문서·코드 충돌을 코드 기준으로 자동 해소하지 않는다.
+
+#### 주요 문서 정합성 1단계 (2026-10-30)
+
+현재 main의 코드·테스트와 기존 검증 기록을 대조해 주요 문서 10개를 최소 범위로 정리했다. Notification 구현 완료/실기기 미검증, 번호 입력 없는 명시적 차량 선택, 신규 1/2정거장 전 단일 준비 알림과 기존 목적지 Push 호환, TASK-608A 표시 계약, 실제 Package 책임·실행 설정을 구분했다. 문서 정확성 정리이며 새 설계·제품 수정·회귀 테스트 통과·TASK-816 최종 완료를 뜻하지 않는다. 아래는 남은 책임이며 새 Task 번호나 체크박스는 추가하지 않는다.
+
+| 남은 항목 | 정적 확인 근거 / 후속 책임 |
+| --- | --- |
+| Flutter 초기 안내 문구 | `app/lib/features/boarding/boarding_stop_screen.dart:210`의 “선택한 정류장에 도달하거나 통과하면 알리는 기능이에요 … 진행 검증 전에는 대기로 표시해요”는 신규 준비 알림과 즉시 TRACKING을 오해하게 한다. TASK-816 제품 문구 후속에서 “선택한 목적지 2정거장 전(기본) 또는 1정거장 전에 하차 준비 알림을 한 번 보내요. 등록하면 바로 추적하고 위치 근거가 부족하면 차량 위치 확인 중으로 표시해요”로 수정 제안. 이번에는 Dart 수정 금지로 보존 |
+| API 오류 본문 차이 | `DeviceController.handlePersistenceFailure()`와 `BoardingSessionController.persistenceFailure()`는 빈 500을 반환하며 기존 Device API 테스트도 빈 본문을 기대한다. [API 오류 형식](api.md#5-오류-형식)의 공통 code/message 요구와 차이가 있다. 계약을 코드 수준으로 낮추지 않으며 TASK-816 최종 검토·TASK-804의 오류 계약 검증으로 연결. 오류 범위 판단과 제품/테스트 수정은 이번 문서 작업 밖 |
+| AUD-12 UTC 제품 결함 | User onPrePersist/onPreUpdate, RefreshToken onPrePersist, Alarm onPrePersist/onPreUpdate의 Host 의존성은 미수정. 위 AUD-12 근거·Characterization과 TASK-814의 선택·구현·기존 데이터 호환 검증 책임 유지 |
+| AUD-01~13 최종 상호 정합성 | 개별 처리 기록과 이번 문서 변경을 함께 대조하고 Backend 주요 회귀 및 Flutter 주요 회귀를 별도로 수행. AUD-13 PASSED의 검증된 정류장명/Successor Edge 수·생략·기존 data key·두 alert body 일치 계약도 회귀 확인 |
+| 실제 외부/기기 미검증 | TASK-710 iPhone 전체 수신/tap·권한/등록 전환, TASK-711 Notification 최종 E2E·multi-device·durable recovery/재시작, TASK-908 신규 정책의 실제 버스·iPhone E2E 책임 유지. Provider 실측·FCM 접수·실제 기기 표시는 각각 구분하며 초기 smoke/Mock 성공으로 대체하지 않음 |
+| TASK-816 최종 완료 판정 | AUD-12→TASK-814의 미수정 책임·검증 근거, 미검증 범위와 기존 TASK-710/711/814/908의 책임 분리, 필수 결함 잔여 여부를 확인한 뒤 기존 완료 기준 검토. 이번 단계에서는 TASK-814/816과 모든 기존 체크박스 유지 |
+
+ADR-006/007/009/010/011/012, TASK-908 연구 기록과 기존 AUD 처리·테스트 실행 기록은 보존했다. AUD-11의 V4 미적용 DB User 0명 자동 업그레이드 조건과 사전 중단·별도 이관 판단, AUD-13의 이미 정확한 상세 계약은 변경하지 않았다. Backend/Flutter 테스트·빌드·서버·DB·실제 Provider/FCM/실기기 실행 없이 Markdown/경로/anchor·Controller/DTO/Class 및 diff만 검토했다.
 
 ### TASK-816 권장 수정 순서와 독립 검증
 
@@ -706,21 +725,21 @@ TASK-816은 감사 후속 결함 수정이며 기존 Task의 검증 책임을 �
 
 목표:
 
-사용자가 실제로 탑승한 버스를 확인하고, 확정된 동일 차량을 목적 정류장까지 추적해 하차에 필요한 시점에 알림을 제공한다. 기존의 정류장 도착 알림과 별도의 사용자 목적을 지원하며 기존 기능과 lifecycle 의미를 보존한다.
+사용자가 목록에서 선택한 동일 차량을 목적 정류장까지 추적해 목적지 이전 하차 준비 알림을 제공한다. 실제 탑승 여부를 검증하지 않는다. 기존의 정류장 도착 알림과 별도의 사용자 목적을 지원하며 기존 기능과 lifecycle 의미를 보존한다.
 
 범위와 설계 원칙:
 
 - 정확성 > 편의성: 잘못된 차량 확정이나 거짓 하차 알림을 줄이는 것을 우선한다.
 - GPS에 의존하지 않는다. 사용자 단말 위치 권한·백그라운드 GPS 추적을 요구하지 않으며, Provider GPS 좌표도 차량 식별·하차 판단의 필수 근거나 GPS 거리 기반 대체 판정으로 사용하지 않는다. GPS 없이 확보 가능한 근거와 한계를 TASK-901에서 확인한다.
 - 사용자 차량 확인을 우선 지원한다. 실제 응답에서 확인된 차량 표시 정보만 제공하며, 사용자에게 보이는 정보와 Provider 추적 식별자의 연결 가능성을 먼저 검증한다.
-- 차량 자동 추천은 후보와 추천 근거를 제시하는 기능이며 탑승 차량 자동 확정과 구분한다. TASK-902에서 실제 전체 차량번호 대조와 사용자 명시적 확정을 채택했으며, 추천 순위나 단일 후보를 이유로 자동 선택·확정하지 않는다. 상세 사용자 보장은 `requirements.md`, 추천 규칙은 ADR-011을 따른다.
-- 식별 불확실 시 임의 확정하지 않는다. 복수 후보는 사용자가 번호를 대조하며, 차량 식별자 누락·변경, stale data, 방향·회차 모호성은 필요한 판단의 불확실성을 표현한다. TAGO 원본 생성시각 부재 자체를 stale로 취급하지 않는다.
-- 추적 중 다른 차량으로 자동 전환하지 않는다. 대상 차량 소실이나 식별 연속성 상실 시 알림 판단을 보류하고 사용자 재확인 또는 종료로 복구하는 계약을 설계한다.
-- 기존 도착 알림의 기능·판정·상태 전이를 보존하고, 기존 NotificationEvent/NotificationDelivery, Device, durable pending dispatch, FCM 및 failure/retry 인프라를 재사용한다. 하차 알림에 필요한 최소 확장 범위는 설계 Task에서 결정한다.
+- 차량 자동 추천은 후보와 추천 근거를 제시하는 기능이며 탑승 차량 자동 확정과 구분한다. TASK-902 당시의 전체 차량번호 입력·대조 UX는 TASK-908에서 번호 입력 없는 목록 선택·명시적 등록으로 대체했다. 추천 순위나 단일 후보를 이유로 자동 선택·확정하지 않는다. 상세 사용자 보장은 `requirements.md`, 추천 규칙은 ADR-011을 따른다.
+- 식별 불확실 시 임의 확정하지 않는다. 복수 후보도 사용자가 목록에서 직접 선택하며, 차량 식별자 누락·변경, stale data, 방향·회차 모호성은 필요한 판단의 불확실성을 표현한다. TAGO 원본 생성시각 부재 자체를 stale로 취급하지 않는다.
+- 추적 중 다른 차량으로 자동 전환하지 않는다. 대상 차량 소실이나 식별 연속성 상실 시 알림 판단을 보류하고 사용자 재확인 또는 종료로 복구한다.
+- 기존 도착 알림의 기능·판정·상태 전이를 보존하고, 기존 NotificationEvent/NotificationDelivery, Device, durable pending dispatch, FCM 및 failure/retry 인프라를 재사용한다. 최소 source 확장은 TASK-903에서 정하고 TASK-905/906에서 연결했다.
 - TASK-901 결과에 따라 지원 범위와 후속 설계를 조정할 수 있다. 필요한 근거를 확보하지 못하면 제약·미지원 범위·추가 판단을 기록하고, GPS나 추측으로 보완하여 구현 완료로 처리하지 않는다.
 - 지하철 하차 알림은 향후 별도 Phase로 계획하며 이번 Phase 9에는 조사·설계·구현을 포함하지 않는다.
 
-이번 Phase 등록 자체는 계획 추가이며 구현 완료를 뜻하지 않는다. TASK-902/903에서 승인한 설계는 ADR-011/012와 Owner 문서가 정의하며 TASK-904~908 구현·검증 완료와 구분한다. 기존 TASK-710/711과 Phase 8의 상태·검증 책임은 유지하며 TASK-908이 이를 대체하지 않는다.
+Phase 등록 당시 계획과 아래 날짜별 구현·검증 기록을 보존한다. 현재 TASK-901~907은 완료됐고 TASK-908의 번호 입력 제거·즉시 TRACKING·신규 1/2정거장 전 준비 알림 변경은 구현됐지만 실제 버스/iPhone E2E는 미완료다. TASK-902/903 당시 설계와 TASK-908의 후행 변경은 ADR-011/012와 Owner 문서를 함께 따른다. 기존 TASK-710/711과 Phase 8의 상태·검증 책임은 유지하며 TASK-908이 이를 대체하지 않는다.
 
 - [x] TASK-901 TAGO·서울 버스 차량 식별 가능성 조사
   - 목적: 경기 TAGO와 서울 버스 API에서 실제 탑승 차량을 사용자가 확인하고 동일 차량을 지속 추적할 수 있는지 GPS 없이 검증한다.
