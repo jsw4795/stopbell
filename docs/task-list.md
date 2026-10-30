@@ -777,6 +777,124 @@ A안을 후속 구현의 최소 방향으로 제안한다. 후보는 `ErrorCode.
 - 미검증: 전체 Backend/Flutter suite·TASK-816 최종 주요 회귀/상호 정합성 감사, 실제 개발/운영 DB·실제 DB 네트워크 commit 응답 유실·process kill/restart, 실제 Google/Transit/FCM/Firebase·iPhone, 모든 Endpoint/예외 계열 하위 타입·만료 JWT 전체 matrix. 서버 상시 실행·터널·Docker Named Volume 조작은 없었다. Gradle/Flutter 최초 실행의 sandbox 캐시 쓰기 제한은 허용된 권한 확장으로 해결했으며 테스트 skip/검증 약화는 없다.
 - TASK-804는 전체 code matrix·Security 401·예상 밖 Exception fallback·신규 Endpoint 및 전체 validation/error regression 책임을 유지한다. TASK-816은 이번 두 mapped 500의 불일치 처리 결과를 최종 주요 Backend/Flutter 회귀 및 AUD-01~13 상호 정합성·문서·잔여 결함 검토에 연결해야 한다. AUD-12→TASK-814의 UTC 수정·기존 데이터 판단과 TASK-710/711/908 실제 E2E 책임도 유지한다. **TASK-804/814/816 및 모든 체크박스는 `[ ]` 등 기존 상태 그대로이며 최종 회귀 단계로 자동 진행하지 않는다.** `main`과 기존 검토/AUD 기록을 보존하고 Git add/commit/push·branch/reset/stash/clean/checkout 없이 보고 후 중단한다.
 
+### TASK-816 최종 종합 회귀 및 완료 조건 감사 (2026-10-30)
+
+**최종 판정: NOT READY.** 전체 Backend 회귀에서 기존 Fixture와 AUD-02·AUD-10의 현재 계약이 충돌하는 실패 2건을 확인했다. 제품 결함 재발로 단정하지 않지만 필수 회귀 통과 조건은 충족되지 않았다. AUD-12의 UTC 제품 결함도 미수정이며 TASK-814의 책임과 완료 조건 해석을 아래에서 구분한다. 이 기록은 TASK-816 완료 처리나 다른 Phase 착수를 뜻하지 않는다.
+
+#### 검증 대상과 실행 안전성
+
+- Branch `main`, Commit `e44d009ff9c65b7fde9ceae94f9a2b84e0b6026f`. 시작 시 `git status --short`와 `git diff HEAD --stat`는 출력이 없는 깨끗한 작업 트리였다. 검증 대상은 이 로컬 코드이며 GitHub와의 대조·fetch/pull/checkout은 수행하지 않았다.
+- API 500 A안, Flutter 안내 문구 및 AUD-01~13의 기존 처리 결과를 현재 코드·테스트와 대조했다. 제품·테스트·SQL·Dependency·Gradle/Profile·Firebase/Docker 설정·Credential·ADR·devlog는 변경하지 않았다.
+- Java와 Gradle JVM은 21.0.12.1, Wrapper는 8.14.3, Flutter는 3.47.1 Stable / Dart 3.13.1이다. 최초 Gradle 버전 확인은 sandbox의 기존 캐시 lock 쓰기 제한으로 실행 전 실패했고, 허용된 권한 확장 후 실행했다. 이 환경 사전 점검은 테스트 실행/실패 개수에 포함하지 않는다.
+- Backend DB 테스트는 `mysql:8.4.11` Testcontainers의 임시 DB와 `@ServiceConnection` 또는 Container JDBC URL만 사용한다. Context smoke의 DB는 제외/Mock이며 실제 개발 MySQL에 연결하지 않는다. 기존 `stopbell-mysql-1`은 보존했다.
+- Provider HTTP는 `MockRestServiceServer`/Mock, Google 검증은 Mock, FCM은 Mock 또는 `127.0.0.1` 임시 HTTP 서버와 합성 인증 경계다. 이름에 Smoke가 있는 `FcmSmokeRunnerTest`도 Mock 테스트이며 수동 실전송을 실행하지 않는다. 기본 Monitoring/Dispatch는 비활성이고 이를 켜는 Scheduler/Worker 테스트는 주입된 Mock을 사용한다. Flutter HTTP·Google·Secure Storage·Firebase/Pigeon/MethodChannel은 Mock/Fake로 격리한다.
+- 전체 Backend는 `env -u JAVA_HOME ./gradlew test --offline --max-workers=1`, Flutter는 `flutter analyze --no-pub` 및 `flutter test --no-pub --reporter=json`으로 실행했다. 안전성 때문에 제외한 자동 테스트는 없다. 실제 외부 호출·개발/운영 DB·기존 Named Volume 변경·서버/터널·iPhone 설치/실행은 수행하지 않았다.
+
+#### AUD-01~13 현재 상태와 상호 정합성
+
+다음 개수는 이번 전체 실행의 실제 사례 수이며 과거 선택 실행 수를 합산하지 않는다. PASS는 기재한 자동 검증/처리 범위에 한정한다.
+
+| AUD / 최초 위험 | 현재 판정과 제품 코드 근거 | 이번 테스트 근거 | 상호 정합성·미검증 / 후속 책임 |
+| --- | --- | --- | --- |
+| AUD-01 최초 Alarm Push 준비 누락 | PASS. `main.dart`→`AlarmHome`→`BusRouteStopScreen._create()`의 준비·사용자 선택→Create→Activate, Auth/화면 수명 재검증 유지 | `alarm_creation_push_test.dart` 32개, Alarm API/timeout·화면 회귀 40개 통과 | AUD-05/06과 준비 취소·늦은 응답·중복 POST 차단 계약 유지. 실제 permission/APNs/수신·tap은 TASK-710/711 |
+| AUD-02 동일·역행 Provider 시각의 오판 | 제품 수정 유지, 최종 회귀 BLOCKED. `BusAlarmEvaluator.isMonotonic()`과 `VehicleTrackingState.lastKnownProviderDataTime`의 엄격 증가·NULL 사이 기준 보존 유지 | Evaluator 65개·Scheduler 35개·Lifecycle 6개 통과. `TransitMonitoringIntegrationTest`는 6개 중 1개 실패 | AUD-09 혼합 차량/재시도 회귀 통과. 동일 시각에 진행시키는 기존 통합 Fixture 충돌은 아래 실패 1 참조. 실 Provider 시각 분포는 미검증. TASK-816 회귀 보정 책임 |
+| AUD-03 불완전 서울 Snapshot 승인 | PASS. `SeoulCsvMetadataSource.fetchCompleteSnapshot()`이 포함 Route의 occurrence 0개를 complete 반환 전에 거부 | CSV Source 13개·서울 Sync 10개·Sync Transaction 3개·Bootstrap 3개·Sync Service 2개 통과 | 정상 complete 갱신/cleanup·기존 ID/데이터 보존과 실패 rollback 유지. 실제 대규모 CSV import·I/O/장애 운영 검증은 별도 |
+| AUD-04 Polling/Dispatch 자원 공유 | PASS. `SchedulingConfiguration`의 독립 단일 스레드와 두 `@Scheduled(scheduler=...)`, 기존 직렬 실행 guard 유지 | Scheduling 5개, Monitoring Scheduler 35개, Dispatch Worker 10개와 Dispatch/Boarding 통합 회귀 통과 | 느린 한쪽과 다른쪽의 독립 진행·각 non-overlap·shutdown 보호 유지. 운영 부하/강제 종료는 TASK-810/811·711 |
+| AUD-05 timeout 뒤 늦은 401 replay | PASS. `AlarmApiClient._request()`의 요청별 active/generation과 `finally` 무효화, `AuthenticatedApiClient`의 refresh/replay 전후 검사 유지 | Alarm timeout 18개·Authenticated API 24개 통과 | AUD-01 준비·AUD-06 공유 Refresh와 유효 요청/만료 요청 분리 유지. 물리적 HTTP 취소·서버 rollback은 보장 밖 |
+| AUD-06 인증 HTTP 무한 대기 | PASS. `BackendAuthClient._post()`의 기본 15초, Token parsing 이전 timeout과 늦은 결과 폐기 유지 | Backend Auth Client 15개·Auth Session 28개와 위 Authenticated API/Alarm timeout 통과 | Login/Refresh/Logout·Rotation/single-flight·500 뒤 Session 보존 유지. Google SDK/Storage/hook 장기 대기·실네트워크 응답 유실은 미검증 |
+| AUD-07 후보 detail 누적 지연 | PASS. `BoardingCandidateService`·전용 `BoardingCandidateDetailExecutor`의 단일 12초 예산, 요청당 2/프로세스 4 admission·늦은 결과 폐기 유지 | Executor 11개·Latency 14개·Service 31개·Reference 9개·Revalidation 36개, Flutter 후보 29개 통과 | 정렬/identity/freshness/reference·PARTIAL/HELD와 15초 Client 수명 유지. AUD-04 pool과 독립. 절대 응답 SLA·Provider 전체 rate limit·실부하 검증 아님 |
+| AUD-08 재확인 후 준비 판단 누락 | PASS. `BoardingSessionService.reconfirm()`→`recordReconfirmedPreparation()`→`recordInitialPreparation()`의 Session/checkpoint/Event/Delivery 원자 저장·commit 확인 유지 | Boarding API 130개·Tracking 139개·Evaluator 66개·Boarding Dispatch 73개 통과 | 새 1/2 구간의 미소비 판단, 기존 NULL offset·TTL·0 recipient 소비·revision/gate·동시성/응답 유실 보존. 실제 버스/기기는 TASK-908·710/711 |
+| AUD-09 차량 mapping 오류의 노선 전파 | PASS. 서울 Mapper의 STRICT 시각/차량 검증→PROTOCOL 변환, Scheduler의 차량별 catch·presence·실패 차량 재시도 유지 | 서울 Mapper 19개·Scheduler 35개 및 Evaluator 65개 통과 | AUD-02 동일/역행 재시도 차단과 정상 차량 평가 보존. 실 malformed 응답 빈도·지연은 미검증 |
+| AUD-10 신규 Google 최초 로그인 경쟁 | 제품 수정 유지, 최종 회귀 BLOCKED. `LoginService`의 로그인 전체 REQUIRES_NEW, 알려진 Identity UNIQUE만 rollback 후 새 Transaction에서 1회 조회 유지 | Login Service 23개·동시성 통합 8개·Auth Controller 23개·Refresh 4개·Login Migration 1개 통과. Repository 20개 중 1개 실패 | AUD-11 Identity 지원 정책·Session 원자성 보존. 미커밋 외부 Fixture와의 잠금 충돌은 아래 실패 2 참조. 실제 Google/다중 서버/운영 장애는 미검증. TASK-816 회귀 보정 책임 |
+| AUD-11 Legacy V3→V4 | PASS(확정된 지원 제한·감사 처리). 기존 SQL 불변, 신규 Identity 합성 없음. V4 미적용 User 0명만 일반 자동 업그레이드 | User Identity Migration 8개·Login Migration 1개 통과 | Fresh/빈 V3/정상 V20 validation·재적용, User 1명의 잘못된 성공 및 2/10명의 실패·원본 보존 확인. 운영 Preflight·수동 이관/Backup Restore는 미검증·별도 설계 책임 |
+| AUD-12 Host 의존 timestamp | PENDING(감사 근거 연결 완료, 제품 미수정). User 2·RefreshToken 1·Alarm 2 callback의 인자 없는 `LocalDateTime.now()` 잔존 | UTC Characterization 4개 통과. 이번에는 기본 테스트 JVM에서 실행했으며 과거 3개 zone의 12회 결과를 이번 수에 합산하지 않음 | 기존 UTC expiry/FOLLOW_UP·Notification·Boarding 경로 회귀 유지. 통과는 현 결함 재현이며 UTC 수정 증거가 아님. 수정·시간 원천 선택·JDBC/다중 zone/DST·기존 데이터 정책은 TASK-814 |
+| AUD-13 PASSED 위치 전달 누락 | PASS. Event의 불변 위치→`NotificationRecipientPreflight`→`PassedNotificationContext`→DispatchTarget/SendRequest→FCM body 유지 | Passed Dispatch 9개·FCM Provider 57개·Notification persistence/attempt/retry/worker 회귀 통과 | 네 data key·두 alert body 일치·선택 위치 생략/길이 제한·다른 Event/Session body·최신 recipient/retry/expiry 보존. process restart·실 FCM/iPhone 표시는 TASK-811·710/711 |
+
+API 500 A안도 두 Controller-local Handler가 지정된 `DataAccessException`/`TransactionException`에만 고정 `INTERNAL_SERVER_ERROR`와 `An internal server error occurred.`의 두 필드 JSON을 반환함을 확인했다. Device API 12개·Boarding API 130개 및 Flutter의 빈/JSON/알 수 없는 code 500 테스트가 통과했다. 원문/민감정보 비노출, 기존 400/401/403/404/409/503 분류, Auth Pair/generation·Device pending·Session의 원래 UUID/body·commit 불확실성 조회 복구가 유지된다. 전체 Endpoint/예상 밖 Exception/Security 오류 형식 완성은 TASK-804의 독립 책임이다.
+
+#### Backend 실제 실행 결과와 실패 분석
+
+전체 79개 테스트 클래스가 모두 보고서에 존재하며 누락·제외한 클래스는 없다. JUnit XML의 실제 `<testcase>`와 suite 합계는 일치한다. Parameterized invocation도 각각 한 사례로 집계하고 동일 DisplayName이라는 이유로 서로 다른 인자를 합치지 않는다.
+
+| 영역 | 실행 | 통과 | 실패 | 오류 | Skip |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Alarm | 189 | 188 | 1 | 0 | 0 |
+| BoardingSession | 410 | 410 | 0 | 0 | 0 |
+| Notification(Device 포함) | 307 | 307 | 0 | 0 | 0 |
+| Authentication/User/Persistence | 102 | 101 | 1 | 0 | 0 |
+| Transit/Metadata | 247 | 247 | 0 | 0 | 0 |
+| Common Configuration/UTC/Application Context | 17 | 17 | 0 | 0 | 0 |
+| 전체 최초 실행 | 1,272 | 1,270 | 2 | 0 | 0 |
+
+Device API 12개·Persistence 2개는 위 Notification의 부분집합이다. Migration 5개 클래스의 12개 사례와 UTC Characterization 4개도 각 영역에 이미 포함되므로 중복 합산하지 않는다. 전체 Gradle 결과는 `BUILD FAILED`(7분 41초)이며 compileJava/compileTestJava는 UP-TO-DATE였다.
+
+1. **시각 계약과 충돌하는 Alarm Fixture:** `TransitMonitoringIntegrationTest.seoul_arrival_then_same_vehicle_one_stop_after_completes_follow_up()`의 135행에서 기대 INACTIVE / 실제 FOLLOW_UP으로 실패했다. 이 테스트의 `detail()`은 target/successor 모두 같은 `20260923090000`을 만들며 Mapper/Scheduler Clock도 고정이다. AUD-02가 동일 시각의 바뀐 위치를 거부하는 것이 현재 설계이므로 정상 후속 진행 Fixture가 아니다. Evaluator의 `audit_rejects_follow_up_time_conflict_and_recovers`와 나머지 단위/통합 경계는 통과했다. 후속 후보는 **이 통합 테스트의 정상 진행에만** Provider 시각과 Mapper/Scheduler/decision Clock을 일관되게 전진시키는 Fixture 보정이다. 동일/역행 시각 차단 assertion이나 제품 검증을 완화하지 않는다. 정상 시각의 전체 DB/lifecycle 경로 최종 통과는 보정 후 확인해야 한다.
+2. **Transaction 경계와 충돌하는 기존 로그인 Fixture:** `RepositoryIntegrationTest.login_existing_google_identity_reuses_user()`의 161행에서 약 50초 후 `CannotAcquireLockException`→`LockTimeoutException`→MySQL lock wait timeout으로 실패했다. 클래스의 테스트 Transaction에서 User를 saveAndFlush하지만 commit하지 않은 채 REQUIRES_NEW 로그인으로 진입한다. 새 Transaction은 그 User를 볼 수 없어 같은 Identity INSERT를 시도하고, 중단된 외부 Transaction의 UNIQUE 잠금을 기다린다. 실제 동시 로그인 8개·정상 이관 후 로그인 1개는 통과했으며 테스트 순서만으로 설명되는 실패가 아니다. 후속 후보는 로그인 관련 Fixture를 **실제 commit된 User**로 준비하고 로그인 결과도 새 읽기 Transaction에서 확인하는 테스트 경계 보정이다. REQUIRES_NEW commit은 바깥 테스트 rollback으로 정리되지 않으므로 기존 신규 로그인 테스트를 포함한 명시적 정리와 절대 `users.count()==1`의 격리 조건도 함께 검토해야 한다. 제품의 Transaction 원자성/충돌 분류 변경이나 잠금 timeout 증가는 후보가 아니다.
+
+실패한 위 두 메서드만 같은 코드에서 `--tests` 두 개로 선택 재실행한 결과 **2개 모두 같은 원인으로 다시 실패**했다(`BUILD FAILED`, 1분 15초). Alarm은 동일한 기대 INACTIVE / 실제 FOLLOW_UP, 로그인은 같은 INSERT의 약 50초 lock wait timeout이다. 따라서 전체 실행 순서나 다른 테스트의 상태 누출만으로 설명되지 않는다. 재실행은 2회(통과 0·실패 2·오류/Skip 0), 누적 실행은 **1,274회(통과 1,270·실패 4·오류/Skip 0)**다. 서로 다른 사례는 최초 전체의 **1,272개**, 최종 통과 1,270·실패 2로 유지하며 재실행을 새 사례로 중복 합산하지 않는다. 이미 통과한 1,270개는 반복 실행하지 않았고 두 Fixture 모두 직접 수정하지 않았다.
+
+최초 전체 JUnit XML은 재실행 전에 `/private/tmp/stopbell-task816-backend-full-results`, HTML은 `/private/tmp/stopbell-task816-backend-full-html`에 보존했다. 재실행 XML은 `/private/tmp/stopbell-task816-backend-rerun-results`에 별도 보존했으며 현재 `backend/build/test-results/test`·HTML은 2개 선택 재실행 결과다. 실행 로그는 `/private/tmp/stopbell-task816-backend.log`·`stopbell-task816-backend-rerun.log`, Flutter runner 원본은 `/private/tmp/stopbell-task816-flutter-test.jsonl`이다. 전체 종료 중 Hikari의 Context 정리 대기를 읽기 전용 스레드 덤프로 확인했으며 강제 종료·설정 변경 없이 정상 종료한 Gradle 실패 결과를 집계했다.
+
+#### MySQL/Flyway 호환성
+
+- `UserIdentityMigrationIntegrationTest`가 실제 MySQL version 8.4.11을 확인하고 Fresh V1~V20, User 0명의 V3→V4→V20, 정상 Identity의 V20 validation/재적용 0건을 검증했다. Login Migration 통합은 기존/신규 Identity와 독립 Session·Rotation·Logout을 검증했다.
+- V3 User 1/2/10명과 strict/빈 sql_mode는 기존 AUD-11 지원 제한대로 관측했다. 1명의 빈 Identity SQL 성공은 지원 성공이 아니고, 2/10명 UNIQUE 실패는 알려진 제한을 재현하는 성공 테스트다. 새로운 제품 회귀로 등록하지 않는다. Local Development의 수동 Preflight·지원 중단·별도 이관 판단 문구도 유지된다.
+- Notification Migration/Source Migration은 legacy History와 기존 ALARM Event·Device·네 Delivery 상태, Session 및 V16~V20의 데이터·기한·fingerprint·NULL offset 호환과 CHECK/UNIQUE를 검증했다. 기존 FOLLOW_UP의 V14 적용 전제도 보존했다.
+- SQL 20개 모두 현재 HEAD 및 각 파일의 최초 추가 Commit과 바이트가 동일하다. 격리 fixture DB의 Flyway validation은 통과했다. 실제 개발/운영 DB의 적용 History/Checksum·실데이터를 조회한 증거로 확대하지 않는다. Entity/Schema 관련 persistence 테스트는 아래 두 Fixture 실패와 별개로 통과했다.
+
+#### Flutter 실제 실행 결과
+
+`flutter analyze --no-pub`는 **No issues found**, 전체 runner는 `done.success=true`다. 실제 테스트 34개 파일·549개 모두 통과했고 실패/오류/Skip/재실행은 0개다. JSON의 hidden 파일 로딩 이벤트 34개는 실제 테스트 수에 포함하지 않았다.
+
+| 영역(중복 없는 파일 기준) | 실행 / 통과 | 실패 / 오류 / Skip |
+| --- | ---: | --- |
+| Authentication | 89 / 89 | 0 / 0 / 0 |
+| Alarm | 72 / 72 | 0 / 0 / 0 |
+| BoardingSession(세션 Notification 포함) | 317 / 317 | 0 / 0 / 0 |
+| Device/Notification/Firebase smoke fixture | 51 / 51 | 0 / 0 / 0 |
+| Transit/Configuration/Phase 6 회귀 | 20 / 20 | 0 / 0 / 0 |
+| 합계 | 549 / 549 | 0 / 0 / 0 |
+
+Auth Session·Secure Pair·Refresh single-flight·Logout·timeout/늦은 응답 폐기, 최초 Push 준비, 명시적 차량 선택/후보 refresh·즉시 TRACKING·알림 시점·원래 UUID 생성/복구/재확인·revision, foreground/initial/opened source별 정확한 ID 이동·stale/generation 차단, Device pending/FID/disable, 빈/JSON 500 뒤 인증·pending·미확정 생성 identity 보존이 자동 검증 범위다. 실제 Firebase SDK 초기화/APNs 등록·권한·OS background/terminated 실행/표시·실제 tap·기기 Secure Storage/재설치는 Mock 성공으로 완료 처리하지 않는다. iOS build·설치·실행·실 Provider/Google/FCM은 미실행이다.
+
+#### 문서와 정책 및 남은 책임
+
+README·app README, Requirements/API/Architecture/Database/Domain/Package/Roadmap/Local Development/Task List의 현행 정책·상태·관련 구현을 대조했다. 신규 Boarding의 명시적 선택·2정거장 전 기본/1정거장 전 선택·즉시 TRACKING/readiness 분리·세션당 준비 1회·목적지 완료만, 기존 NULL offset 목적지 Push·ON/OFF, Alarm ACTIVE/FOLLOW_UP·ARRIVED 우선/PASSED 뒤 ACTIVE·새 차량 감시, Notification source identity/atomic decision·recipient/lock 순서·retry/expiry·terminal 비재전송을 유지한다. 정상 시각의 Alarm 전체 FOLLOW_UP 경로는 실패한 Fixture를 보정해 최종 확인해야 한다.
+
+두 local Handler 500의 한정된 계약, PASSED의 Event snapshot 기반 선택 위치와 동일 alert body/data key, AUD-11 지원 제한, AUD-12 미수정/TASK-814, 실제 Notification 구현 완료와 최종 실기기 미검증의 구분은 문서와 일치한다. 주요 문서의 로컬 Markdown 파일/앵커 219개를 검사해 깨진 참조 0개를 확인했다. ADR은 후행 결정/역사 기록으로 읽고 수정하지 않았다. 이번 대조에서 다른 Owner 문서의 새 명백한 오류는 발견하지 않았으며 불필요한 재작성도 하지 않았다.
+
+| 남은 문제 | 심각도 / 실제 영향 | TASK-816 차단 여부 | 후속 책임 |
+| --- | --- | --- | --- |
+| Alarm 정상 진행 통합 Fixture의 동일 시각 | 회귀 검증 결함. 유효한 정상 후속 DB/lifecycle 검증이 최종 녹색이 아님 | 차단. 회귀 통과 조건 4·6·10 미충족 | TASK-816, AUD-02 인접 테스트 보정 |
+| 기존 로그인 Fixture의 미커밋 외부 Transaction | 회귀 검증 결함. 알려진 로그인 경계와 충돌해 lock timeout, 로그인 관련 Fixture 정리/개수 격리 검토 필요 | 차단. 회귀 통과 조건 4·10 미충족 | TASK-816, AUD-10 인접 테스트 보정 |
+| AUD-12 Host 의존 callback 5곳 | 알려진 P2 제품 결함 미수정. 감사 시각과 Alarm 목록 정렬의 UTC 의미 미보장, 기존 데이터의 zone 해석 불명확 | 조건 2는 PENDING. 명시적 책임 분리 근거와 필수 결함 포함 여부의 해석 필요. 이번 NOT READY의 독립적인 회귀 차단 2건과 구분 | TASK-814, 시간 원천/타입·기존 데이터 정책·JDBC/다중 zone/DST 검증 |
+| 전체 API validation/error matrix·fallback | 기존 독립 검증 범위. 두 Handler 500 성공이 모든 Endpoint의 오류 계약을 보장하지 않음 | 현재 확인된 두 Handler 불일치는 해결. 이 범위 자체로 자동 차단하지 않음 | TASK-804 |
+| 실제 iPhone·버스·Provider/FCM 검증 | 실제 freshness/무정차/회차·수신/표시/tap·quota/부하 미검증 | 자동 회귀와 분리된 후속 E2E. 다른 Task 번호만으로 필요한 correctness를 면제하지 않음 | TASK-710 수신/tap, TASK-711 최종 Notification E2E/regression, TASK-908 실제 버스/하차 알림 |
+| 실제 process restart/graceful shutdown/recovery·응답 유실 | 자동 fixture는 실제 kill/restart/FCM accepted 뒤 crash·운영 DB 장애를 대체하지 않음 | 기존 운영 후속 책임. 이번 자동 회귀는 운영 안전성 완료가 아님 | TASK-811 및 TASK-711, latency/운영 부하는 TASK-810 |
+
+AUD-12는 새 결함으로 중복 등록하지 않는다. 기존 완료 기준 9와 TASK-814 책임 문구, AUD-12의 명시적 감사·이관 결정은 TASK-816의 감사 처리와 TASK-814 제품 수정을 분리할 근거다. 그러나 기준 2의 “수정이 필요한 결함을 실제 코드에서 해결”과 기준 10의 “모든 필수 결함”이 미수정 UTC 결함까지 포함하는지에 대한 무조건적 면제는 명시되어 있지 않다. 따라서 제품 수정 완료를 PASS로 바꾸지 않았다. 두 회귀 실패를 해결하더라도 AUD-12를 TASK-816 필수 수정에서 제외하는 기존 책임 분리의 적용을 최종 확인해야 한다. 포함한다면 TASK-814 수정·호환성 검증 결과 연결까지 차단되며, 제외한다면 감사/근거/후속 소유는 충족하되 UTC 제품 결함과 TASK-814 `[ ]`는 남는다. 이번 작업에서 정책 선택이나 UTC 구현을 임의 확정하지 않는다.
+
+#### 기존 10개 완료 조건 판정
+
+| 완료 조건 | 상태 | 근거 | 남은 문제 |
+| --- | --- | --- | --- |
+| 1. AUD-01~13 검토·처리 기록 | PASS | 기존 기록 보존, 현재 코드·이번 결과·미검증·소유자 연결 | AUD-02/10 통합 Fixture 실패를 숨기지 않고 추가 기록 |
+| 2. 수정 필요한 필수 제품 결함 해결 | PENDING | AUD-01~10/13 수정 유지, AUD-11 지원 정책 유지 | AUD-12 제품 미수정. TASK-814 책임 분리의 완료 기준 적용 확인 필요 |
+| 3. 수정별 재현/회귀 방지 테스트 | PASS | 각 수정의 직접 테스트 존재·이번 전체 실행에 포함, AUD-12 Characterization 명시 | 기존 인접 Fixture 2건의 실패는 조건 4에서 차단 |
+| 4. Backend·Flutter 주요 회귀 | BLOCKED | Flutter 549개 성공, Backend 1,270/1,272 성공 | Backend 실패 2건 해결·직접 검증 필요 |
+| 5. 주요 문서 정합성 | PASS | 현행 정책/API 500·PASSED·Migration·UTC 미완료/책임 일치, 링크 219개 정상 | UTC 목표의 구현 격차 자체는 조건 2/ TASK-814로 구분 |
+| 6. Alarm·Boarding 정책 보존 | BLOCKED | Boarding/Notification·Alarm 핵심 단위 회귀 통과 | 정상 시각의 Alarm 전체 FOLLOW_UP 완료 통합 회귀가 아직 통과하지 않음 |
+| 7. 기존 DB/Migration 호환 | PASS(지원 범위) | 실제 격리 MySQL/Flyway·데이터 보존·validation, SQL 20개 최초 버전과 동일 | Legacy User 존재 DB는 명시적 지원 제외. 실데이터 이관 미검증 |
+| 8. 실제 Provider/iPhone 미검증 구분 | PASS | Mock/loopback·자동 runner와 실제 E2E 책임 분리 | TASK-710/711/908·실 Provider/운영 검증 유지 |
+| 9. 미수정 사유·후속 Task 명시 | PASS | AUD-11 제한·AUD-12→814, 804/710/711/908/811 책임 및 두 회귀 보정 범위 명시 | 다른 Task의 미완료를 감사 통과로 대체하지 않음 |
+| 10. 필수 결함·검증 조건 모두 충족 | BLOCKED | 최종 NOT READY, 모든 기존 체크박스 유지 | 두 회귀 실패와 조건 2 PENDING 해소 전 완료 불가 |
+
+#### 변경/Git 및 다음 작업
+
+유일한 추적 파일 변경은 이 `docs/task-list.md`의 새 감사 기록 118행 추가다. `git diff --check`는 통과했고 최종 status는 ` M docs/task-list.md`, staged diff는 없다. 새 절을 제외한 본문이 HEAD와 완전히 같고 기존 체크박스 102개도 동일함을 비교했다. 시작 시 기존 미커밋 변경은 없었으며 TASK-804/814/816 및 TASK-710/711/908/811의 상태를 변경하지 않는다. 종료 시 이번 테스트 JVM·임시 MySQL·Ryuk Container가 남지 않고 기존 개발 MySQL Container ID가 그대로임을 확인했다. Git add/commit/push·branch 생성·reset/stash/clean/checkout·pull/fetch는 수행하지 않는다. Dependency·Migration·제품·테스트 변경과 다음 Phase 착수도 없다.
+
+**다음 권장 작업은 하나다: TASK-816의 위 두 기존 회귀 Fixture만 별도 작업으로 보정하고 실패 경로를 재검증한다.** assertion·timeout·제품 안전 조건을 약화하지 않으며 성공한 전체 Suite를 이번 감사 중 다시 실행하지 않는다. 완료 체크는 이 보고서를 검토한 사용자가 별도로 결정한다.
+
 ### TASK-816 권장 수정 순서와 독립 검증
 
 | 순서 | 작업 그룹 | 대상 | 검증 초점 |
