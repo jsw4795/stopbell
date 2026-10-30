@@ -679,7 +679,7 @@ allprojects {
 
 | 남은 항목 | 정적 확인 근거 / 후속 책임 |
 | --- | --- |
-| Flutter 초기 안내 문구 | `app/lib/features/boarding/boarding_stop_screen.dart:210`의 “선택한 정류장에 도달하거나 통과하면 알리는 기능이에요 … 진행 검증 전에는 대기로 표시해요”는 신규 준비 알림과 즉시 TRACKING을 오해하게 한다. TASK-816 제품 문구 후속에서 “선택한 목적지 2정거장 전(기본) 또는 1정거장 전에 하차 준비 알림을 한 번 보내요. 등록하면 바로 추적하고 위치 근거가 부족하면 차량 위치 확인 중으로 표시해요”로 수정 제안. 이번에는 Dart 수정 금지로 보존 |
+| Flutter 초기 안내 문구 | 1단계 당시 `app/lib/features/boarding/boarding_stop_screen.dart:210`의 “선택한 정류장에 도달하거나 통과하면 알리는 기능이에요 … 진행 검증 전에는 대기로 표시해요”가 신규 준비 알림과 즉시 TRACKING을 오해하게 해 수정 제안했으며, 당시에는 Dart 수정 금지로 보존했다. 이후 아래 Flutter 안내 문구 후속 처리에서 수정·선택 검증 완료 |
 | API 오류 본문 차이 | `DeviceController.handlePersistenceFailure()`와 `BoardingSessionController.persistenceFailure()`는 빈 500을 반환하며 기존 Device API 테스트도 빈 본문을 기대한다. [API 오류 형식](api.md#5-오류-형식)의 공통 code/message 요구와 차이가 있다. 계약을 코드 수준으로 낮추지 않으며 TASK-816 최종 검토·TASK-804의 오류 계약 검증으로 연결. 오류 범위 판단과 제품/테스트 수정은 이번 문서 작업 밖 |
 | AUD-12 UTC 제품 결함 | User onPrePersist/onPreUpdate, RefreshToken onPrePersist, Alarm onPrePersist/onPreUpdate의 Host 의존성은 미수정. 위 AUD-12 근거·Characterization과 TASK-814의 선택·구현·기존 데이터 호환 검증 책임 유지 |
 | AUD-01~13 최종 상호 정합성 | 개별 처리 기록과 이번 문서 변경을 함께 대조하고 Backend 주요 회귀 및 Flutter 주요 회귀를 별도로 수행. AUD-13 PASSED의 검증된 정류장명/Successor Edge 수·생략·기존 data key·두 alert body 일치 계약도 회귀 확인 |
@@ -687,6 +687,15 @@ allprojects {
 | TASK-816 최종 완료 판정 | AUD-12→TASK-814의 미수정 책임·검증 근거, 미검증 범위와 기존 TASK-710/711/814/908의 책임 분리, 필수 결함 잔여 여부를 확인한 뒤 기존 완료 기준 검토. 이번 단계에서는 TASK-814/816과 모든 기존 체크박스 유지 |
 
 ADR-006/007/009/010/011/012, TASK-908 연구 기록과 기존 AUD 처리·테스트 실행 기록은 보존했다. AUD-11의 V4 미적용 DB User 0명 자동 업그레이드 조건과 사전 중단·별도 이관 판단, AUD-13의 이미 정확한 상세 계약은 변경하지 않았다. Backend/Flutter 테스트·빌드·서버·DB·실제 Provider/FCM/실기기 실행 없이 Markdown/경로/anchor·Controller/DTO/Class 및 diff만 검토했다.
+
+#### Flutter 안내 문구 후속 처리 (2026-10-30)
+
+- 기존 문구: “선택한 정류장에 도달하거나 통과하면 알리는 기능이에요. 목록에서 차량을 선택해 미리 등록하세요. 진행 검증 전에는 대기로 표시해요.”는 목적지 도달·통과를 신규 알림 시점으로 오해하게 하고, 기본 2정거장 전/선택 1정거장 전 준비 알림과 즉시 TRACKING·위치 근거 부족을 구분하지 못했다.
+- 확인한 현행 계약: Requirements·API·Domain·ADR-012·TASK-908 후행 계약과 Flutter 확인/상세/Controller·관련 테스트를 대조했다. 신규 세션은 차량번호 입력 없이 단일 후보도 사용자가 직접 선택해 등록하고 즉시 TRACKING을 시작한다. 위치 근거 부족은 TRACKING을 유지하는 VERIFICATION_PENDING이며 실제 진행 근거 확보 뒤 알림 시점을 판단한다. 기본 2정거장 전 또는 선택 1정거장 전 준비 알림은 세션당 한 번만 결정하고, 목적지 도달·통과는 완료 조건이며 신규 목적지 Push는 만들지 않는다. NULL offset 기존 세션의 목적지 Push 호환은 유지한다. 실제 정차·탑승·하차나 기기 수신/표시 성공을 보장하지 않는다. 상세 계약의 Owner 문서는 변경하지 않았다.
+- 최종 문구: “목적지 2정거장 전(기본) 또는 1정거장 전(선택)에 하차 준비 알림을 받을 수 있어요. 목록에서 차량을 직접 선택해 등록하세요. 등록 후 바로 추적을 시작하며, 위치를 확인하는 동안에는 '차량 위치 확인 중'으로 표시해요.”
+- 수정 범위: `app/lib/features/boarding/boarding_stop_screen.dart`의 기존 안내 Text 문자열 하나와 `app/test/boarding_flow_test.dart`의 기존 흐름 테스트 기대값만 수정했다. 기본/선택 시점·준비 알림·직접 차량 선택·즉시 추적·위치 확인 중 표시 및 이전 도달·통과/대기 설명 부재를 검사한다. 신규 테스트는 0개이며 `boarding_stop_screen_test.dart`는 변경하지 않았다. Widget 구조·상태 변수·Controller·API 호출·다른 Flutter 화면·Backend·Notification 정책·Dependency·설정·Migration·devlog는 변경하지 않았다.
+- 선택 검증: `app`에서 `flutter test --no-pub test/boarding_stop_screen_test.dart` **16개**, `flutter test --no-pub test/boarding_flow_test.dart` **4개**, 합계 **20개** 실패/오류/skip 없이 통과했다. 작은 화면/큰 글자 스크롤, 목적/승차 occurrence 선택, 후보 조회·오류/재시도·오래된 응답 무효화·로그인 변경·기존 도착 알림 흐름을 검증했다. `flutter analyze --no-pub lib/features/boarding/boarding_stop_screen.dart test/boarding_flow_test.dart`는 No issues, 두 파일의 `dart format --output=none --set-exit-if-changed`는 변경 0개이며 `git diff --check`를 통과했다.
+- 미검증·후속 책임: 전체 Flutter/Backend 테스트·빌드·서버 실행·개발 DB 접근·실제 Provider/FCM 호출·iPhone 설치/실행·터널은 수행하지 않았다. 실제 iPhone의 안내 줄바꿈/가독성·foreground/background/terminated 수신/tap, 버스 진행과 신규 준비 알림 E2E는 TASK-710/711/908 책임으로 남는다. DeviceController/BoardingSessionController의 빈 500 응답과 AUD-12/TASK-814 UTC 수정은 이번 범위 밖이다. TASK-816의 최종 Backend/Flutter 주요 회귀·문서/잔여 결함 검토는 별도 후속이며 이번 20개 테스트로 대체하지 않는다. 기존 감사 기록과 모든 체크박스, TASK-814/816 `[ ]` 및 `main`을 유지하며 Git add/commit/push·reset/stash/clean/checkout·branch 생성은 수행하지 않았다.
 
 ### TASK-816 권장 수정 순서와 독립 검증
 

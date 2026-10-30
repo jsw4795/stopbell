@@ -138,7 +138,14 @@ void main() {
       await start(tester);
       await tester.pumpAndSettle();
       expect(find.text('서울70사1234'), findsOneWidget);
-      expect(find.textContaining('목록에서 차량을 선택해 미리 등록하세요'), findsOneWidget);
+      expect(find.textContaining('목적지 2정거장 전(기본)'), findsOneWidget);
+      expect(find.textContaining('1정거장 전(선택)'), findsOneWidget);
+      expect(find.textContaining('하차 준비 알림을 받을 수 있어요'), findsOneWidget);
+      expect(find.textContaining('목록에서 차량을 직접 선택해 등록하세요'), findsOneWidget);
+      expect(find.textContaining('등록 후 바로 추적을 시작'), findsOneWidget);
+      expect(find.textContaining('차량 위치 확인 중'), findsOneWidget);
+      expect(find.textContaining('도달하거나 통과하면 알리는 기능'), findsNothing);
+      expect(find.textContaining('진행 검증 전에는 대기로 표시'), findsNothing);
       expect(
         requests.where((r) => r.url.path == '/auth/refresh'),
         hasLength(1),

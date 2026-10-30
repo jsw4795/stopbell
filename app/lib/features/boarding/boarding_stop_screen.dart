@@ -207,7 +207,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         ),
         Text(widget.route.regionName),
         const Text(
-          '선택한 정류장에 도달하거나 통과하면 알리는 기능이에요. 목록에서 차량을 선택해 미리 등록하세요. 진행 검증 전에는 대기로 표시해요.',
+          "목적지 2정거장 전(기본) 또는 1정거장 전(선택)에 하차 준비 알림을 받을 수 있어요. 목록에서 차량을 직접 선택해 등록하세요. 등록 후 바로 추적을 시작하며, 위치를 확인하는 동안에는 '차량 위치 확인 중'으로 표시해요.",
         ),
         const SizedBox(height: 12),
         if (_state == _StopsState.loading) ...[
