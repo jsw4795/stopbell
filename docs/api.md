@@ -360,6 +360,17 @@ Push payload는 navigation hint 수준의 최소 정보만 포함한다.
 
 `userId`, Auth Token, push registration identifier, Provider Route/Stop external ID, GPS, Alarm 상세 전체는 포함하지 않는다. Payload는 권한 근거가 아니며 Flutter는 Auth Session initialization 뒤 `alarmId` navigation entry를 사용해 Backend Alarm detail API에서 ownership과 current state를 다시 확인한다. 삭제되었거나 접근할 수 없는 Alarm은 stale notification으로 정상 처리한다. TASK-704 Client는 위 string field와 `ONE_STOP_BEFORE` / `ARRIVED` / `PASSED` / `ONE_STOP_AFTER` eventType을 검증한다. 기존 Alarm payload 생성/전달은 TASK-705/706에서 구현했으며 TASK-906의 세션 source payload는 아래 계약을 따른다. TASK-907 3단계에서 initial/opened tap의 중복을 source별로 제거하고 최초 인증 복원 문맥에 묶었다. 미인증 시작의 알림은 이후 로그인에 이전하지 않으며 foreground 안내의 상세 action도 현재 Auth Session에 묶는다.
 
+TASK-816/AUD-13은 ALARM PASSED의 표시 Body만 보강하며 위 네 string data key와 ID 의미를 유지한다. 일반 `message.notification.body`와 iOS `message.apns.payload.aps.alert.body`는 같은 문구를 사용한다. 기본 문장은 항상 `버스가 목표 정류장을 지나갔어요.`이며, 원래 Event의 표시 가능한 이름과 검증된 양수 정거장 수를 각각 독립적으로 다음 줄에 덧붙인다.
+
+| 선택적 근거 | 기본 문장 다음의 보조 문구 예시 |
+| --- | --- |
+| 이름 + 정거장 수 | `최근 확인된 정류장: 강남역 (목표 정류장 이후 3정거장)` |
+| 이름만 | `최근 확인된 정류장: 강남역` |
+| 정거장 수만 | `목표 정류장 이후 3정거장 이동한 것으로 확인됐어요.` |
+| 둘 다 없음/표시 불가 | 보조 문구 없이 기본 문장만 사용 |
+
+이는 최근 확인된 Event 근거이며 현재 실제 위치/정차를 단정하지 않는다. 입력 생략·길이 제한과 snapshot 경계는 [Architecture](architecture.md#passed-위치-보조-정보-전달-task-816--aud-13)를 따른다. 위치 data key·새 제목·화면을 추가하지 않으며 다른 Alarm/BoardingSession 문구와 Flutter의 기존 foreground 안내·parser·tap/navigation은 유지한다. iPhone의 실제 표시·줄바꿈 범위는 TASK-710/711에서 확인한다.
+
 ### 탑승 세션 API (TASK-903)
 
 다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904, 세션 Persistence와 생성·조회·취소 API 경계는 TASK-905 1단계에서 구현했다. TASK-905는 특정 차량 polling·준비 후보·종료 판정, checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API까지 구현했다. TASK-906은 Backend Notification dispatch를 연결했으며 Flutter 후보·세션 조회/취소/재확인은 TASK-907 1·2단계에서 연결했고 TASK-908에서 번호 입력 없는 차량 선택·등록으로 변경했다. 세션 Push 수신/tap은 3단계에서 연결했다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.

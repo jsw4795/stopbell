@@ -341,6 +341,14 @@ AlarmService.delete는 기존 인증/소유권 검증과 Alarm PESSIMISTIC_WRITE
 
 삭제는 Alarm → Event join/Delivery ID 순서로 lock을 얻고 Device lock을 추가하지 않는다. 신규 결정은 같은 Alarm lock 뒤 Event → Device 순서이므로 삭제와 직렬화하며, 삭제 후 Scheduler/Event candidate는 TASK-708의 Alarm 부재 검증으로 거부한다. Worker는 Delivery → Device만 잠그고 뒤에 Alarm/Event write lock을 추가하지 않으므로 역순 lock cycle을 만들지 않는다. Worker preflight가 먼저 commit됐다면 I/O 직전 삭제 경쟁과 진행 중 FCM 요청의 회수는 보장하지 않는다. 삭제가 종료한 terminal row에는 후속 Worker가 새 호출을 시작하거나 late result로 PENDING을 복구하지 않는다. TASK-706은 이 Worker 경계를 구현했고 실제 result 정책은 TASK-709에 남는다.
 
+#### PASSED 위치 보조 정보 전달 (TASK-816 / AUD-13)
+
+기존 ALARM의 PASSED 위치 보조 정보는 `TransitEvent → NotificationEvent → NotificationRecipientPreflight → NotificationDispatchTarget(NotificationAttemptSnapshot) → NotificationSendRequest → FCM Payload`로 전달한다. `PassedNotificationContext`는 기존 attempt 준비 transaction에서 Delivery가 참조하는 원래 Event의 `currentStopName`·`stopsPastTarget`만 복사하는 불변 값이다. Entity/Lazy proxy는 전송 경계를 넘기지 않으며 기존 commit 뒤 transaction 밖 FCM 호출과 Delivery → Device lock 순서를 유지한다. 위치용 Provider 재조회·외부 cache·Event 사후 갱신은 없다. retry나 전송 서비스 재생성 뒤에도 해당 Delivery의 원래 Event를 사용하며 다른 차량/cycle의 최근 정보와 결합하지 않는다.
+
+두 값은 Event 생성 시점에 확인된 선택적 근거이며 실제 현재 위치가 아니다. 정거장 수는 기존 Evaluator/Traversal이 확인한 동일 traversal의 successor edge 수만 사용하고 dispatch에서 order 차/GPS로 재계산하지 않는다. null·0·음수는 생략한다. 이름은 앞뒤 공백을 제거하고 null·공백뿐인 값·제어 문자·Unicode format/line/paragraph separator·고립 surrogate가 있으면 생략한다. 긴 이름은 surrogate를 분리하지 않고 말줄임표 포함 80 Unicode code point로 제한한다. 선택적 정보가 없어도 일반 PASSED 알림을 보내며 실제 DB 오류를 정보 부재로 숨기지 않는다. 현재 서울·TAGO Observation Mapper는 이름을 null로 두므로 이름을 새로 보강하지 않고 정거장 수만으로도 안내한다.
+
+기본 문장과 선택적 보조 문구·두 alert body의 일치 및 기존 data 계약은 [API](api.md#push-payload와-notification-tap)를 따른다. PASSED 외 Alarm Event와 BOARDING_SESSION은 이 Context를 사용하지 않는다. 판정 우선순위·PASSED 뒤 ACTIVE/다음 차량 감시·identity/UNIQUE·recipient generation/revision·retry/backoff/expiry/cleanup 정책은 변경하지 않는다. 격리 MySQL의 commit·영속성 컨텍스트 분리·전송 경계 재생성 검증은 실제 프로세스 restart E2E나 iPhone 표시 검증을 대체하지 않는다. 실기기 줄바꿈·표시 범위와 수신/tap은 TASK-710/711에 남는다.
+
 #### Notification dispatch worker 구현 (TASK-706)
 
 `notification.service.NotificationDispatchWorker`는 기존 `findDuePendingIds(now, PageRequest.of(0, batchSize))`를 사용해 `nextAttemptAt ASC, id ASC`의 ALARM source PENDING ID만 제한 조회하고 순차 처리한다. TASK-906 1단계의 source 제한은 LIMIT 전에 적용한다. Alarm의 expired/capped PENDING을 조회에서 제외하지 않으며 recipient fan-out, 새 Event/Delivery 생성, Alarm lifecycle 변경을 수행하지 않는다. MySQL이 pending source이며 [전용 Scheduler](#scheduler-실행-자원-분리-task-816--aud-04)에서 동기 실행하고, memory queue, 추가 비동기 executor, worker sleep/retry loop는 없다.

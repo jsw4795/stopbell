@@ -30,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 import com.stopbell.notification.entity.BoardingNotificationEventType;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -125,6 +127,91 @@ class FcmProviderClientTest {
                     + "\",\"notificationEventId\":\"456\"}"));
         assertThat(message.getAsJsonObject("notification").get("body").getAsString()).contains(word);
         assertThat(message.getAsJsonObject("data").get("eventType").getAsString()).isEqualTo(type.name());
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {"강남역,3", "강남역,NULL", "NULL,3", "NULL,NULL", "강남역,0", "강남역,-1",
+            "NULL,0", "NULL,-1"}, nullValues = "NULL")
+    @DisplayName("PASSED는 표시명과 양수 정거장 수를 독립적으로 안내하고 두 alert body와 data identity를 보존한다")
+    void passed_uses_optional_event_evidence(String name, Integer stops) {
+        String expected = "버스가 목표 정류장을 지나갔어요.";
+        if (name != null) {
+            expected += "\n최근 확인된 정류장: 강남역";
+            if (stops != null && stops > 0) expected += " (목표 정류장 이후 3정거장)";
+        } else if (stops != null && stops > 0) {
+            expected += "\n목표 정류장 이후 3정거장 이동한 것으로 확인됐어요.";
+        }
+        assertPassedPayload(name, stops, expected);
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"   ", "\u00a0", "강남\n역", "강남\r역", "강남\t역", "강남\u0000역",
+            "강남\u007f역", "강남\u0085역", "강남\u2028역", "강남\u2029역", "강남\u202e역", "강남\ud800역"})
+    @DisplayName("공백과 제어 문자 및 표시 불가능한 이름은 생략해도 검증된 정거장 수는 안내한다")
+    void passed_omits_unprintable_name(String name) {
+        assertPassedPayload(name, 3, "버스가 목표 정류장을 지나갔어요.\n목표 정류장 이후 3정거장 이동한 것으로 확인됐어요.");
+        assertPassedPayload(name, null, "버스가 목표 정류장을 지나갔어요.");
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {79, 80, 81, 255})
+    @DisplayName("긴 한글과 보조 평면 문자는 surrogate를 자르지 않고 말줄임표 포함 80 code point로 제한한다")
+    void passed_bounds_stop_name(int length) {
+        String name = "가".repeat(length - 2) + "🚏역";
+        String expectedName = length <= 80 ? name : name.substring(0, 79) + "…";
+        assertPassedPayload(name, 3, "버스가 목표 정류장을 지나갔어요.\n최근 확인된 정류장: "
+                + expectedName + " (목표 정류장 이후 3정거장)");
+        var context = new PassedNotificationContext("🚏".repeat(length), 3);
+        assertThat(context.currentStopName().codePointCount(0, context.currentStopName().length()))
+                .isEqualTo(Math.min(length, 80));
+        assertThat(context.currentStopName()).isEqualTo(length <= 80 ? "🚏".repeat(length) : "🚏".repeat(79) + "…");
+    }
+
+    @Test
+    @DisplayName("앞뒤 공백은 제거하고 한글 이름의 따옴표와 역슬래시는 JSON escape 후 그대로 표시한다")
+    void passed_escapes_display_name() {
+        assertPassedPayload("  강남\"역\\출구  ", 3,
+                "버스가 목표 정류장을 지나갔어요.\n최근 확인된 정류장: 강남\"역\\출구 (목표 정류장 이후 3정거장)");
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = TransitEventType.class, names = "PASSED", mode = EnumSource.Mode.EXCLUDE)
+    @DisplayName("다른 Alarm Event에 PASSED 문맥이 입력되어도 기존 문구와 data를 유지한다")
+    void ignores_passed_context_for_other_alarm_events(TransitEventType type) {
+        var source = NotificationSourceHint.alarm(123, type);
+        var request = new NotificationSendRequest(FID, source, 456, NOW.plusSeconds(60), null,
+                new PassedNotificationContext("강남역", 3));
+        assertThat(request.passedContext()).isNull();
+        assertThat(FcmProviderClient.payload(request)).isEqualTo(FcmProviderClient.payload(
+                new NotificationSendRequest(FID, source, 456, NOW.plusSeconds(60))));
+    }
+
+    @ParameterizedTest
+    @EnumSource(BoardingNotificationEventType.class)
+    @DisplayName("BoardingSession의 두 Event는 PASSED 문맥을 버리고 기존 문구와 data를 유지한다")
+    void isolates_passed_context_from_boarding(BoardingNotificationEventType type) {
+        var source = NotificationSourceHint.boardingSession(123, type);
+        var request = new NotificationSendRequest(FID, source, 456, NOW.plusSeconds(60), "목적지",
+                new PassedNotificationContext("강남역", 3));
+        assertThat(request.passedContext()).isNull();
+        assertThat(FcmProviderClient.payload(request)).isEqualTo(FcmProviderClient.payload(
+                new NotificationSendRequest(FID, source, 456, NOW.plusSeconds(60), "목적지")));
+    }
+
+    private void assertPassedPayload(String name, Integer stops, String expectedBody) {
+        var request = new NotificationSendRequest(FID, NotificationSourceHint.alarm(123, TransitEventType.PASSED),
+                456, NOW.plusSeconds(60), null, new PassedNotificationContext(name, stops));
+        var message = JsonParser.parseString(FcmProviderClient.payload(request)).getAsJsonObject().getAsJsonObject("message");
+        assertThat(message.keySet()).containsExactlyInAnyOrder("fid", "data", "notification", "apns");
+        assertThat(message.getAsJsonObject("notification").get("body").getAsString()).isEqualTo(expectedBody);
+        var apns = message.getAsJsonObject("apns");
+        assertThat(apns.getAsJsonObject("payload").getAsJsonObject("aps").getAsJsonObject("alert"))
+                .isEqualTo(message.getAsJsonObject("notification"));
+        assertThat(apns.getAsJsonObject("headers").get("apns-expiration").getAsString())
+                .isEqualTo(Long.toString(request.expiresAt().getEpochSecond()));
+        assertThat(message.getAsJsonObject("data")).isEqualTo(JsonParser.parseString(
+                "{\"type\":\"ALARM_EVENT\",\"alarmId\":\"123\",\"eventType\":\"PASSED\",\"notificationEventId\":\"456\"}"));
     }
 
     @ParameterizedTest

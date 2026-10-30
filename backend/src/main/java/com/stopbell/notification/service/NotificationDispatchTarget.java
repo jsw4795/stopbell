@@ -5,6 +5,7 @@ import java.time.ZoneOffset;
 
 import com.stopbell.notification.client.NotificationSendRequest;
 import com.stopbell.notification.client.NotificationSourceHint;
+import com.stopbell.notification.client.PassedNotificationContext;
 import com.stopbell.notification.entity.NotificationSourceType;
 import com.stopbell.boarding.domain.BoardingTrackingSnapshot;
 import com.stopbell.notification.entity.Device;
@@ -14,7 +15,8 @@ import com.stopbell.transit.domain.TransitEventType;
 public record NotificationDispatchTarget(
         long deliveryId, long notificationEventId, NotificationSourceHint source,
         long deviceId, long eventOwnerId, long ownershipGeneration, long registrationRevision,
-        String fid, LocalDateTime expiresAt, BoardingTrackingSnapshot validatedSession
+        String fid, LocalDateTime expiresAt, BoardingTrackingSnapshot validatedSession,
+        PassedNotificationContext passedContext
 ) {
     public NotificationDispatchTarget {
         Device.validatePushTarget(fid);
@@ -29,6 +31,16 @@ public record NotificationDispatchTarget(
                 : validatedSession != null) {
             throw new IllegalArgumentException("Invalid Session attempt validation");
         }
+        if (source.eventType() != TransitEventType.PASSED) {
+            passedContext = null;
+        }
+    }
+
+    public NotificationDispatchTarget(long deliveryId, long notificationEventId, NotificationSourceHint source,
+            long deviceId, long eventOwnerId, long ownershipGeneration, long registrationRevision,
+            String fid, LocalDateTime expiresAt, BoardingTrackingSnapshot validatedSession) {
+        this(deliveryId, notificationEventId, source, deviceId, eventOwnerId, ownershipGeneration,
+                registrationRevision, fid, expiresAt, validatedSession, null);
     }
 
     public NotificationDispatchTarget(long deliveryId, long notificationEventId, long alarmId, TransitEventType eventType,
@@ -43,7 +55,8 @@ public record NotificationDispatchTarget(
 
     public NotificationSendRequest request() {
         return new NotificationSendRequest(fid, source, notificationEventId,
-                expiresAt.toInstant(ZoneOffset.UTC), validatedSession == null ? null : validatedSession.targetName());
+                expiresAt.toInstant(ZoneOffset.UTC), validatedSession == null ? null : validatedSession.targetName(),
+                passedContext);
     }
 
     @Override

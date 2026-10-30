@@ -19,6 +19,8 @@ import com.stopbell.transit.repository.BusRouteRepository;
 import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class BusRouteTraversalServiceTest {
 
@@ -46,6 +48,26 @@ class BusRouteTraversalServiceTest {
         );
 
         assertThat(traversalService.stopsPastTarget(target, observation)).hasValue(2);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false,1", "true,3"})
+    @DisplayName("Stop order 차이가 같아도 실제 successor edge가 1개 또는 3개인 traversal을 구분한다")
+    void counts_only_confirmed_successor_edges(boolean intermediateStops, int expected) {
+        BusAlarmTarget target = new BusAlarmTarget(TransitProvider.SEOUL_BUS, "route", "target", 20,
+                "7000", "Target", null, null, null, null, null);
+        BusRoute route = new BusRoute(TransitProvider.SEOUL_BUS, "route", "7000", null);
+        when(routeRepository.findByProviderAndExternalRouteId(TransitProvider.SEOUL_BUS, "route"))
+                .thenReturn(java.util.Optional.of(route));
+        List<BusRouteStopOccurrence> occurrences = intermediateStops
+                ? List.of(occurrence("target", 20), occurrence("first", 21), occurrence("second", 22), occurrence("current", 23))
+                : List.of(occurrence("target", 20), occurrence("current", 23));
+        when(occurrenceRepository.findAllByRouteOrderByStopOrderAsc(route)).thenReturn(occurrences);
+        TransitObservation observation = new TransitObservation(TransitProvider.SEOUL_BUS, "route", "vehicle",
+                "current", 23, null, null, null, null, null,
+                Instant.parse("2026-09-23T03:00:00Z"), null, ArrivalEvidence.MOVING);
+
+        assertThat(traversalService.stopsPastTarget(target, observation)).hasValue(expected);
     }
 
     @Test

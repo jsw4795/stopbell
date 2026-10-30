@@ -386,9 +386,38 @@ Future Consideration:
 | AUD-10 | P2 | 동일 신규 Google 사용자의 동시 최초 로그인 경쟁. identity UNIQUE 충돌 후 안전한 기존 사용자 재확인 검토 | 동시 실행 경로에 대한 추론. 실제 LoginService 경쟁 재현은 미실행 |
 | AUD-11 | P2 | 기존 사용자 데이터가 존재하는 V3→V4 Migration 업그레이드 문제. 지원할 과거 데이터 범위·적용 전제와 호환성 검토 | 격리 MySQL의 V3 사용자 2명 상태에서 V4 identity UNIQUE 중복키 실패 재현. 과거 업그레이드 호환성 문제이며 현재 V20 적용 실패가 확인된 것은 아님 |
 | AUD-12 | P2 | 일부 기존 timestamp의 Host Timezone 의존성. User·RefreshToken·Alarm callback과 UTC 저장 계약 차이 | 코드 확인. 기존 TASK-814 잔여 범위이며 구현·검증 책임은 TASK-814에 연결 |
-| AUD-13 | P2 | 기존 Alarm의 PASSED 위치 보조 정보가 Push 안내까지 전달되지 않는 문제. 검증된 optional 위치·지난 정거장 정보의 표시 연결 검토 | 코드·요구사항 대조 확인. Event의 stopsPastTarget 보존과 전송 입력·일반 PASSED 문구 사이의 누락 |
+| AUD-13 | P2 | 기존 Alarm의 PASSED 위치 보조 정보가 Push 안내까지 전달되지 않는 문제. 검증된 optional 위치·지난 정거장 정보의 표시 연결 검토 | 불변 PASSED Context로 영속 Event→Dispatch→FCM Body 전달 수정·선택 검증 완료. 실제 Provider/FCM·iPhone 표시·process restart는 미검증이며 아래 처리 기록 참조 |
 
 각 항목의 처리 기록에는 재현 근거, 수정 또는 미수정 판단, 변경 범위, 방지 테스트와 결과, 남은 실측·실기기 검증 및 담당 Task를 남긴다. 미재현 추론·위험을 확인된 운영 장애로 승격하지 않는다. API·Domain·Authentication·DB 정책이나 공식 문서 간 설계 판단이 필요한 경우 개발자 결정 후 반영한다.
+
+#### AUD-13 처리 (2026-10-30)
+
+- 원인·수정 경계: `BusAlarmEvaluator`는 동일 차량의 검증된 Observation 이름과 `BusRouteTraversalService`의 successor edge 수를 TransitEvent에 넣고, Lifecycle은 NotificationEvent/Delivery와 원자 저장했으나 `NotificationRecipientPreflight`가 전송 Target에 이를 복사하지 않아 FCM이 고정 PASSED 문구만 사용했다. 이제 기존 attempt transaction의 원래 Event에서 두 값만 `PassedNotificationContext`로 복사해 DispatchTarget → AttemptSnapshot → SendRequest → FCM Body로 전달한다. 기존 생성자 호환성을 유지하며 Entity/Lazy proxy·추가 조회/lock·Provider 재조회·cache·Event 사후 갱신은 추가하지 않았다. 상세 경계는 [Architecture](architecture.md#passed-위치-보조-정보-전달-task-816--aud-13)를 따른다.
+- 출처·불확실성: 정거장 수는 기존 동일 traversal의 검증된 successor edge 수이며 dispatch에서 raw order 차/GPS로 재계산하지 않는다. null/비양수는 생략한다. 이름은 원래 Event 값만 사용하며 null/공백·제어/format/줄 구분 문자·고립 surrogate는 생략하고 앞뒤 공백 제거·말줄임표 포함 80 code point 제한을 적용한다. 현재 서울·TAGO Mapper는 이름을 null로 남기므로 임의 이름 보강은 없다. 위치 부재는 정상 기본 문구로 처리하되 실제 DB 예외를 부재로 숨기지 않는다.
+- 문구·호환성: 기본 `버스가 목표 정류장을 지나갔어요.`를 앞에 두고 이름/정거장 수/둘 다/모두 없음의 네 경우를 독립 처리한다. 최근 확인된 위치로 표현하고 실시간 위치/도착을 단정하지 않는다. [API의 최종 문구](api.md#push-payload와-notification-tap)를 일반 notification과 APS alert에 동일하게 사용한다. `type`·`alarmId`·`eventType`·`notificationEventId`와 BoardingSession의 기존 data key, 제목·FCM HTTP/auth/timeout은 유지하며 위치 data key는 추가하지 않았다. 다른 Alarm Event/두 BoardingSession Event는 Context를 사용하지 않는다. Flutter의 foreground 일반 안내·수신/parser·Event ID dedupe·tap/navigation은 코드 확인 후 변경하지 않았다.
+- 실제 MySQL·Dispatch 검증: 신규 통합 9개는 네 선택 조합의 Lifecycle 원자 저장·commit 뒤 별도 영속성 컨텍스트/clear와 재조회, 이름/정거장 수/Stop ID/order/providerDataTime/type/cycle/generation·Delivery 연결, transaction 밖 Worker→실제 payload builder의 두 alert body/identity를 검증한다. production AttemptHandler/RetryPolicy로 retry 예약 후 전송 서비스를 재생성하고 Device FID/revision 갱신·다른 cycle Event 추가 뒤에도 원래 Event 위치/identity/기한을 사용하는지 검증했다. expiry·disabled·owner 변경·A→B→A generation 변경은 attempt 0·Provider 호출 0이며 Alarm ACTIVE 유지도 확인했다. 이는 실제 프로세스 restart E2E가 아니다.
+- 신규 회귀: `FcmProviderClientTest`에 32개 사례(네 조합·null/비양수·공백/제어/Unicode·한글/JSON escape·길이·다른 Alarm/BoardingSession 격리·data/APS 일치), `BusRouteTraversalServiceTest`에 order 차가 3일 때 실제 edge 1/3을 구분하는 2개, `PassedNotificationDispatchIntegrationTest`에 9개를 추가했다. 신규 총 **43개 사례/10개 테스트 메서드**이며 기존 판정 우선순위·stale/충돌·baseline·PASSED 뒤 다음 차량·정상 Lifecycle 및 recipient/retry/expiry/cleanup 회귀를 선택 검증했다.
+- 실행 결과: Java/Gradle JVM 21.0.12.1·Wrapper 8.14.3·MySQL 8.4.11 Testcontainers에서 아래 **13개 클래스의 최종 341개**가 실패·오류·skip 없이 통과했다. 첫 실행 254개 중 신규 통합 4개의 UUID/문자열 기대 타입 오류를 수정했다. 후속 98개 실행에서는 새 Traversal 2개의 중첩 Mockito stubbing 오류만 발생해 fixture 생성과 stubbing을 분리했고, 해당 클래스 4개만 재실행하여 통과했다. 제품 코드 변경이나 검증 약화로 실패를 우회하지 않았으며 이미 통과한 무변경 클래스는 반복하지 않았다.
+
+| 선택 테스트 클래스 | 최종 통과 사례 수 |
+| --- | ---: |
+| BusAlarmEvaluatorTest | 65 |
+| BusRouteTraversalServiceTest | 4 |
+| BusAlarmLifecycleServiceTest | 6 |
+| BusAlarmDecisionIntegrationTest | 12 |
+| NotificationEventTest | 22 |
+| NotificationPersistenceIntegrationTest | 12 |
+| NotificationDispatchWorkerTest | 10 |
+| NotificationDispatchIntegrationTest | 10 |
+| NotificationAttemptIntegrationTest | 31 |
+| DurableNotificationAttemptHandlerTest | 30 |
+| FcmProviderClientTest | 57 |
+| PassedNotificationDispatchIntegrationTest | 9 |
+| BoardingDispatchIntegrationTest | 73 |
+| 합계 | **341** |
+
+- 문서·보호 범위: Architecture와 API의 변경된 전달/표시 계약 및 이 처리 기록만 동기화했다. Requirements의 기존 검증된 traversal/생략 계약과 Database/V14/V16의 optional snapshot Schema는 이미 정확해 수정하지 않았다. 판정/Evaluator/Lifecycle 구현·Tracking Cycle/activation generation·Event/Delivery UNIQUE·recipient lock 순서/owner/generation/revision·retry/expiry·Device 정책·BoardingSession·AUD-12 Characterization Test·TASK-814 UTC 후속 범위는 보존한다. Dependency·Migration·Credential·환경 설정·devlog 변경은 없으며 `git diff --check`를 통과했다.
+- 미검증·상태: 전체 Backend/Flutter suite·실제 Provider/FCM/Google 호출·개발 MySQL 접근·Backend 상시 실행·터널·실제 iPhone·process restart는 수행하지 않았다. 실제 iPhone의 긴 Body/줄바꿈/표시 범위·foreground/background/terminated 수신/tap은 TASK-710/711 책임으로 남는다. AUD-13 구현/선택 검증 완료는 TASK-816 전체 완료가 아니다. 주요 문서 불일치 정리, Backend·Flutter 주요 회귀, AUD-12/TASK-814 연결 최종 확인, 실기기/Provider 미검증 항목과 기존 Task 책임·완료 조건 정리를 별도 후속 작업으로 남기며 TASK-816/TASK-814는 `[ ]`를 유지한다. 기존 AUD-01~12 기록과 다른 Task 상태를 보존하고 `main`에서 Git add/commit/push·reset/stash/clean/checkout·branch 생성 없이 AUD-13 보고 후 중단한다.
 
 AUD-07 분석 (2026-10-30, 제품 수정 보류·설계 판단 필요): 서울 후보 조회의 순차 detail 지연과 Flutter 15초 예산 불일치를 실제 `BoardingCandidateService`·Mock Client·제어 가능한 Clock으로 재현했다. 운영 지연의 발생 빈도/실제 차량 수 분포를 측정한 것은 아니다. **Case A의 조건부 성능 위험은 확인됐으며 보호 장치가 충분한 Case B로 종결하지 않는다.** deadline 중단 시 미조회 차량의 응답 정책이 없어 제품 구현을 임의 변경하지 않았다.
 

@@ -153,7 +153,7 @@ public final class FcmProviderClient {
         } : switch (request.eventType()) {
             case ONE_STOP_BEFORE -> "목표 정류장까지 한 정거장 남았어요.";
             case ARRIVED -> "버스가 목표 정류장에 도착했어요.";
-            case PASSED -> "버스가 목표 정류장을 지나갔어요.";
+            case PASSED -> passedBody(request.passedContext());
             case ONE_STOP_AFTER -> "버스가 목표 정류장 다음 정류장에 도착했어요.";
         };
         Map<String, String> data = boarding
@@ -172,6 +172,20 @@ public final class FcmProviderClient {
                                 "apns-expiration", Long.toString(request.expiresAt().getEpochSecond())),
                         "payload", Map.of("aps", Map.of("alert", alert, "sound", "default")))
         )));
+    }
+
+    private static String passedBody(PassedNotificationContext context) {
+        String base = "버스가 목표 정류장을 지나갔어요.";
+        if (context == null) {
+            return base;
+        }
+        String name = context.currentStopName();
+        Integer stops = context.stopsPastTarget();
+        if (name != null) {
+            return base + "\n최근 확인된 정류장: " + name
+                    + (stops == null ? "" : " (목표 정류장 이후 " + stops + "정거장)");
+        }
+        return stops == null ? base : base + "\n목표 정류장 이후 " + stops + "정거장 이동한 것으로 확인됐어요.";
     }
 
     private static String serviceAccountToken(FcmClientProperties properties, FcmAttempt attempt) throws IOException {

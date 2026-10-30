@@ -2,11 +2,13 @@ package com.stopbell.notification.service;
 
 import com.stopbell.notification.entity.Device;
 import com.stopbell.notification.client.NotificationSourceHint;
+import com.stopbell.notification.client.PassedNotificationContext;
 import com.stopbell.boarding.domain.BoardingTrackingSnapshot;
 import com.stopbell.notification.entity.NotificationDelivery;
 import com.stopbell.notification.entity.NotificationEvent;
 import com.stopbell.notification.entity.NotificationSourceType;
 import com.stopbell.notification.repository.DeviceRepository;
+import com.stopbell.transit.domain.TransitEventType;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Reads only the original recipient. Never locks Alarm/Event or adds recipients. */
@@ -57,9 +59,12 @@ public class NotificationRecipientPreflight {
         NotificationSourceHint source = event.getSourceType() == NotificationSourceType.ALARM
                 ? NotificationSourceHint.alarm(event.getAlarmId(), event.getEventType())
                 : NotificationSourceHint.boardingSession(event.getBoardingSessionId(), event.getBoardingEventType());
+        PassedNotificationContext passed = source.eventType() == TransitEventType.PASSED
+                ? new PassedNotificationContext(event.getCurrentStopName(), event.getStopsPastTarget()) : null;
         return new Result(new NotificationDispatchTarget(delivery.getId(), event.getId(), source, device.getId(),
                 event.getUser().getId(), device.getOwnershipGeneration(),
-                device.getRegistrationRevision(), device.getCurrentPushTargetId(), delivery.getExpiresAt(), validatedSession), null);
+                device.getRegistrationRevision(), device.getCurrentPushTargetId(), delivery.getExpiresAt(),
+                validatedSession, passed), null);
     }
 
     private Result rejected(Rejection reason) {
