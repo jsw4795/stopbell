@@ -680,7 +680,7 @@ allprojects {
 | 남은 항목 | 정적 확인 근거 / 후속 책임 |
 | --- | --- |
 | Flutter 초기 안내 문구 | 1단계 당시 `app/lib/features/boarding/boarding_stop_screen.dart:210`의 “선택한 정류장에 도달하거나 통과하면 알리는 기능이에요 … 진행 검증 전에는 대기로 표시해요”가 신규 준비 알림과 즉시 TRACKING을 오해하게 해 수정 제안했으며, 당시에는 Dart 수정 금지로 보존했다. 이후 아래 Flutter 안내 문구 후속 처리에서 수정·선택 검증 완료 |
-| API 오류 본문 차이 | `DeviceController.handlePersistenceFailure()`와 `BoardingSessionController.persistenceFailure()`는 빈 500을 반환하며 기존 Device API 테스트도 빈 본문을 기대한다. [API 오류 형식](api.md#5-오류-형식)의 공통 code/message 요구와 차이가 있다. 계약을 코드 수준으로 낮추지 않으며 TASK-816 최종 검토·TASK-804의 오류 계약 검증으로 연결. 오류 범위 판단과 제품/테스트 수정은 이번 문서 작업 밖 |
+| API 오류 본문 차이 | `DeviceController.handlePersistenceFailure()`와 `BoardingSessionController.persistenceFailure()`의 빈 500은 제품에 남아 있다. 기존 테스트·보안 근거·Client 영향과 최소 수정 권고는 아래 [API 500 검토](#api-500-오류-응답-계약-검토-2026-10-30)에 기록했다. 검토만 수행했으며 제품/테스트는 미수정. TASK-816의 두 Handler 수정·집중 검증과 TASK-804의 전체 오류 계약 검증 책임을 구분하며 [API 오류 형식](api.md#5-오류-형식)을 낮추지 않음 |
 | AUD-12 UTC 제품 결함 | User onPrePersist/onPreUpdate, RefreshToken onPrePersist, Alarm onPrePersist/onPreUpdate의 Host 의존성은 미수정. 위 AUD-12 근거·Characterization과 TASK-814의 선택·구현·기존 데이터 호환 검증 책임 유지 |
 | AUD-01~13 최종 상호 정합성 | 개별 처리 기록과 이번 문서 변경을 함께 대조하고 Backend 주요 회귀 및 Flutter 주요 회귀를 별도로 수행. AUD-13 PASSED의 검증된 정류장명/Successor Edge 수·생략·기존 data key·두 alert body 일치 계약도 회귀 확인 |
 | 실제 외부/기기 미검증 | TASK-710 iPhone 전체 수신/tap·권한/등록 전환, TASK-711 Notification 최종 E2E·multi-device·durable recovery/재시작, TASK-908 신규 정책의 실제 버스·iPhone E2E 책임 유지. Provider 실측·FCM 접수·실제 기기 표시는 각각 구분하며 초기 smoke/Mock 성공으로 대체하지 않음 |
@@ -696,6 +696,62 @@ ADR-006/007/009/010/011/012, TASK-908 연구 기록과 기존 AUD 처리·테스
 - 수정 범위: `app/lib/features/boarding/boarding_stop_screen.dart`의 기존 안내 Text 문자열 하나와 `app/test/boarding_flow_test.dart`의 기존 흐름 테스트 기대값만 수정했다. 기본/선택 시점·준비 알림·직접 차량 선택·즉시 추적·위치 확인 중 표시 및 이전 도달·통과/대기 설명 부재를 검사한다. 신규 테스트는 0개이며 `boarding_stop_screen_test.dart`는 변경하지 않았다. Widget 구조·상태 변수·Controller·API 호출·다른 Flutter 화면·Backend·Notification 정책·Dependency·설정·Migration·devlog는 변경하지 않았다.
 - 선택 검증: `app`에서 `flutter test --no-pub test/boarding_stop_screen_test.dart` **16개**, `flutter test --no-pub test/boarding_flow_test.dart` **4개**, 합계 **20개** 실패/오류/skip 없이 통과했다. 작은 화면/큰 글자 스크롤, 목적/승차 occurrence 선택, 후보 조회·오류/재시도·오래된 응답 무효화·로그인 변경·기존 도착 알림 흐름을 검증했다. `flutter analyze --no-pub lib/features/boarding/boarding_stop_screen.dart test/boarding_flow_test.dart`는 No issues, 두 파일의 `dart format --output=none --set-exit-if-changed`는 변경 0개이며 `git diff --check`를 통과했다.
 - 미검증·후속 책임: 전체 Flutter/Backend 테스트·빌드·서버 실행·개발 DB 접근·실제 Provider/FCM 호출·iPhone 설치/실행·터널은 수행하지 않았다. 실제 iPhone의 안내 줄바꿈/가독성·foreground/background/terminated 수신/tap, 버스 진행과 신규 준비 알림 E2E는 TASK-710/711/908 책임으로 남는다. DeviceController/BoardingSessionController의 빈 500 응답과 AUD-12/TASK-814 UTC 수정은 이번 범위 밖이다. TASK-816의 최종 Backend/Flutter 주요 회귀·문서/잔여 결함 검토는 별도 후속이며 이번 20개 테스트로 대체하지 않는다. 기존 감사 기록과 모든 체크박스, TASK-814/816 `[ ]` 및 `main`을 유지하며 Git add/commit/push·reset/stash/clean/checkout·branch 생성은 수행하지 않았다.
+
+#### API 500 오류 응답 계약 검토 (2026-10-30)
+
+이번 단계는 두 Controller의 빈 500에 대한 정적 분석과 후속 구현 범위 제안이다. 아래 `INTERNAL_SERVER_ERROR`와 message는 **권장 후보이며 아직 구현·확정된 API 계약이 아니다.** Java/Flutter 제품·테스트·설정·Dependency·Migration과 `api.md`는 변경하지 않았다. TASK-804/814/816 및 모든 기존 체크박스는 유지한다.
+
+**현재 Handler와 보안 근거**
+
+- [DeviceController](../backend/src/main/java/com/stopbell/notification/controller/DeviceController.java)의 `handlePersistenceFailure()`는 `DataAccessException`, `TransactionException` 계열을 HTTP 500 + 빈 본문으로 처리한다. 등록·상태 조회·disable에서 Service 밖으로 전파된 영속성 실패가 대상이다. 로그는 `Device persistence failed: <예외 단순 클래스명>`뿐이며 원문 message/cause/stack이나 요청 값을 전달하지 않는다.
+- [BoardingSessionController](../backend/src/main/java/com/stopbell/boarding/controller/BoardingSessionController.java)의 `persistenceFailure()`도 같은 예외 계열을 HTTP 500 + 빈 본문으로 처리한다. 생성·상세/current/clientRequestId 조회·취소·재확인에서 최종 전파된 실패가 대상이며 로그는 `Boarding persistence failed: <예외 단순 클래스명>`이다. 모든 RuntimeException을 처리하는 Handler는 아니다. Spring의 cause 탐색으로 일치하는 wrapper도 고려해야 한다.
+- `GlobalExceptionHandler`는 `ApiException`을 해당 `ErrorCode`의 status/name + exception message로, validation/body/query/type 오류 4종을 400 `INVALID_REQUEST` + 고정 message로 처리한다. 영속성 예외나 임의 `Exception`의 fallback은 없다. MVC는 Controller-local Handler를 먼저 찾고 불일치할 때 Advice를 찾는다. 따라서 현재 두 영속성 Handler가 응답을 결정하며, Global Handler에 같은 매핑만 추가해도 local Handler는 대체되지 않는다. 로컬 Spring 7.0.9 JAR의 `ExceptionHandlerExceptionResolver.getExceptionHandlerMethod()` 바이트코드에서도 이 순서를 확인했다.
+- `ApiErrorResponse`는 `code/message` 두 string의 record이며 500에도 재사용할 수 있다. `ErrorCode`는 status와 기본 message를 보유하지만 현재 `INTERNAL_SERVER_ERROR`는 없다. TASK-804의 `UNAUTHENTICATED`, `METADATA_UNAVAILABLE`도 현재 enum에 없으므로 목표 검증 목록을 이미 구현된 code matrix로 읽지 않는다. 기존 `ApiException`은 custom message도 허용하므로 500에 원본 `exception.getMessage()`를 전달하는 방식은 금지한다.
+- Device Handler의 주석은 JDBC 원문에 UUID/FID가 들어갈 수 있어 cause를 로그하지 않는다고 명시한다. 도입 commit `516408e`와 함께 추가된 `report_unclassified_database_failure_safely()`는 User 삭제와 등록의 실제 FK 경쟁에서 미분류 오류를 target conflict로 위장하지 않는 500, 빈 본문, Device 미생성, 안전한 클래스명 로그와 installation/FID/credential/hash/constraint 미노출을 보호한다. `application.yml`의 `org.hibernate.orm.jdbc.error=OFF`도 하위 JDBC 로그의 원문 노출을 막는 기존 방어다.
+- Boarding Handler는 commit `c7f78b2`에서 같은 제한적 처리 패턴으로 도입됐다. 확인한 코드·공식 문서·commit에는 빈 본문 자체를 영구 보안 계약으로 정한 별도 근거가 없다. Boarding의 의도는 동일한 비노출 방어로 해석할 수 있으나 Device와 동일한 HTTP 500 보안 테스트가 있다는 뜻은 아니다. 보안상 핵심은 미분류 DB 실패의 500 분류와 원문 비노출이며, 고정된 안전한 JSON도 이 조건을 만족할 수 있다.
+
+**Service·Transaction·분류 경계**
+
+- `DeviceService`의 write/read `TransactionTemplate`은 모두 `REQUIRES_NEW`이며 상태 조회만 read-only다. User/Device 조회, lock, insert/flush, disable 및 commit 실패가 전파될 수 있다. 등록은 MySQL 1062와 알려진 installation/push-target UNIQUE 메타데이터만 식별하고, 실패 transaction 종료 뒤 새 transaction에서 원래 요청을 한 번 재확인한다. 재확인된 자격증명/owner/revision/target conflict는 기존 403/409로 처리하고, 미식별 제약·FK·연결/timeout 및 재확인 실패는 그대로 전파한다. 상태 조회와 disable에는 이 등록 복구를 추가하지 않는다.
+- `BoardingSessionService`도 `REQUIRES_NEW` template을 사용한다. 생성의 기존 request 조회는 검증 I/O 전 transaction이며 여기서 실패하면 생성 재확인 catch 밖으로 전파된다. 후보/Provider 검증은 lock transaction 밖이고, 생성 반영은 User lock → 같은 `clientRequestId` → current session → metadata/freshness 확인 → Session/Notification 저장이다. 반영 중 미식별 `DataIntegrityViolationException`은 그대로 전파하고, 알려진 두 Session UNIQUE 또는 그 외 `DataAccessException`/`TransactionException`은 원래 입력으로 `createTransaction()`을 최대 한 번 더 수행한다. 따라서 DB 장애가 항상 즉시 500이 되는 것은 아니며, 재확인 결과 성공·명시적 conflict·최종 500으로 나뉜다. 이 기존 생성 복구를 이번 본문 수정에서 확대하거나 변경하지 않는다.
+- 상세/current/clientRequestId GET도 만료 및 PENDING 종료를 반영할 수 있어 단순 read-only가 아니다. 취소는 ownership/revision 검사와 Session 취소·관련 PENDING 종료를 같은 transaction에서 처리하고 별도 재적용 retry가 없다. 재확인은 사전 snapshot 조회 → transaction 밖 후보 재검증 → Session lock 및 revision/metadata/freshness 재검사 → checkpoint/revision/준비 Event·Delivery 저장 순서다. `DataIntegrityViolationException` 또는 반영 결과가 준비되기 전 실패는 전파한다. 그 외 commit 불확실성은 새 transaction에서 원래 결과 snapshot과 반환 Event ID, metadata/freshness를 확인할 뿐 rollback된 재확인을 재적용하지 않는다.
+- `BoardingNotificationService`는 `MANDATORY`로 Session transaction에 참여한다. Event `saveAndFlush`, eligible Device lock, Delivery 저장/flush와 취소·만료의 PENDING 종료는 독립 commit되지 않는다. 검증된 Session UNIQUE 및 비즈니스 revision/ownership conflict와 다른 Event/Delivery UNIQUE·FK·실제 DB 실패를 합치지 않는다. Scheduler/Worker에서 발생한 실패는 Controller-local Handler의 적용 대상이 아니다.
+- callback 내부 실패는 `TransactionTemplate.execute()`의 rollback 경계를 지난 뒤 Controller로 도달한다. 정상 반환은 commit 호출 뒤에만 가능하다(로컬 Spring 7.0.9 `TransactionTemplate.execute()` 확인). **500을 받았다는 사실만으로 rollback 또는 미저장을 보장하지 않는다.** commit 응답 유실·rollback 실패·commit 뒤 후속 조회 실패는 결과가 불확실하거나 이미 반영됐을 수 있고, Boarding의 사전 만료 transaction과 반영 transaction도 별개다. Body 직렬화는 이 경계 밖이므로 본문만 바꾸는 권고는 DB 원자성을 바꾸지 않으며, 실패 시 기존 상태 보존과 commit 불확실성 복구를 구별해 검증해야 한다.
+
+**계약 적용 범위와 Client 영향**
+
+- [API 오류 형식](api.md#5-오류-형식)은 V1 Error Response를 정확히 `code/message` 두 필드로 규정하며 두 Controller의 영속성 500에 대한 빈 본문 예외를 명시하지 않는다. Device use-case 오류와 세션 오류도 이 형식을 참조한다. 따라서 HTTP 500이라는 분류는 타당하지만 두 mapped 500의 빈 본문은 남은 형식 불일치다. 문서에 500 code/message 값의 명시적 행은 없으므로 그 값은 후속 구현 전 승인할 후보로 구분한다.
+- JWT 누락/실패의 401은 API의 Device/세션 절에서 기존 Spring Security 처리 유지로 별도 명시돼 있다. `SecurityConfiguration`은 기본 JWT Resource Server를 사용하며 custom JSON entry point가 없다. Filter 이전/내부 실패는 Controller Advice만으로 통일되지 않는다. 또한 Service의 User 부재는 `ResponseStatusException`, Google/refresh의 credential 오류는 `@ResponseStatus(UNAUTHORIZED)`가 붙은 전용 예외 경로여서 모든 401이 Filter에서 발생하는 것도 아니다. 이번 검토로 Security/401·모든 HTTP 오류·임의 예상 밖 예외에 JSON을 강제하지 않는다. 이 적용 범위와 최종 matrix는 TASK-804에서 검증·결정한다.
+- Transit 실패는 use-case에서 정규화된 `TRANSIT_TEMPORARILY_UNAVAILABLE` 503 등을 유지하며 Google Identity 검증의 credential 401/infrastructure 503, FCM의 내부 전송 결과 분류도 별개다. 외부 Provider 원문/status를 이 두 500의 code/message로 복사하지 않는다. Alarm/Transit/Auth 등 다른 Controller에는 같은 local 영속성 Handler가 없으므로 그들의 미처리 DB 오류 body를 공통 JSON이라고 가정하지 않는다. A안은 이 경로를 바꾸지 않으며 전체 fallback은 TASK-804 책임이다.
+- `AuthenticatedApiClient`는 status=401일 때만 refresh와 최대 한 번 replay하고 body를 판단하지 않는다. `authenticated_api_client_test.dart`에는 빈 500의 무-refresh 통과 테스트가 있다. JSON 500도 동일 경로이므로 인증 제거/자동 POST replay를 새로 유발하지 않는다.
+- `DeviceApiClient`는 오류 JSON 파싱 실패(빈 본문 포함)를 허용하고 allowlist code만 저장한다. 새 `INTERNAL_SERVER_ERROR`는 현 allowlist에 없어 **500/code=null**로 보존되며 `message`는 보존하지 않는다. `definitive`는 4xx에만 true이므로 500은 계속 미확정이다. `PushRegistrationService`도 이 값으로 rejected 여부를 정해 pending을 보존한다. 새 code를 인식시키는 Flutter 제품 수정은 호환성에 필수적이지 않다.
+- `BoardingSessionApiClient`는 빈/비정상 오류 JSON에서도 status를 보존하고 문자열 code는 미등록 값도 수용한다. JSON 500은 `SessionFailure.http`, status=500, 새 code로 처리되며 `uncertain=true`를 유지한다. `boardingSessionError()`의 기본 안내와 생성의 원래 UUID/body 보존·조회 복구, 취소/재확인 후 상태 재조회는 유지된다. 기존 Client 테스트의 500/`INTERNAL`은 임의 fixture code이며 서버 계약이 아니다. 통합된 Error DTO/parser는 없고 Device/Boarding이 각각 파싱한다. 8초/15초 timeout, 늦은 401 차단과 session generation 검증도 본문에 의존하지 않는다.
+
+**수정안 비교와 권고**
+
+| 방안 | 후속 수정 파일 | 장점 | 위험 | 추천 여부 |
+| --- | --- | --- | --- | --- |
+| A — Controller-local 유지 | `ErrorCode.java`, `DeviceController.java`, `BoardingSessionController.java`, 두 API 통합 테스트 | 현재 매핑·우선순위·클래스명 로그와 Service 경계를 유지하며 본문만 정합화 | 두 곳의 짧은 DTO 생성 중복, 전체 500 통일은 아님 | **권고** |
+| B — Global Handler 확장 | A의 파일 + `GlobalExceptionHandler.java`, 다른 Controller의 오류 회귀 테스트 | 영속성 오류 응답 생성 집중 | local 제거가 필요하고 Alarm/Transit/Auth의 미처리 DB 오류까지 영향 확대, 로그 문맥/보안·예외 선택 검증 증가, TASK-804와 겹침 | 이번 최소 수정으로 비권고 |
+| C — 빈 500 유지 | 제품 변경 없음, 예외 계약 채택 시 `api.md` 설계 변경 필요 | 현 테스트/응답 유지 | 문서 계약에 새 예외 도입, 기계적 오류 처리 일관성 저하, 비노출에 빈 본문이 필수라는 근거 없음 | 비권고; 이번에 문서 계약을 낮추지 않음 |
+
+A안을 후속 구현의 최소 방향으로 제안한다. 후보는 `ErrorCode.INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "An internal server error occurred.")`이며 두 local Handler의 반환형을 `ResponseEntity<ApiErrorResponse>`로 바꿔 enum의 name/고정 message만 전달한다. 기존 status·매핑·로그 문구/클래스명만 유지하고 catch-all·Service 예외 wrapping·자동 retry는 추가하지 않는다. `ApiErrorResponse`, `ApiException`, `GlobalExceptionHandler` 및 Flutter 제품 수정은 필요하지 않다. 채택 시 API Owner 문서에는 두 mapped 500의 명시적 code/message와 한정 범위를 최소 동기화하며, 이번에는 변경하지 않는다.
+
+응답/로그에는 SQL·SQLState·constraint·Hibernate 원문·stack trace·내부 DB 구조·installationId·FID/push target·Device credential/hash·User ID·JWT/Refresh Token을 포함하지 않는다. 응답은 정확히 두 필드이며 timestamp/path/status/trace ID 등의 필드를 추가하지 않는다. 원문 예외나 cause를 로거의 Throwable 인자로 넘기지 않고 기존 Hibernate 원문 로그 억제도 유지한다.
+
+**후속 테스트 acceptance와 책임 분리**
+
+| 대상 | 필요한 변경·선택 검증 |
+| --- | --- |
+| `DeviceApiIntegrationTest` | `report_unclassified_database_failure_safely()`의 빈 본문 assertion만 승인된 JSON 계약 검사로 대체: 500, JSON Content-Type, 정확한 code/message와 필드 집합 `{code,message}`. FK 경쟁·Device 미생성·클래스명 로그·기존 민감값/constraint 미노출 assertion은 삭제하지 않고 응답 비노출까지 보강. register/state/disable의 DB·transaction 실패와 기존 row의 owner/generation/revision/target/시각 보존도 검증 |
+| `BoardingSessionApiIntegrationTest` | 현재 빈 500 자체를 검증하는 HTTP 테스트는 발견하지 못함. create·상세/current/request GET·cancel·reconfirm의 HTTP 실패 매핑과 두 예외 계열 대표 경로에서 정확한 두 필드/고정 값, 원문/민감값 및 stack 미노출, 안전한 클래스명 로그 검증 추가. 단순 Service mock만으로 rollback을 주장하지 않고 기존 MySQL Testcontainers의 Event/Delivery 저장 중 실패와 Session·revision·checkpoint·PENDING 원자 보존을 HTTP 경로에서도 연결 |
+| 기존 Transaction·동시성 회귀 | Device `roll_back_target_uniqueness_races`, `serialize_existing_device_mutations` 및 설치본 UNIQUE 경쟁 테스트를 보존. Boarding `lost_commit_response_and_rollback`, `reconfirm_commit_reconciliation`, `aud08_atomic_failure`, `aud08_commit_reconciliation`, `concurrent_same_request`, `concurrent_distinct_creates`, `concurrent_reconfirmation`과 ownership/cancel revision 검증을 선택 실행. 앞의 rollback/commit 테스트는 Service 직접 호출이므로 HTTP body/log 검증을 대신하지 않음 |
+| Flutter 호환 회귀 | 기존 `device_api_client_test.dart`, `boarding_session_client_test.dart`에 빈 500·후보 JSON 500·미등록 code·비정상 JSON과 민감 message 무보존 비교 보강. `authenticated_api_client_test.dart`에서 JSON 500의 refresh/replay 0회·인증 유지, `push_registration_service_test.dart`의 pending 보존, `boarding_session_controller_test.dart`의 원래 UUID/body·조회 복구 및 mutation 재조회 검증. 현재 제품 수정 필요성은 발견하지 못했으며 이 정확한 후보 조합은 미실행 |
+| 인접 Backend 회귀 | 변경 Handler가 `ApiException`/validation을 가로채지 않는지 두 API의 기존 400/403/404/409와 JWT 401, Boarding Provider 503을 선택 검증. 다른 Controller와 전역 fallback·Security 전체 matrix는 TASK-804에서 다루며 이번 수정 검증을 전체 API 완료로 확대하지 않음 |
+
+- **TASK-816 후속 구현 책임:** 발견된 두 mapped 500의 형식 정합화, 비노출/클래스명 로그 보존, 직접 관련 HTTP·DB 원자성·Client 호환 회귀와 필요한 API 문서 최소 동기화. 구현 전 A안과 후보 code/message 채택을 확인하고, transaction 내부 실패·commit 불확실·후속 read 실패를 구분해 fixture를 설계한다. 반환형/직렬화 변경이 새 민감 로그나 error fallback을 유발하지 않는지도 확인한다.
+- **TASK-804 유지 책임:** 전체 Error Code Matrix, Controller별 400/401/403/404/409/500(및 기존 Provider 503)의 의미/shape, Security entry point·인증 응답, 예상 밖 Exception의 최종 fallback, 신규 Endpoint 일관성, 전체 validation/error regression. 미구현 code와 metadata/Provider 의미 구분도 여기서 확정하며 모든 DB 실패를 409 또는 400으로 바꾸지 않는다. 두 Handler 수정만으로 TASK-804를 완료 처리하지 않는다.
+- **이번 확인 수준:** 기존 코드·테스트·공식 문서·도입 Git 이력과 로컬 Spring 바이트코드의 정적 분석만 수행했다. 테스트 실행은 **0개**이며 성공을 주장하지 않는다. 문서 검토만으로 최소 방향을 판단할 수 있어 두 Testcontainers 클래스·전체 Backend/Flutter suite·compile/build를 실행하지 않았다. 실제 DB rollback/commit·HTTP JSON 직렬화·로그 수집·Flutter 후보 JSON 500의 실행 검증은 후속 acceptance다. 개발 DB·Docker/volume 조작·Provider/Google/FCM·서버/터널·iPhone 실행은 없고 `main` 및 기존 감사 기록을 유지한다. Git add/commit/push 및 branch/reset/stash/clean/checkout은 수행하지 않는다.
 
 ### TASK-816 권장 수정 순서와 독립 검증
 
@@ -722,6 +778,7 @@ ADR-006/007/009/010/011/012, TASK-908 연구 기록과 기존 AUD 처리·테스
 10. 모든 필수 결함의 처리와 검증이 완료된 경우에만 TASK-816을 `[x]`로 변경한다. 등록·부분 수정·자동 테스트 통과만으로 완료하지 않는다.
 
 - TASK-814: AUD-12 및 UTC 관련 문서 불일치의 구현·검증 책임을 유지한다. TASK-816은 해당 처리 결과·검증 근거를 연결하며 중복 구현하거나 TASK-814를 대신 완료 처리하지 않는다.
+- TASK-804: 두 Controller의 500 형식 수정·집중 검증은 TASK-816 후속 범위이며, 전체 API 오류 matrix·Security/401·예상 밖 Exception 처리와 최종 regression은 TASK-804 책임을 유지한다. 위 [API 500 검토](#api-500-오류-응답-계약-검토-2026-10-30)는 설계 권고이며 두 Task의 완료를 뜻하지 않는다.
 - TASK-710: 실제 iPhone Notification 수신·tap 검증 책임과 현재 상태를 유지한다.
 - TASK-711: Notification 최종 E2E·regression 검증 책임과 현재 상태를 유지한다. 그룹별 방지 테스트는 이 최종 검증을 대체하지 않는다.
 - TASK-908: 실제 버스 탑승·하차 알림 E2E 검증 책임과 현재 상태를 유지한다.
