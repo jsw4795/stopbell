@@ -37,7 +37,10 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
@@ -77,6 +80,9 @@ class RepositoryIntegrationTest {
 
     @Autowired
     private DataSource dataSource;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     @DisplayName("테스트 데이터베이스는 Testcontainer의 랜덤 포트를 사용한다")
@@ -137,32 +143,57 @@ class RepositoryIntegrationTest {
 
     @Test
     @DisplayName("신규 Google Identity 로그인은 User를 생성하고 Access Token과 해시 저장 Refresh Token을 발급한다")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void login_new_google_identity_creates_user_and_token_pair() throws Exception {
-        TokenResponse tokenResponse = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, "google-login-user"));
+        String providerUserId = "google-login-" + UUID.randomUUID();
+        try {
+            assertThat(identityCount(providerUserId)).isZero();
+            TokenResponse tokenResponse = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, providerUserId));
 
-        User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, "google-login-user")
-                .orElseThrow();
+            User user = userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, providerUserId)
+                    .orElseThrow();
 
-        assertThat(user.getAuthProvider()).isEqualTo(AuthProvider.GOOGLE);
-        assertThat(user.getProviderUserId()).isEqualTo("google-login-user");
-        assertThat(jwtTokenService.extractUserId(tokenResponse.accessToken())).isEqualTo(user.getId());
-        assertThat(tokenResponse.refreshToken()).isNotBlank();
-        RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(sha256(tokenResponse.refreshToken()))
-                .orElseThrow();
-        assertThat(refreshToken.getUser().getId()).isEqualTo(user.getId());
-        assertThat(refreshToken.getTokenHash()).isNotEqualTo(tokenResponse.refreshToken());
+            assertThat(identityCount(providerUserId)).isEqualTo(1);
+            assertThat(user.getAuthProvider()).isEqualTo(AuthProvider.GOOGLE);
+            assertThat(user.getProviderUserId()).isEqualTo(providerUserId);
+            assertThat(jwtTokenService.extractUserId(tokenResponse.accessToken())).isEqualTo(user.getId());
+            assertThat(tokenResponse.refreshToken()).isNotBlank();
+            RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(sha256(tokenResponse.refreshToken()))
+                    .orElseThrow();
+            assertThat(refreshToken.getUser().getId()).isEqualTo(user.getId());
+            assertThat(refreshToken.getTokenHash()).isNotEqualTo(tokenResponse.refreshToken());
+        } finally {
+            cleanLoginIdentity(providerUserId);
+        }
     }
 
     @Test
     @DisplayName("기존 Google Identity 로그인은 기존 User를 재사용하고 새 Refresh Token Session을 발급한다")
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void login_existing_google_identity_reuses_user() {
-        User existingUser = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "google-existing-login-user"));
+        String providerUserId = "google-existing-login-" + UUID.randomUUID();
+        try {
+            User existingUser = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, providerUserId));
+            assertThat(identityCount(providerUserId)).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject("select count(*) from refresh_tokens where user_id = ?",
+                    Integer.class, existingUser.getId())).isZero();
 
-        TokenResponse tokenResponse = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, "google-existing-login-user"));
+            TokenResponse tokenResponse = loginService.login(new ExternalIdentity(AuthProvider.GOOGLE, providerUserId));
 
-        assertThat(userRepository.count()).isEqualTo(1);
-        assertThat(jwtTokenService.extractUserId(tokenResponse.accessToken())).isEqualTo(existingUser.getId());
-        assertThat(refreshTokenRepository.findByTokenHash(sha256Unchecked(tokenResponse.refreshToken()))).isPresent();
+            assertThat(identityCount(providerUserId)).isEqualTo(1);
+            assertThat(userRepository.findByAuthProviderAndProviderUserId(AuthProvider.GOOGLE, providerUserId)
+                    .orElseThrow().getId()).isEqualTo(existingUser.getId());
+            assertThat(jwtTokenService.extractUserId(tokenResponse.accessToken())).isEqualTo(existingUser.getId());
+            RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(sha256Unchecked(tokenResponse.refreshToken()))
+                    .orElseThrow();
+            assertThat(refreshToken.getUser().getId()).isEqualTo(existingUser.getId());
+            assertThat(refreshToken.getTokenHash()).isEqualTo(sha256Unchecked(tokenResponse.refreshToken()));
+            assertThat(refreshToken.getTokenHash()).isNotEqualTo(tokenResponse.refreshToken());
+            assertThat(jdbcTemplate.queryForObject("select count(*) from refresh_tokens where user_id = ?",
+                    Integer.class, existingUser.getId())).isEqualTo(1);
+        } finally {
+            cleanLoginIdentity(providerUserId);
+        }
     }
 
     @Test
@@ -427,6 +458,28 @@ class RepositoryIntegrationTest {
                 alarm.getId()
         )).isInstanceOf(UncategorizedSQLException.class)
                 .hasMessageContaining("ck_bus_alarm_targets_successor");
+    }
+
+    private int identityCount(String providerUserId) {
+        return jdbcTemplate.queryForObject(
+                "select count(*) from users where auth_provider = ? and provider_user_id = ?",
+                Integer.class, AuthProvider.GOOGLE.name(), providerUserId);
+    }
+
+    private void cleanLoginIdentity(String providerUserId) {
+        // Login commits independently of the test rollback. Delete only this test's unique Identity.
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            List<Long> userIds = jdbcTemplate.queryForList(
+                    "select id from users where auth_provider = ? and provider_user_id = ?",
+                    Long.class, AuthProvider.GOOGLE.name(), providerUserId);
+            for (Long userId : userIds) {
+                jdbcTemplate.update("delete from refresh_tokens where user_id = ?", userId);
+                jdbcTemplate.update("delete from users where id = ?", userId);
+                assertThat(jdbcTemplate.queryForObject("select count(*) from refresh_tokens where user_id = ?",
+                        Integer.class, userId)).isZero();
+            }
+            assertThat(identityCount(providerUserId)).isZero();
+        });
     }
 
     private Alarm saveAlarm() {

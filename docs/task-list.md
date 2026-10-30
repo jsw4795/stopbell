@@ -895,6 +895,60 @@ AUD-12는 새 결함으로 중복 등록하지 않는다. 기존 완료 기준 9
 
 **다음 권장 작업은 하나다: TASK-816의 위 두 기존 회귀 Fixture만 별도 작업으로 보정하고 실패 경로를 재검증한다.** assertion·timeout·제품 안전 조건을 약화하지 않으며 성공한 전체 Suite를 이번 감사 중 다시 실행하지 않는다. 완료 체크는 이 보고서를 검토한 사용자가 별도로 결정한다.
 
+### TASK-816 회귀 Fixture 보정 후속 검증 (2026-10-30)
+
+**최종 권고: READY FOR FINAL DECISION.** 두 Fixture를 보정한 뒤 개별·클래스·AUD 인접 검증과 Backend 전체 1,272개가 모두 통과했다. 이전 회귀 차단 2건은 해소됐으며 제품 결함 수정 없이 정상 입력/Transaction Fixture의 문제였음을 확인했다. TASK-816 완료 기준 2의 AUD-12/TASK-814 책임 분리 및 최종 완료 판단은 여전히 남고 체크박스는 변경하지 않는다.
+
+검증 대상은 `main`, HEAD `21153d6f1c3fb09408f8a7904493f8739337832b`와 아래 테스트 Fixture 변경이다. 시작 작업 트리는 깨끗했고 이전 감사는 해당 HEAD에 commit되어 있었다. 이전 **Backend 1,272개 중 2개 실패 / NOT READY** 기록과 모든 AUD 처리 기록은 당시 증거로 그대로 보존한다. e44d009 이후 시작 HEAD까지의 변경은 이 감사 문서뿐이므로 제품·기존 테스트 경계는 이전 실패 재현 당시와 같다.
+
+#### 실제 원인과 최소 Fixture 보정
+
+- 서울 `seoul_arrival_then_same_vehicle_one_stop_after_completes_follow_up()`은 같은 차량의 target(20)과 successor(30)에 같은 Provider 시각을 주어 AUD-02의 엄격 증가 계약과 충돌했다. 해당 정상 진행만 `20260923085959`→`20260923090000`으로 1초 증가시키고, 명시적 시각을 받는 `detail()` overload를 추가했다. 기본 helper의 시각과 다른 테스트는 유지했다.
+- 서울 Mapper는 Asia/Seoul을 UTC로 해석하므로 위 시각은 `2026-09-22T23:59:59Z`→`2026-09-23T00:00:00Z`다. 기존 Mapper/Scheduler/decision Clock의 NOW(`2026-09-23T00:00:00Z`)보다 미래가 아니며 60초 freshness 안이다. Provider 시각이 존재하면 수신시각 비역행과 Provider 시각 엄격 증가를 검사하므로 고정 observedAt의 변경이 필요하지 않았다. FOLLOW_UP 시작은 NOW, 만료는 NOW+5분으로 기존 기한 안에서 후속 판단한다. MutableClock·전역 Clock 변경·제품 시각 검증 변경은 없다.
+- 기존 ACTIVE→FOLLOW_UP→INACTIVE, 차량 ID·generation·호출 횟수 assertion을 보존했다. 실제 DB에 ARRIVED/ONE_STOP_AFTER가 각각 한 개씩이고 같은 Alarm/generation 및 영속 FOLLOW_UP Tracking Cycle을 공유함을 추가 확인한다. Event 생성·Lifecycle Transaction은 실제 제품 경로를 사용한다.
+- 기존 `login_existing_google_identity_reuses_user()`는 클래스의 미커밋 User INSERT와 제품 LoginService의 REQUIRES_NEW INSERT가 UNIQUE 잠금에서 충돌했다. 해당 메서드에만 `@Transactional(propagation=NOT_SUPPORTED)`를 적용해 UserRepository의 saveAndFlush 호출 자체 Transaction이 반환 전에 commit되게 했다. 조회 assertion도 외부 테스트 snapshot 없이 commit된 결과를 확인한다. 클래스의 기본 `@Transactional`과 다른 persistence 테스트는 유지한다.
+- 같은 클래스의 신규 로그인도 제품 REQUIRES_NEW commit을 외부 Rollback으로 정리할 수 없어, 해당 메서드에도 같은 제한적 경계와 cleanup을 적용했다. 두 테스트는 각각 UUID를 붙인 고유 Google Identity를 사용한다. 기존 User ID 재사용·Identity 개수 유지·Access Token subject·새 RefreshToken의 Hash/FK·원문 미저장을 보존/보강했다. 전체 `users.count()==1`은 해당 `(GOOGLE, providerUserId)`의 1행과 같은 내부 ID 검증으로 대체해 다른 Identity에 의존하지 않는다. 신규 로그인은 생성 전 0→후 1, 기존 로그인은 로그인 전후 1을 확인한다.
+- 두 로그인 모두 `try/finally`에서 `cleanLoginIdentity()`를 호출하므로 본문 assertion 실패에도 정리가 실행된다. 별도 유효한 TransactionTemplate 안에서 **해당 고유 Identity의 User ID만** 조회해 RefreshToken→User 순서로 삭제하고 잔존 Token/Identity 0개를 확인한다. 실제 commit 실패는 테스트 실패로 전파한다. 전체 테이블 delete나 다른 Identity 삭제는 없다. 정상 로그인·cleanup은 클래스 전체 실행에서도 통과했다. assertion 실패를 인위적으로 주입한 추가 테스트는 실행하지 않았으며 실패 시 정리 보장은 finally 구조로 확인했다.
+
+#### 단계별 실제 검증
+
+Java/Gradle JVM 21.0.12.1·Wrapper 8.14.3, 기존 격리 `mysql:8.4.11` Testcontainers/Flyway를 사용한다. 공통 명령은 `env -u JAVA_HOME ./gradlew test --offline --max-workers=1`이며 1~3단계만 아래 클래스로 `--tests`를 지정했다. 실제 Provider/Google/FCM은 호출하지 않고 기존 Mock/loopback 경계를 유지했다.
+
+| 단계 | 실제 범위 | 실행 | 통과 | 실패 / 오류 / Skip |
+| --- | --- | ---: | ---: | --- |
+| 1 | 기존 실패 두 메서드 | 2 | 2 | 0 / 0 / 0 |
+| 2 | TransitMonitoringIntegrationTest 6 + RepositoryIntegrationTest 20 | 26 | 26 | 0 / 0 / 0 |
+| 3 | BusAlarmEvaluatorTest 65 + LoginServiceConcurrencyIntegrationTest 8 + LoginMigrationIntegrationTest 1 | 74 | 74 | 0 / 0 / 0 |
+| 4 | Backend 전체 79개 클래스(최종 1회) | 1,272 | 1,272 | 0 / 0 / 0 |
+
+1단계 27초, 2단계 25초, 3단계 24초로 모두 BUILD SUCCESSFUL이다. 동일·역행 Provider 시각 차단과 정상 후속 관측의 같은 cycle 복구, 최초 로그인 실제 UNIQUE 경쟁/rollback 후 새 Transaction 복구·기존 User 다중 Session·독립 commit 및 기존 Identity/Migration 정책을 검증했다. 1단계의 두 메서드는 이전 FAIL에서 PASS로 바뀌었고, 2단계에서 신규 로그인과 cleanup을 포함한 같은 클래스의 나머지 테스트도 통과했다. 단계 확대는 이번 사용자 요청의 순서를 따르며 임의 반복 실행은 하지 않는다.
+
+Backend 전체 회귀는 위 단계 통과 후 최종 1회 실행했고 **BUILD SUCCESSFUL(6분 39초)**이다. JUnit XML 79개 클래스의 suite 합계와 실제 testcase 개수가 일치하며 모든 테스트 클래스가 포함되고 제외/누락은 없다. 이번 실행 중 실패·오류·Skip과 실패 때문에 추가한 재실행은 모두 0이다. 단계별 확대의 중복 실행 102회를 포함한 이번 누적 실행은 **1,374회 전부 통과**이며, 서로 다른 사례는 전체 Suite의 **1,272개**다. 과거 감사의 실패/재실행 수나 Flutter 549개를 이번 실행 수에 합산하지 않는다. 테스트 메서드/사례를 추가·삭제하지 않아 이전 전체 1,272개와 동일한 수다.
+
+| Backend 영역 | 실행 | 통과 | 실패 | 오류 | Skip |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Alarm | 189 | 189 | 0 | 0 | 0 |
+| BoardingSession | 410 | 410 | 0 | 0 | 0 |
+| Notification/Device | 307 | 307 | 0 | 0 | 0 |
+| Authentication/User | 102 | 102 | 0 | 0 | 0 |
+| Transit/Metadata | 247 | 247 | 0 | 0 | 0 |
+| Common/UTC/Application Context | 17 | 17 | 0 | 0 | 0 |
+| 합계 | 1,272 | 1,272 | 0 | 0 | 0 |
+
+수정된 두 클래스는 단독 선택 26개와 전체 Suite 양쪽에서 통과했다. Cleanup의 Identity/Token 0개 확인이 성공했고 신규·기존 로그인 데이터가 다른 테스트에 남는 문제는 관측되지 않았다. 별도 실행 순서 강제나 성공 테스트의 추가 반복은 하지 않았다. 실제 MySQL/Flyway·Notification/Boarding·동시 로그인 및 API 500 회귀도 모두 통과했으며 새로운 제품 결함이나 회귀 실패는 발견하지 않았다.
+
+1~3단계 JUnit XML은 `/private/tmp/stopbell-task816-fixture-step1-results`, `step2-results`, `step3-results`(동일 `stopbell-task816-fixture-` 접두사)에 보존했다. 최종 XML은 `/private/tmp/stopbell-task816-fixture-full-results`와 현재 `backend/build/test-results/test`, HTML은 `backend/build/reports/tests/test/index.html`이다. 각 실행 로그는 `/private/tmp/stopbell-task816-fixture-step1.log`·`step2.log`·`step3.log`·`full.log`(동일 접두사)이며 과거 감사 결과 파일은 덮어쓰지 않았다.
+
+이번 수정은 Backend 테스트 Fixture만이므로 Flutter analyze/test는 재실행하지 않았다. 이전 감사의 analyze No issues·549/549 PASS는 **이전 실행 결과**로 보존한다. 실제 개발/운영 DB·기존 Named Volume·실제 Google/Transit/FCM·Firebase Credential·iPhone·Backend 서버/터널은 사용하지 않았다. 실제 Provider/iPhone·운영 restart 검증은 이번 전체 자동 통과로 대체하지 않는다.
+
+#### 후속 책임과 상태 유지
+
+제품 Java·Flutter 제품/테스트·Migration·Dependency·Gradle/Profile·Docker Compose·Firebase/Credential·Spring Security/Transaction 설정·기존 ADR·devlog는 변경하지 않는다. 변경 파일은 위 테스트 두 개와 이 Task List뿐이다. 기존 assertion의 의미를 보존하고 정상 입력·Transaction/cleanup만 보정했다. AUD-02 Evaluator와 AUD-10 LoginService의 REQUIRES_NEW·Identity UNIQUE·Session 원자성/Rotation·오류 분류는 유지한다. `git diff --check`는 통과했고 staged/미추적 신규 파일은 없다. 종료 시 임시 MySQL/Ryuk Container가 남지 않고 기존 개발 MySQL Container ID가 그대로임을 확인했다.
+
+AUD-12의 Host 의존 callback 5곳은 미수정이며 TASK-814의 시간 원천/타입 선택·JDBC/다중 zone/DST·기존 데이터 호환 정책 책임이 남는다. 실제 Provider/iPhone 및 운영 restart는 자동 테스트로 대체하지 않으며 TASK-710/711/908/811, 전체 API 오류 계약은 TASK-804가 계속 소유한다. TASK-804/814/816을 포함한 모든 체크박스를 그대로 유지하며 Git add/commit/push·branch/reset/stash/clean/checkout/pull/fetch는 수행하지 않는다. Backend 전체 통과 여부와 별개로 AUD-12의 완료 기준 2 책임 분리 및 TASK-816 완료 여부는 사용자 최종 판단으로 남긴다.
+
+이전 완료 기준 중 4(주요 회귀)는 이번 Backend 1,272개 통과와 제품 변경 없는 기존 Flutter 549개 통과 근거로 PASS, 6(Alarm·Boarding 정책 보존)은 정상 FOLLOW_UP DB/Event 경로와 전체 관련 회귀 통과로 PASS로 재평가한다. 조건 2는 AUD-12 제품 미수정/책임 분리 판단으로 PENDING이며 조건 10도 최종 판단 전 PENDING이다. 나머지 기존 PASS 근거는 보존한다. 이 변화는 이전 감사 표의 당시 BLOCKED/NOT READY 기록을 삭제하거나 TASK-816을 완료 처리하는 것이 아니다.
+
 ### TASK-816 권장 수정 순서와 독립 검증
 
 | 순서 | 작업 그룹 | 대상 | 검증 초점 |

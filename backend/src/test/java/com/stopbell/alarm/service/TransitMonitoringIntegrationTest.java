@@ -26,6 +26,8 @@ import com.stopbell.transit.client.SeoulBusVehicleLocationClient;
 import com.stopbell.transit.client.TagoVehicleLocationClient;
 import com.stopbell.transit.client.TransitProviderClientException;
 import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.transit.domain.TransitEventType;
+import com.stopbell.notification.entity.NotificationEvent;
 import com.stopbell.transit.dto.seoul.SeoulBusVehicleDetailItem;
 import com.stopbell.transit.dto.seoul.SeoulBusVehicleDetailResponse;
 import com.stopbell.transit.dto.seoul.SeoulBusVehicleLocationItem;
@@ -121,7 +123,8 @@ class TransitMonitoringIntegrationTest {
         SeoulBusVehicleDetailClient detailClient = mock(SeoulBusVehicleDetailClient.class);
         when(rosterClient.fetchVehicleLocations(any())).thenReturn(roster("vehicle-1"));
         when(detailClient.fetchVehicleDetail("vehicle-1"))
-                .thenReturn(detail("vehicle-1", "target", 20, 1), detail("vehicle-1", "successor", 30, 0));
+                .thenReturn(detail("vehicle-1", "target", 20, 1, "20260923085959"),
+                        detail("vehicle-1", "successor", 30, 0, "20260923090000"));
 
         BusAlarmMonitoringScheduler scheduler = scheduler(mock(TagoVehicleLocationClient.class), rosterClient, detailClient);
         scheduler.pollMonitoringAlarms();
@@ -136,6 +139,14 @@ class TransitMonitoringIntegrationTest {
         assertThat(reload(alarm).getActivationGeneration()).isEqualTo(1);
         verify(rosterClient, times(2)).fetchVehicleLocations(any());
         verify(detailClient, times(2)).fetchVehicleDetail("vehicle-1");
+        var storedEvents = events.findAll();
+        assertThat(storedEvents).extracting(NotificationEvent::getEventType)
+                .containsExactlyInAnyOrder(TransitEventType.ARRIVED, TransitEventType.ONE_STOP_AFTER);
+        assertThat(storedEvents).allSatisfy(event -> {
+            assertThat(event.getAlarmId()).isEqualTo(alarm.getId());
+            assertThat(event.getActivationGeneration()).isEqualTo(1);
+            assertThat(event.getTrackingCycleId()).isEqualTo(followUp.getFollowUpTrackingCycleId());
+        });
     }
 
     @Test
@@ -280,10 +291,16 @@ class TransitMonitoringIntegrationTest {
     }
 
     private static SeoulBusVehicleDetailResponse detail(String vehicleId, String stopId, int stopOrder, int stopFlag) {
+        return detail(vehicleId, stopId, stopOrder, stopFlag, "20260923090000");
+    }
+
+    private static SeoulBusVehicleDetailResponse detail(
+            String vehicleId, String stopId, int stopOrder, int stopFlag, String providerDataTime
+    ) {
         return new SeoulBusVehicleDetailResponse(
                 new SeoulBusVehicleDetailResponse.Header("0", "OK"),
                 new SeoulBusVehicleDetailResponse.Body(List.of(new SeoulBusVehicleDetailItem(
-                        vehicleId, null, stopId, stopOrder, stopFlag, "20260923090000", null, null
+                        vehicleId, null, stopId, stopOrder, stopFlag, providerDataTime, null, null
                 )))
         );
     }
