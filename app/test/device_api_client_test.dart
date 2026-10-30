@@ -147,6 +147,53 @@ void main() {
       isNull,
     );
   });
+  for (final entry in {
+    'empty': '',
+    'json': jsonEncode({
+      'code': 'INTERNAL_SERVER_ERROR',
+      'message': 'An internal server error occurred.',
+    }),
+    'unknown': jsonEncode({
+      'code': 'UNKNOWN_SERVER_ERROR',
+      'message': 'private-FID-credential',
+    }),
+  }.entries) {
+    test('500 ${entry.key}는 미확정 오류이며 알 수 없는 code와 원문을 보존하지 않는다', () async {
+      final f = PushFixture();
+      await f.initialize();
+      addTearDown(f.auth.dispose);
+      var calls = 0;
+      final api = client(
+        f,
+        MockClient((_) async {
+          calls++;
+          return http.Response(entry.value, 500);
+        }),
+      );
+      await expectLater(
+        api.mutate(
+          payload(),
+          'register',
+          'fixture-credential',
+          f.auth.generation,
+        ),
+        throwsA(
+          isA<DeviceApiException>()
+              .having((error) => error.status, 'status', 500)
+              .having((error) => error.code, 'code', isNull)
+              .having((error) => error.definitive, 'definitive', false)
+              .having(
+                (error) => error.toString(),
+                'safe error',
+                isNot(contains('private-FID-credential')),
+              ),
+        ),
+      );
+      expect(calls, 1);
+      expect(f.backend.refreshCalls, 0);
+      expect(f.auth.state, AuthState.authenticated);
+    });
+  }
   test('같은 login generation의 401은 rotation 후 동일 body를 재전송한다', () async {
     final f = PushFixture();
     await f.initialize();

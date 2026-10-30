@@ -7,6 +7,7 @@ import com.stopbell.boarding.dto.CancelBoardingSessionRequest;
 import com.stopbell.boarding.dto.CreateBoardingSessionRequest;
 import com.stopbell.boarding.dto.ReconfirmBoardingSessionRequest;
 import com.stopbell.boarding.service.BoardingSessionService;
+import com.stopbell.common.error.ApiErrorResponse;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
 import com.stopbell.user.auth.service.JwtTokenService;
@@ -80,8 +81,10 @@ public class BoardingSessionController {
     }
 
     @ExceptionHandler({DataAccessException.class, TransactionException.class})
-    public ResponseEntity<Void> persistenceFailure(Exception exception) {
+    public ResponseEntity<ApiErrorResponse> persistenceFailure(Exception exception) {
         log.error("Boarding persistence failed: {}", exception.getClass().getSimpleName());
-        return ResponseEntity.internalServerError().build();
+        ErrorCode code = ErrorCode.INTERNAL_SERVER_ERROR;
+        return ResponseEntity.status(code.getHttpStatus())
+                .body(new ApiErrorResponse(code.name(), code.getMessage()));
     }
 }

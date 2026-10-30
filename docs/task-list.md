@@ -680,7 +680,7 @@ allprojects {
 | 남은 항목 | 정적 확인 근거 / 후속 책임 |
 | --- | --- |
 | Flutter 초기 안내 문구 | 1단계 당시 `app/lib/features/boarding/boarding_stop_screen.dart:210`의 “선택한 정류장에 도달하거나 통과하면 알리는 기능이에요 … 진행 검증 전에는 대기로 표시해요”가 신규 준비 알림과 즉시 TRACKING을 오해하게 해 수정 제안했으며, 당시에는 Dart 수정 금지로 보존했다. 이후 아래 Flutter 안내 문구 후속 처리에서 수정·선택 검증 완료 |
-| API 오류 본문 차이 | `DeviceController.handlePersistenceFailure()`와 `BoardingSessionController.persistenceFailure()`의 빈 500은 제품에 남아 있다. 기존 테스트·보안 근거·Client 영향과 최소 수정 권고는 아래 [API 500 검토](#api-500-오류-응답-계약-검토-2026-10-30)에 기록했다. 검토만 수행했으며 제품/테스트는 미수정. TASK-816의 두 Handler 수정·집중 검증과 TASK-804의 전체 오류 계약 검증 책임을 구분하며 [API 오류 형식](api.md#5-오류-형식)을 낮추지 않음 |
+| API 오류 본문 차이 | 아래 [API 500 검토](#api-500-오류-응답-계약-검토-2026-10-30) 뒤 사용자 확정 A안을 구현했다. 두 local Handler의 지정된 영속성 500은 고정 `INTERNAL_SERVER_ERROR`/message 두 필드를 반환한다. [구현·집중 검증 결과](#api-500-a안-구현-결과-2026-10-30)와 [API 계약](api.md#5-오류-형식)을 연결하며, TASK-804의 전체 오류 계약 및 TASK-816 최종 주요 회귀·완료 판정은 남아 있음 |
 | AUD-12 UTC 제품 결함 | User onPrePersist/onPreUpdate, RefreshToken onPrePersist, Alarm onPrePersist/onPreUpdate의 Host 의존성은 미수정. 위 AUD-12 근거·Characterization과 TASK-814의 선택·구현·기존 데이터 호환 검증 책임 유지 |
 | AUD-01~13 최종 상호 정합성 | 개별 처리 기록과 이번 문서 변경을 함께 대조하고 Backend 주요 회귀 및 Flutter 주요 회귀를 별도로 수행. AUD-13 PASSED의 검증된 정류장명/Successor Edge 수·생략·기존 data key·두 alert body 일치 계약도 회귀 확인 |
 | 실제 외부/기기 미검증 | TASK-710 iPhone 전체 수신/tap·권한/등록 전환, TASK-711 Notification 최종 E2E·multi-device·durable recovery/재시작, TASK-908 신규 정책의 실제 버스·iPhone E2E 책임 유지. Provider 실측·FCM 접수·실제 기기 표시는 각각 구분하며 초기 smoke/Mock 성공으로 대체하지 않음 |
@@ -698,6 +698,8 @@ ADR-006/007/009/010/011/012, TASK-908 연구 기록과 기존 AUD 처리·테스
 - 미검증·후속 책임: 전체 Flutter/Backend 테스트·빌드·서버 실행·개발 DB 접근·실제 Provider/FCM 호출·iPhone 설치/실행·터널은 수행하지 않았다. 실제 iPhone의 안내 줄바꿈/가독성·foreground/background/terminated 수신/tap, 버스 진행과 신규 준비 알림 E2E는 TASK-710/711/908 책임으로 남는다. DeviceController/BoardingSessionController의 빈 500 응답과 AUD-12/TASK-814 UTC 수정은 이번 범위 밖이다. TASK-816의 최종 Backend/Flutter 주요 회귀·문서/잔여 결함 검토는 별도 후속이며 이번 20개 테스트로 대체하지 않는다. 기존 감사 기록과 모든 체크박스, TASK-814/816 `[ ]` 및 `main`을 유지하며 Git add/commit/push·reset/stash/clean/checkout·branch 생성은 수행하지 않았다.
 
 #### API 500 오류 응답 계약 검토 (2026-10-30)
+
+아래는 **구현 전 검토 당시의 기록**이다. 이후 사용자 확정과 실제 구현·검증 결과는 [A안 구현 결과](#api-500-a안-구현-결과-2026-10-30)를 따른다.
 
 이번 단계는 두 Controller의 빈 500에 대한 정적 분석과 후속 구현 범위 제안이다. 아래 `INTERNAL_SERVER_ERROR`와 message는 **권장 후보이며 아직 구현·확정된 API 계약이 아니다.** Java/Flutter 제품·테스트·설정·Dependency·Migration과 `api.md`는 변경하지 않았다. TASK-804/814/816 및 모든 기존 체크박스는 유지한다.
 
@@ -753,6 +755,28 @@ A안을 후속 구현의 최소 방향으로 제안한다. 후보는 `ErrorCode.
 - **TASK-804 유지 책임:** 전체 Error Code Matrix, Controller별 400/401/403/404/409/500(및 기존 Provider 503)의 의미/shape, Security entry point·인증 응답, 예상 밖 Exception의 최종 fallback, 신규 Endpoint 일관성, 전체 validation/error regression. 미구현 code와 metadata/Provider 의미 구분도 여기서 확정하며 모든 DB 실패를 409 또는 400으로 바꾸지 않는다. 두 Handler 수정만으로 TASK-804를 완료 처리하지 않는다.
 - **이번 확인 수준:** 기존 코드·테스트·공식 문서·도입 Git 이력과 로컬 Spring 바이트코드의 정적 분석만 수행했다. 테스트 실행은 **0개**이며 성공을 주장하지 않는다. 문서 검토만으로 최소 방향을 판단할 수 있어 두 Testcontainers 클래스·전체 Backend/Flutter suite·compile/build를 실행하지 않았다. 실제 DB rollback/commit·HTTP JSON 직렬화·로그 수집·Flutter 후보 JSON 500의 실행 검증은 후속 acceptance다. 개발 DB·Docker/volume 조작·Provider/Google/FCM·서버/터널·iPhone 실행은 없고 `main` 및 기존 감사 기록을 유지한다. Git add/commit/push 및 branch/reset/stash/clean/checkout은 수행하지 않는다.
 
+#### API 500 A안 구현 결과 (2026-10-30)
+
+- 사용자 확정에 따라 A안(Controller-local Handler 유지)을 구현했다. `ErrorCode.INTERNAL_SERVER_ERROR`에 HTTP 500과 `An internal server error occurred.`를 추가하고 `DeviceController.handlePersistenceFailure()`·`BoardingSessionController.persistenceFailure()`가 기존 `ApiErrorResponse`로 정확히 `{"code":"INTERNAL_SERVER_ERROR","message":"An internal server error occurred."}`를 반환하도록 변경했다. 실제 MockMvc 응답의 Content-Type은 `application/json`이다. [API 오류 형식](api.md#5-오류-형식)에 두 Handler의 지정된 예외에 한정한 계약을 반영했다.
+- `DataAccessException`·`TransactionException` 매핑과 기존 로그 문구/예외 단순 클래스명만 기록하는 정책은 동일하다. 원문 message/cause/stack·SQL/제약 이름·민감정보를 응답/로그로 전달하지 않는다. GlobalExceptionHandler/ApiException/ApiErrorResponse·Security·세 Service·TransactionTemplate/lock/retry/commit 복구·Flutter 제품·Dependency·Migration·환경 설정은 변경하지 않았다. 기존 AUD-01~13 제품/회귀 테스트도 보존했다.
+- Device의 기존 `report_unclassified_database_failure_safely()`에서 빈 본문 검사만 정확한 JSON 두 필드/고정 값/Content-Type 및 응답 비노출 검사로 교체했다. 실제 MySQL User 삭제/FK 경쟁·Device 미생성·예외 클래스명 로그·installation/FID/credential/hash/constraint 미노출 검증과 동기화는 유지했다.
+- Boarding에 `report_database_failure_over_http_safely()`를 추가했다. 기존 검증 fixture로 재확인 HTTP를 호출하고 실제 Event INSERT/flush 뒤 MySQL FK 실패를 발생시킨다. HTTP 500/두 필드/고정 값과 안전 로그, `afterCompletion=ROLLED_BACK`, 요청 뒤 transaction 종료, 원래 Session snapshot·revision·checkpoint 보존, Event/Delivery 0개 및 gate 차단을 확인했다. Delivery 중간 저장 실패는 기존 `aud08_atomic_failure` 두 사례가 별도로 검증하며 두 검증을 합쳐 Service mock만으로 원자성을 주장하지 않는다.
+- `report_transaction_failure_over_http_safely()`는 실제 조회 HTTP에서 기존 Notification Service spy에 제한적으로 `TransactionSystemException`을 주입해 두 번째 예외 계열의 local Handler 선택·고정 JSON·message/cause/민감 marker 비노출과 Session 보존을 검증한다. 이 사례는 실제 commit 장애 재현이 아니다. Spy는 기존 `@MockitoSpyBean`의 테스트 후 자동 reset을 사용한다. 최초 실행은 MANDATORY AOP proxy를 transaction 밖에서 stubbing한 fixture 오류로 실패했고, 기존 테스트 방식대로 ultimate target에 stubbing한 뒤 실패했던 메서드 1개만 재실행해 통과했다. 제품 transaction 정책은 변경하지 않았다.
+
+| 실행 대상 | 실제 실행·결과 |
+| --- | --- |
+| HTTP 500 집중 테스트 | Device 기존 FK 경쟁 1개 + Boarding 신규 2개. 최초 3개 중 2개 성공/fixture 1개 실패, 해당 1개 수정 후 재실행 성공. 최종 서로 다른 3개 모두 통과 |
+| Device 선택 회귀 | 8개 통과: `rotate_target_and_enforce_revision`, `transfer_ownership_and_reject_old_generations`, `enforce_credentials_platform_authority_and_limits`, `reject_invalid_input_without_coercion`, `require_jwt_for_all_endpoints`, `resolve_first_registration_races`, `roll_back_target_uniqueness_races`, `serialize_existing_device_mutations` |
+| Boarding 선택 회귀 | 26개 필터 실행 통과: `require_jwt`, `request_and_session_conflicts`, `query_and_cancel_with_ownership`, `cancel_requires_current_revision`, `invalid_revision_body`(6), `provider_metadata_and_target_failures`, `concurrent_distinct_creates`, `concurrent_same_request`, `lost_commit_response_and_rollback`, `reconfirm_authentication_and_ownership`, `reconfirm_requires_suspension`(4), `reconfirm_commit_reconciliation`(2), `concurrent_reconfirmation`, `aud08_atomic_failure`(2), `aud08_commit_reconciliation`(2). 추가로 `known_run_end_does_not_create_session` 1개를 선택 실행해 `BOARDING_TRACKING_UNSUPPORTED` 409 보존 통과. 합계 **27개** |
+| Backend 합계 | 최종 서로 다른 **38개** 통과(Device 500 1 + Boarding 500 2 + Device 회귀 8 + Boarding 회귀 27), 최종 실패/오류/skip 없음. 최초 fixture 실패와 수정 재실행까지 누적 실행은 39회(성공 38회·실패 1회)이며 최종 통과 수에 중복 합산하지 않음 |
+| Flutter 선택 회귀 | `device_api_client_test.dart`, `boarding_session_client_test.dart`, `authenticated_api_client_test.dart`, `push_registration_service_test.dart`, `boarding_session_controller_test.dart` 5개 파일 합계 **127개 통과**, 실패/오류/skip 없음. 전체 Flutter suite가 아님 |
+| 정적 검사 | Java 21 `compileJava`·`compileTestJava` 성공. 변경 Dart 테스트 5개 파일 `flutter analyze --no-pub` No issues, `dart format --output=none --set-exit-if-changed` 변경 0개. `git diff --check` 및 보호 파일/Handler 매핑·로그 불변 정적 확인 통과 |
+
+- 신규 테스트는 Boarding 메서드 2개와 Dart 5개 선언에서 생성하는 9개 사례(Device 빈/JSON/미등록 code 3개, Boarding 생성 500 동일 3개, JSON 500 무-refresh·무-POST replay/Token Pair 보존 1개, Device pending 보존/동일 payload 재시도 1개, Boarding 원래 UUID/body 보존/조회/명시적 재시도 1개)다. 신규 파일이나 테스트 infrastructure는 추가하지 않았다. Device Client가 allowlist 밖 code를 null로 처리하고 `definitive=false`를 유지하며, Boarding Client는 HTTP/status=500/`uncertain=true`를 유지하는 것을 실행 검증했다. 기존 인증 generation·timeout/늦은 401 차단·mutation 재조회 회귀도 포함한다.
+- DB 검증은 기존 MySQL **8.4.11 Testcontainers**만, Provider는 Mock/Fake만 사용했다. 400/403/404/409·JWT 누락/잘못된 JWT 401·Provider 503 분류와 Device UNIQUE/ownership/generation/revision·Boarding idempotency/revision/원자성 및 commit 응답 유실/rollback 재확인을 선택 검증했다. HTTP 500 자체로 미저장/rollback을 단정하지 않으며, 기존 commit 결과 불확실성 복구와 원래 요청 identity를 유지한다.
+- 미검증: 전체 Backend/Flutter suite·TASK-816 최종 주요 회귀/상호 정합성 감사, 실제 개발/운영 DB·실제 DB 네트워크 commit 응답 유실·process kill/restart, 실제 Google/Transit/FCM/Firebase·iPhone, 모든 Endpoint/예외 계열 하위 타입·만료 JWT 전체 matrix. 서버 상시 실행·터널·Docker Named Volume 조작은 없었다. Gradle/Flutter 최초 실행의 sandbox 캐시 쓰기 제한은 허용된 권한 확장으로 해결했으며 테스트 skip/검증 약화는 없다.
+- TASK-804는 전체 code matrix·Security 401·예상 밖 Exception fallback·신규 Endpoint 및 전체 validation/error regression 책임을 유지한다. TASK-816은 이번 두 mapped 500의 불일치 처리 결과를 최종 주요 Backend/Flutter 회귀 및 AUD-01~13 상호 정합성·문서·잔여 결함 검토에 연결해야 한다. AUD-12→TASK-814의 UTC 수정·기존 데이터 판단과 TASK-710/711/908 실제 E2E 책임도 유지한다. **TASK-804/814/816 및 모든 체크박스는 `[ ]` 등 기존 상태 그대로이며 최종 회귀 단계로 자동 진행하지 않는다.** `main`과 기존 검토/AUD 기록을 보존하고 Git add/commit/push·branch/reset/stash/clean/checkout 없이 보고 후 중단한다.
+
 ### TASK-816 권장 수정 순서와 독립 검증
 
 | 순서 | 작업 그룹 | 대상 | 검증 초점 |
@@ -778,7 +802,7 @@ A안을 후속 구현의 최소 방향으로 제안한다. 후보는 `ErrorCode.
 10. 모든 필수 결함의 처리와 검증이 완료된 경우에만 TASK-816을 `[x]`로 변경한다. 등록·부분 수정·자동 테스트 통과만으로 완료하지 않는다.
 
 - TASK-814: AUD-12 및 UTC 관련 문서 불일치의 구현·검증 책임을 유지한다. TASK-816은 해당 처리 결과·검증 근거를 연결하며 중복 구현하거나 TASK-814를 대신 완료 처리하지 않는다.
-- TASK-804: 두 Controller의 500 형식 수정·집중 검증은 TASK-816 후속 범위이며, 전체 API 오류 matrix·Security/401·예상 밖 Exception 처리와 최종 regression은 TASK-804 책임을 유지한다. 위 [API 500 검토](#api-500-오류-응답-계약-검토-2026-10-30)는 설계 권고이며 두 Task의 완료를 뜻하지 않는다.
+- TASK-804: 두 Controller의 500 형식 수정·집중 검증 결과는 위 [A안 구현 결과](#api-500-a안-구현-결과-2026-10-30)에 연결한다. 전체 API 오류 matrix·Security/401·예상 밖 Exception 처리와 최종 regression은 TASK-804 책임을 유지하며, 이번 집중 검증은 TASK-804/816 완료를 뜻하지 않는다.
 - TASK-710: 실제 iPhone Notification 수신·tap 검증 책임과 현재 상태를 유지한다.
 - TASK-711: Notification 최종 E2E·regression 검증 책임과 현재 상태를 유지한다. 그룹별 방지 테스트는 이 최종 검증을 대체하지 않는다.
 - TASK-908: 실제 버스 탑승·하차 알림 E2E 검증 책임과 현재 상태를 유지한다.

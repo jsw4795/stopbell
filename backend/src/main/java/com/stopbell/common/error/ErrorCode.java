@@ -24,7 +24,8 @@ public enum ErrorCode {
     BOARDING_TARGET_NOT_AHEAD(HttpStatus.CONFLICT, "Boarding target cannot be verified ahead."),
     BOARDING_RECONFIRM_REQUIRED(HttpStatus.CONFLICT, "A suspended session with the same vehicle and target is required."),
     BOARDING_TRACKING_UNSUPPORTED(HttpStatus.CONFLICT, "Boarding tracking is not supported by verified evidence."),
-    INVALID_REQUEST(HttpStatus.BAD_REQUEST, "Request is invalid.");
+    INVALID_REQUEST(HttpStatus.BAD_REQUEST, "Request is invalid."),
+    INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "An internal server error occurred.");
 
     private final HttpStatus httpStatus;
     private final String message;

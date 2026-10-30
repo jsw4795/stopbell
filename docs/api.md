@@ -524,6 +524,17 @@ TASK-906의 Backend FCM data payload는 아래처럼 기존 ALARM_EVENT와 구�
 
 V1 Error Response는 `code`, `message` 두 필드만 사용한다. `timestamp`, `path`, `status`, trace/request ID, field error 또는 stack trace는 포함하지 않는다.
 
+`DeviceController`와 `BoardingSessionController`의 Controller-local Handler가 처리하는 `DataAccessException`·`TransactionException` 계열의 영속성 실패는 `500 Internal Server Error`, `Content-Type: application/json`과 다음 고정 응답을 반환한다. 원본 예외 message/cause, SQL·제약 이름 및 민감정보는 응답에 포함하지 않는다.
+
+```json
+{
+  "code": "INTERNAL_SERVER_ERROR",
+  "message": "An internal server error occurred."
+}
+```
+
+이는 두 Handler의 지정된 예외에 한정한 계약이다. 다른 Controller의 모든 500이나 Spring Security 401이 이미 같은 형식이라는 의미는 아니며, 전체 오류 형식과 예상 밖 Exception의 fallback은 TASK-804의 후속 검증 범위다. 500은 DB 미저장이나 rollback 완료를 보장하지 않으므로 기존 요청 identity와 commit 결과 재확인 정책을 유지한다.
+
 Alarm API의 error code와 HTTP status는 다음과 같다.
 
 | Code | HTTP status | 의미 |

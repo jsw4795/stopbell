@@ -51,10 +51,13 @@ import com.stopbell.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -62,12 +65,14 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -1473,6 +1478,86 @@ class BoardingSessionApiIntegrationTest {
         return new SeoulBusVehicleDetailResponse(new SeoulBusVehicleDetailResponse.Header("0", null),
                 new SeoulBusVehicleDetailResponse.Body(List.of(new SeoulBusVehicleDetailItem(
                         "vehicle-id", NUMBER, stop, order, flag, liveDataTime(), null, null))));
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("재확인 HTTP의 실제 Event FK 실패는 안전한 JSON 500과 Session·Event rollback을 보장한다")
+    void report_database_failure_over_http_safely(CapturedOutput output) throws Exception {
+        long id = aud08Suspended(2);
+        device(owner);
+        device(owner);
+        var before = BoardingTrackingSnapshot.from(sessions.findById(id).orElseThrow());
+        var completed = new AtomicReference<Integer>();
+        doReturn(aud08Start(1)).when(validator).validate(anyLong(), anyString(), nullable(String.class));
+        doAnswer(invocation -> {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    completed.set(status);
+                }
+            });
+            NotificationEvent event = invocation.getArgument(0);
+            entityManager.persist(event);
+            entityManager.flush();
+            jdbc.update("update notification_events set user_id=-1 where id=?", event.getId());
+            return event;
+        }).when(events).saveAndFlush(any(NotificationEvent.class));
+
+        var result = mvc.perform(auth(reconfirmRequest(id, 1, "ref"), owner)).andReturn();
+
+        assertSafePersistenceFailure(result, output, "DataIntegrityViolationException");
+        assertThat(completed.get()).isEqualTo(TransactionSynchronization.STATUS_ROLLED_BACK);
+        assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+        assertThat(before.matches(sessions.findById(id).orElseThrow())).isTrue();
+        assertThat(sessions.count()).isEqualTo(1);
+        assertThat(events.count()).isZero();
+        assertThat(deliveries.count()).isZero();
+        assertThat(runtime.isReady(before, UTC_NOW.plusSeconds(20))).isFalse();
+        for (var device : devices.findAll()) {
+            assertThat(output.getAll()).doesNotContain(device.getInstallationId(), device.getCurrentPushTargetId(),
+                    device.getInstallationCredentialHash());
+        }
+    }
+
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    @DisplayName("조회 HTTP의 TransactionException은 원문과 cause 없이 같은 JSON 500을 반환한다")
+    void report_transaction_failure_over_http_safely(CapturedOutput output) throws Exception {
+        long id = aud08Suspended(2);
+        var before = BoardingTrackingSnapshot.from(sessions.findById(id).orElseThrow());
+        String privateDetail = "SQL SELECT private-table SQLState=HY000 constraint=private-constraint "
+                + "installation=private-installation FID=private-target credential=private-credential "
+                + "userId=private-user JWT=private-jwt refresh=private-refresh";
+        com.stopbell.boarding.service.BoardingNotificationService targetNotifications =
+                org.springframework.test.util.AopTestUtils.getUltimateTargetObject(notifications);
+        doThrow(new TransactionSystemException(privateDetail, new IllegalStateException("private-cause")))
+                .when(targetNotifications).preparationStatus(id);
+
+        var result = mvc.perform(auth(get("/api/v1/boarding-sessions/" + id), owner)).andReturn();
+
+        assertSafePersistenceFailure(result, output, "TransactionSystemException");
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(privateDetail, "private-cause");
+        assertThat(output.getAll()).doesNotContain(privateDetail, "private-cause", "private-table",
+                "private-constraint", "private-installation", "private-target", "private-credential",
+                "private-user", "private-jwt", "private-refresh");
+        assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+        assertThat(before.matches(sessions.findById(id).orElseThrow())).isTrue();
+    }
+
+    private void assertSafePersistenceFailure(MvcResult result, CapturedOutput output, String exceptionType) throws Exception {
+        assertThat(result.getResponse().getStatus()).isEqualTo(500);
+        assertThat(result.getResponse().getContentType()).isEqualTo("application/json");
+        String body = result.getResponse().getContentAsString();
+        var error = json.readTree(body);
+        assertThat(error.propertyNames()).containsExactlyInAnyOrder("code", "message");
+        assertThat(error.get("code").asString()).isEqualTo("INTERNAL_SERVER_ERROR");
+        assertThat(error.get("message").asString()).isEqualTo("An internal server error occurred.");
+        assertThat(body).doesNotContain("SQLState", "SQLSTATE", "stackTrace", exceptionType,
+                "fk_notification_events_user_id", "uk_notification_deliveries_event_device");
+        assertThat(output.getAll()).contains("Boarding persistence failed: " + exceptionType)
+                .doesNotContain("fk_notification_events_user_id", "uk_notification_deliveries_event_device",
+                        "update notification_events set user_id=-1");
     }
 
     private String createOutcome(String id) {

@@ -354,6 +354,31 @@ void main() {
       },
     );
   }
+  test(
+    'HTTP 500 preserves original UUID until explicit retry resolves creation',
+    () async {
+      await start();
+      api.onCreate = () async => throw const BoardingSessionException(
+        SessionFailure.http,
+        statusCode: 500,
+        code: 'INTERNAL_SERVER_ERROR',
+      );
+      await create();
+      final original = Map.of(api.creations.single);
+      expect(c.creationState, BoardingCreationState.outcomeUnknown);
+      expect(c.pending!.clientRequestId, original['clientRequestId']);
+      expect(storage.records, hasLength(1));
+      await c.recover();
+      expect(api.creations, hasLength(1));
+      expect(c.pending!.clientRequestId, original['clientRequestId']);
+      api.onCreate = () async => sessionFixture();
+      await c.retryCreation();
+      expect(api.creations, hasLength(2));
+      expect(api.creations.last, original);
+      expect(c.creationState, BoardingCreationState.resolved);
+      expect(storage.records, isEmpty);
+    },
+  );
   test('a retry 4xx never erases an earlier uncertain POST identity', () async {
     await start();
     api.onCreate = () async =>

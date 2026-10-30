@@ -70,6 +70,23 @@ void main() {
     expect(f.devices.requests[1], pending['payload']);
     expect(jsonDecode(f.persistence.value!)['pending'], isNull);
   });
+  test('500은 pending을 거부 처리하지 않고 같은 payload로 재시도한다', () async {
+    final f = PushFixture();
+    await f.initialize();
+    addTearDown(f.auth.dispose);
+    f.devices.mutation = (_, _) async =>
+        throw const DeviceApiException(500, null);
+    expect(await f.service.synchronize(), PushReadiness.backendFailed);
+    final pending = jsonDecode(f.persistence.value!)['pending'];
+    expect(pending['rejected'], isNot(true));
+    expect(f.devices.requests, hasLength(1));
+    f.devices.mutation = null;
+    expect(await f.service.synchronize(), PushReadiness.ready);
+    expect(f.devices.requests, hasLength(2));
+    expect(f.devices.requests.last, pending['payload']);
+    expect((await f.storage.initialize()).pending, isNull);
+    expect(f.backend.refreshCalls, 0);
+  });
   test('일시 실패 후 FID 변경은 기존 intent 복구 뒤 새 revision을 저장한다', () async {
     final f = PushFixture();
     await f.initialize();

@@ -224,6 +224,52 @@ void main() {
       );
     });
   }
+  for (final entry in {
+    'empty': ('', null),
+    'json': (
+      jsonEncode({
+        'code': 'INTERNAL_SERVER_ERROR',
+        'message': 'An internal server error occurred.',
+      }),
+      'INTERNAL_SERVER_ERROR',
+    ),
+    'unknown': (
+      jsonEncode({
+        'code': 'UNKNOWN_SERVER_ERROR',
+        'message': 'private-provider',
+      }),
+      'UNKNOWN_SERVER_ERROR',
+    ),
+  }.entries) {
+    test(
+      'create 500 ${entry.key} preserves uncertainty and original request UUID',
+      () async {
+        respond = (_) async => http.Response(entry.value.$1, 500);
+        await expectLater(
+          client.create(body, generation: auth.generation, current: current),
+          throwsA(
+            isA<BoardingSessionException>()
+                .having(
+                  (error) => error.failure,
+                  'failure',
+                  SessionFailure.http,
+                )
+                .having((error) => error.statusCode, 'status', 500)
+                .having((error) => error.code, 'code', entry.value.$2)
+                .having((error) => error.uncertain, 'uncertain', true)
+                .having(
+                  (error) => error.toString(),
+                  'safe error',
+                  isNot(contains('private-provider')),
+                ),
+          ),
+        );
+        expect(requests, hasLength(1));
+        expect(jsonDecode(requests.single.body), body);
+        expect(jsonDecode(requests.single.body)['clientRequestId'], uuid);
+      },
+    );
+  }
   for (final malformed in [
     '{',
     jsonEncode({'id': 123}),

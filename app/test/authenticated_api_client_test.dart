@@ -314,6 +314,53 @@ void main() {
   }
 
   test(
+    'JSON 500 preserves authentication and token pair without POST replay',
+    () async {
+      final backend = FakeBackend();
+      final storage = FakeStorage(oldPair);
+      final auth = await session(storage, backend);
+      addTearDown(auth.dispose);
+      final generation = auth.generation;
+      var sends = 0;
+      final errorBody = jsonEncode({
+        'code': 'INTERNAL_SERVER_ERROR',
+        'message': 'An internal server error occurred.',
+      });
+      final transport = MockClient((request) async {
+        sends++;
+        expect(request.method, 'POST');
+        expect(request.body, '{"value":1}');
+        expect(
+          request.headers['authorization'],
+          'Bearer ${oldPair.accessToken}',
+        );
+        return http.Response(errorBody, 500);
+      });
+      addTearDown(transport.close);
+      final client = AuthenticatedApiClient(
+        apiBaseUrl: baseUrl,
+        authSession: auth,
+        client: transport,
+      );
+
+      final response = await client.request(
+        'POST',
+        '/api/v1/fixture',
+        body: '{"value":1}',
+      );
+
+      expect(response.statusCode, 500);
+      expect(response.body, errorBody);
+      expect(sends, 1);
+      expect(backend.calls, 0);
+      expect(auth.state, AuthState.authenticated);
+      expect(auth.generation, generation);
+      expect(auth.accessToken, oldPair.accessToken);
+      expect(storage.pair, same(oldPair));
+      expect(storage.pair!.refreshToken, oldPair.refreshToken);
+    },
+  );
+  test(
     '401 refreshes then retries once with rotated token, including a retry 401',
     () async {
       final backend = FakeBackend()..refreshResult = () async => newPair;

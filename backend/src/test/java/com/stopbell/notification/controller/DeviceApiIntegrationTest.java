@@ -536,7 +536,14 @@ class DeviceApiIntegrationTest {
             deletion.get(10, TimeUnit.SECONDS);
             MvcResult response = registration.get(10, TimeUnit.SECONDS);
             assertThat(response.getResponse().getStatus()).isEqualTo(500);
-            assertThat(response.getResponse().getContentAsString()).isEmpty();
+            assertThat(response.getResponse().getContentType()).isEqualTo("application/json");
+            JsonNode error = JSON.readTree(response.getResponse().getContentAsString());
+            assertThat(error.propertyNames()).containsExactlyInAnyOrder("code", "message");
+            assertThat(error.get("code").asString()).isEqualTo("INTERNAL_SERVER_ERROR");
+            assertThat(error.get("message").asString()).isEqualTo("An internal server error occurred.");
+            assertThat(response.getResponse().getContentAsString())
+                    .doesNotContain(installation, target, CREDENTIAL, hash(CREDENTIAL), "fk_devices_user_id",
+                            "SQLState", "SQLSTATE", "Hibernate", "stackTrace", "DataIntegrityViolationException");
         }
         assertThat(devices.findByInstallationId(installation)).isEmpty();
         assertThat(output.getAll()).contains("Device persistence failed: DataIntegrityViolationException")

@@ -1,5 +1,7 @@
 package com.stopbell.notification.controller;
 
+import com.stopbell.common.error.ApiErrorResponse;
+import com.stopbell.common.error.ErrorCode;
 import com.stopbell.notification.dto.DeviceResponse;
 import com.stopbell.notification.dto.DeviceStateResponse;
 import com.stopbell.notification.dto.DisableDeviceRequest;
@@ -67,9 +69,11 @@ public class DeviceController {
     }
 
     @ExceptionHandler({DataAccessException.class, TransactionException.class})
-    public ResponseEntity<Void> handlePersistenceFailure(Exception exception) {
+    public ResponseEntity<ApiErrorResponse> handlePersistenceFailure(Exception exception) {
         // JDBC exception messages can include raw UUID/FID values. Do not log the cause.
         log.error("Device persistence failed: {}", exception.getClass().getSimpleName());
-        return ResponseEntity.internalServerError().build();
+        ErrorCode code = ErrorCode.INTERNAL_SERVER_ERROR;
+        return ResponseEntity.status(code.getHttpStatus())
+                .body(new ApiErrorResponse(code.name(), code.getMessage()));
     }
 }
