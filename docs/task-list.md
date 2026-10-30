@@ -311,6 +311,310 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
   - 목적: 종합 감사에서 발견한 AUD-01~AUD-13을 중요도에 따라 검토·수정하고 관련 테스트와 문서를 보강한다. 하나의 상위 Task로 관리하며 실제 수정·필수 검증 완료 전까지 `[ ]`를 유지한다.
   - 등록 범위 (2026-10-29): Task와 작업 계획만 추가한다. 이번 등록은 코드·Migration·테스트·Dependency·DB 변경이나 실제 Provider 호출·FCM 발송을 포함하지 않으며, 후속 지시 없이 수정에 착수하지 않는다. 기존 Task 번호와 완료 상태를 유지한다.
 
+### TASK-804 API 오류 계약 분석 및 구현 계획 (2026-10-30)
+
+**분석 전용 결과: A안(기존 GlobalExceptionHandler·Security 경계의 최소 보강, 두 Controller-local Handler 유지)을 추천한다.** 기준은 `main`, HEAD `47493ea3ef3f70d37d258d81d90521f7bb6e6f3d`이며 시작 시 tracked/untracked 변경은 없었다. 이 절만 추가하며 TASK-804 `[ ]`, TASK-814 `[x]`, TASK-816 `[x]`와 다른 Task 상태·기존 감사/완료 기록을 유지한다. 아래 권고는 구현·새 정책 확정·HTTP 실행 검증을 뜻하지 않는다.
+
+#### 조사 범위와 확인 수준
+
+Owner 문서 `api.md` §4~6, `architecture.md`의 인증·Client 복구·Device/Boarding transaction 경계, `requirements.md`의 인증/장애/보안, 관련 Domain/Package/개발·로컬 실행 규칙, ADR-005·010·012 및 기존 TASK-804/814/816 기록을 대조했다. Java 제품의 모든 HTTP Controller와 공통 오류/보안 설정, 인증·Domain Service/DTO, Flutter의 아래 Client와 호출 측 복구 정책, 기존 테스트 소스를 조사했다. devlog는 근거로 사용하지 않았다.
+
+**이 절의 HTTP 상태·Content-Type·본문은 모두 ‘정적 분석상 예상’이다. 이번 HTTP 요청·테스트·build/compile 실행은 0개다.** 기존 테스트의 assertion 존재와 과거 실행 기록은 이번 실행 결과와 구분한다. TASK-816의 두 local 500 집중 검증 및 Flutter 회귀, TASK-814 완료 결과를 재실행하거나 다시 완료 처리하지 않는다. Servlet error dispatch, 실제 JSON coercion/직렬화와 content negotiation은 후속 실행 acceptance다.
+
+프레임워크 판단에는 로컬 캐시의 Spring WebMVC 7.0.9, Spring Security 7.1.1, Spring Boot 4.1.1 및 Google API Client 2.9.0/HTTP Client 2.0.0 바이트코드를 읽기 전용으로 확인했다. Dependency resolution/다운로드는 하지 않았다. `BearerTokenAuthenticationEntryPoint`·`BearerTokenAccessDeniedHandler`는 header/status만 설정하며 JSON을 쓰지 않는다. `ResponseStatusExceptionResolver`는 `sendError`를 사용하고 `BasicErrorController`/`DefaultErrorAttributes`는 별도 기본 오류 경로다. 이 근거도 실제 Servlet HTTP 응답을 관측한 것은 아니다.
+
+#### 전체 Endpoint 목록
+
+제품 Controller는 6개, 명시적 HTTP mapping은 20개다. 모두 아래 목록에 포함하며 동일 GET의 query 모드는 별도 mapping으로 세지 않는다. 운영 health 1개와 프레임워크 `/error`는 별도 경계다. GET의 암시적 HEAD/OPTIONS 처리는 MVC 검증에 포함한다.
+
+| Controller | 실제 Endpoint | 주요 실패 경계 |
+| --- | --- | --- |
+| AuthController | `POST /auth/google` | body/Google credential 400·401, 검증 Infrastructure 503, 로그인 DB/Token 발급 500 후보 |
+| AuthController | `POST /auth/refresh` | body 400, 유효하지 않음/만료/재사용 401, DB/발급 500 후보 |
+| AuthController | `POST /auth/logout` | body 400, DB 500 후보; 읽을 수 있는 body의 없음/null/blank Token은 204 |
+| AlarmController | `POST /api/v1/alarms` | validation 400, User 소실 401, occurrence 404, Domain 400, 미처리 500 |
+| AlarmController | `GET /api/v1/alarms` | JWT/subject, DB·response mapping 실패 |
+| AlarmController | `GET /api/v1/alarms/{alarmId}` | 타입 400, 부재/다른 owner 404, DB·mapping 실패 |
+| AlarmController | `POST /api/v1/alarms/{alarmId}/activate` | 타입 400, 부재/다른 owner 404, DB·상태 변경 실패 |
+| AlarmController | `POST /api/v1/alarms/{alarmId}/deactivate` | 타입 400, 부재/다른 owner 404, DB·상태 변경 실패 |
+| AlarmController | `DELETE /api/v1/alarms/{alarmId}` | 타입 400, 부재/다른 owner 404, DB·transaction 실패 |
+| BusRouteController | `GET /api/v1/bus-routes?query=...` | 누락/blank 400, DB·mapping 실패; 검색 결과 없음은 200 빈 배열 |
+| BusRouteController | `GET /api/v1/bus-routes/{routeId}/stops` | 타입/0 이하 400, Route 404, 빈 traversal invariant 실패 |
+| BoardingCandidateController | `GET /api/v1/bus-routes/{routeId}/boarding-candidates?targetStopOccurrenceId=...&boardingStopOccurrenceId=...` | 필수 query/ID 400, metadata 404, 전체 Provider 실패 503 |
+| DeviceController | `POST /api/v1/devices` | body/header 400, credential 403, ownership/platform/revision/target 409, local 500 |
+| DeviceController | `GET /api/v1/devices/{installationId}` | UUID/header 400, credential 403, 부재 404, local 500 |
+| DeviceController | `POST /api/v1/devices/disable` | body/header 400, credential 403, 부재/다른 owner 404, generation/revision 409, local 500 |
+| BoardingSessionController | `POST /api/v1/boarding-sessions` | body 400, User 401, metadata 404, candidate/request/open-session 409, Provider 503, local 500 |
+| BoardingSessionController | `GET /api/v1/boarding-sessions/{sessionId}` | 타입/0 이하 400, User 401, 부재/다른 owner 404, local 500 |
+| BoardingSessionController | `GET /api/v1/boarding-sessions?scope=current` 또는 `?clientRequestId={uuid}` | query 조합/중복/UUID 400, User 401, local 500; 조회 없음은 200 빈 배열 |
+| BoardingSessionController | `POST /api/v1/boarding-sessions/{sessionId}/reconfirm` | body/ID 400, User 401, owner/metadata 404, 상태/revision/candidate 409, Provider 503, local 500 |
+| BoardingSessionController | `POST /api/v1/boarding-sessions/{sessionId}/cancel` | body/ID 400, User 401, 부재/다른 owner 404, revision 409, local 500 |
+| Actuator (제품 Controller 아님) | `GET /actuator/health` | 공개 health; DOWN의 503 health body는 Application Domain 오류와 별개, TASK-807 소유 |
+
+`/auth/*`는 위 POST와 health만 permitAll이고 Application API는 모두 JWT 필수다. permitAll POST라도 잘못된 Bearer header를 함께 보내면 Resource Server filter가 Controller보다 먼저 거부할 수 있다. Notification/FCM·metadata bootstrap·scheduler 자체의 HTTP Controller는 없다. `/error`는 Boot 자동 오류 처리 경로이며 공개 Application Endpoint로 새로 추가된 것이 아니다.
+
+#### 현재 오류 처리 구조와 우선순위
+
+1. Security filter가 Bearer parsing·JWT 검증·인가를 수행한다. JWT 실패는 filter의 EntryPoint, 미인증 보호 요청은 ExceptionTranslationFilter의 EntryPoint, 인증된 인가 거부는 AccessDeniedHandler 경로다. Controller Advice가 이 filter 경계의 오류를 자동 처리하지 않는다.
+2. MVC가 Controller를 선택하고 argument binding/body parsing/`@Valid`를 수행한다. Controller-local `@ExceptionHandler`가 우선하며 Device·Boarding의 `DataAccessException`/`TransactionException`만 안전한 고정 JSON 500으로 처리한다. local Handler는 `ApiException`이나 임의 RuntimeException 전체를 처리하지 않는다.
+3. `GlobalExceptionHandler`는 `ApiException`의 enum HTTP/code와 exception message를 반환한다. 현재 custom message를 주는 제품 호출은 Alarm의 predecessor/successor 고정 문구다. 나머지 모든 예외 message를 그대로 노출하는 구조는 아니다. 단, 향후 `ApiException(code, rawMessage)` 사용은 안전성을 별도로 확인해야 한다.
+4. Global validation Handler는 `MethodArgumentNotValidException`, `HttpMessageNotReadableException`, `MissingServletRequestParameterException`, `MethodArgumentTypeMismatchException` 네 종류만 400 `INVALID_REQUEST`로 변환한다.
+5. 세 인증 예외의 `@ResponseStatus`와 Service의 `ResponseStatusException(401, "User not found")`는 위 Handler 대상이 아니다. 기본 Resolver/sendError로 넘어간다. 미처리 Runtime/DB/transaction/serialization 실패는 현재 공통 JSON 500이 보장되지 않는다. Handler 자체 실패도 다른 Handler가 반드시 다시 처리한다고 보장할 수 없다.
+
+근거: [공통 Handler](../backend/src/main/java/com/stopbell/common/error/GlobalExceptionHandler.java), [응답 DTO](../backend/src/main/java/com/stopbell/common/error/ApiErrorResponse.java), [Security 설정](../backend/src/main/java/com/stopbell/common/config/SecurityConfiguration.java), [Device local Handler](../backend/src/main/java/com/stopbell/notification/controller/DeviceController.java), [Boarding local Handler](../backend/src/main/java/com/stopbell/boarding/controller/BoardingSessionController.java). `ApiErrorResponse`는 이미 `code/message` 두 필드이므로 DTO 확장은 필요 없다.
+
+#### 구현된 ErrorCode Matrix
+
+아래 22개가 현재 enum의 전부다. 각 message의 원문은 [ErrorCode](../backend/src/main/java/com/stopbell/common/error/ErrorCode.java)가 소유하며 아래 표는 의미/도달 경로를 비교한다. ‘유지’는 정적 구조가 계약과 맞는다는 뜻이며 모든 HTTP 조합의 이번 실행 통과를 뜻하지 않는다.
+
+| 구현된 Code | HTTP | 실제 사용 조건/영역 | 판단 |
+| --- | ---: | --- | --- |
+| `INVALID_REQUEST` | 400 | 네 binding/validation 예외, Route query/양의 ID, Device strict DTO/header/UUID/counter, Boarding DTO/ID/query | 유지·경계별 shape 검증 보강 |
+| `INVALID_ALARM_REQUEST` | 400 | 첫/마지막 occurrence에 불가능한 before/after 옵션 | 구체적 안전 message 유지 |
+| `ALARM_NOT_FOUND` | 404 | Alarm 상세/활성/비활성/삭제의 부재 또는 다른 owner | 정보 비노출 404 유지 |
+| `BUS_ROUTE_NOT_FOUND` | 404 | Stop/후보 조회·세션 검증의 Route 부재 | 유지 |
+| `TARGET_STOP_OCCURRENCE_NOT_FOUND` | 404 | Alarm/후보/세션 검증의 occurrence 부재 | stale 선택 복구 의미 유지 |
+| `DEVICE_CREDENTIAL_INVALID` | 403 | 형식은 유효하나 저장 hash와 다른 credential | Security 403과 구분, 유지 |
+| `DEVICE_NOT_FOUND` | 404 | 상태/disable 부재 또는 disable 다른 owner | 유지 |
+| `DEVICE_OWNERSHIP_CONFLICT` | 409 | generation/명시적 이전 intent 불일치 | revision 검사 전 권한 의미 유지 |
+| `DEVICE_PLATFORM_CONFLICT` | 409 | 기존 installation platform 변경 | 유지 |
+| `DEVICE_REGISTRATION_STALE` | 409 | 저장 revision보다 낮은 mutation | 유지 |
+| `DEVICE_REVISION_CONFLICT` | 409 | 같은 revision에 다른 결과 상태 | 동일 결과의 idempotent 성공과 구분 |
+| `DEVICE_PUSH_TARGET_CONFLICT` | 409 | 다른 installation의 현재 FID 점유·식별된 UNIQUE 경합 | 미분류 DB 오류로 확대 금지 |
+| `BOARDING_SESSION_NOT_FOUND` | 404 | 상세/변경 대상 부재 또는 다른 owner | 유지 |
+| `BOARDING_CANDIDATE_CHANGED` | 409 | reference 만료/소실, identity·시각·metadata 불일치 | 후보 재조회 의미 유지 |
+| `BOARDING_SESSION_CONFLICT` | 409 | 다른 미종료 세션 존재 | 자동 대체 금지 유지 |
+| `BOARDING_REQUEST_CONFLICT` | 409 | 같은 User/UUID의 다른 fingerprint | 원래 UUID/body 보존 |
+| `BOARDING_REVISION_CONFLICT` | 409 | mutation/reconfirm snapshot revision 불일치 | 상세 조회 복구 유지 |
+| `BOARDING_TARGET_NOT_AHEAD` | 409 | enum 존재, 현재 제품 throw 지점 없음 | 이전 Backend 호환 코드; 새 사용/삭제 불필요 |
+| `BOARDING_RECONFIRM_REQUIRED` | 409 | 같은 차량·목적/상태 재확인 조건 불충족 | terminal/상태 검증 유지 |
+| `BOARDING_TRACKING_UNSUPPORTED` | 409 | 검증되지 않은 TAGO 지원·운행 종료 등 추적 근거 미지원 | Provider 장애 503과 구분 |
+| `TRANSIT_TEMPORARILY_UNAVAILABLE` | 503 | 후보 roster 실패 및 생성/재확인 Provider 재검증 실패 | upstream 401도 Client 인증 401로 전파하지 않음 |
+| `INTERNAL_SERVER_ERROR` | 500 | Device·Boarding local persistence Handler만 현재 사용 | 고정 message·두 필드 JSON 보존, 공통 fallback 후보로 재사용 |
+
+**미구현:** `UNAUTHENTICATED`, `METADATA_UNAVAILABLE`, Security 일반 권한 거부용 code, Google 인증 Infrastructure 503용 code는 현재 enum에 없다. TASK-804 bullet에 적힌 앞의 두 이름은 구현 사실이 아니다. Route/Stop API는 local metadata DB를 조회하며 요청마다 metadata Provider를 호출하지 않는다. metadata 부재는 확정된 404, 빈 traversal은 `IllegalStateException`인 invariant 실패다. 아직 별도 metadata 일시 장애 판정/HTTP 정책이 없으므로 `METADATA_UNAVAILABLE`을 선행 추가하지 않는다. Transit Provider 장애를 이 이름으로 중복 매핑하거나 모든 DB 오류를 metadata 503으로 바꾸지 않는다.
+
+#### HTTP 오류 Matrix: 목표와 현재의 차이
+
+이 표의 모든 현재 결과는 **정적 분석상 예상**이다. `JSON 2필드`는 일반 JSON 요청/응답 협상에서의 `ApiErrorResponse`이며 Content-Type의 실제 값과 정확한 key 집합은 후속 테스트로 확인한다. `기본 오류 경로`는 MockMvc의 sendError 후 빈 본문과 실제 Servlet의 error dispatch 응답을 구분해야 한다.
+
+| 영역 | 상황 | 현재 HTTP | 현재 Body / Content-Type | 목표 계약 | 수정 필요 |
+| --- | --- | --- | --- | --- | --- |
+| 공통 MVC | body 없음/깨진 JSON/bean validation/필수 query/Long 변환 실패 | 400 | JSON 2필드 `INVALID_REQUEST` | 동일 400·두 필드 | 주로 테스트 보강 |
+| Alarm | Domain 옵션 위반/부재·다른 owner | 400 / 404 | JSON 2필드·기존 Domain code | 현재 의미 유지 | 구현 불필요 |
+| Alarm | `{alarmId}`가 0/음수지만 Long 변환 성공 | 404 | 조회 결과 `ALARM_NOT_FOUND` | generic 0 이하 ID=400 문구의 path 적용 범위 판단 필요 | 아래 미확정 결정 |
+| Device | credential/리소스/ownership·revision 실패 | 403 / 404 / 409 | JSON 2필드·기존 Device code | 동일 | 구현 불필요 |
+| Boarding | 리소스/상태·UUID·revision 충돌 | 404 / 409 (형식 오류 400) | JSON 2필드·기존 Boarding code | 동일 | 구현 불필요 |
+| Transit | roster·선택 차량 재검증 transport/protocol/upstream 실패 | 503 | JSON 2필드 `TRANSIT_TEMPORARILY_UNAVAILABLE` | 동일·Client 401과 구분 | 구현 불필요 |
+| Security | JWT 없음, compact JWT 오류, 서명 오류, 만료, issuer/필수 exp 검증 실패 | 401 | 기본 EntryPoint는 body/Content-Type 미설정, Bearer challenge | 401 고정 JSON·안전한 challenge | 필요 |
+| Security | Bearer header 형식 오류 | 기본 resolver는 malformed header를 401 `invalid_token` 처리 | 기본 EntryPoint body 미설정 | 기존 상태·header 보존 | 필요·세부 실행 확인 |
+| Security | 인증 성공 후 filter 인가 거부 | 도달하면 403 | 기본 Handler는 body/Content-Type 미설정 | 403·안전한 JSON·challenge | 필요; 현재 실제 권한 rule은 없음 |
+| JWT claim | 서명/issuer/exp는 유효하나 sub 누락·0·문자·Long overflow | filter 통과 가능; extract 시 미처리 실패(500 경로), Route search/stops는 extract 안 함 | 공통 JSON 보장 없음 | 기존 양의 User ID 규칙을 JWT 검증 경계에서 거부하는 401 | 필요 |
+| Auth | Google null/blank/검증 false·서명 실패·subject 없음 | Resolver 단계 401 | `@ResponseStatus` 기본 오류 경로, JSON 계약 없음 | 401 고정 JSON·개인정보 비노출 | 필요 |
+| Auth | Refresh null/blank/unknown/만료/재사용 | Resolver 단계 401 | 위와 동일 | 401 고정 JSON·Rotation 정책 유지 | 필요 |
+| Auth | Google key 조회 등의 원격 IOException | Resolver 단계 503, ERROR 재인가 시 최종 401 위험 | 기본 오류 경로 | 503 고정 JSON·인증 실패와 분리 | 필요·실제 Servlet 확인 |
+| Auth | Google compact token 파싱 실패 | IllegalArgumentException 미처리 500 경로 또는 parse IOException의 503 오분류 가능 | 기본 오류 경로 | credential 실패 401 | 필요·로컬 라이브러리 parser 경계 검증 |
+| Service | JWT User가 DB에서 사라짐(Alarm 생성·Device·Boarding) | Resolver 단계 401 | `ResponseStatusException`의 sendError, JSON 계약 없음 | 401·고정 message, User 정보 비노출 | 필요 |
+| Device/Boarding | 지정된 DataAccess/Transaction 계열 | 500 | 고정 `INTERNAL_SERVER_ERROR` JSON 2필드 | 현재 계약 | 보존·기존 회귀 재사용 |
+| 나머지 Controller/공통 | 예상 밖 Runtime/DB/transaction·metadata invariant 실패 | 미처리 500 경로; public Auth는 ERROR 재인가 위험 | 기본 오류 경로, JSON 2필드 보장 없음 | 고정 안전 JSON 500 | 필요 |
+| MVC 자체 | 미지원 method/media/Accept·알 수 없는 URL | 인증 통과 후 405/415/406/404 후보 | 기본 Resolver/Boot JSON 또는 HTML 등 | 상태·Allow 등 header 보존, 적용할 오류 code는 미확정 | 필요·후속 결정/테스트 |
+| 직렬화/Handler | message write 실패, Handler 재실패, 이미 commit된 응답 | commit 전 500 후보; commit 후 원래 상태/부분 body 유지 가능 | 일관된 body 보장 불가 | commit 전 안전 500, commit 후 재작성 금지 | fallback의 한계 명시 |
+
+유효하지만 다른 owner인 User는 JWT 인증 자체는 성공한다. Alarm·Boarding·Device disable은 확정된 404, installation credential 불일치는 403, Device generation/이전 충돌은 409다. 이들을 Security 일반 403이나 401로 통합하지 않는다. 현재 `anyRequest().authenticated()` 외 role/scope/method-security 인가 rule은 없으므로 실제 제품 Endpoint에 존재하지 않는 Security 권한 거부 경로를 구현된 403 사례로 기록하지 않는다.
+
+#### 발견된 문제와 추천 방향
+
+| ID / 심각도 | 코드 위치·재현 가능한 조건 | 현재 동작과 기대 동작 | 영향 API / Flutter | 최소 수정 방향 |
+| --- | --- | --- | --- | --- |
+| E01 / P2 | `SecurityConfiguration.java:18~35`; 보호 Endpoint의 JWT 누락/실패 | filter가 JSON을 쓰지 않음 → status를 보존한 두 필드 JSON 필요 | 모든 Application API / AuthenticatedApiClient 및 모든 보호 Client | 누락 인증의 exceptionHandling EntryPoint와 Bearer filter EntryPoint를 모두 연결, AccessDeniedHandler도 별도 보강 |
+| E02 / P1 | `JwtConfiguration.java:49~55`, `JwtTokenService.java:60~70`; 올바르게 서명한 sub 누락/비양수/문자/overflow token | issuer/time 검증만 통과, 추출 시 JwtException 또는 추출 없는 API 통과 → 동일 User ID 규칙으로 filter에서 401 | Alarm/Device/Boarding/후보 및 Route 조회 / 보호 Client 전체 | 기존 sub 규칙을 재사용/일치시키는 작은 JWT validator. 모든 JwtException을 global 401로 묶어 발급 장애를 숨기지 않음 |
+| E03 / P1 | 인증 예외 3종, `AlarmService.java:57`, `DeviceService.java:190`, `BoardingSessionService.java:116,349`, Security 설정; public Auth sendError/미처리 실패 | body 미통일, `/error` 재인가가 원래 503/500을 401로 바꿀 위험 → 인증 401·장애 5xx 보존 | Auth·User 검증 API / BackendAuthClient·AuthSession(Refresh 401이면 Pair 삭제) | 인증 예외/기존 Service 401을 명시적으로 ResponseEntity 처리. 제한된 ERROR dispatch 경로도 실제 서버 테스트로 확인 |
+| E04 / P1 | `GoogleIdentityVerifier.java:28~43`; compact token 점 구분 오류 또는 payload 파싱 실패 | `verify(String)`의 IllegalArgumentException은 누락, parse IOException도 원격 I/O와 같은 catch → invalid credential 401·원격 I/O 503 분리 | `/auth/google` / GoogleAuthService·BackendAuthClient | 라이브러리의 로컬 parse 단계와 검증/공개키 I/O 단계를 구분. parse 단계에서만 알려진 parse 예외를 401 처리; 임의 Runtime/원격 장애를 credential 오류로 숨기지 않음 |
+| E05 / P2 | `GlobalExceptionHandler.java:12~32`; Alarm/Route/Auth DB 실패 또는 `BusRouteStopService.java:38~39` 빈 traversal | 공통 고정 JSON 500 없음 → 안전 500 fallback 필요 | local 지정 예외 이외 모든 API / 모든 Client | known HTTP/auth/domain 분류 후 마지막 MVC fallback. local Handler·transaction·서비스 재시도 정책 보존 |
+| E06 / P2 | 같은 Global Handler; 미지원 method/Content-Type/Accept, 잘못된 URL·새 validation 경로 | 기본 오류 body가 섞이고 무조건 catch-all 추가 시 4xx→500 위험 | 전체 MVC / 보호 Client 전체 | 구체적 MVC 예외와 ErrorResponse의 status/header 분류를 먼저 보존. 현재 사용되지 않는 validation 예외를 무차별 400으로 등록하지 않음 |
+| E07 / P2·정책 확인 | `AlarmController.java:43~60`, `AlarmService.java:120~148`; path ID 0/음수 | Long 변환은 성공해 404, Stop/Boarding은 명시적으로 400 | Alarm 상세/활성/비활성/삭제 / AlarmApiClient는 보통 전송 전 양수 검사 | API §5의 ID 문구 범위를 확인한 뒤 최소 guard/테스트. 양의 부재 ID·다른 owner 404는 유지 |
+| E08 / P1 | `app/lib/features/transit/bus_route_stop_screen.dart:154~181`의 Alarm create catch 및 `alarm_detail_screen.dart`의 `_change`/`_confirmDelete`; mutation HTTP 500/503 또는 응답 유실 | create는 status null/transport 실패만 outcomeUnknown, HTTP 5xx는 ‘생성하지 못했습니다’와 재생성 허용. 상세 mutation도 실패 문구와 기존 상태를 유지 → 서버 반영 결과를 단정하지 않고 조회 복구 필요 | Alarm 생성/활성/비활성/삭제 / AlarmApiClient의 호출 화면 | 생성 5xx를 기존 목록 확인·중복 POST 차단 흐름에 연결, 상세는 원래 ID 조회로 결과 확인. 새로운 Alarm UUID/idempotency API는 도입하지 않음 |
+
+E03은 확정된 실서비스 장애 보고가 아니라 우선 실행 검증할 P1 위험이다. Boot의 Security filter registration 기본 dispatcher에는 ERROR가 포함되고 AuthorizationFilter도 error dispatch를 검사한다. 현재 `/error`·ERROR 허용 rule이 없어 public `/auth/*`의 anonymous error dispatch는 `anyRequest().authenticated()`에 걸릴 수 있다. MockMvc는 실제 Container의 error 재진입을 자동 재현하지 않으므로 기존 Auth 503 status assertion만으로 최종 HTTP를 보장할 수 없다. 단순 `/error` URL 전체 permitAll이나 Security filter 전체 비활성화를 권하지 않는다. 필요하면 `DispatcherType.ERROR`와 오류 경로를 제한한 예외만 검토하고 정상 REQUEST 보호·public 오류의 비노출을 함께 검증한다.
+
+E04의 근거는 Google verifier의 `verify(String) → GoogleIdToken.parse → JsonWebSignature.Parser.parse`가 key I/O보다 먼저 실행되고 구분자/형식 검사에서 `checkArgument`를 호출한다는 점이다. 기존 `GoogleIdentityVerifierTest`는 verifier mock의 GeneralSecurityException/IOException/subject 없음만 다루어 실제 parser의 이 구분을 검증하지 않는다. 새 테스트는 가짜 token·로컬 key fixture로 원격 호출 없이 분류를 확인해야 한다.
+
+Bearer resolver의 query/form token 허용은 현재 기본 false다. 따라서 여러 전달 채널의 중복 token에서 생기는 OAuth `invalid_request` 400을 현재 활성 제품 경로로 주장하지 않는다. 향후 writer가 이 오류를 받는 경우에도 401로 강제하지 않는 호환 분기를 검증할 수 있지만, 이를 위해 제품의 query/form token 허용 설정을 켜지 않는다. 헤더 중복/잘못된 scheme의 실제 Container 해석은 후속 HTTP 검증 대상이다.
+
+E08은 Backend body 통일로 새로 생기는 문제가 아니라 이번 분석에서 발견한 기존 복구 경계의 차이다. 사용자가 지정한 ‘500을 확정적 작업 실패로 단정하지 않음’ 조건과 현재 Alarm 화면이 다르므로 자동으로 문서를 현재 코드에 맞추지 않는다. 기존 UUID 없는 Alarm 생성 정책은 유지하면서 생성 5xx의 목록 확인과 원래 ID의 mutation 결과 조회를 최소 보완하는 방향을 제안한다. 이번에는 Flutter 제품/테스트를 수정하지 않는다.
+
+#### Validation 400의 보존/누락 구분
+
+| 입력 축 | 현재 처리 | 다음 구현의 검증/판단 |
+| --- | --- | --- |
+| 전체 `@RequestBody` 누락·빈 본문·JSON syntax/불가능한 구조 | `HttpMessageNotReadableException` → 400 | Auth를 포함한 JSON Content-Type 요청별 두 필드/고정 message 확인. body literal null과 token 필드 null은 구분 |
+| Alarm target ID 누락/null/0/음수 | `@Valid`의 NotNull/Positive 및 Service guard → 400 | 기존 HTTP 테스트 재사용, Long overflow/타입 변환 경계 보강 |
+| Alarm option 누락/null | JsonCreator가 false로 정규화 | 기존 허용 정책 유지; NotNull을 추가하지 않음 |
+| Device 필수 필드·enum·UUID v4·counter·credential header | JsonNode strict creator·Service 검증 → 400 | 문자열/boolean/실수 counter·Long overflow·음수 거부, 0/Long.MAX_VALUE의 허용 및 ownership counter overflow 규칙 유지 |
+| Boarding UUID/reference·offset 1/2·revision | strict JsonNode creator·Service → 400 | offset 생략=2, 명시적 null/타입 오류 거부, negative/overflow revision과 stale nonnegative revision 409 구분 |
+| Path/query의 Long 변환 실패·필수 query 누락 | type mismatch/missing parameter → 400 | blank/비숫자/overflow·Route/Boarding 양수 guard 확인; Alarm path 비양수는 E07 |
+| Boarding 조회 query | MultiValueMap으로 하나의 key/하나의 value와 scope/current 또는 canonical UUID 검사 | 무query·동시 query·unknown key·반복 value 400, 조회 없음 200 보존 |
+| Google/Refresh token 필드 누락/null/blank | verifier/Service의 인증 실패 → 401 | 무조건 Bean Validation 400으로 바꾸지 않음; 구조가 읽히지 않는 요청은 400 |
+| Logout token 필드 누락/null/blank·만료/없는 token | 정상 DTO가 읽히면 무변경/해당 hash 삭제 후 204 | idempotency 보존; body 자체 누락·깨진 JSON까지 204로 바꾸지 않음 |
+| typed Long/Boolean/String coercion | Alarm/Auth는 typed DTO, Device/Boarding과 달리 전역 strict 정책 없음 | 실제 configured Jackson mapper를 통과한 HTTP로 numeric string/float/boolean 경계 확인. 임의 전역 coercion/unknown-field 정책 도입 금지 |
+| Method validation/필수 header/ConstraintViolation | 현재 Handler 네 종류에 없음; direct parameter constraint/필수 RequestHeader 사용은 현 Controller에 없음 | `HandlerMethodValidationException`은 입력 400과 반환값 검증 500 구분. Jakarta constraint를 DB/Hibernate constraint와 혼동하지 않음. 도달하지 않는 예외를 현재 제품 결함으로 과장하지 않음 |
+
+따라서 실제 사용 중인 body/query/type/Bean Validation 400은 이미 상당 부분 처리한다. 새 `@Validated`·전역 제약 추가나 모든 IllegalArgumentException/ConstraintViolationException의 400 변환은 최소 수정안이 아니다. Generic catch-all만 추가해 기존 MVC 400/404/405/406/415·인증 401/503을 500으로 바꾸는 것이 가장 큰 회귀 위험이다.
+
+#### 500 fallback·보안·Provider 503 권고
+
+- 공통 500 fallback은 필요하다. 두 local persistence Handler는 그대로 두고, global에서 기존 `ApiException`·네 validation 예외·인증 예외·`ResponseStatusException` 및 MVC의 알려진 HTTP 예외를 먼저 분류한다. `ErrorResponse` 또는 `@ResponseStatus`의 HTTP 의미/필요 header를 확인한 뒤에만 미분류 Exception을 `INTERNAL_SERVER_ERROR` 고정 응답으로 처리한다. 모든 Exception을 400으로 바꾸거나 Exception.class 하나로 바로 500을 반환하지 않는다. 원인에 알려진 HTTP 예외가 감싸진 경우도 기존 Resolver와 달라지지 않는지 확인한다.
+- MVC `HttpMessageNotWritableException`/직렬화 실패는 서버 500 영역이다. 오류 응답을 쓰기 전 `response.isCommitted()`를 확인하고 commit 뒤에는 status/body를 재작성하거나 성공/rollback을 단정하지 않는다. Handler 자체 직렬화 실패·filter 외부 실패·Container 오류는 Advice의 완전한 처리 범위가 아니므로 Boot 오류 경로의 최소 보완 여부를 실제 Servlet 검증 뒤 결정한다. catch-all로 `Error`/OOM까지 복구하는 설계를 만들지 않는다.
+- 응답에는 고정 code/message만 사용한다. SQL/table/constraint/stack, Token·Google/Firebase credential·FCM target·내부 User ID·installationId/credential/hash·Provider raw URL/query/body를 넣지 않는다. 새 내부 오류 log도 고정 operation/오류 종류 등 필요한 안전 메타데이터만 사용하고 exception message/cause/Throwable 전체·원문 request/path를 기록하지 않는다. Device/Boarding local 로그와 Hibernate 원문 억제를 유지한다. Bearer challenge의 기본 error_description도 무조건 복사하지 말고 안전한 정적 값과 기존 OAuth 상태 의미로 제한한다. 전체 관측 시스템 설계는 TASK-805 범위다.
+- Provider 전체 실패는 기존 503 `TRANSIT_TEMPORARILY_UNAVAILABLE` 그대로다. upstream 401/403·timeout·HTTP/provider logical/protocol 오류는 Client 인증 실패가 아니다. 정상 EMPTY는 200, detail 일부 실패/deadline의 PARTIAL/HELD도 200이며 이를 모두 503으로 바꾸지 않는다. 선택 차량 생성/재확인의 detail 실패와 identity/state conflict의 기존 503/409 구분도 유지한다.
+- Google 검증 원격 I/O 실패는 503을 유지하되 Transit code를 재사용하지 않는다. 일반 DB DataAccess/Transaction 실패를 자동 503/409로 분류하지 않는다. FCM은 durable worker의 결과/retry 정책이며 현재 HTTP 오류 code 추가 대상이 아니다. Health 503과 metadata 최초 bootstrap/readiness 정책은 TASK-807 책임을 유지한다.
+
+#### Flutter 오류 소비와 호환성
+
+| Client/호출 책임 | 오류 JSON·빈 본문·unknown code와 HTTP 처리 | Timeout/응답 유실·보존 사항 | 제품 수정 판단 |
+| --- | --- | --- | --- |
+| `core/authenticated_api_client.dart` | body를 해석하지 않고 status 401에만 refresh single-flight·최대 1회 동일 요청 replay. 400/403/404/409/500/503은 그대로 반환 | 응답 후/refresh 후/replay 후 generation·current 검사. wrapper timeout 뒤 늦은 401로 refresh/replay하지 않는 기존 수명 유지 | Backend shape 변경만으로 수정 불필요 |
+| `features/auth/backend_auth_client.dart` + `auth_session.dart` | 오류 본문/code를 읽지 않고 status 보존. refresh 401만 현재 Pair 삭제/unauthenticated; 5xx·network/timeout은 Pair 즉시 삭제 안 함 | Auth HTTP 15초, 자동 auth POST 재시도 없음. 늦은 결과·logout/refresh 직렬화·Pair 원자 저장 유지. logout의 명시적 local 종료는 별도 정책 | E03의 status 오분류가 가장 큰 위험. JSON 401/503 조합 회귀 필요 |
+| `features/alarm/alarm_api_client.dart` + 생성/상세 화면 | code/message가 문자열이면 보존, 빈/깨진 body는 nullable fallback. 특정 404 code만 부재/stale target 구분; 다른 4xx/5xx는 일반 실패 | 최초 요청+refresh+replay 전체 15초·finally 무효화. 생성 UUID 계약 없음. 생성 화면은 timeout/파싱 등 status null에서는 목록 확인·자동 create/activate 차단하지만 HTTP 5xx는 그 경로를 타지 않음. 상세 mutation 실패도 자동 결과 조회 없음 | Client body parser 수정 불필요, 호출 화면의 5xx/불확실 mutation 복구 보완 필요(E08). raw message 임의 출력 금지 |
+| `features/notification/device_api_client.dart` + `push_registration_service.dart` | code allowlist만 보존, message는 버림. 정확한 404 `DEVICE_NOT_FOUND`만 null. unknown/empty에도 HTTP status 유지. 4xx definitive, 500/503은 false | 8초·늦은 401 차단. 5xx/timeout/응답 파싱 실패면 pending revision/generation/payload 보존, 다음 상태 조회/동일 intent 복구. 새 revision/body로 blind retry 금지 | `INTERNAL_SERVER_ERROR`를 allowlist에 넣을 필요 없음 |
+| `features/boarding/boarding_session_client.dart` + `boarding_session_controller.dart` | code 문자열 선택 보존, message 버림. 빈/unknown/malformed 오류 body도 HTTP/status 보존. 5xx는 `uncertain=true`, 그 외 HTTP 4xx와 구분 | 15초·늦은 응답 폐기. create UUID/body/login identity를 보존하고 request GET 우선, 조회 0개도 실패 확정 아님. 명시적 동일 요청 재시도, mutation은 상세 GET; 이전 불확실 POST 뒤 4xx도 원래 identity를 지우지 않음 | 수정 불필요 |
+| `features/boarding/boarding_candidate_client.dart` | code/status 선택 보존, 400/404/503을 UI가 구분. unknown/empty는 안전 일반 오류, 서버 raw message 미사용 | 15초·network/timeout/parsing 구분·generation/screen epoch, timeout 뒤 늦은 401 차단 | 수정 불필요 |
+| `features/transit/bus_route_search_client.dart`, `bus_route_stop_client.dart` | error body/code를 읽지 않고 모든 non-200의 status 보존, 일반 안내 | GET 15초, 네트워크/timeout은 상위 UI catch. 두 GET wrapper 자체에는 request-current timeout guard가 없어 같은 로그인에서 늦은 401의 refresh/read replay 가능; mutation은 없음 | body 통일의 필수 변경 아님. 인증 전체 수명 정책 확대 시 별도 판단, 이번에 선행 수정하지 않음 |
+
+Backend의 HTTP status·Domain code·성공 계약을 보존하는 body 통일 자체는 Flutter Client parser 변경을 요구하지 않는다. 다만 E08의 기존 Alarm 화면 불일치는 별도 최소 보완 대상이다. unknown code가 항상 작업 결과 확정 실패를 뜻하는 것은 아니다. 특히 500 JSON을 받았다는 이유로 Device pending이나 Boarding UUID를 지우거나 Alarm 생성 POST를 자동 재전송해서는 안 된다. 기존 TASK-816에 이미 추가된 빈/JSON/unknown 500 회귀를 재사용한다.
+
+#### A/B안 비교 및 추천 구현 순서
+
+| 비교 기준 | A안: 기존 경계 최소 보강 (추천) | B안: 오류 공통 구조 확대 |
+| --- | --- | --- |
+| 계약 누락 해소 | Security writer + Global 명시 매핑/fallback + 기존 JWT/Google 검증 보완으로 주요 누락 해결 | 중앙 resolver/base handler/공통 writer로 더 넓게 통합 가능 |
+| 변경 파일 | 주요 제품 5곳 후보: GlobalExceptionHandler·SecurityConfiguration·ErrorCode·JwtConfiguration·GoogleIdentityVerifier. 작은 Security writer/validator는 필요 시 한정 추가; `/error` 보완은 실행 근거에 따라 조건부 | 앞의 보안/검증 변경에 더해 local Handler 2곳·공통 추상화/기본 오류 경로 등 확대. 정확한 파일 수는 구조 선택 전 확정 불가 |
+| 기존 의미·인증 보안 | local 우선순위·Service/transaction을 유지하기 쉬움. 단, 명시 HTTP 분류를 catch-all보다 먼저 완성해야 함 | 중앙화 과정에서 인증/Domain/local handler 우선순위와 안전 로그가 바뀔 위험 |
+| Flutter·테스트 가능성 | status/code 보존 검증을 작은 단위로 나눌 수 있음 | Client 회귀 범위와 handler 선택 회귀가 넓어짐 |
+| 유지보수 | 기존 6개 Controller 규모에 적합, 약간의 500 응답 생성 중복 허용 | 단일 관리 장점은 있으나 현재 입증된 추상화 필요보다 변경 폭이 큼 |
+
+권장 순서는 다음과 같다. 각 단계는 승인 후 구현할 독립 작업 단위이며 이번에는 실행하지 않는다.
+
+1. **계약의 빈칸만 확정:** 아래 미확정 code/message와 generic ID 범위를 결정하고 `api.md`에 최소 동기화할 내용을 정한다. Domain 오류 의미·Refresh Rotation·Logout은 재설계하지 않는다. `METADATA_UNAVAILABLE`은 별도 의미가 확인되기 전 추가하지 않는 권고를 TASK-804 계획에 반영한다.
+2. **인증 분류와 JSON:** JWT sub validator, Google 로컬 parse/원격 I/O 분리, 세 인증 예외와 현재 ResponseStatusException 401 매핑, Security 401/403 writer를 보강한다. 전달받은 OAuth 오류의 고유 status도 보존한다. Security filter 자체 실패·미인증 보호 접근 두 경로를 각각 검증하고 인증 서비스 장애가 최종 HTTP에서 401로 바뀌지 않는지 확인한다.
+3. **MVC validation/known HTTP 매핑:** 현재 네 validation Handler를 보존하고 실제 도달하는 추가 MVC 예외의 status/header를 먼저 매핑한다. Alarm path ID는 결정된 범위만 보강한다. typed DTO coercion 정책 변경은 별도 근거 없이 포함하지 않는다.
+4. **안전한 마지막 500:** 기존 Domain/auth/MVC 예외 보존 테스트 후 미분류 Runtime/DB/transaction/직렬화에 고정 fallback과 비민감 log를 추가한다. local Handler를 이동/제거하지 않는다. 실제 error dispatch의 남은 누락이 재현될 때만 최소 Boot 오류 경로 보완을 추가한다.
+5. **Alarm 복구·회귀·문서:** E08을 기존 생성 목록 확인/원래 ID 조회 흐름의 작은 작업으로 보완하고 아래 선택 테스트/Client 회귀로 status·shape·비노출·복구 의미를 확인한다. Owner 문서는 승인된 변경 계약만 동기화한다. TASK-804 완료는 구현/관련 검증 성공 뒤 별도로 판단한다. 이번 분석으로 체크하지 않는다.
+
+예상 변경 파일은 위 Backend 제품 후보와 기존 HTTP 테스트들, E08의 `app/lib/features/transit/bus_route_stop_screen.dart`·`app/lib/features/alarm/alarm_detail_screen.dart` 및 대응 Flutter 테스트, `docs/api.md`·`docs/task-list.md`다. JWT validator를 별도 파일로 분리하거나 기존 `JwtTokenService` 검증을 공유할지는 최소 변경 여부로 정한다. Auth 예외 class의 `@ResponseStatus` 제거, `ApiException`/응답 DTO 변경, local Controller 수정, Flutter Client parser 수정은 현재 필수가 아니다. DB Schema/Migration, Dependency, 신규 인증/Identity/권한 모델, 재시도/Rate Limit infrastructure 변경은 필요 없다. 관측된 `/error` 누락을 해결할 작은 클래스/설정과 대응 테스트는 조건부 후보이며 B안의 전면 중앙화를 미리 선택하지 않는다.
+
+#### 다음 구현 단계의 테스트 계획
+
+공통 acceptance는 실제 request binding/filter/handler/serialization을 통과한 HTTP status, JSON Content-Type, 정확한 key 집합 `{code,message}`·고정 안전 값, 금지 필드와 민감 marker 비노출이다. 성공 DTO·204 무본문·Bearer challenge·Allow 등 필요한 header도 보존한다. 서비스 mock은 경계별 예외 주입에만 제한하고 DB commit/rollback 보장의 증거로 사용하지 않는다.
+
+| 대상 클래스/파일 | 재사용할 근거와 추가/선택 Case |
+| --- | --- |
+| `SecurityConfigurationIntegrationTest` | 기존 실제 JWT Encoder/Decoder·MockMvc와 5개 인증 테스트 재사용. JWT 없음/잘못된 compact·서명·issuer·만료·exp 없음/미래 nbf·잘못된 sub(null/0/음수/문자/overflow)의 401 shape/challenge·비노출. Route GET과 User 추출 API 모두 동일 거부. Bearer header syntax/중복 header·비허용 query/form 전달에서 기존 status 보존. writer의 OAuth invalid_request 400 분기는 필요 시 단위 테스트로 별도 확인. 테스트 전용 deny rule로 authenticated 403과 anonymous 401 분기 검증; 제품에 새 role rule 추가 금지 |
+| `JwtConfigurationTest`, `JwtTokenServiceTest` | 기존 시간·issuer/exp 검증, sub 양수/Long 범위와 validator 일치. Token 생성/encode 오류는 401로 위장하지 않음. JWT 값·key 원문 비노출 |
+| `AuthControllerIntegrationTest` | 기존 Google 로그인/Refresh Rotation·다른 Session 보존·재사용/만료/Logout 사례 재사용, 오류 두 필드/Content-Type 보강. `{}`/null/blank token의 기존 Google·Refresh 401, Logout 204; body 누락/깨진 JSON은 400. Google Infrastructure 503·로그인/Refresh DB/발급 500과 User 소실 401의 안전 shape·민감 message 비노출 |
+| `GoogleIdentityVerifierTest` | 실제 로컬 parser를 통과하는 compact 구분자/잘못된 Base64·header/payload 형식의 credential 401과 원격 key fetch IOException 503 분리. key/network fixture는 in-memory 또는 loopback stub만 사용. 기존 일반 verifier mock만으로 parse 분리를 검증했다고 주장하지 않음 |
+| `AlarmServiceIntegrationTest` | 기존 `reject_invalid_target_stop_occurrence_id`, `reject_missing_or_malformed_request_body`, Domain before/after·404/ownership HTTP 재사용. path/query 타입·overflow, 결정된 비양수 path ID 정책, 삭제된 User 401, Runtime/DB/transaction 주입 500과 정확한 두 필드·안전 log. 양의 없는 ID·다른 owner는 404 유지 |
+| `BusRouteSearchIntegrationTest`, `BusRouteStopIntegrationTest` | missing/blank query·invalid/비양수/overflow routeId 400, missing Route 404, 검색 없음 200. 빈 traversal invariant와 DB 장애를 400/404/metadata 503으로 바꾸지 않고 안전 500 처리 |
+| `BoardingCandidateApiIntegrationTest` | 기존 `provider_error_response`, `upstream_unauthorized_is_not_client_unauthorized`, `invalid_ids`, `missing_metadata`, `reject_other_route_occurrences` 재사용. 필수 query/타입/blank·전체 roster 503 정확한 shape, 정상 EMPTY/PARTIAL/HELD 200·sensitive Provider 원문 비노출 |
+| `DeviceApiIntegrationTest` | 기존 strict body/header/UUID/counter 검증·credential 403·부재/ownership 404·모든 revision/generation/platform/target 409, `report_unclassified_database_failure_safely` 보존. register/state/disable의 대표 Runtime/Transaction 매핑과 local Handler 우선순위 확인. 실제 UNIQUE/권한·원자성 회귀 재사용 |
+| `BoardingSessionApiIntegrationTest` | 기존 invalid body/query/UUID/revision·404/상태 409·Provider 503과 두 HTTP persistence 500 재사용. local Handler 우선순위, stale revision≠형식 400, terminal cancel 성공, 같은 UUID 원래 body 성공·다른 fingerprint 409 보존. 기존 `lost_commit_response_and_rollback`/`reconfirm_commit_reconciliation`/`aud08_atomic_failure`로 응답 형식과 commit 결과 불확실성을 별도 검증 |
+| 공통 MVC 오류 경계 테스트 (신규 후보 `ApiErrorHandlingIntegrationTest`) | 기존 Testcontainers/MockMvc 설정을 재사용해 405/415/406/unknown URL 404·400 input validation 대 500 return validation·ResponseStatusException·annotated 예외·Runtime·DataAccess·Transaction·message write 실패의 분류 검증. product Endpoint로 주요 사례 확인, 도달 불가능한 framework 경계만 test Controller 사용. catch-all이 403/404/409/503을 덮지 않음. mock setter로 response를 직접 만든 결과를 HTTP 검증이라고 하지 않음 |
+| 실제 Servlet 경계 테스트 (신규 후보 `ApiErrorDispatchIntegrationTest`) | `@SpringBootTest(webEnvironment=RANDOM_PORT)` + 기존 test profile/격리 MySQL, loopback HTTP만 사용. anonymous `/auth/google` Infrastructure 503, `/auth/refresh` DB/Runtime 500·invalid 401, authenticated MVC 404/405/415 및 정상 REQUEST 보호 확인. 실제 ERROR 재진입·Content-Type/본문·민감 path/message 비노출 검증. MockMvc 결과와 구분하고 이미 commit된 응답에 새 JSON을 보장하지 않음 |
+| Flutter `backend_auth_client_test.dart`, `auth_session_test.dart`, `authenticated_api_client_test.dart` | 빈/정상 JSON/unknown/malformed 오류 본문의 401 및 500/503. refresh 401만 Pair 제거, 5xx/timeout은 Pair 보존, auth POST 자동 retry 0회·보호 API replay 최대 1회, 403은 refresh 0회. 기존 shared refresh·logout/late generation·timeout 후 replay 차단 유지 |
+| Flutter `alarm_api_client_test.dart`, `alarm_api_client_timeout_test.dart`, `bus_route_stop_screen_test.dart`, `alarm_screen_test.dart`, `alarm_creation_push_test.dart`, `device_api_client_test.dart`, `push_registration_service_test.dart` | 기존 500 형태별 사례 재사용. Alarm 400/정확한 404와 unknown fallback, create 500/503·timeout/파싱 실패에서 목록 확인/재생성·activate 차단, 성공 create 뒤 activate 실패는 원래 ID 유지. 상세 mutation 5xx/timeout은 같은 ID GET으로 확인하고 조회 실패 중 추가 mutation 차단, 삭제 뒤 404는 정상 부재 처리. Device 400/403/404/409·unknown code/null·500/503 pending 유지·동일 revision/body와 늦은 401 차단 |
+| Flutter `boarding_session_client_test.dart`, `boarding_session_controller_test.dart`, `boarding_candidate_client_test.dart`, `bus_route_search_client_test.dart`, `bus_route_stop_client_test.dart` | 400/401/403/404/409/500/503 중 해당 Client가 실제 소비하는 조합·빈/unknown/깨진 body fallback. Session 5xx/timeout/파싱 결과 불확실·원래 UUID/body·GET 복구·명시적 동일 재시도, conflict 뒤 재조회, late response 폐기. 후보 Provider 503≠인증 실패, Route status 기반 일반 오류 보존 |
+
+구현 시 직접 관련 메서드/클래스를 단계별 선택 실행하고 인접 회귀만 추가한다. 전체 Backend/Flutter suite는 기본 실행하지 않으며 필요한 영향 근거가 생기면 먼저 범위를 보고한다. 격리 Testcontainers 외 실제 개발/운영 DB 접근, 실제 Google/Transit/FCM·Firebase credential 사용, 실제 iPhone·Docker 기존 Container/Volume 변경은 필요 없다. 실제 commit 네트워크 장애·프로세스 restart·실 Provider/iPhone 검증은 이 자동 테스트의 보장 범위가 아니다.
+
+#### 미확정 결정과 이번 종료 상태
+
+다음은 구현 전에 개발자 판단이 필요한 계약의 빈칸이며 이번 분석에서 확정하지 않는다.
+
+1. **새 공개 code/message 최소 집합:** 인증 실패의 `UNAUTHENTICATED`와 일반 Security 권한 거부 code, Google 인증 Infrastructure 503 code 및 MVC 404/405/406/415의 code/message를 정해야 한다. 추천은 인증 401만 공통 `UNAUTHENTICATED` 후보로 두되 Domain 오류를 재사용해 의미를 흐리지 않고 Google 장애를 별도 503으로 구분하는 것이다. 이 이름들은 모두 미구현 후보이며 보안상 고정 message만 허용한다. `METADATA_UNAVAILABLE`은 독립 의미/트리거가 없어 추가하지 않는 방향을 추천한다. TASK-804 bullet의 기존 검증 후보 문구도 승인된 최종 범위와 맞출 필요가 있다.
+2. **Alarm path 비양수 ID:** API §5의 generic ‘0 이하 ID’ 400 규칙을 `{alarmId}`에도 적용할지 확인해야 한다. 현재 구현은 404이고 Client는 보통 전송 전 거부한다. 추천은 형식/범위 오류만 400으로 명시하고 양의 부재 ID/다른 owner 404를 보존하는 것이다. 이번에는 API Owner 문서나 제품을 임의로 바꾸지 않는다.
+
+인증 401과 장애 5xx 분리, Refresh Rotation·다른 Session 보존·Token Pair 원자성·User Identity, Logout idempotency, ownership 403/404/409·Provider 503, Client의 불확실 결과 복구는 이미 확정된 계약이므로 재질문/재설계 대상이 아니다. ERROR dispatch 제한 보완·fallback 내부 구현 방식은 위 계약을 지키는 최소 구현으로 판단하되, 공개 접근 정책을 넓히는 변경은 자동 채택하지 않는다.
+
+이번 변경은 `docs/task-list.md`의 이 분석 절뿐이다. 제품·테스트·설정·Dependency·Migration·다른 Owner 문서·devlog와 기존 TASK-814/816 기록을 수정하지 않았다. 새 code/응답을 구현하거나 Task 완료 체크를 하지 않았고, 테스트/build/compile·HTTP·외부 Provider·DB·Docker 조작·Git add/commit/push·branch 전환/생성·reset/stash/clean/pull/fetch는 수행하지 않았다. 최종 `git status --short`, `git diff HEAD --stat`, `git diff --check`로 변경 범위/공백을 확인하며 결과는 미커밋 상태로 보고 후 중단한다.
+
+### TASK-804 1단계 — 인증·Security 오류 계약 구현 및 검증 (2026-10-30)
+
+이번 단계는 위 226행 분석을 보존하고 인증·Security 경계만 구현한다. 시작은 `main`, HEAD `47493ea3ef3f70d37d258d81d90521f7bb6e6f3d`, 기존 변경은 위 분석을 추가한 `docs/task-list.md`뿐이었다. 분석 당시 ‘미구현/미확정’은 당시 상태이며 아래 사용자 확정과 구현 결과를 현재 인증 계약으로 따른다. TASK-804는 `[ ]`, TASK-814/816은 `[x]`와 기존 완료 기록을 유지한다.
+
+#### 확정한 공개 계약과 제품 변경
+
+새 ErrorCode는 아래 세 개뿐이며 `Content-Type: application/json`, 정확한 `{code,message}` 두 필드와 고정 message를 사용한다. 기존 Domain code/status는 변경하지 않았다. `METADATA_UNAVAILABLE`은 추가하지 않는다. 상세 HTTP Owner는 [API 오류 형식](api.md#5-오류-형식)과 [인증](api.md#6-인증)이다.
+
+| Code | HTTP | Message |
+| --- | ---: | --- |
+| `UNAUTHENTICATED` | 401 | `Authentication is required or invalid.` |
+| `ACCESS_DENIED` | 403 | `Access is denied.` |
+| `SOCIAL_IDENTITY_UNAVAILABLE` | 503 | `Social identity verification is temporarily unavailable.` |
+
+- `JwtConfiguration`: 기존 HS256/서명·issuer·Clock·timestamp/필수 exp validator에 subject validator를 추가했다. `[1-9]`로 시작하는 십진 정수 문자열과 `Long.parseLong`으로 존재/빈 값/0/음수/문자/소수/선행 0/overflow를 검증한다. Nimbus가 JSON 숫자형 sub를 문자열로 정규화하는 것을 로컬 바이트코드에서 추가 확인해, 서명 검증을 마친 JWT의 원래 payload에서 claim 타입도 검사한다. 서명 검증을 대체하거나 Controller에 JWT parsing을 추가하지 않는다. `Authentication.name`만 사용하는 Endpoint에서도 인증 성립 전에 거부하며 `JwtTokenService.extractUserId()`의 방어 검증과 발급 코드는 변경하지 않았다.
+- `SecurityErrorHandler`와 `SecurityConfiguration`: 누락 인증의 exceptionHandling EntryPoint 및 Bearer filter EntryPoint 양쪽, 인증된 AccessDeniedHandler에 같은 작은 writer를 연결했다. JWT/원인 예외 message를 직렬화하지 않고 기존 DTO/Mapper로 고정 JSON을 쓴다. `WWW-Authenticate: Bearer`와 invalid_token/insufficient_scope challenge, 기본 Security header를 유지하되 decoder error_description 원문은 내보내지 않는다. 비활성 query/form token 전달을 새로 켜지 않으며 OAuth invalid_request 400을 받는 경우 기존 `INVALID_REQUEST`로 보존하는 분기를 둔다. Role/권한 모델은 추가하지 않았다.
+- `GoogleIdentityVerifier`: 도입된 Google 2.9.0/HTTP Client 2.0.0의 `verify(String) → parse → verify(GoogleIdToken)` 경계를 확인하고 로컬 parse와 검증을 분리했다. parse의 `IOException`/`IllegalArgumentException`만 `InvalidSocialCredentialException`으로 분류한다. 검증 false/subject 누락/기존 GeneralSecurityException은 인증 실패, 공개키 조회 등 검증 I/O는 기존 Infrastructure 실패를 유지한다. 검증 단계의 임의 RuntimeException은 그대로 전파하며 catch-all 인증 실패로 숨기지 않는다.
+- `GlobalExceptionHandler`: `InvalidSocialCredentialException`/`InvalidRefreshTokenException`을 401, `SocialIdentityVerificationException`을 503의 고정 JSON으로 명시 처리한다. 실제 HTTP 테스트로 기존 `@ResponseStatus`보다 이 Handler가 먼저 선택됨을 확인했다. 기존 `ApiException`·validation Handler와 두 Controller-local persistence Handler는 수정하지 않았다.
+
+Java 제품 변경은 위 5개 기존 파일과 신규 `common/error/SecurityErrorHandler.java`로 한정했다. Auth Controller/Service·Identity 모델·Refresh Rotation/Hash/원자성·Session별 Logout·요청/정상 응답 DTO, Alarm/Boarding/Device/Transit/Notification 제품, Schema/Migration/Dependency는 변경하지 않았다.
+
+#### 실제 Servlet ERROR dispatch 재현과 수정
+
+신규 `AuthenticationErrorDispatchIntegrationTest`는 RANDOM_PORT Embedded Servlet을 loopback HTTP로 호출한다. DB 검증이 아닌 dispatch 경계 테스트이므로 기존 Security 테스트의 Repository/Transaction mock 설정을 재사용하고 DataSource/JPA auto-config를 제외했다. Auth Controller와 Security는 실제 제품 경로이며 Google verifier만 제한적으로 stub한다. 실제 DB 정책은 별도의 기존 Auth/Domain MySQL Testcontainers 테스트가 검증한다.
+
+**수정 전 실제 재현:** 공개 `POST /auth/google`에서 verifier가 `ResponseStatusException(404/500)`을 던지는 두 사례 모두 최종 HTTP가 **401**이었다(예상 404/500의 2개 assertion 실패). 실제 Servlet의 sendError→ERROR 재진입에서 인가가 원래 상태를 덮는 결함을 확인했다. MockMvc 결과만으로 재현했다고 주장하지 않는다.
+
+수정은 `dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()` 한 규칙이다. `/api/**`, `/error` URL 또는 모든 Dispatcher를 공개하지 않는다. 수정 후 원래 404/500, 미처리 Runtime 500, 인증 예외의 401·Infrastructure 503, Refresh 401·Logout 204를 실제 HTTP에서 확인했다. 직접 GET `/error`·`/auth/google`·`/auth/refresh`·`/auth/logout`·`/api/v1/alarms`는 여전히 JSON 401이며 익명 health는 200, 유효 JWT의 미등록 Application 경로는 404다. 일반 MVC/Boot 오류 body는 이번에 통일하지 않았으며 그 한계를 테스트/Owner 문서에 명시했다.
+
+#### HTTP/비노출 및 기존 의미 검증
+
+| 상황 | 실행 경계 | 결과 |
+| --- | --- | --- |
+| JWT 없음·malformed Bearer/JWT·변조·만료·issuer 불일치·exp 누락 | 실제 Filter Chain을 통과한 MockMvc | 401 UNAUTHENTICATED, application/json, 정확한 두 필드 |
+| 서명은 유효하나 sub 누락/빈 값/0/음수/선행 0/+기호/소수/지수/공백/문자/Long overflow 및 JSON 숫자 42/Long.MAX_VALUE | User ID를 추출하지 않는 테스트 Endpoint의 실제 JWT 인증 | 모두 같은 JSON 401; 정상 문자열 User ID와 Long.MAX_VALUE는 통과 |
+| 인증된 Security 거부 / 동일 조건의 미인증 요청 | 테스트 전용 denyAll 경계 + 실제 제품 error writer/Resource Server | 각각 403 ACCESS_DENIED / 401 UNAUTHENTICATED. 제품 role 정책 추가 없음 |
+| Google 무효 Credential·실제 parser malformed | Auth MockMvc 및 실제 parser + network 금지 transport | 401 UNAUTHENTICATED |
+| Google 검증 I/O·실제 공개키 fetch 단계 I/O | Auth HTTP와 실제 Google verifier/실패 transport | HTTP 503 SOCIAL_IDENTITY_UNAVAILABLE, 내부 분류 보존 |
+| Refresh 만료/unknown/blank/null/Rotation 뒤 재사용 | 기존 실제 MySQL Auth HTTP | 401 UNAUTHENTICATED, 다른 Session·Rotation 보존 |
+| Login·정상 Refresh·Logout/반복 Logout | 기존 실제 MySQL Auth HTTP | 기존 Token Pair·Hash 저장·현재 Session 삭제, Logout 204 무본문 보존 |
+| Device credential 불일치 | 기존 Device HTTP/DB | 기존 403 DEVICE_CREDENTIAL_INVALID 보존 |
+| Domain 부재·다른 owner·request/revision 충돌·Provider 장애 | 기존 Alarm/Device/Boarding/Transit 선택 HTTP 회귀 | 기존 404/409 및 TRANSIT_TEMPORARILY_UNAVAILABLE 503 보존 |
+
+정확한 key 집합/고정 message로 원문 Credential·JWT·decoder message·SQL/내부 예외가 JSON에 섞이지 않음을 검증했다. Security challenge에 원문 error_description이 없고 `X-Content-Type-Options: nosniff`, Set-Cookie 없음도 확인했다. 실제 Servlet의 기본 404/500 응답도 synthetic 내부 marker/stack 정보를 본문에 내보내지 않는지 확인했다. 새로운 오류 writer/Advice는 Token/예외 cause 로그를 남기지 않는다. 일반 Runtime의 전체 로깅/공통 500 정책을 이번 단계에서 구현했다고 확대하지 않는다.
+
+#### 단계별 실행 결과
+
+환경은 Java/Gradle JVM 21.0.12.1, Wrapper 8.14.3이다. Backend 명령은 `env -u JAVA_HOME ./gradlew test --offline --max-workers=1`에 아래 집중/선택 클래스·메서드의 `--tests`를 지정했다. DB 테스트는 기존 격리 `mysql:8.4.11` Testcontainers/Flyway만 사용했다. 실제 Google/Transit/FCM 요청은 금지하고 Mock/실제 로컬 parser/실패 transport만 사용했다.
+
+| 단계 | 실행 | 통과 | 실패 / 오류 / Skip | 범위 |
+| --- | ---: | ---: | --- | --- |
+| 수정 전 Servlet 재현 | 2 | 0 | 2 / 0 / 0 | 404/500이 401로 바뀌는 기존 결함 재현, 수정 후 아래 재검증 |
+| JWT/Security/Google 집중 | 50 | 50 | 0 / 0 / 0 | SecurityConfigurationIntegrationTest 23, NonWeb 1, JwtConfigurationTest 2, JwtTokenServiceTest 8, GoogleIdentityVerifierTest 16 |
+| Auth + 실제 Servlet | 36 | 36 | 0 / 0 / 0 | AuthControllerIntegrationTest 26, AuthenticationErrorDispatchIntegrationTest 10 |
+| 인접 Backend 선택 회귀 | 11 | 11 | 0 / 0 / 0 | Alarm 2, Device 2, Boarding 4, BoardingCandidate 3 |
+| Flutter 인증 관련 | 74 | 74 | 0 / 0 / 0 | backend_auth_client/auth_session/authenticated_api_client/google_auth_service 4개 파일 |
+| Backend 전체 (원래 claim 타입 보강 전) | 1,323 | 1,323 | 0 / 0 / 0 | 80개 클래스, BUILD SUCCESSFUL(6분 44초); 아래 최종 보강 뒤 결과와 구분 |
+| 마지막 JWT claim 타입 보강 | 35 | 35 | 0 / 0 / 0 | SecurityConfigurationIntegrationTest 25, JwtConfigurationTest 2, JwtTokenServiceTest 8; 숫자형 sub 2개 추가 |
+| Backend 최종 전체 | 1,325 | 1,325 | 0 / 0 / 0 | 최종 코드 80개 클래스, BUILD SUCCESSFUL(6분 34초); 실제 JUnit XML suite/testcase 합계 일치 |
+
+Auth 단계 최초 실행은 새 assertion helper의 checked exception 선언 누락으로 compileTestJava에서 실패했으며 JUnit 실행은 0개였다. helper 선언만 수정한 뒤 위 36개가 통과했다. 기존 테스트 삭제·Skip·assertion 약화나 제품 예외 분류 변경으로 통과시키지 않았다. 수정 전 재현 실패와 검증 과정 compile 실패를 최종 성공 수에 숨기거나 통과로 합산하지 않는다.
+
+첫 전체 실행 중 최종 점검에서 Nimbus 10.9.1의 숫자형 subject 정규화를 확인했다. 이 실행은 컴파일된 기존 subject validator의 결과로 구분해 보존했다. 이후 JWT payload의 원래 String 타입 검사와 실제 HS256으로 서명한 숫자형 42/Long.MAX_VALUE HTTP 사례를 추가하고, 정상/최대 문자열 ID와 기존 JWT 오류를 포함한 35개를 통과했다. 최종 제품 코드가 달라졌으므로 전체 회귀를 다시 실행해 최종 1,325개 전부 통과했으며, 성공한 동일 코드를 근거 없이 반복한 것이 아니다. 기존 1,280개에 Backend 신규 45개(Security 20, Google 12, Auth 3, Servlet 10)를 추가한 수와 실제 XML이 일치한다. 선택 실행·첫 전체의 중복 횟수를 최종 서로 다른 1,325개에 합산하지 않는다. 종료된 격리 DB의 cached context shutdown 중 Hikari 연결 종료 경고가 있었지만 JUnit 실패/오류/Skip은 모두 0이며 테스트 검증을 약화하거나 timeout을 변경하지 않았다.
+
+Flutter 제품은 변경하지 않았다. 추가한 인증 테스트 2개 파일은 `flutter analyze --no-pub` No issues, Dart format 적용 후 관련 74개가 통과했다. 신규 6개는 Login/Refresh 각각 JSON 401/503의 status·자동 재시도 없음 4개와, 실제 BackendAuthClient를 사용하는 AuthSession의 JSON Refresh 401 Pair 삭제/503 Pair 보존 2개다. 기존 single-flight·늦은 응답·timeout/replay/Logout 회귀도 함께 통과했다. Flutter 전체는 실행하지 않았으며 과거 전체 결과를 이번 수치에 합산하지 않는다. 초기 Gradle/Flutter SDK 캐시 쓰기 제한은 허용된 권한 확장으로 해결했고 SDK/Dependency upgrade는 하지 않았다.
+
+실행 로그는 `/private/tmp/stopbell-task804-step1-{dispatch-before,focused,auth,adjacent,flutter,full-before-claim-type,claim-type,full}.log`, Backend 단계별 JUnit XML/summary는 같은 접두사의 `*-results` 디렉터리에 보존한다. 실제 개발/운영 DB, 기존 Docker Container/Volume, 실제 Google/Provider/FCM/Firebase Credential·iPhone은 사용/변경하지 않았다.
+
+#### 문서·변경 범위 및 남은 책임
+
+기존 분석 226행과 TASK-814/816 기록은 그대로 두고 이 절만 추가했다. `docs/api.md` §5/6에 확정된 공개 code/message·JWT sub 검증·ERROR 경계·미완료 body 범위를 동기화했다. 다른 Owner 문서와 직접 충돌하는 새 계약은 발견하지 않아 수정하지 않았다. 새 Dependency·Migration·API DTO·Flutter 제품·devlog 변경은 없다. 기존 분석 문서 변경도 이번 구현 Commit에 포함하며 모든 체크박스를 유지한다.
+
+Java 테스트 변경은 SecurityConfigurationIntegrationTest, AuthControllerIntegrationTest, GoogleIdentityVerifierTest와 신규 AuthenticationErrorDispatchIntegrationTest다. 기존 Auth 테스트에 실제 parser를 연결한 malformed HTTP 3개, Google 단위 테스트에 실제 parser/network 차단·실제 key I/O·내부 Runtime 보존을 보강했다. Flutter 테스트 변경은 backend_auth_client_test.dart와 auth_session_test.dart뿐이다.
+
+최종 변경은 허용된 14개 파일(Backend 제품 6, Java 테스트 4, Flutter 테스트 2, 문서 2)뿐이다. 기존 ErrorCode 22개의 HTTP/message 불변, 새 code 3개만 추가, 기존 분석/감사/Task 상태 불변과 문서 링크를 정적으로 확인했다. 집중·Auth/Servlet·인접 Backend·Flutter·최종 Backend 전체 검증과 `git diff --check`가 모두 통과했으며 사용자 지시에 따라 기존 분석을 포함한 허용 파일만 명시적으로 Stage해 `main`에서 Commit·Push한다. Commit subject는 사용자 지정 `fix: TASK-804 harden authentication error contracts`를 사용하며 body는 실제 개행 bullet로 작성하고 Commit 후 형식을 확인한다.
+
+남은 TASK-804 범위는 (1) MVC validation 400과 기타 기본 오류 경로, (2) 안전한 공통 500 fallback, (3) 전체 Endpoint 오류 Matrix 회귀, (4) Flutter Alarm 생성 실패·응답 유실 복구, (5) TASK-802의 서버 중복 방지 책임과 구분, (6) TASK-804 최종 회귀·완료 판단이다. 일반 Service `ResponseStatusException(401)`의 body, MVC 404/405/406/415 등의 code, commit/직렬화/Handler 재실패의 공통 처리도 이번에 완료하지 않았다. 분석 E08의 Alarm 화면은 이번 범위에서 수정하지 않는다. 1단계 Commit·Push 성공도 TASK-804 전체 완료를 의미하지 않는다.
+
 ### 기존 Phase 8 Task 상세 및 실행 dependency
 
 TASK-805는 structured log, 최소 operational metric, alerting contract를 함께 다룬다. metric은 Provider request outcome/latency, Observation staleness/UNKNOWN reason, ACTIVE/FOLLOW_UP Alarm 수, scheduler cycle duration·last completion·overlap, Notification pending 수와 oldest pending delivery age, no-recipient Event, delivery accepted/failure/retry/expired, metadata 마지막 complete sync 성공 age를 후보로 한다. `alarmId`, `deviceId`, `routeId`, `trackingCycleId`, `installationId`는 metric label에 넣지 않는다. Actuator/Micrometer 수준을 기본으로 하고 자체 Prometheus/Grafana stack을 V1 요구로 만들지 않으며 export와 alert destination은 deployment platform에서 정한다. log는 문맥에 필요한 correlation(`requestId`, `operationId`, provider, schedulerCycleId, alarmId, activation generation, trackingCycleId, notificationEventId, deliveryId, elapsedMs, outcome)만 기록한다. Access/Refresh Token, Google ID Token, Firebase credential, 원문 push targeting identifier·installationId, API key가 든 URL/query, 필요 이상의 GPS, raw Provider response 전체는 로그에 남기지 않는다.

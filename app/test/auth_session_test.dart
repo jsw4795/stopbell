@@ -103,6 +103,61 @@ http.Response tokenResponse(TokenPair pair) => http.Response(
 );
 
 void main() {
+  for (final status in [401, 503]) {
+    test('JSON refresh $status preserves existing session policy', () async {
+      var requests = 0;
+      final transport = MockClient((request) async {
+        requests++;
+        expect(request.url.path, '/auth/refresh');
+        return http.Response(
+          jsonEncode({
+            'code': status == 401
+                ? 'UNAUTHENTICATED'
+                : 'SOCIAL_IDENTITY_UNAVAILABLE',
+            'message': status == 401
+                ? 'Authentication is required or invalid.'
+                : 'Social identity verification is temporarily unavailable.',
+          }),
+          status,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+      addTearDown(transport.close);
+      final storage = FakeStorage(pair: oldPair);
+      final auth = httpSession(
+        BackendAuthClient(
+          apiBaseUrl: Uri.parse('http://localhost:8080'),
+          client: transport,
+        ),
+        storage,
+      );
+      await auth.initialize();
+      await expectLater(
+        auth.refreshAfterUnauthorized(oldPair.accessToken),
+        throwsA(
+          isA<BackendAuthException>().having(
+            (error) => error.statusCode,
+            'status',
+            status,
+          ),
+        ),
+      );
+      expect(requests, 1);
+      expect(storage.saves, 0);
+      if (status == 401) {
+        expect(auth.state, AuthState.unauthenticated);
+        expect(auth.currentPair, isNull);
+        expect(storage.pair, isNull);
+        expect(storage.deletes, 1);
+      } else {
+        expect(auth.state, AuthState.authenticated);
+        expect(auth.currentPair, same(oldPair));
+        expect(storage.pair, same(oldPair));
+        expect(storage.deletes, 0);
+      }
+    });
+  }
+
   testWidgets('unresponsive shared refresh releases logout at HTTP deadline', (
     tester,
   ) async {

@@ -188,6 +188,49 @@ void main() {
     }
   });
 
+  for (final operation in ['login', 'refresh']) {
+    for (final status in [401, 503]) {
+      test('$operation preserves JSON auth status $status without retry', () async {
+        var requests = 0;
+        final transport = MockClient((_) async {
+          requests++;
+          return http.Response(
+            jsonEncode({
+              'code': status == 401
+                  ? 'UNAUTHENTICATED'
+                  : 'SOCIAL_IDENTITY_UNAVAILABLE',
+              'message': status == 401
+                  ? 'Authentication is required or invalid.'
+                  : 'Social identity verification is temporarily unavailable.',
+            }),
+            status,
+            headers: {'content-type': 'application/json'},
+          );
+        });
+        addTearDown(transport.close);
+        final client = BackendAuthClient(
+          apiBaseUrl: baseUrl,
+          client: transport,
+        );
+        await expectLater(
+          operation == 'login'
+              ? client.login('private-google-fixture')
+              : client.refresh('private-refresh-fixture'),
+          throwsA(
+            isA<BackendAuthException>()
+                .having((error) => error.statusCode, 'status', status)
+                .having(
+                  (error) => error.message,
+                  'message',
+                  isNot(contains('private-')),
+                ),
+          ),
+        );
+        expect(requests, 1);
+      });
+    }
+  }
+
   test('network failure is distinct from HTTP failure', () async {
     final client = BackendAuthClient(
       apiBaseUrl: baseUrl,

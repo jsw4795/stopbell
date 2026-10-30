@@ -4,6 +4,9 @@ import org.springframework.http.HttpStatus;
 
 public enum ErrorCode {
 
+    UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "Authentication is required or invalid."),
+    ACCESS_DENIED(HttpStatus.FORBIDDEN, "Access is denied."),
+    SOCIAL_IDENTITY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Social identity verification is temporarily unavailable."),
     ALARM_NOT_FOUND(HttpStatus.NOT_FOUND, "Alarm was not found."),
     BUS_ROUTE_NOT_FOUND(HttpStatus.NOT_FOUND, "Bus route was not found."),
     TARGET_STOP_OCCURRENCE_NOT_FOUND(HttpStatus.NOT_FOUND, "Target stop occurrence was not found."),

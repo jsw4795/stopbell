@@ -524,6 +524,18 @@ TASK-906의 Backend FCM data payload는 아래처럼 기존 ALARM_EVENT와 구�
 
 V1 Error Response는 `code`, `message` 두 필드만 사용한다. `timestamp`, `path`, `status`, trace/request ID, field error 또는 stack trace는 포함하지 않는다.
 
+TASK-804 1단계의 인증·Security 오류는 `Content-Type: application/json`과 다음 고정 code/message를 반환한다. JWT 누락·무효·만료와 Google/Refresh 인증 실패는 같은 401을 사용하며, 인증된 요청의 Security 접근 거부 및 Google 검증 Infrastructure 장애와 구분한다.
+
+| Code | HTTP status | Message |
+| --- | --- | --- |
+| `UNAUTHENTICATED` | 401 | `Authentication is required or invalid.` |
+| `ACCESS_DENIED` | 403 | `Access is denied.` |
+| `SOCIAL_IDENTITY_UNAVAILABLE` | 503 | `Social identity verification is temporarily unavailable.` |
+
+Security의 401에는 Bearer challenge를 제공하고 JWT decoder의 원문 오류 설명/Token은 포함하지 않는다. 인증된 Security 접근 거부에는 `Bearer error="insufficient_scope"` challenge를 제공한다. 기존 Device의 `DEVICE_CREDENTIAL_INVALID` 403과 Transit의 `TRANSIT_TEMPORARILY_UNAVAILABLE` 503은 별개이며 변경하지 않는다. 현재 비활성인 query/form Bearer 전달을 새로 허용하지 않으며, OAuth `invalid_request` 400이 주어지는 경우도 401로 강제하지 않는다.
+
+Servlet 내부 `ERROR` dispatch는 원래 오류 상태를 보존하도록 Security 인가에서 허용한다. 외부의 원래 `REQUEST`에는 기존 인증 규칙이 그대로 적용되며 직접 `/error` 요청이나 POST 이외의 `/auth/*`를 공개하지 않는다. 이 규칙은 모든 MVC/Boot 오류 body를 위 두 필드 형식으로 통일한다는 의미가 아니다.
+
 `DeviceController`와 `BoardingSessionController`의 Controller-local Handler가 처리하는 `DataAccessException`·`TransactionException` 계열의 영속성 실패는 `500 Internal Server Error`, `Content-Type: application/json`과 다음 고정 응답을 반환한다. 원본 예외 message/cause, SQL·제약 이름 및 민감정보는 응답에 포함하지 않는다.
 
 ```json
@@ -533,7 +545,7 @@ V1 Error Response는 `code`, `message` 두 필드만 사용한다. `timestamp`, 
 }
 ```
 
-이는 두 Handler의 지정된 예외에 한정한 계약이다. 다른 Controller의 모든 500이나 Spring Security 401이 이미 같은 형식이라는 의미는 아니며, 전체 오류 형식과 예상 밖 Exception의 fallback은 TASK-804의 후속 검증 범위다. 500은 DB 미저장이나 rollback 완료를 보장하지 않으므로 기존 요청 identity와 commit 결과 재확인 정책을 유지한다.
+이는 두 Handler의 지정된 예외에 한정한 500 계약이다. 위 인증·Security 오류 외의 모든 MVC/Boot 오류와 다른 Controller의 모든 500이 이미 같은 형식이라는 의미는 아니며, 전체 오류 형식과 예상 밖 Exception의 fallback은 TASK-804의 후속 검증 범위다. Service의 일반 `ResponseStatusException`도 이번 인증 예외 세 종류의 JSON 매핑에 포함되지 않는다. 500은 DB 미저장이나 rollback 완료를 보장하지 않으므로 기존 요청 identity와 commit 결과 재확인 정책을 유지한다.
 
 Alarm API의 error code와 HTTP status는 다음과 같다.
 
@@ -556,6 +568,8 @@ Authorization: Bearer <Access Token>
 ```
 
 Google ID Token은 로그인 시 외부 Identity를 확인하기 위해 Backend에 전달할 뿐, Application API의 인증 헤더에 사용하지 않는다. Access Token 기본 수명은 1시간이며, Refresh Token은 Access Token 재발급과 현재 Session Logout에 사용한다.
+
+JWT 인증 단계에서 HS256 서명, issuer, timestamp와 필수 `exp`를 검증하고, `sub`가 양의 Long 범위의 정수 문자열인지도 검증한다. `sub` 누락/빈 값/0/음수/문자/소수/선행 0/Long 범위 초과 및 JSON 숫자형 claim은 User ID를 추출하지 않는 Endpoint에서도 인증 성립 전에 401 `UNAUTHENTICATED`로 거부한다. 라이브러리의 숫자→문자열 정규화 전 원래 claim 타입도 확인하며 기존 Clock과 Token 발급 계약 및 User ID 추출의 방어적 검증은 유지한다.
 
 ### Google 로그인
 
@@ -583,7 +597,7 @@ Backend는 `GOOGLE_SERVER_CLIENT_ID`에 설정한 Backend용 Google Server Clien
 }
 ```
 
-이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. 잘못된 Google Credential, 검증 실패, 또는 누락된 `sub`에는 `401 Unauthorized`를 반환한다. Google 공개키 조회 등 Google Identity 검증 Infrastructure의 I/O 실패에는 Credential 오류로 처리하지 않고 `503 Service Unavailable`을 반환한다.
+이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. 잘못된 Google Credential, 검증 실패, 또는 누락된 `sub`에는 `401 Unauthorized`와 `UNAUTHENTICATED`를 반환한다. Google ID Token의 로컬 compact/JSON 파싱에서 발생하는 `IllegalArgumentException`·`IOException`도 Credential 실패로 구분한다. 파싱 후 Google 공개키 조회 등 Identity 검증 Infrastructure의 I/O 실패에는 Credential 오류로 처리하지 않고 `503 Service Unavailable`과 `SOCIAL_IDENTITY_UNAVAILABLE`을 반환한다. 검증 단계의 임의 RuntimeException을 인증 실패로 통합하지 않는다. 두 오류의 Content-Type과 고정 공개 message는 §5를 따른다.
 
 ### Refresh Token 재발급
 
@@ -609,7 +623,7 @@ Content-Type: application/json
 }
 ```
 
-이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. Backend는 Refresh Token 원문을 SHA-256 Hash로 변환해 저장된 Session을 찾고, 유효한 Token이면 기존 row를 삭제한 뒤 새 30일 Refresh Token과 새 Access Token을 발급한다. 유효하지 않거나 만료된 Refresh Token은 `401 Unauthorized`를 반환하며 Backend는 Flutter Login 화면으로 redirect하지 않는다. 한 User의 다른 Refresh Token Session은 Rotation으로 삭제하지 않는다.
+이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. Backend는 Refresh Token 원문을 SHA-256 Hash로 변환해 저장된 Session을 찾고, 유효한 Token이면 기존 row를 삭제한 뒤 새 30일 Refresh Token과 새 Access Token을 발급한다. 유효하지 않거나 만료된 Refresh Token 및 Rotation 뒤 기존 Hash 재사용은 `401 Unauthorized`와 `UNAUTHENTICATED`의 고정 JSON을 반환하며 Backend는 Flutter Login 화면으로 redirect하지 않는다. 한 User의 다른 Refresh Token Session은 Rotation으로 삭제하지 않는다.
 
 Flutter는 refresh `401`을 현재 Token Pair가 더 이상 유효하지 않다는 신호로 처리해 Token을 제거하고 unauthenticated로 전환한다. network/offline/5xx는 이 `401` 의미와 구분하며 저장된 장기 session을 즉시 삭제하지 않는다. `/auth/refresh` 자체는 refresh interceptor나 자동 재시도 대상이 아니다.
 

@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -13,6 +14,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.io.IOException;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import com.google.api.client.http.HttpTransport;
+import com.google.api.client.http.LowLevelHttpRequest;
+import com.google.api.client.json.gson.GsonFactory;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.json.JsonMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -161,7 +169,8 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
                         .content("{\"refreshToken\":\"" + firstLogin.refreshToken() + "\"}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
 
         TokenPair refreshedAgainTokenPair = refresh(rotatedTokenPair.refreshToken());
         assertThat(refreshedAgainTokenPair.refreshToken()).isNotEqualTo(rotatedTokenPair.refreshToken());
@@ -191,7 +200,8 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
                         .content("{\"refreshToken\":\"" + firstLogin.refreshToken() + "\"}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
 
         refresh(secondLogin.refreshToken());
     }
@@ -206,7 +216,8 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(post("/auth/google")
                         .contentType("application/json")
                         .content("{\"idToken\":\"invalid-google-id-token\"}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
     }
 
     @Test
@@ -220,6 +231,8 @@ class AuthControllerIntegrationTest {
                         .contentType("application/json")
                         .content("{\"idToken\":\"unavailable-google-id-token\"}"))
                 .andExpect(status().isServiceUnavailable())
+                .andExpect(result -> assertError(result, "SOCIAL_IDENTITY_UNAVAILABLE",
+                        "Social identity verification is temporarily unavailable."))
                 .andExpect(content().string(not(containsString("Google public keys unavailable"))));
     }
 
@@ -227,7 +240,8 @@ class AuthControllerIntegrationTest {
     @DisplayName("POST 이외의 Google Login 경로는 인증 없이 접근할 수 없다")
     void keep_non_post_google_login_path_protected() throws Exception {
         mockMvc.perform(get("/auth/google"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
     }
 
     @Test
@@ -270,7 +284,8 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
                         .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
     }
 
     @Test
@@ -284,7 +299,8 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
                         .content("{\"refreshToken\":\"" + expiredToken + "\"}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
 
         assertThat(refreshTokenRepository.findByTokenHash(expiredTokenHash)).isEmpty();
     }
@@ -295,7 +311,8 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
                         .content("{\"refreshToken\":\"unknown-refresh-token\"}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
     }
 
     @Test
@@ -304,12 +321,14 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
                         .content("{\"refreshToken\":\"\"}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
 
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
                         .content("{\"refreshToken\":null}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
     }
 
     @Test
@@ -335,7 +354,8 @@ class AuthControllerIntegrationTest {
     @DisplayName("GET Refresh 경로는 인증 없이 접근할 수 없다")
     void keep_non_post_refresh_path_protected() throws Exception {
         mockMvc.perform(get("/auth/refresh"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
     }
 
     @Test
@@ -368,7 +388,8 @@ class AuthControllerIntegrationTest {
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
                         .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
     }
 
     @Test
@@ -451,12 +472,49 @@ class AuthControllerIntegrationTest {
     @DisplayName("GET Logout 경로는 인증 없이 접근할 수 없다")
     void keep_non_post_logout_path_protected() throws Exception {
         mockMvc.perform(get("/auth/logout"))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
     }
 
     private String sha256(String value) throws Exception {
         return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                 .digest(value.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not-a-compact-token", "one.dot", "e30.e30.c2ln"})
+    @DisplayName("실제 Google parser가 거부한 Credential도 HTTP에서 안전한 JSON 401을 반환한다")
+    void reject_real_malformed_google_credential(String credential) throws Exception {
+        HttpTransport noNetwork = new HttpTransport() {
+            @Override
+            protected LowLevelHttpRequest buildRequest(String method, String url) {
+                throw new AssertionError("Google network requests are forbidden");
+            }
+        };
+        GoogleIdentityVerifier realVerifier = new GoogleIdentityVerifier(
+                new GoogleIdTokenVerifier.Builder(noNetwork, GsonFactory.getDefaultInstance()).build());
+        doAnswer(invocation -> realVerifier.verify(invocation.getArgument(0)))
+                .when(googleIdentityVerifier).verify(credential);
+
+        MvcResult result = mockMvc.perform(post("/auth/google")
+                        .contentType("application/json")
+                        .content("{\"idToken\":\"" + credential + "\"}"))
+                .andExpect(this::assertUnauthenticated).andReturn();
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(credential, "IllegalArgumentException",
+                "IOException", "stackTrace", "SQL");
+    }
+
+    private void assertUnauthenticated(MvcResult result) throws Exception {
+        assertThat(result.getResponse().getStatus()).isEqualTo(401);
+        assertError(result, "UNAUTHENTICATED", "Authentication is required or invalid.");
+    }
+
+    private void assertError(MvcResult result, String code, String message) throws Exception {
+        assertThat(result.getResponse().getContentType()).isEqualTo("application/json");
+        var error = JsonMapper.builder().build().readTree(result.getResponse().getContentAsString());
+        assertThat(error.propertyNames()).containsExactlyInAnyOrder("code", "message");
+        assertThat(error.get("code").asString()).isEqualTo(code);
+        assertThat(error.get("message").asString()).isEqualTo(message);
     }
 
     private String responseValue(String responseBody, String fieldName) {

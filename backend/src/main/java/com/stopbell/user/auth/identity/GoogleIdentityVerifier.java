@@ -25,9 +25,16 @@ public class GoogleIdentityVerifier implements SocialIdentityVerifier {
             throw new InvalidSocialCredentialException();
         }
 
+        GoogleIdToken googleIdToken;
         try {
-            GoogleIdToken googleIdToken = googleIdTokenVerifier.verify(credential);
-            if (googleIdToken == null) {
+            googleIdToken = GoogleIdToken.parse(googleIdTokenVerifier.getJsonFactory(), credential);
+        } catch (IOException | IllegalArgumentException exception) {
+            // Only local credential parsing failures are authentication failures.
+            throw new InvalidSocialCredentialException(exception);
+        }
+
+        try {
+            if (!googleIdTokenVerifier.verify(googleIdToken)) {
                 throw new InvalidSocialCredentialException();
             }
 
