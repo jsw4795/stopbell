@@ -80,6 +80,12 @@ JPA는 단순한 Domain CRUD와 Entity 상태 관리가 필요한 영역에서 �
 
 현재 구현된 Query는 JPA로 충분하며 MyBatis Mapper, Mapper XML, 전용 production 설정과 starter를 유지하지 않는다. Route/Stop 검색, Alarm grouping, 집계 또는 성능 최적화에서 명시적 SQL 제어의 실제 필요가 확인되면 MyBatis 도입을 다시 결정한다.
 
+### UTC 계약 감사와 구현 책임 (TASK-816 / AUD-12 → TASK-814)
+
+persisted operational time의 UTC 목표는 유지한다. AUD-12는 기존 User·RefreshToken·Alarm callback의 Host Timezone 의존성과 실제 Java↔Hibernate/JDBC↔MySQL 저장 경계를 감사하고, 미완료 TASK-814의 수정·검증 범위를 연결한다. AUD-12의 Characterization Test 통과는 현 결함 재현의 성공이며 UTC 제품 수정 완료가 아니다. TASK-814와 TASK-816의 상태는 모두 `[ ]`를 유지한다.
+
+TASK-814는 callback 원천 통일, 기존 UTC Service/Provider/Scheduler/Notification/BoardingSession 경로와의 일관성, JDBC 경계 및 기존 데이터 해석·이관 정책을 최종 검증한다. UTC `LocalDateTime`/`DATETIME(6)` 유지와 `Instant` 중심 전환의 선택은 Schema·DTO·Query·호환성 비용을 확인한 뒤 결정하며, 이번 감사에서는 타입 전환·공통 Clock 구조·운영 timezone 설정·Migration을 도입하지 않는다. 저장 의미와 기존 데이터 제약은 [Database](database.md#utc-목표와-현재-저장-경계-task-816--aud-12), 재현·실제 영향·설계 대안·후속 acceptance는 [AUD-12 기록](task-list.md#aud-12-처리-2026-10-30)이 소유한다. AUD-10 로그인 TransactionTemplate/Session 원자성과 AUD-11 Migration 호환성 정책은 유지한다.
+
 ## 5. Authentication Architecture
 
 현재 로그인 및 Application API 인증 흐름은 다음과 같다.

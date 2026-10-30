@@ -329,6 +329,8 @@ TASK-813은 단일 persistent Backend runtime, durable MySQL, HTTPS/domain 또�
 
 TASK-814는 persisted operational time을 UTC 의미로 통일한다. `createdAt`/`updatedAt`, RefreshToken expiry, FOLLOW_UP start/expiry, Provider data time normalization, scheduler time, Notification retry/expiry, latency instrumentation 및 Analytics event time(도입 시)이 대상이다. TASK-504/510/707/709 등 그 전에 추가되는 timestamp도 처음부터 UTC 의미, test 가능한 `Clock` 또는 동등한 time source, 명시적인 Provider timezone parsing을 적용한다. TASK-814는 기존 timestamp consistency의 최종 정리이며 그 전까지 host-local `now()` 추가를 허용하지 않는다. 모든 type을 `Instant`로 바꿀지 UTC `LocalDateTime`/MySQL `DATETIME` 의미를 유지할지는 implementation 시 Schema와 migration 비용을 확인해 정하되 host local timezone에 따라 persisted time 의미가 달라져서는 안 된다.
 
+TASK-816 / [AUD-12 처리 기록](#aud-12-처리-2026-10-30)은 기존 callback 5개 컬럼의 Host 의존성, 별도 UTC 경로, MySQL 실측 및 기존 데이터 위험을 TASK-814의 근거로 연결한다. 감사 재현 완료는 UTC 결함 수정이나 TASK-814 완료를 의미하지 않는다.
+
 TASK-815는 Phase 6의 iOS development/actual-device vertical slice를 막지 않으며 public App Store 제출 전에만 release blocker다. 제출 시점 Apple 공식 Guideline을 확인해 Google-only primary social login의 Guideline 4.8 준수, 동등한 privacy-preserving login option 필요 여부, in-app account deletion, Privacy Policy, App Store privacy disclosure/data inventory, Firebase/Google 등 third-party SDK disclosure를 검토한다. 지금 Sign in with Apple 구현을 고정하지 않으며 필요할 때 User, Alarm, Device, Refresh Session 등 사용자 연결 데이터의 삭제 범위와 법적 보존 데이터를 정한다.
 
 공개 V1 전에는 기존 Domain Task에서 User별 총/ACTIVE Alarm, User별 Device, Route search query 길이/result limit, request body size의 최소 상한을 Provider quota와 실제 규모를 기준으로 결정한다. 별도 generic rate limiter나 Redis rate limiter는 도입하지 않는다. Provider polling은 Route grouping으로 Alarm별 외부 API 증폭을 막는다.
@@ -537,6 +539,92 @@ AUD-10 처리 (2026-10-30): 기존 `LoginService.login()`의 조회 후 INSERT�
 - 변경 판단: 기존 V1~V20 SQL/Checksum과 제품 Schema는 수정하지 않았다. 후속 Migration은 실패한 V4보다 먼저 실행될 수 없어 추가하지 않았다. 새로운 startup guard는 순서/운영 복잡도를 늘리므로 추가하지 않고, User 한 명의 잘못된 성공까지 막도록 **실행 전 수동 Preflight를 필수화**했다. 이는 자동 차단 구현을 의미하지 않는다. [Local Development](local-development.md#v4-미적용-db의-read-only-preflight-task-816--aud-11)에 현재 History/Version/V4·User/Alarm/History 개수·고아 FK·Schema·매핑/Backup/Restore 확인과 실패 후 점검 절차를 추가하고 Architecture에 실행 경계를 연결했다. Repair는 데이터 복구가 아니며 임의 Repair/Clean/Baseline/History 편집/UNIQUE 삭제로 통과시키지 않는다.
 - 신규·선택 테스트: `UserIdentityMigrationIntegrationTest` **8건**(2개 일반 테스트 + 6개 parameter invocation), `LoginMigrationIntegrationTest` **1건**, 신규 **9건 전부 실패/오류/skip 0건**으로 첫 선택 실행에 통과했다. `env -u JAVA_HOME ./gradlew test --offline --tests com.stopbell.user.entity.UserIdentityMigrationIntegrationTest --tests com.stopbell.user.auth.service.LoginMigrationIntegrationTest`를 실행했다. 후자는 검증된 ExternalIdentity 경계 fixture와 실제 LoginService/DB를 사용해 Fresh 최초 로그인·기존 User 재로그인·새 Identity, 독립 Session, Refresh Hash 저장/Rotation/재사용 거부·한 Session Logout 후 나머지 Session 유효성을 확인했다. Google 검증기는 Mock이고 실제 인증/Provider/FCM 호출은 없다. AUD-10 제품 코드는 그대로 유지했고 동시성 테스트 전체를 반복하지 않았다.
 - 범위·미검증: 실제 개발/운영 DB와 Docker Named Volume은 접근·수정·삭제하지 않았다. 배포 데이터에 외부 매핑이 존재하는지, 실제 수동 이관·Backup Restore drill·Google 인증/실기기, 다른 MySQL 버전/모든 SQL Mode/장애 중 DDL 중단은 미검증이다. 실제 데이터 이관이 필요한 증거가 나오면 별도 설계 결정이 필요하다. Backend/Flutter 전체 suite·서버/터널은 실행하지 않았다. Dependency·Credential/환경 설정·devlog 및 다른 감사 기록은 변경하지 않았다. `git diff --check` 통과, main 유지, Git add/commit/push·branch 생성·reset/stash/clean/checkout 없이 종료한다. TASK-816은 `[ ]`를 유지하며 AUD-12·13으로 진행하지 않는다.
+
+### AUD-12 처리 (2026-10-30)
+
+**판정: UTC 저장 목표와 기존 callback 구현의 불일치를 확인했으며, 수정하지 않고 TASK-814에 이관한다.** TASK-814는 착수 전부터 `[ ]`이고 UTC operational time 전체의 구현·최종 검증 소유자다. TASK-816도 `[ ]`를 유지한다. 기존 감사 표의 당시 코드 확인 수준은 보존하고 이번 실행 근거를 아래에 추가한다. 운영 DB에서 장애가 발생했거나 모든 `LocalDateTime`이 잘못됐다고 판정한 것은 아니다.
+
+#### 원인과 컬럼별 경로
+
+영속 시각 중심으로 `LocalDateTime/LocalDate/ZonedDateTime/OffsetDateTime/Instant.now`, `Clock.systemDefaultZone`, `ZoneId.systemDefault`, `ZoneOffset.UTC`, `ofInstant`, `clock.instant`와 관련 getter·Query·Migration을 확인했다. 직접 Host 의존 호출은 `User.onPrePersist()`/`onPreUpdate()`, `RefreshToken.onPrePersist()`, `Alarm.onPrePersist()`/`onPreUpdate()`의 인자 없는 `LocalDateTime.now()` **5개 지점**이다. `DATETIME(6)`과 callback 사용이라는 사실만으로 UTC가 보장되지 않는다.
+
+아래 LocalDateTime/Instant 컬럼의 physical type은 모두 `DATETIME(6)`이다. UTC 보장은 현재 제품 생성·소비 경로의 정적 확인을 뜻하며 모든 생성자 입력/외부 SQL/과거 데이터를 검증했다는 뜻은 아니다. 실측한 경로는 별도 명시한다.
+
+| 저장 위치 | Java 타입 | 생성 위치·원천 | 현재 UTC 의미 | 실제 용도·영향 | 담당 |
+| --- | --- | --- | --- | --- | --- |
+| `users.created_at`, `updated_at` | LocalDateTime | User JPA callback / Host | 미보장, MySQL 재현 | 감사 시각. 현재 User 생성 이후 공개 수정 경로는 없으며 테스트에서 dirty field로 PreUpdate 실행 | AUD-12 근거 → TASK-814 수정 |
+| `refresh_tokens.created_at` | LocalDateTime | RefreshToken JPA callback / Host | 미보장, MySQL 재현 | 감사 시각. 만료 판단에는 사용하지 않음 | AUD-12 → TASK-814 |
+| `refresh_tokens.expires_at` | LocalDateTime | RefreshTokenService.issue / jwtClock Instant를 UTC 변환 +30일 | 보장, 발급·Rotation·만료 경계 실측 | refresh의 `expiresAt > UTC now`, Logout은 Hash 삭제만 수행 | 기존 인증 유지, TASK-814 최종 검증 |
+| `alarms.created_at`, `updated_at` | LocalDateTime | Alarm JPA callback / Host | 미보장, MySQL 재현 | 생성·상태 변경 감사 시각, 사용자 목록 `ORDER BY createdAt DESC` | AUD-12 → TASK-814 |
+| `alarms.follow_up_started_at`, `follow_up_expires_at` | LocalDateTime | BusAlarmLifecycleService.applyArrival / Event observedAt Instant의 UTC, +5분 | 보장, 저장·재조회·Evaluator 경계 실측 | 복구·FOLLOW_UP 관측/만료 비교에서 명시적 UTC Instant 복원 | 기존 lifecycle 유지, TASK-814 최종 검증 |
+| `bus_alarm_targets` | 해당 없음 | Timestamp 컬럼/자체 callback 없음 | 적용 대상 없음 | Alarm runtime과 구분, 수정 대상 아님 | 기존 모델 유지 |
+| `devices.created_at`, `updated_at`; `last_registered_at` | LocalDateTime | callback의 `now(ZoneOffset.UTC)`; DeviceService의 Clock→UTC | 보장, 코드 확인 | 등록·소유권/상태 갱신. callback은 UTC지만 주입 Clock을 사용하지 않음 | 기존 TASK-702 유지, TASK-814 source 정리 검토 |
+| `boarding_sessions.created_at`, `updated_at`, `expires_at`, `ended_at`, `checkpoint_observed_at`, `checkpoint_provider_data_time` | LocalDateTime | Session/TrackingStore/Notification Service Clock→UTC; Validator의 차량 Instant→UTC | 보장, 코드 확인 | 최초 수명·freshness·checkpoint 단조성·재확인·종료 비교 | 기존 TASK-903~906 유지, TASK-814 최종 검증 |
+| `notification_events.observed_at`, `provider_data_time`, `event_detected_at`, `created_at`, `expires_at` | LocalDateTime | TransitEvent Instant→UTC 또는 검증된 Session checkpoint; lifecycle/BoardingNotificationService Clock→UTC | 보장, 코드 확인 | Event 시각 순서·Session 불변 기한. Alarm 감사 시각을 복사하지 않음 | 기존 TASK-707/906 유지, TASK-814 최종 검증 |
+| `notification_deliveries.created_at`, `updated_at`, `last_attempt_at`, `provider_accepted_at`, `next_attempt_at`, `expires_at` | LocalDateTime | lifecycle/DispatchAttempt/Worker/DurableHandler Clock→UTC, FCM result Instant→UTC, RetryPolicy | 보장, 코드 확인 | due 조회·expiry·attempt/recovery/retry·accepted. Event/관측 기한 사용 | 기존 TASK-709 유지, TASK-814 최종 검증 |
+| `bus_metadata_sync_states.last_complete_sync_at` | Instant | BusMetadataSyncService의 `Instant.now(transitMetadataClock)` | 보장, JPA 저장·읽기 실측 | 마지막 complete sync 성공 시각. 부분 실패는 갱신 근거가 아님 | 기존 TASK-507/513 유지, TASK-814 JDBC 최종 검증 |
+| `bus_routes`, `bus_stops`, `bus_route_stop_occurrences` | 해당 없음 | Timestamp 컬럼/자체 now 없음 | 적용 대상 없음 | metadata business snapshot과 complete sync 시각 분리 | 기존 모델 유지 |
+| legacy `notification_history.created_at` | 현재 Entity 없음 | V3 SQL만 존재, V14의 기존 데이터가 있는 경우 보존 | 과거 원천 불명확 | 현재 Event/Delivery 경로에서 쓰지 않음. 보존 데이터 해석은 미확정 | TASK-814 기존 데이터 조사 |
+
+Provider `observedAt`은 Mapper Clock의 Instant이고 서울 `dataTm`은 명시적 `Asia/Seoul` parsing 뒤 Instant다. TAGO의 원본 시각 부재는 그대로 유지하며 수신 시각으로 Provider freshness를 합성하지 않는다. Scheduler는 Clock Instant를 사용하고 FOLLOW_UP 저장값을 UTC로 해석한다. FCM result receive time도 Clock Instant이고 elapsed/request budget은 `System.nanoTime()`이다. `FcmSmokeRunner`의 `Instant.now()`는 zone에 독립적인 smoke request 기한이며 DB callback이 아니고 실행하지 않았다. `AlarmService`의 삭제 시 Delivery 종료 시각은 `now(ZoneOffset.UTC)`로 Host 의존 결함은 없지만 Device callback과 함께 Clock 주입 일관성 검토 여지는 남는다. 인자 없는 LocalDate/ZonedDateTime/OffsetDateTime.now나 제품 `Clock.systemDefaultZone`/`ZoneId.systemDefault` 호출은 발견하지 않았다.
+
+#### 고정 Instant와 격리 JVM 재현
+
+기준은 **`2026-10-30T00:00:00Z`**다. JVM 시작 시 `user.timezone`을 각각 지정한 별도 Gradle Test worker/MySQL Testcontainer로 실행했다. `TimeZone.setDefault()`나 시스템 시각 변경은 없다. 테스트 thread의 `Clock.systemDefaultZone()`만 fixed Clock으로 제한해 실제 `LocalDateTime.now()`·JPA callback을 통과시켰고, MySQL 자체는 Mock하지 않았다.
+
+| 대상 | UTC JVM | Asia/Seoul JVM | America/Los_Angeles JVM |
+| --- | --- | --- | --- |
+| User 생성·최초 수정 / RefreshToken 생성 / Alarm 생성·최초 수정 | 10-30 00:00 | 10-30 09:00 | 10-29 17:00 |
+| +60초 시 User·Alarm 수정 | 10-30 00:01 | 10-30 09:01 | 10-29 17:01 |
+| RefreshToken 만료 | 11-29 00:00 | 11-29 00:00 | 11-29 00:00 |
+| FOLLOW_UP 시작 / 만료 | 10-30 00:00 / 00:05 | 동일 UTC 값 | 동일 UTC 값 |
+| metadata complete sync raw DATETIME / 복원 Instant | 10-30 00:00 / `00:00Z` | 동일 UTC 값 / Instant | 동일 UTC 값 / Instant |
+
+LA의 이 날짜 offset은 **-07:00**이다. UTC Host에서는 기존 callback도 우연히 목표값과 일치한다. 서로 다른 Host 설정으로 쌓인 감사 시각은 시간 순서가 뒤집힐 수 있으나 운영 발생 이력은 확인하지 않았다. 기존 RepositoryIntegrationTest는 생성 시각 non-null·갱신 증가 등을 확인하고 RefreshTokenServiceTest는 UTC fixed Clock에서 만료를 검증한다. 명시적으로 Host=UTC를 강제하는 설정은 없고 callback의 UTC 의미/시간대 불변성도 검증하지 않아 UTC Host에서 이 결함을 발견할 수 없는 공백이 있었다.
+
+#### 실제 MySQL·JDBC 관측과 서비스 영향
+
+- Java/Gradle JVM **21.0.12.1**, Wrapper **8.14.3**, Hibernate **7.4.5.Final**, Connector/J **9.7.0**, 격리 image **mysql:8.4.11**, 기존 Flyway V1~V20 및 `ddl-auto=validate`로 실행했다. 실제 개발 MySQL/Named Volume은 접근하지 않았다.
+- JPA persist→flush→clear→find 및 JDBC typed raw read로 위 callback/expiry/FOLLOW_UP 값을 확인했다. 동일 SQL literal `2026-10-30 00:00:00`도 세 JVM에서 같은 User `LocalDateTime`으로 읽었다. 실제 연결의 Session offset `+00:00`/`+09:00`/`-07:00` 모두 DATETIME 날짜·시각은 유지됐고 metadata Instant도 원래 `00:00Z`로 복원됐다. DB에 timezone 정보가 추가되거나 잘못 생성된 Host 값이 자동 보정되지는 않았다.
+- 비교용 connection-local 임시 테이블의 `TIMESTAMP` 및 `FROM_UNIXTIME(기준 epoch)`는 같은 offset 순서로 `00:00`/`09:00`/전날 `17:00`이 됐다. 반면 `getObject(DATETIME, LocalDateTime.class)`는 항상 `00:00`이다. 기본 Connector 설정의 `getTimestamp(DATETIME).toInstant()`는 UTC JVM `00:00Z`, Seoul JVM **전날 `15:00Z`**, LA JVM **`07:00Z`**로 해석됐다. 이는 JDBC API/설정 차이이며, 모든 JPA LocalDateTime이 자동 Instant 변환된다는 뜻은 아니다. 임시 테이블은 제거하고 Session zone은 원래 값으로 복구했다. 저장 의미와 공식 자료는 [Database](database.md#utc-목표와-현재-저장-경계-task-816--aud-12)를 따른다.
+- **RefreshToken:** 생성/만료 컬럼의 의미 혼합은 확인된 결함이다. 현재 서비스는 createdAt을 만료 판단에 사용하지 않아 이 결함에 따른 조기/지연 만료는 재현되지 않았다. UTC 만료 **1초 전** refresh 성공·새 30일 기한, 기존 Hash 재사용 거부, 정확한 만료 경계의 거부/삭제, 만료된 Token의 Logout Hash 삭제를 실제 Repository/Service로 확인했다. JWT 생성기만 Mock이며 Google/인증 네트워크 검증이나 AUD-10 Session 원자성 재검증은 아니다.
+- **Alarm/FOLLOW_UP:** 생성/수정 감사 시각 불일치와 목록 생성시각 내림차순 사용을 확인했다. 같은 Host에서 일정 offset만 적용되면 순서는 유지되지만 zone 변경/혼합·DST 전환 시 순서 왜곡 가능성은 추론이며 목록 역전/DST 실측은 하지 않았다. activate/deactivate/FOLLOW_UP 자체의 조건은 감사 시각을 쓰지 않는다. 기존 실제 `applyArrival` 변환을 호출해 UTC start/expiry를 저장하고 재조회한 뒤 메모리 state 없이 Evaluator가 +299초에는 유지, +300초에는 만료함을 확인했다. 이 테스트는 해당 private 변환과 재조회/Evaluator 경계 검증이며 전체 lifecycle commit·restart E2E는 아니다.
+- **Notification:** Event/delivery/dispatch/retry/expiry가 별도 UTC 경로이고 User/Alarm createdAt·updatedAt을 기한 계산에 사용하지 않음을 코드로 확인했다. 이 callback 결함으로 발송 지연/조기 expiry가 발생했다는 근거는 없다. 실제 발송/Worker/Retry 테스트를 이번에 실행하지 않았으므로 전체 Notification 동작을 새로 실증했다고 주장하지 않는다.
+- **BoardingSession:** 생성/수정/수명·checkpoint/Provider 시각·freshness/재확인은 Clock Instant→UTC 경로이며 대상 callback과 독립적이다. 세션 응답은 UTC offset으로 Instant를 복원한다. 이번 감사로 새 결함은 확인되지 않았으며 실제 Session 생성/재확인·Provider 추적/재시작 테스트는 재실행하지 않았다.
+- **기존 데이터:** callback 컬럼은 Host 변경 시 같은 컬럼에도 다른 의미가 섞일 수 있다. 현재 Schema나 timezone 없는 값만으로 원래 Instant를 복원할 수 없다. 실제 운영 Host/DB/JDBC 설정 이력과 신뢰 가능한 대응 시각은 조사하지 않았으므로 기존 값의 timezone은 미확정이다. UTC 경로의 값까지 ±9시간 이동하거나 전체 변환하지 않는다. TASK-814에서 근거와 Backup/Restore를 갖춘 별도 이관/호환성 정책이 필요하다.
+
+#### TASK-814 후속 구현과 검증 조건
+
+| 대안 | 이점 | 실제 영향·비용 및 검증 필요 |
+| --- | --- | --- |
+| A. UTC LocalDateTime + DATETIME 유지 | 현재 Entity/Schema/대부분 Query 변경 최소화 가능, 기존 UTC 경로 재사용 | 5개 Host 호출의 원천을 UTC Clock 기준으로 통일하고 zone 없는 타입의 UTC 의미를 모든 생성·소비 경계에서 유지. Hibernate Timestamp binding/extraction·JDBC API/옵션 조합 검증 필요. 기존 데이터 해석 문제는 남음 |
+| B. Instant 중심 전환 | 특정 순간 의미를 타입으로 명확히 표현, UTC offset 해석 누락 감소 | User/RefreshToken/Alarm뿐 아니라 Notification/Session의 Entity·생성자·DTO·Repository Query/비교·테스트 영향 검토. 현재 metadata의 Instant→DATETIME 왕복은 가능하지만 전체 전환/Schema 유지 가능성의 증거로 일반화하지 않음. MySQL 정밀도·JDBC 설정·직렬화·과거 데이터 이관 비용 검토 필요 |
+
+이번에는 어느 대안도 채택하지 않았다. TASK-814에서는 다음을 수행해야 한다.
+
+1. A/B의 범위·호환성을 결정하고 5개 callback Host 호출을 제거한다. UTC이지만 직접 system time을 쓰는 Device callback/Alarm 삭제 시각도 test 가능한 원천의 일관성 검토에 포함한다. 불필요한 BaseEntity/공통 Framework는 선행 도입하지 않는다.
+2. 현재 UTC인 Refresh expiry/Rotation, FOLLOW_UP start/expiry/복구, Provider parsing, Scheduler, Notification retry/expiry, BoardingSession freshness/재확인, metadata Instant를 보존한다. 감사 시각과 업무 기한 사이에 새 의존성을 만들지 않는다.
+3. 이번 **Host-local Characterization 기대값을 동일 Instant→동일 UTC 저장 기대값으로 변경**한다. 세 JVM의 raw DATETIME/JPA 왕복, 동일 DB 값의 교차 zone 읽기, 실제 도입 JDBC/Hibernate 설정, microsecond 정밀도·만료 경계와 DST 중첩/누락 시각을 검증한다. UTC runtime 설정만으로 callback/경계 검증을 대체하지 않는다.
+4. 컬럼·배포 기간별 과거 시각 원천/설정 근거와 혼합 가능성을 조사하고, 원래 Instant를 알 수 없는 경우의 정책을 별도 결정한다. 근거 없는 일괄 보정/Migration 없이 Backup·실제 Restore 및 해석/소유권/기한 보존 검증을 준비한다.
+5. 최종 선택·제품 수정·필수 검증 후 Owner 문서를 동기화한다. 이번 AUD-12 근거 확보만으로 TASK-814 또는 TASK-816을 완료 처리하지 않는다.
+
+#### 선택 테스트·변경 범위·미검증
+
+- 신규 파일 `backend/src/test/java/com/stopbell/common/UtcTimestampCharacterizationIntegrationTest.java`의 **4개 테스트**를 세 별도 JVM에서 실행해 **총 12회, 실패/오류/skip 0건**으로 통과했다. 실행 중 테스트 실패나 제품 코드 수정은 없었다. callback의 현 결함 동작을 UTC 정책으로 승인하는 회귀 테스트가 아닌 분석용 Characterization임을 클래스에 명시했다.
+- 동일 클래스만 선택 실행했다. 각 실행의 보고서는 `backend/build/test-results/aud12-UTC`, `aud12-Asia-Seoul`, `aud12-America-Los_Angeles`에 분리했다. 실행 명령은 `env -u JAVA_HOME ./gradlew test --offline --tests com.stopbell.common.UtcTimestampCharacterizationIntegrationTest -I /private/tmp/stopbell-aud12/timezone.init.gradle -PauditTimezone=<zone>`이며 `<zone>`에 위 세 값을 차례로 지정했다. init script는 저장소 밖 임시 테스트 설정이고 아래 내용으로 재현할 수 있다. 제품/개인 Credential·환경 파일이나 Gradle build 설정을 변경하지 않았다.
+
+```groovy
+allprojects {
+    tasks.withType(Test).configureEach {
+        systemProperty 'user.timezone', providers.gradleProperty('auditTimezone').get()
+        reports.junitXml.outputLocation = layout.buildDirectory.dir('test-results/aud12-' + providers.gradleProperty('auditTimezone').get().replace('/', '-'))
+    }
+}
+```
+
+- 이번 변경은 신규 테스트와 `docs/task-list.md`·`docs/database.md`·`docs/architecture.md` **4개 파일**뿐이다. 기존 AUD-11 변경을 보존했으며 작업 중 별도 주체가 해당 변경을 commit한 뒤에도 문서 본문이 시작 시점과 같음을 확인했다. 제품 Entity/Service·AUD-10 TransactionTemplate·AUD-01~11 정책·기존/신규 Migration·Dependency·Credential/환경 설정·devlog는 변경하지 않았다.
+- 미검증: 실제 개발/운영 데이터·과거 Host/DB/JDBC 설정/배포 이력, 실데이터 이관·Backup Restore, DST 경계, 임의 JDBC/Hibernate 옵션 조합·다른 MySQL 버전, 모든 Entity의 교차 Host 전체 업무 흐름·Notification/BoardingSession E2E/재시작·목록 역전, 실제 Provider/Google/FCM/실기기는 검증하지 않았다. 동일 DB를 여러 JVM이 차례로 공유한 실험은 아니며 각 JVM의 새 DB에 동일 literal을 넣어 읽었다. Backend/Flutter 전체 테스트·서버/터널 실행은 없었다.
+- `git diff --check`와 신규 미추적 테스트 파일의 `git diff --no-index --check /dev/null <파일>` 모두 통과했다. main 유지, Git add/commit/push·branch 생성·reset/stash/clean/checkout 없이 AUD-12만 보고 후 중단한다. 이 감사의 완료는 결함 수정이 아니라 TASK-814로의 근거 이관이며 체크박스는 모두 유지한다.
 
 ### TASK-816 문서 불일치 후속 범위
 

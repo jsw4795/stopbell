@@ -51,6 +51,20 @@ V1~V4를 포함한 기존 Migration과 Checksum은 유지한다. V4 뒤 신규 M
 - 제공자 식별자는 제공자별 네임스페이스가 없으면 전역적으로 유일하다고 가정하지 않는다.
 - persisted operational timestamp는 host local timezone과 무관한 UTC 의미로 일관되게 저장한다. 구체 Java type과 MySQL `DATETIME` 표현은 TASK-814에서 Schema/migration 비용을 확인해 정한다.
 
+### UTC 목표와 현재 저장 경계 (TASK-816 / AUD-12)
+
+위 UTC 원칙은 최종 계약이며 **현재 모든 컬럼에서 보장된다는 뜻은 아니다.** AUD-12에서 `users.created_at/updated_at`, `refresh_tokens.created_at`, `alarms.created_at/updated_at`의 기존 `LocalDateTime.now()` callback이 JVM 기본 시간대의 값을 저장함을 실제 JPA/MySQL로 확인했다. `refresh_tokens.expires_at`과 `alarms.follow_up_started_at/follow_up_expires_at`은 별도 UTC 계산 경로이므로 같은 테이블 안에서도 시각 의미가 혼합된다. 제품 수정과 UTC 계약의 최종 검증은 미완료 TASK-814의 책임이다. 컬럼별 원천·영향·재현과 검증 한계는 [AUD-12 처리 기록](task-list.md#aud-12-처리-2026-10-30)을 따른다.
+
+- Java `Instant`는 특정 순간을 표현한다. `LocalDateTime`은 offset/zone 없는 날짜·시각이며 UTC 여부는 생성·해석하는 코드의 계약으로 정해진다. UTC `LocalDateTime` 사용 자체를 결함으로 취급하지 않는다.
+- MySQL `DATETIME(6)`은 microsecond 정밀도의 날짜·시각을 저장하며 원래 timezone/offset은 보존하지 않는다. `TIMESTAMP`의 Session Timezone↔UTC 변환과 구분한다. 현재 operational 컬럼의 physical type은 `DATETIME(6)`이다.
+- 현재 저장소의 `application.yml`/`application-local.yml`에는 `hibernate.jdbc.time_zone`이나 Connector/J `connectionTimeZone`/`forceConnectionTimeZoneToSession`의 명시적 고정이 없다. JVM Default Timezone은 Java의 host-local 값 생성에, JDBC/Hibernate 설정은 binding/extraction에, MySQL Session Timezone은 `TIMESTAMP`와 `NOW()`/`FROM_UNIXTIME()` 같은 SQL 시간 연산에 관여한다. 세 경계를 하나의 설정으로 취급하지 않는다.
+- 검증한 기본 경로(Java 21, Hibernate 7.4.5.Final, Connector/J 9.7.0, MySQL 8.4.11)에서는 `LocalDateTime` JPA 저장·재조회 및 JDBC `getObject(..., LocalDateTime.class)`가 `DATETIME`의 날짜·시각 필드를 유지했다. 같은 SQL literal은 UTC·Seoul·Los Angeles JVM에서 같은 `LocalDateTime`으로 읽혔으며 UTC로 자동 보정되지 않았다. 반면 `getTimestamp(...).toInstant()`는 이번 기본 Connector 설정에서 JVM zone을 적용해 다른 Instant로 해석됐다. 이 둘을 같은 API로 간주하지 않는다.
+- 이미 `Instant`인 `bus_metadata_sync_states.last_complete_sync_at`은 현재 Hibernate UTC binding/extraction으로 UTC `DATETIME`을 저장하고 동일 Instant로 복원했다. Session offset을 `+00:00`/`+09:00`/`-07:00`으로 바꿔도 검증한 JPA `LocalDateTime`/`Instant` 경로의 결과는 유지됐다. 임시 비교 테이블의 `TIMESTAMP`와 `FROM_UNIXTIME()` 결과는 Session offset에 따라 달라졌다. **DB 시간대를 UTC로 바꾸는 것만으로 Java callback의 Host 시각 생성은 해결되지 않는다.**
+
+공식 동작 설명은 [MySQL 8.4 DATETIME/TIMESTAMP](https://dev.mysql.com/doc/refman/8.4/en/datetime.html), [Connector/J instant 보존](https://dev.mysql.com/doc/connector-j/en/connector-j-time-instants.html), [Connector/J datetime 설정](https://dev.mysql.com/doc/connector-j/en/connector-j-connp-props-datetime-types-processing.html)을 참고한다. 위 실측은 현재 기본 설정의 결과이며 임의의 `hibernate.jdbc.time_zone`/JDBC 옵션 조합이나 DST 중첩 구간까지 검증한 것은 아니다. 특히 Java에서 미리 Host 값으로 만든 `LocalDateTime`에 JDBC UTC 옵션만 추가해 해결됐다고 판단하면 안 된다.
+
+**기존 데이터:** `DATETIME` 값만으로 원래 Instant/Host zone을 복원할 수 없다. 현재 저장소 설정은 과거 운영 JVM/DB 설정의 증거가 아니며 실제 배포 이력·원본 데이터는 조사하지 않았다. 같은 컬럼도 실행 Host/설정 변경에 따라 다른 zone 의미가 섞였을 수 있다. UTC 생성 경로의 기존 값까지 함께 이동하거나 일괄 ±9시간/전체 UTC 변환을 하지 않는다. TASK-814에서 컬럼·배포 기간별 생성 경로, 당시 JVM/JDBC/DB 설정 및 신뢰 가능한 외부 시각 근거를 확인하고 Backup/Restore와 이관 후 검증을 포함한 별도 호환성 정책을 결정해야 한다. 근거 없는 Migration은 추가하지 않는다.
+
 ## 5. Persistence Strategy
 
 JPA는 단순한 Domain CRUD와 Entity 상태 관리에 사용한다. `users`, `refresh_tokens`, `devices`, `alarms`, `bus_alarm_targets`, Phase 7의 Notification event/delivery persistence, `bus_routes`, `bus_stops`, `bus_route_stop_occurrences`는 Repository 기반으로 관리한다. `BusAlarmTarget`은 Alarm aggregate를 통해 persist/remove한다. Bus metadata는 source-neutral route snapshot을 한 Route 단위로 reconciliation한다.
