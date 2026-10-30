@@ -55,6 +55,8 @@ class AuthenticationErrorDispatchIntegrationTest {
 
         assertThat(response.statusCode()).isEqualTo(status);
         assertThat(response.body()).doesNotContain("private-error-marker", "stackTrace", "java.lang");
+        assertError(response, status, status == 404 ? "NOT_FOUND" : "INTERNAL_SERVER_ERROR",
+                status == 404 ? "Requested resource was not found." : "An internal server error occurred.");
     }
 
     @Test
@@ -85,7 +87,7 @@ class AuthenticationErrorDispatchIntegrationTest {
         assertThat(response.statusCode()).isEqualTo(500);
         assertThat(response.body()).doesNotContain("private-runtime-marker", "runtime-fixture", "IllegalStateException",
                 "stackTrace", "java.lang");
-        // The Boot 500 body is intentionally not unified by this authentication-only step.
+        assertError(response, 500, "INTERNAL_SERVER_ERROR", "An internal server error occurred.");
     }
 
     @ParameterizedTest
@@ -101,6 +103,7 @@ class AuthenticationErrorDispatchIntegrationTest {
         HttpResponse<String> response = get("/api/v1/unknown-fixture", jwtTokens.createAccessToken(42L));
         assertThat(response.statusCode()).isEqualTo(404);
         assertThat(response.body()).doesNotContain("stackTrace", "java.lang");
+        assertError(response, 404, "NOT_FOUND", "Requested resource was not found.");
         assertThat(get("/actuator/health", null).statusCode()).isEqualTo(200);
     }
 

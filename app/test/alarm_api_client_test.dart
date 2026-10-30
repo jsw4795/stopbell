@@ -65,6 +65,52 @@ Map<String, Object> alarm([int id = 15, String status = 'INACTIVE']) => {
 };
 
 void main() {
+  for (final entry in {
+    400: ('INVALID_REQUEST', 'Request is invalid.'),
+    404: ('NOT_FOUND', 'Requested resource was not found.'),
+    405: ('METHOD_NOT_ALLOWED', 'Request method is not supported.'),
+    406: ('NOT_ACCEPTABLE', 'Requested response media type is not supported.'),
+    415: ('UNSUPPORTED_MEDIA_TYPE', 'Request media type is not supported.'),
+    500: ('INTERNAL_SERVER_ERROR', 'An internal server error occurred.'),
+    503: ('SERVICE_UNAVAILABLE', 'Service is temporarily unavailable.'),
+  }.entries) {
+    test(
+      'normalized MVC ${entry.key} preserves status and code without replay',
+      () async {
+        var calls = 0;
+        final client = await alarmClient(
+          MockClient((_) async {
+            calls++;
+            return jsonResponse(
+              jsonEncode({'code': entry.value.$1, 'message': entry.value.$2}),
+              entry.key,
+            );
+          }),
+        );
+        await expectLater(
+          client.create(
+            targetStopOccurrenceId: 1,
+            notifyOneStopBefore: false,
+            notifyOneStopAfter: false,
+          ),
+          throwsA(
+            isA<AlarmApiException>()
+                .having((error) => error.statusCode, 'status', entry.key)
+                .having((error) => error.code, 'code', entry.value.$1)
+                .having((error) => error.message, 'message', entry.value.$2)
+                .having(
+                  (error) => error.isAlarmNotFound,
+                  'alarm not found',
+                  false,
+                )
+                .having((error) => error.isStaleTarget, 'stale target', false),
+          ),
+        );
+        expect(calls, 1);
+      },
+    );
+  }
+
   test('create sends only occurrence selection and options through protected client', () async {
     var calls = 0;
     final client = await alarmClient(
@@ -173,7 +219,7 @@ void main() {
             jsonEncode(
               alarm(
                 15,
-                  request.url.path.endsWith('/activate') ? 'ACTIVE' : 'INACTIVE',
+                request.url.path.endsWith('/activate') ? 'ACTIVE' : 'INACTIVE',
               ),
             ),
             200,

@@ -11,9 +11,18 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ApiErrorResponse> handleMethodValidation(HandlerMethodValidationException exception) {
+        // Input constraints are 400; return-value validation is an internal 500 failure.
+        return ResponseEntity.status(exception.getStatusCode())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(ApiErrorResponse.forStatus(exception.getStatusCode().value()));
+    }
 
     @ExceptionHandler({InvalidSocialCredentialException.class, InvalidRefreshTokenException.class})
     public ResponseEntity<ApiErrorResponse> handleAuthenticationFailure(Exception exception) {

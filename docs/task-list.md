@@ -615,6 +615,73 @@ Java 테스트 변경은 SecurityConfigurationIntegrationTest, AuthControllerInt
 
 남은 TASK-804 범위는 (1) MVC validation 400과 기타 기본 오류 경로, (2) 안전한 공통 500 fallback, (3) 전체 Endpoint 오류 Matrix 회귀, (4) Flutter Alarm 생성 실패·응답 유실 복구, (5) TASK-802의 서버 중복 방지 책임과 구분, (6) TASK-804 최종 회귀·완료 판단이다. 일반 Service `ResponseStatusException(401)`의 body, MVC 404/405/406/415 등의 code, commit/직렬화/Handler 재실패의 공통 처리도 이번에 완료하지 않았다. 분석 E08의 Alarm 화면은 이번 범위에서 수정하지 않는다. 1단계 Commit·Push 성공도 TASK-804 전체 완료를 의미하지 않는다.
 
+### TASK-804 2단계 — MVC Validation 및 공통 500 오류 계약 구현 (2026-10-31)
+
+이번 단계는 `main`, HEAD `4c1b9bef764c4f44f0dba9c5ee1566eb90ed4d01`, tracked/untracked 변경 없는 상태에서 시작했다. 위 분석 226행과 1단계 결과는 당시 조사/구현 범위로 보존한다. 아래 내용이 현재 MVC/공통 500 구현 결과이며 TASK-804는 `[ ]`, TASK-814/816은 `[x]`와 다른 모든 Task 상태를 유지한다. TASK-804 전체 완료나 Phase 종료 감사로 확대하지 않는다.
+
+#### 확인한 경로와 구현 선택
+
+제품 Controller 6개(Alarm, Device, BoardingSession, Auth, BusRoute, BoardingCandidate), DTO/Domain 오류와 기존 HTTP/DB 테스트, [API 오류 형식](api.md#5-오류-형식)·관련 Architecture/Requirements/Domain/Package/개발·로컬 실행 규칙·ADR을 대조했다. Security/인증 1단계는 재설계하지 않았다. 구현 전 설치된 Spring MVC **7.0.9**의 `DefaultHandlerExceptionResolver` 바이트코드와 [공식 지원 예외/상태](https://docs.spring.io/spring-framework/docs/7.0.9/javadoc-api/org/springframework/web/servlet/mvc/support/DefaultHandlerExceptionResolver.html), [Resolver 확장 API](https://docs.spring.io/spring-framework/docs/7.0.9/javadoc-api/org/springframework/web/servlet/config/annotation/WebMvcConfigurer.html)를 확인했다. Boot/Dependency는 기존 **4.1.1** 그대로다.
+
+- 기존 `GlobalExceptionHandler`는 body Bean Validation, 읽기 실패, Query 누락, Path/Query 타입 실패의 네 400 예외와 `ApiException`·인증 예외를 처리한다. 이 Handler들을 유지하고 `HandlerMethodValidationException`만 추가했다. `getStatusCode()`를 사용해 입력 validation의 400과 반환값 validation의 500을 구분한다.
+- 미등록 경로는 기본 static resource 처리의 `NoResourceFoundException` 404, 지원하지 않는 method/media type/Accept는 각각 405/415/406이다. 기본 Resolver는 상태·`Allow`/지원 media type header를 설정하고 `sendError`한다. `ResponseStatusException`과 원인 예외까지의 `@ResponseStatus`도 상태 Resolver에서 `sendError`로 처리한다. 이 경로는 기존 generic 400 Handler의 대상이 아니며 원래 상태를 보존해야 한다.
+- `ResponseEntityExceptionHandler` 확장도 검토했으나 기존 Advice와 기본 Resolver를 보존하는 더 작은 변경을 선택했다. Advice의 catch-all은 상태/기본 Resolver보다 먼저 실행하므로 `@ExceptionHandler(Exception.class)`를 추가하지 않았다. `MvcErrorConfiguration.extendHandlerExceptionResolvers()`로 **기존 Resolver 목록의 마지막**에만 예상 밖 Exception fallback을 추가했다.
+- 실행 순서는 Controller-local Handler → 기존 Advice → `ResponseStatusExceptionResolver` → `DefaultHandlerExceptionResolver` → 신규 fallback이다. Domain/인증 예외와 정상 MVC 상태가 앞에서 해결되면 fallback은 호출되지 않는다. Security의 Authentication/AccessDenied 예외는 cause chain까지 확인해 fallback에서 처리하지 않고 바깥 Filter에 맡긴다. 실제 MVC→Security 401/403/challenge 회귀로 확인했다.
+- 신규 `ApiErrorController`는 Boot 기본 `/error` Controller를 대체해 Servlet의 `ERROR_STATUS_CODE`만 읽고 안전한 JSON을 만든다. `ERROR_MESSAGE`·Exception·URI·Boot error attributes를 직렬화하지 않는다. 상태가 없거나 유효한 4xx/5xx가 아니면 500을 사용한다. 상태에 따른 공개 body는 `ApiErrorResponse.forStatus()`에서 공유한다. Security Filter/정책·운영 설정은 변경하지 않았다.
+- 새 enum code는 `NOT_FOUND`(404), `METHOD_NOT_ALLOWED`(405), `NOT_ACCEPTABLE`(406), `UNSUPPORTED_MEDIA_TYPE`(415), `SERVICE_UNAVAILABLE`(503) 다섯 개다. 일반 401/403/400/500은 기존 공통 code를 사용하고, 나머지 상태는 `HTTP_<status>`와 고정 `Request could not be completed.`를 사용한다. 예컨대 generic `HTTP_409`와 Domain의 revision/ownership 409를 구분한다. 기존 **25개 ErrorCode의 HTTP/message는 모두 불변**이다. 정확한 공개 message의 Owner는 API §5다.
+- Alarm ID는 이번 요청과 API §5의 ‘0 이하 ID는 INVALID_REQUEST’ 계약을 확인해 조회·활성화·비활성화·삭제의 Path 인자에만 `@Positive`를 추가했다. 양수 부재/다른 owner의 `ALARM_NOT_FOUND` 404는 유지한다. Create DTO나 다른 DTO의 제약을 새로 만들지 않고 기존 필수값·범위·Enum·UUID 검증을 사용했다.
+
+#### 안전한 500 및 기존 Handler 우선순위
+
+fallback은 아직 commit되지 않은 응답 buffer와 기존 Content-Length만 비우고 HTTP 500, `application/json`, 정확히 `INTERNAL_SERVER_ERROR`/`An internal server error occurred.` 두 필드를 기록한다. 이미 commit됐거나 쓰기 I/O가 실패하면 교체를 보장하지 않는다. 연결 단절·streaming 이후 오류나 Container 자체 장애까지 안전한 새 body를 전달한다고 주장하지 않는다.
+
+기존 Device/Boarding의 `DataAccessException`·`TransactionException` local Handler를 그대로 두었다. 실제 Servlet에서 각 local 로그와 고정 JSON 500이 나오고 마지막 fallback 로그가 없음을 확인했다. Alarm/Auth처럼 local Handler가 없는 경로의 Runtime·DataAccessException은 마지막 fallback을 사용한다. 신규 fallback 로그는 `exceptionType`만 기록하며 원문 message/cause·JWT/Refresh/Google/Firebase credential·FCM target·SQL/constraint·서버 경로·Provider 원문을 기록하지 않는다. 별도 Logging Framework나 TASK-805의 구조화 Logging 시스템은 추가하지 않았다.
+
+500은 서버 미저장/rollback의 증거가 아니다. 기존 Device/Boarding의 원래 요청 identity와 결과 재확인, Alarm 생성 결과 불확실성은 그대로다. JWT/Google 검증·Auth Service·Token Rotation/Pair/Logout, Alarm/Boarding Lifecycle, Transit Mapping, Notification, DB/Flyway/Dependency/운영 설정 및 Flutter 제품은 변경하지 않았다.
+
+#### 실제 Servlet HTTP 검증
+
+신규 `MvcErrorHttpIntegrationTest`는 RANDOM_PORT Embedded Tomcat을 `java.net.http.HttpClient`로 호출한다. 기존 인증 dispatch 테스트의 Repository/Transaction mock 구성과 DataSource/JPA 제외를 재사용하고, 제품 Controller/DTO/Security를 실제로 실행한다. 예외 주입은 test의 Service/Google 경계 mock으로 한정했다. 기본 `sendError`, annotation/원인 annotation, 반환값 validation, MVC Security 예외를 위한 probe Controller와 ERROR dispatch 확인 Filter는 **test source에만** 둔다. 실제 DB/Domain 정책은 아래 기존 MySQL 통합 회귀가 별도로 검증한다.
+
+| 검증 상황 | 실제 결과 |
+| --- | --- |
+| 누락 body, 잘못된 JSON, 필수값/null/빈 문자열, 타입/범위/overflow, Enum/UUID 오류, Bean Validation | 400 INVALID_REQUEST, 정확한 두 필드; 해당 Service 호출 없음 |
+| Path/Query 타입 오류와 필수 Query 누락 | 같은 고정 JSON 400 |
+| Alarm Path ID 0/-1, 조회/activate/deactivate/delete | Service 호출 전 400; 양수 Domain 404 유지 |
+| 기본 미등록 URL / 지원하지 않는 method / 요청 media type / Accept 협상 | 404 NOT_FOUND / 405 METHOD_NOT_ALLOWED / 415 UNSUPPORTED_MEDIA_TYPE / 406 NOT_ACCEPTABLE; ERROR dispatch와 Allow/지원 media type header 보존 |
+| 공개 Auth의 ResponseStatusException | 400/401/403/404/405/406/409/415/418/422/429/500/502/503/504 그대로 보존, reason/cause 비노출 |
+| Servlet sendError 404/500/503 및 annotation/원인 annotation 404 | 실제 ERROR 재진입을 test Filter header로 확인, 원래 상태와 고정 JSON 보존 |
+| 필수 Header 누락 / 반환값 validation 실패 | 각각 400 INVALID_REQUEST / 500 INTERNAL_SERVER_ERROR |
+| Alarm/Auth 예상 밖 Runtime·DataAccessException | 고정 JSON 500; 내부 marker·SQL/Token/경로/예외 class 비노출 |
+| Device/Boarding local 영속성 Handler | 기존 JSON 500 및 local 우선순위 보존 |
+| Domain 403/404/409, Transit Provider 503 | 기존 resource/conflict code 및 TRANSIT_TEMPORARILY_UNAVAILABLE 보존 |
+| Security 401/403, Google/Auth 401/503 | 기존 UNAUTHENTICATED/ACCESS_DENIED/SOCIAL_IDENTITY_UNAVAILABLE 및 Security challenge 보존 |
+
+모든 오류 assertion은 HTTP status·Content-Type·정확한 `code/message` key 집합·고정 message와 가짜 민감 marker 비노출을 검사한다. 기존 `AuthenticationErrorDispatchIntegrationTest`의 404/500 assertion도 고정 JSON까지 강화했다. 기존 테스트 삭제·Skip·assertion 약화는 없다. 이번 실제 HTTP 검증이 모든 Endpoint 오류 조합의 최종 Matrix를 대체하지는 않는다.
+
+#### 실행 결과와 검증 범위
+
+환경은 Java/Gradle JVM **21.0.12.1**, Wrapper **8.14.3**, DB는 기존 격리 **mysql:8.4.11 Testcontainers/Flyway**다. Backend 명령은 `env -u JAVA_HOME ./gradlew test --offline --max-workers=1`에 집중/인접 단계의 `--tests`를 지정했다. 초기 Gradle wrapper cache 접근 제한은 허용된 권한 확장으로 해결했으며 제품/설정/Dependency를 우회 변경하지 않았다.
+
+| 단계 | 실행 / 통과 | 실패 / 오류 / Skip | 범위 |
+| --- | ---: | --- | --- |
+| MVC 집중 + 실제 Servlet | 83 / 83 | 0 / 0 / 0 | 신규 MvcErrorHttpIntegrationTest 73 + 기존 AuthenticationErrorDispatchIntegrationTest 10 |
+| 인접 Backend 회귀 | 256 / 256 | 0 / 0 / 0 | Alarm 38, Device 12, Boarding 130, BoardingCandidate 9, RouteSearch 10, RouteStop 5, Security 25, NonWeb 1, Auth 26 |
+| Backend 전체 | 1,398 / 1,398 | 0 / 0 / 0 | 81개 클래스, 실제 JUnit XML suite/testcase 합계 일치, BUILD SUCCESSFUL(6분 33초) |
+| Flutter Client 선택 회귀 | 131 / 131 | 0 / 0 / 0 | Alarm/Timeout, Device, BoardingSession/Candidate, RouteSearch/Stop, AuthenticatedApi, BackendAuth 9개 파일 |
+
+Flutter는 제품을 수정하지 않았다. `alarm_api_client_test.dart`에 신규 고정 JSON 400/404/405/406/415/500/503의 status/code/message 보존·Domain 404와의 구분·Create 자동 replay 없음 7개를 추가했다. 기존 Session의 500 uncertainty/원래 UUID 보존과 Device/Transit/Auth 호환성도 함께 통과했다. `flutter analyze --no-pub`는 No issues, 변경 Dart의 format 검사는 통과했다. Flutter 전체는 실행하지 않았으며 과거 전체 결과를 이번 수치에 합산하지 않는다. 응답 key와 기존 Domain/status·인증 경계가 유지되고 관련 Client 9개 파일이 통과하므로 전체 Flutter 회귀로 확대하지 않았다. Alarm 화면의 생성 실패·응답 유실 복구 자체는 다음 단계다.
+
+기존 Backend 1,325개와 신규 Servlet 73개를 합친 최종 1,398개 전부 통과했으며 테스트 실패로 인한 재실행은 없다. 종료된 격리 DB의 cached context shutdown 중 Hikari 연결 종료 경고가 있었지만 JUnit 실패/오류/Skip은 모두 0이다. 종료 후 Docker에는 시작 전과 같은 개발 MySQL Container `978144708abb`만 남았으며 기존 Container/Volume을 변경하지 않았다. 단계별 테스트 결과는 서로 겹치므로 전체 테스트 수에 중복 합산하지 않는다. 실행 로그는 `/private/tmp/stopbell-task804-step2-{focused,adjacent,full,flutter,flutter-analyze}.log`, Backend JUnit XML은 같은 접두사의 단계별 `*-results` 디렉터리에 보존한다. 실제 Google/Transit Provider/FCM·Firebase credential·iPhone, 개발/운영 DB는 사용하지 않았다.
+
+#### 문서 일관성과 남은 완료 조건
+
+[API §5](api.md#5-오류-형식)에 범용 오류 code/message·Servlet 상태 보존·fallback 우선순위·보안/commit 한계와 Alarm Path ID 범위를 최소 동기화했다. 위 분석/1단계 기록은 수정하지 않고 이번 절만 추가하며, 이미 정확한 Owner 문서와 devlog는 변경하지 않는다. 기존 분석의 ‘미구현/미확정’과 1단계의 ‘후속 범위’는 각 시점의 기록이다. 현재 상태는 이번 절과 API Owner를 따른다.
+
+최종 변경은 허용된 11개 파일(제품 6, Java 테스트 2, Flutter 테스트 1, 문서 2)뿐이다. 기존 25개 ErrorCode의 status/message, Task 체크박스 102개와 새 절을 제외한 task-list 전체 본문의 불변을 비교했고 `git diff --check`를 통과했다. 필요한 문서 동기화와 집중·인접·전체 Backend 및 관련 Flutter 검증이 성공했으므로 사용자 지정 subject `fix: TASK-804 normalize MVC error responses`와 실제 개행 bullet body로 명시적 Stage·Commit·Push를 진행한다.
+
+TASK-804는 `[ ]`이며 남은 작업은 (1) 전체 Endpoint 오류 Matrix 최종 검증, (2) Flutter Alarm 생성 실패·응답 유실 복구, (3) TASK-802 중복 방지 책임/경계 확정, (4) 최종 Backend·Flutter 회귀, (5) TASK-804 완료 판단이다. `METADATA_UNAVAILABLE`은 독립 의미/정책이 확정되지 않아 추가하지 않았다. 본 단계 성공 및 Commit·Push도 TASK-804 전체 완료를 뜻하지 않는다.
+
 ### 기존 Phase 8 Task 상세 및 실행 dependency
 
 TASK-805는 structured log, 최소 operational metric, alerting contract를 함께 다룬다. metric은 Provider request outcome/latency, Observation staleness/UNKNOWN reason, ACTIVE/FOLLOW_UP Alarm 수, scheduler cycle duration·last completion·overlap, Notification pending 수와 oldest pending delivery age, no-recipient Event, delivery accepted/failure/retry/expired, metadata 마지막 complete sync 성공 age를 후보로 한다. `alarmId`, `deviceId`, `routeId`, `trackingCycleId`, `installationId`는 metric label에 넣지 않는다. Actuator/Micrometer 수준을 기본으로 하고 자체 Prometheus/Grafana stack을 V1 요구로 만들지 않으며 export와 alert destination은 deployment platform에서 정한다. log는 문맥에 필요한 correlation(`requestId`, `operationId`, provider, schedulerCycleId, alarmId, activation generation, trackingCycleId, notificationEventId, deliveryId, elapsedMs, outcome)만 기록한다. Access/Refresh Token, Google ID Token, Firebase credential, 원문 push targeting identifier·installationId, API key가 든 URL/query, 필요 이상의 GPS, raw Provider response 전체는 로그에 남기지 않는다.

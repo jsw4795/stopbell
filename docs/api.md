@@ -534,7 +534,23 @@ TASK-804 1단계의 인증·Security 오류는 `Content-Type: application/json`�
 
 Security의 401에는 Bearer challenge를 제공하고 JWT decoder의 원문 오류 설명/Token은 포함하지 않는다. 인증된 Security 접근 거부에는 `Bearer error="insufficient_scope"` challenge를 제공한다. 기존 Device의 `DEVICE_CREDENTIAL_INVALID` 403과 Transit의 `TRANSIT_TEMPORARILY_UNAVAILABLE` 503은 별개이며 변경하지 않는다. 현재 비활성인 query/form Bearer 전달을 새로 허용하지 않으며, OAuth `invalid_request` 400이 주어지는 경우도 401로 강제하지 않는다.
 
-Servlet 내부 `ERROR` dispatch는 원래 오류 상태를 보존하도록 Security 인가에서 허용한다. 외부의 원래 `REQUEST`에는 기존 인증 규칙이 그대로 적용되며 직접 `/error` 요청이나 POST 이외의 `/auth/*`를 공개하지 않는다. 이 규칙은 모든 MVC/Boot 오류 body를 위 두 필드 형식으로 통일한다는 의미가 아니다.
+Servlet 내부 `ERROR` dispatch는 원래 오류 상태를 보존하도록 Security 인가에서 허용한다. 외부의 원래 `REQUEST`에는 기존 인증 규칙이 그대로 적용되며 직접 `/error` 요청이나 POST 이외의 `/auth/*`를 공개하지 않는다.
+
+TASK-804 2단계부터 MVC 기본 오류와 `ResponseStatusException`·`@ResponseStatus`·Servlet `sendError`의 `/error` 응답은 아래 고정 JSON 계약을 사용한다. 원래 HTTP 상태와 기본 Resolver의 `Allow`·지원 media type header를 유지하며, `reason`, 원본 예외 message/cause, 경로, Boot 기본 오류 속성은 본문에 포함하지 않는다. `Accept` 협상 실패도 원래 406을 유지하고 오류 본문은 `application/json`으로 제공한다. 기존 `ApiException`의 resource별 code/message와 인증·Provider 전용 오류가 이 범용 code보다 우선한다.
+
+| Code | HTTP status | Message |
+| --- | --- | --- |
+| `INVALID_REQUEST` | 400 | `Request is invalid.` |
+| `NOT_FOUND` | 404 | `Requested resource was not found.` |
+| `METHOD_NOT_ALLOWED` | 405 | `Request method is not supported.` |
+| `NOT_ACCEPTABLE` | 406 | `Requested response media type is not supported.` |
+| `UNSUPPORTED_MEDIA_TYPE` | 415 | `Request media type is not supported.` |
+| `INTERNAL_SERVER_ERROR` | 500 | `An internal server error occurred.` |
+| `SERVICE_UNAVAILABLE` | 503 | `Service is temporarily unavailable.` |
+
+일반 상태 오류의 401/403은 위 `UNAUTHENTICATED`/`ACCESS_DENIED`의 고정 message를 사용한다. 다른 4xx/5xx 상태는 원래 숫자 상태를 보존하고 `HTTP_<status>` code(예: `HTTP_409`, `HTTP_429`, `HTTP_502`)와 `Request could not be completed.`를 반환한다. 이 규칙은 해당 상태의 새로운 Domain 정책을 정의하지 않으며, 기존 Domain conflict·resource-specific NOT_FOUND·Transit/Google 장애 code를 대체하지 않는다.
+
+기존 body Bean Validation, 읽을 수 없는 JSON·body 누락, 필수 Query 누락, Path/Query 타입 변환 실패의 400 계약을 유지한다. MVC method parameter validation 실패도 400 `INVALID_REQUEST`이며, 반환값 validation 실패는 입력 오류로 취급하지 않고 500 `INTERNAL_SERVER_ERROR`다. DTO에는 기존 API의 제약만 적용한다.
 
 `DeviceController`와 `BoardingSessionController`의 Controller-local Handler가 처리하는 `DataAccessException`·`TransactionException` 계열의 영속성 실패는 `500 Internal Server Error`, `Content-Type: application/json`과 다음 고정 응답을 반환한다. 원본 예외 message/cause, SQL·제약 이름 및 민감정보는 응답에 포함하지 않는다.
 
@@ -545,7 +561,9 @@ Servlet 내부 `ERROR` dispatch는 원래 오류 상태를 보존하도록 Secur
 }
 ```
 
-이는 두 Handler의 지정된 예외에 한정한 500 계약이다. 위 인증·Security 오류 외의 모든 MVC/Boot 오류와 다른 Controller의 모든 500이 이미 같은 형식이라는 의미는 아니며, 전체 오류 형식과 예상 밖 Exception의 fallback은 TASK-804의 후속 검증 범위다. Service의 일반 `ResponseStatusException`도 이번 인증 예외 세 종류의 JSON 매핑에 포함되지 않는다. 500은 DB 미저장이나 rollback 완료를 보장하지 않으므로 기존 요청 identity와 commit 결과 재확인 정책을 유지한다.
+TASK-804 2단계에서는 두 local Handler를 유지하면서, 다른 Controller의 예상 밖 Exception에도 같은 고정 JSON 500 fallback을 추가했다. 실행 순서는 Controller-local Handler → 기존 Advice → Spring의 상태/기본 MVC Resolver → 마지막 fallback이다. 정상적인 MVC 4xx와 명시적인 503을 500으로 변경하지 않으며, MVC에서 발생한 Security 예외는 기존 Filter 처리에 맡긴다. 신규 fallback 로그는 예외 type만 기록하고 message·cause·요청/Token/SQL/Provider 원문은 기록하지 않는다. TASK-805의 구조화 Logging은 별도 책임이다.
+
+이미 응답이 commit됐거나 Client 연결이 끊어진 경우는 새 JSON으로 교체할 수 없다. 공통 JSON 500도 DB 미저장이나 rollback 완료를 보장하지 않으므로 기존 요청 identity와 commit 결과 재확인 정책을 유지한다. 전체 Endpoint 오류 Matrix와 Flutter Alarm 생성 실패·응답 유실 복구 및 TASK-804 최종 완료 판단은 후속 단계에 남는다.
 
 Alarm API의 error code와 HTTP status는 다음과 같다.
 
@@ -558,6 +576,8 @@ Alarm API의 error code와 HTTP status는 다음과 같다.
 | `INVALID_REQUEST` | `400 Bad Request` | 필수 ID 누락, 0 이하 ID, body 누락 또는 읽을 수 없는 JSON 등 기본 요청 형식 오류 |
 
 `ALARM_NOT_FOUND`의 message는 `Alarm was not found.`이며, `BUS_ROUTE_NOT_FOUND`의 message는 `Bus route was not found.`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`의 message는 `Target stop occurrence was not found.`이다. `INVALID_ALARM_REQUEST`는 `Target stop has no predecessor stop.` 또는 `Target stop has no successor stop.`처럼 구체적 사유를 message로 전달한다. `INVALID_REQUEST`의 message는 `Request is invalid.`이다.
+
+Alarm 조회·활성화·비활성화·삭제의 `{alarmId}`도 양수 Long이어야 하며 0·음수는 400 `INVALID_REQUEST`다. 양수 ID의 부재나 다른 User 소유는 기존 404 `ALARM_NOT_FOUND`를 유지한다.
 
 ## 6. 인증
 

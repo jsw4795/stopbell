@@ -28,6 +28,11 @@ public enum ErrorCode {
     BOARDING_RECONFIRM_REQUIRED(HttpStatus.CONFLICT, "A suspended session with the same vehicle and target is required."),
     BOARDING_TRACKING_UNSUPPORTED(HttpStatus.CONFLICT, "Boarding tracking is not supported by verified evidence."),
     INVALID_REQUEST(HttpStatus.BAD_REQUEST, "Request is invalid."),
+    NOT_FOUND(HttpStatus.NOT_FOUND, "Requested resource was not found."),
+    METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "Request method is not supported."),
+    NOT_ACCEPTABLE(HttpStatus.NOT_ACCEPTABLE, "Requested response media type is not supported."),
+    UNSUPPORTED_MEDIA_TYPE(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "Request media type is not supported."),
+    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Service is temporarily unavailable."),
     INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "An internal server error occurred.");
 
     private final HttpStatus httpStatus;

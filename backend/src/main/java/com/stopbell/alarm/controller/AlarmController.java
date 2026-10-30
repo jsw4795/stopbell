@@ -7,6 +7,7 @@ import com.stopbell.alarm.dto.CreateAlarmRequest;
 import com.stopbell.alarm.service.AlarmService;
 import com.stopbell.user.auth.service.JwtTokenService;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -41,23 +42,23 @@ public class AlarmController {
     }
 
     @GetMapping("/api/v1/alarms/{alarmId}")
-    public AlarmResponse findById(@AuthenticationPrincipal Jwt jwt, @PathVariable Long alarmId) {
+    public AlarmResponse findById(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Long alarmId) {
         return alarmService.findById(jwtTokenService.extractUserId(jwt), alarmId);
     }
 
     @PostMapping("/api/v1/alarms/{alarmId}/activate")
-    public AlarmResponse activate(@AuthenticationPrincipal Jwt jwt, @PathVariable Long alarmId) {
+    public AlarmResponse activate(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Long alarmId) {
         return alarmService.activate(jwtTokenService.extractUserId(jwt), alarmId);
     }
 
     @PostMapping("/api/v1/alarms/{alarmId}/deactivate")
-    public AlarmResponse deactivate(@AuthenticationPrincipal Jwt jwt, @PathVariable Long alarmId) {
+    public AlarmResponse deactivate(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Long alarmId) {
         return alarmService.deactivate(jwtTokenService.extractUserId(jwt), alarmId);
     }
 
     @DeleteMapping("/api/v1/alarms/{alarmId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@AuthenticationPrincipal Jwt jwt, @PathVariable Long alarmId) {
+    public void delete(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Long alarmId) {
         alarmService.delete(jwtTokenService.extractUserId(jwt), alarmId);
     }
 }
