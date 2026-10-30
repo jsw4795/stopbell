@@ -154,7 +154,7 @@ Logout은 기존 `beforeLogout` → generation 무효화 → 진행 중 Refresh 
 
 `main.dart`의 기존 `prepareAlarmPush()` 콜백을 `AlarmHome`이 상세 화면과 `BusRouteStopScreen`에 전달한다. 최초 `알람 시작`은 중복 입력을 막은 뒤 Push 준비·사용자 선택 → Create → Activate 순서로 실행하며, 같은 동작의 Activate 직전에는 준비를 반복하지 않는다. 미결정 권한은 도착 알림 안내 뒤 사용자가 선택할 때만 요청하고, 취소·Dialog 닫기는 Create 전에 종료한다. 권한 거부·기기 등록 실패는 기존 설정 안내와 명시적 계속 진행/취소를 유지하며 Alarm 사용 자체를 강제 차단하지 않는다. 콜백이 없는 환경의 기존 생성 계약과 BoardingSession 준비 UX는 유지한다.
 
-준비 완료 뒤와 각 API 응답 뒤에는 화면 수명·요청 generation·선택 Route/occurrence·Client 및 `AlarmHome`의 Auth generation·User/login session identity·navigation epoch를 재검증한다. Logout/계정 전환·화면 이동·Route 교체로 무효화된 요청은 후속 Create/Activate나 상세 이동을 실행하지 않는다. 이미 서버에 전달된 요청을 취소한다는 의미는 아니다. 준비 단계 예외는 재시도 가능한 준비 오류이며 Create 결과 불명확과 구분한다. Create 성공 뒤 Activate 실패는 원래 ID의 INACTIVE 상세로 복구하고 수동 활성화 시 다시 Push를 준비한다. Create 결과 불명확은 자동 POST 재전송 없이 목록 확인으로 복구하는 TASK-608B 계약을 유지한다.
+준비 완료 뒤와 각 API 응답 뒤에는 화면 수명·요청 generation·선택 Route/occurrence·Client 및 `AlarmHome`의 Auth generation·User/login session identity·navigation epoch를 재검증한다. Logout/계정 전환·화면 이동·Route 교체로 무효화된 요청은 후속 Create/Activate나 상세 이동을 실행하지 않는다. 이미 서버에 전달된 요청을 취소한다는 의미는 아니다. 준비 단계 예외는 재시도 가능한 준비 오류이며 Create 결과 불명확과 구분한다. Create 성공 뒤 Activate 실패는 원래 ID를 보존하고 아래 TASK-804 3단계의 미확인 상태·GET 복구를 사용한다. 수동 활성화는 현재 상태 확인 후 다시 Push를 준비한다. Create 결과 불명확은 자동 POST 재전송 없이 목록 확인으로 복구하는 TASK-608B 계약을 유지한다.
 
 ### Flutter Alarm HTTP 요청 수명과 Timeout (TASK-816 / AUD-05)
 
@@ -163,6 +163,14 @@ Logout은 기존 `beforeLogout` → generation 무효화 → 진행 중 Refresh 
 기존 `AuthenticatedApiClient`는 최초 응답 수신 직후 Refresh 시작 전, Refresh 완료 후 Replay 전, Replay 응답 수신 후에 generation과 요청 유효성을 검사한다. 따라서 Timeout 뒤 늦은 401은 새 Refresh/Replay로 이어지지 않고, 이미 Refresh가 시작됐어도 만료된 요청의 Replay는 차단한다. 한 요청의 Timeout은 Auth Session이나 공유 Refresh를 취소하지 않으며, 다른 유효한 요청은 동일 Refresh 결과를 계속 사용한다. Token rotation·Secure Storage·login identity·Refresh 401의 인증 실패 정책과 제한 시간 내 정상 401의 최대 1회 Replay는 기존 Auth Session 계약을 유지한다.
 
 TimeoutException은 기존대로 호출자에게 전달한다. 늦은 성공을 새 UI 성공이나 후속 Activate로 반영하지 않으며, Create Unknown Outcome의 목록 확인·자동 Create 금지와 Create 성공/Activate 실패 시 원래 ID로 복구하는 UX를 유지한다. 이미 서버에 전달된 Mutation의 실행 취소·Rollback이나 물리적 HTTP 연결 종료를 보장하지 않는다. BoardingSession·Device의 기존 요청 유효성 패턴은 변경하지 않으며 인증 HTTP 자체의 예산은 [AUD-06](#flutter-인증-http-timeout-task-816--aud-06)을 따른다. 재현·선택 테스트와 실환경 미검증 사항은 [TASK-816 처리 기록](task-list.md#task-816-감사-항목과-확인-수준)을 따른다.
+
+### Flutter Alarm 응답 유실 복구 (TASK-804 3단계)
+
+`BusRouteStopScreen`은 생성 전 Push 준비 → Create → Activate 순서를 유지한다. 생성 결과 불확실은 기존 `_outcomeUnknown`으로 생성·선택·옵션 변경과 자동 재전송/활성화를 차단한다. HTTP 오류의 확정 거부 조합과 생성 요청 identity 부재의 한계는 [API](api.md#알림-생성)가 소유한다. 목록에서 유사한 Alarm을 골라 성공으로 간주하지 않는다.
+
+생성 ID를 확보한 뒤 Activate 실패는 `onCreated`의 `activationUnverified`를 `AlarmHome`을 통해 상세에 전달한다. 상세는 생성 당시 INACTIVE를 최신 상태로 표시하지 않고 같은 ID로 GET한다. 상세 Activate/Deactivate/Delete 결과가 불확실하면 추가 Mutation을 잠그고 같은 ID를 한 번 GET한다. GET 성공은 조회 시점 상태만 반영하고, 실패는 상태 확인 필요·명시적 재조회로 복구한다. FOLLOW_UP 재활성화도 확인 전 반복하지 않는다. 삭제 뒤 GET 404는 부재/접근 불가 안내와 사용자 목록 선택이며 DELETE 성공으로 해석하지 않는다. HTTP 성공 상태와 오류 의미는 [API](api.md#flutter-alarm-mutation-결과-확인-task-804-3단계)를 따른다.
+
+`AlarmHome`의 기존 Auth generation·User/login identity·navigation epoch를 상세의 `isRequestCurrent`에도 전달해 logout/계정 전환이나 알림 선택이 화면 dispose보다 먼저 일어나도 후속 Mutation/GET/UI/Navigation을 막는다. 상세는 자체 request generation·Alarm ID·Client identity·mounted를 각 await 뒤에 확인하고, ID/Client 교체와 dispose에서 이전 요청을 무효화한다. GET 중 중복 조회와 Mutation을 직렬로 차단해 오래된 조회가 새 Mutation을 덮지 못하게 한다. Push 준비 실패는 HTTP 미전송 상태이므로 재시도 가능하며, 삭제 확인 Dialog 뒤에도 같은 수명을 확인한다. 기존 `AuthenticatedApiClient`/`AuthSession`과 Timeout 이후 늦은 401의 Refresh/Replay 차단 정책은 변경하지 않는다. 이미 전송한 서버 작업의 취소나 서버 수준의 생성 멱등성을 보장하는 경계는 아니다.
 
 ### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
 

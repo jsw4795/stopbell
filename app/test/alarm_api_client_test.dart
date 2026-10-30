@@ -319,4 +319,117 @@ void main() {
       );
     },
   );
+  for (final body in [
+    '',
+    '{',
+    '[]',
+    '{"code":42}',
+    '{"code":"FUTURE_ERROR","message":"opaque"}',
+  ]) {
+    test(
+      'unknown or malformed HTTP error body $body retains status without retry',
+      () async {
+        var calls = 0;
+        final client = await alarmClient(
+          MockClient((_) async {
+            calls++;
+            return jsonResponse(body, 502);
+          }),
+        );
+        await expectLater(
+          client.create(
+            targetStopOccurrenceId: 12345,
+            notifyOneStopBefore: false,
+            notifyOneStopAfter: false,
+          ),
+          throwsA(
+            isA<AlarmApiException>()
+                .having((e) => e.statusCode, 'status', 502)
+                .having(
+                  (e) => e.code,
+                  'code',
+                  body.contains('FUTURE_ERROR') ? 'FUTURE_ERROR' : null,
+                )
+                .having((e) => e.isMutationRejected, 'uncertain', false),
+          ),
+        );
+        expect(calls, 1);
+      },
+    );
+  }
+
+  for (final body in ['', '{', '{}', '[]']) {
+    test(
+      'malformed 201 $body preserves HTTP status and uncertain outcome',
+      () async {
+        var calls = 0;
+        final client = await alarmClient(
+          MockClient((_) async {
+            calls++;
+            return jsonResponse(body, 201);
+          }),
+        );
+        await expectLater(
+          client.create(
+            targetStopOccurrenceId: 12345,
+            notifyOneStopBefore: false,
+            notifyOneStopAfter: false,
+          ),
+          throwsA(
+            isA<AlarmApiException>()
+                .having((e) => e.statusCode, 'status', 201)
+                .having((e) => e.isMutationRejected, 'uncertain', false),
+          ),
+        );
+        expect(calls, 1);
+      },
+    );
+  }
+
+  test('only documented status and rejection code pairs are definite', () {
+    for (final entry in [
+      (400, 'INVALID_REQUEST'),
+      (400, 'INVALID_ALARM_REQUEST'),
+      (401, 'UNAUTHENTICATED'),
+      (403, 'ACCESS_DENIED'),
+      (404, 'TARGET_STOP_OCCURRENCE_NOT_FOUND'),
+      (404, 'ALARM_NOT_FOUND'),
+    ]) {
+      expect(
+        AlarmApiException(
+          statusCode: entry.$1,
+          code: entry.$2,
+        ).isMutationRejected,
+        isTrue,
+      );
+      expect(
+        AlarmApiException(statusCode: 500, code: entry.$2).isMutationRejected,
+        isFalse,
+      );
+    }
+    for (final status in [
+      200,
+      201,
+      400,
+      401,
+      403,
+      404,
+      408,
+      409,
+      429,
+      500,
+      502,
+      503,
+      504,
+      599,
+    ]) {
+      expect(
+        AlarmApiException(
+          statusCode: status,
+          code: 'UNKNOWN',
+        ).isMutationRejected,
+        isFalse,
+      );
+    }
+  });
 }

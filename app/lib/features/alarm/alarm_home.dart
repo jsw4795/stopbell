@@ -55,6 +55,7 @@ class _AlarmHomeState extends State<AlarmHome> {
   late final String? _userIdentity, _loginIdentity;
   ScaffoldMessengerState? _messenger;
   Alarm? _createdAlarm;
+  bool _activationUnverified = false;
   late final int _sessionGeneration;
 
   @override
@@ -89,6 +90,7 @@ class _AlarmHomeState extends State<AlarmHome> {
     _messenger?.clearSnackBars();
     setState(() {
       _createdAlarm = null;
+      _activationUnverified = false;
       _alarmId = null;
       _boardingSessionId = null;
     });
@@ -140,6 +142,7 @@ class _AlarmHomeState extends State<AlarmHome> {
       setState(() {
         _boardingSessionId = tap.boardingSessionId;
         _createdAlarm = null;
+        _activationUnverified = false;
         _page = _Page.boardingNotification;
       });
       return;
@@ -151,6 +154,7 @@ class _AlarmHomeState extends State<AlarmHome> {
       if (alarm.id != tap.alarmId) throw const AlarmApiException();
       setState(() {
         _alarmId = alarm.id;
+        _activationUnverified = false;
         _createdAlarm = alarm;
         _page = _Page.detail;
       });
@@ -173,6 +177,7 @@ class _AlarmHomeState extends State<AlarmHome> {
       _route = null;
       _alarmId = null;
       _createdAlarm = null;
+      _activationUnverified = false;
     });
   }
 
@@ -216,6 +221,7 @@ class _AlarmHomeState extends State<AlarmHome> {
                   _navigationEpoch++;
                   _alarmId = id;
                   _createdAlarm = null;
+                  _activationUnverified = false;
                   _page = _Page.detail;
                 });
               },
@@ -276,12 +282,13 @@ class _AlarmHomeState extends State<AlarmHome> {
           }
         },
         onShowAlarms: _showList,
-        onCreated: (alarm) {
+        onCreated: (alarm, {bool activationUnverified = false}) {
           if (!_current || epoch != _navigationEpoch) return;
           setState(() {
             _navigationEpoch++;
             _alarmId = alarm.id;
             _createdAlarm = alarm;
+            _activationUnverified = activationUnverified;
             _page = _Page.detail;
           });
         },
@@ -289,6 +296,9 @@ class _AlarmHomeState extends State<AlarmHome> {
       _Page.detail => AlarmDetailScreen(
         key: ValueKey((_alarmId, _navigationEpoch)),
         beforeActivate: widget.beforeActivate,
+        activationUnverified: _activationUnverified,
+        isRequestCurrent: () =>
+            _current && epoch == _navigationEpoch && _page == _Page.detail,
         alarmId: _alarmId!,
         createdAlarm: _createdAlarm,
         client: widget.client,

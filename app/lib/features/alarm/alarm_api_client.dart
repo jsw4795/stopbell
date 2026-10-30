@@ -122,7 +122,7 @@ class AlarmApiClient implements AlarmClient {
     try {
       return Alarm.fromJson(jsonDecode(utf8.decode(bodyBytes)));
     } on FormatException {
-      throw const AlarmApiException();
+      throw AlarmApiException(statusCode: statusCode);
     }
   }
 
@@ -155,6 +155,18 @@ class AlarmApiException implements Exception {
   final int? statusCode;
   final String? code;
   final String? message;
+
+  // Only contract-defined rejection before a mutation is safe to treat as final.
+  // An unknown 4xx, unexpected success status, or 5xx may follow a commit.
+  bool get isCreationRejected => isMutationRejected && !isAlarmNotFound;
+
+  bool get isMutationRejected =>
+      (statusCode == 400 &&
+          (code == 'INVALID_REQUEST' || code == 'INVALID_ALARM_REQUEST')) ||
+      (statusCode == 401 && code == 'UNAUTHENTICATED') ||
+      (statusCode == 403 && code == 'ACCESS_DENIED') ||
+      isAlarmNotFound ||
+      isStaleTarget;
 
   bool get isAlarmNotFound => statusCode == 404 && code == 'ALARM_NOT_FOUND';
   bool get isStaleTarget =>

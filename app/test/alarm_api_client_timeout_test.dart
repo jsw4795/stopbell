@@ -493,7 +493,7 @@ void main() {
               ],
               alarmClient: f.client,
               onBack: () {},
-              onCreated: (_) => created++,
+              onCreated: (_, {bool activationUnverified = false}) => created++,
               onShowAlarms: () => showList++,
             ),
           ),
@@ -518,4 +518,82 @@ void main() {
       expect(showList, 1);
     },
   );
+  for (final failure in [
+    '500',
+    '502',
+    '503',
+    '504',
+    '408',
+    'malformed-201',
+    'transport',
+  ]) {
+    testWidgets('real HTTP $failure blocks duplicate creation and activation', (
+      tester,
+    ) async {
+      final f = _Fixture()
+        ..respond = (_) async {
+          if (failure == 'transport') {
+            throw http.ClientException('connection lost');
+          }
+          if (failure == 'malformed-201') return http.Response('{', 201);
+          return _json({
+            'code': 'UNKNOWN',
+            'message': 'opaque',
+          }, int.parse(failure));
+        };
+      await f.initialize();
+      var created = 0;
+      var lists = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BusRouteStopScreen(
+              route: const BusRoute(
+                id: 754,
+                routeNumber: '7000',
+                regionName: '수원시',
+              ),
+              findStops: (_) async => [
+                const BusRouteStopOccurrence(
+                  id: 12345,
+                  name: '사색의광장',
+                  order: 3,
+                  canNotifyOneStopBefore: true,
+                  canNotifyOneStopAfter: true,
+                ),
+              ],
+              alarmClient: f.client,
+              onBack: () {},
+              onCreated: (_, {bool activationUnverified = false}) => created++,
+              onShowAlarms: () => lists++,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey(12345)));
+      await tester.pump();
+      final press = tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '알람 시작'))
+          .onPressed!;
+      press();
+      press();
+      await tester.pumpAndSettle();
+      expect(find.textContaining('중복 생성을 피하려면 알람 목록에서'), findsOneWidget);
+      expect(find.text('알람 시작'), findsNothing);
+      expect(
+        tester
+            .widgetList<SwitchListTile>(find.byType(SwitchListTile))
+            .every((tile) => tile.onChanged == null),
+        isTrue,
+      );
+      press();
+      await tester.pump(const Duration(seconds: 30));
+      expect(f.requests, hasLength(1));
+      expect(f.refreshes, 0);
+      expect(created, 0);
+      await tester.tap(find.text('알람 목록 보기'));
+      expect(lists, 1);
+    });
+  }
 }

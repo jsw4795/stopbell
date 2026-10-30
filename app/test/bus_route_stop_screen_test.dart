@@ -46,7 +46,7 @@ Widget screen(Future<List<BusRouteStopOccurrence>> Function(int) findStops) =>
           findStops: findStops,
           onBack: () {},
           alarmClient: EmptyAlarmClient(),
-          onCreated: (_) {},
+          onCreated: (_, {bool activationUnverified = false}) {},
           onShowAlarms: () {},
         ),
       ),
@@ -175,5 +175,4 @@ void main() {
       );
     },
   );
-
 }

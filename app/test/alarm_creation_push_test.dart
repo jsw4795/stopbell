@@ -90,7 +90,7 @@ void main() {
     expectNoMutation();
     expect(find.byType(BusRouteStopScreen), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.textContaining('알람 생성 결과를 확인할 수 없습니다'), findsNothing);
+    expect(find.textContaining('알람 생성 요청이 서버에 반영됐을 수 있습니다'), findsNothing);
     expect(find.text('알람 목록 보기'), findsNothing);
     expect(
       tester
@@ -129,42 +129,41 @@ void main() {
     expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
   });
 
-  testWidgets(
-    'partial success opens original INACTIVE detail and prepares again on manual activation',
-    (tester) async {
-      var preparations = 0;
-      client.activateAlarm = (_) async => throw TimeoutException('activation');
-      await pumpHome(
-        tester,
-        prepare: (_) async {
-          preparations++;
-          return true;
-        },
-      );
-      await start(tester);
-      await tester.pumpAndSettle();
-      expect(preparations, 1);
-      expect(client.createCalls, 1);
-      expect(client.activateCalls, 1);
-      expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
-      expect(
-        tester
-            .widget<AlarmDetailScreen>(find.byType(AlarmDetailScreen))
-            .alarmId,
-        sample.id,
-      );
-      client.activateAlarm = (id) async {
-        expect(id, sample.id);
-        return withStatus(AlarmStatus.active);
-      };
-      await tester.tap(find.text('활성화'));
-      await tester.pumpAndSettle();
-      expect(preparations, 2);
-      expect(client.createCalls, 1);
-      expect(client.activateCalls, 2);
-      expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
-    },
-  );
+  testWidgets('partial success verifies original ID before manual activation', (
+    tester,
+  ) async {
+    var preparations = 0;
+    client.activateAlarm = (_) async => throw TimeoutException('activation');
+    await pumpHome(
+      tester,
+      prepare: (_) async {
+        preparations++;
+        return true;
+      },
+    );
+    await start(tester);
+    await tester.pumpAndSettle();
+    expect(preparations, 1);
+    expect(client.createCalls, 1);
+    expect(client.activateCalls, 1);
+    expect(client.detailIds, [sample.id]);
+    expect(find.text('조회 시점의 서버 상태입니다.'), findsOneWidget);
+    expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
+    expect(
+      tester.widget<AlarmDetailScreen>(find.byType(AlarmDetailScreen)).alarmId,
+      sample.id,
+    );
+    client.activateAlarm = (id) async {
+      expect(id, sample.id);
+      return withStatus(AlarmStatus.active);
+    };
+    await tester.tap(find.text('활성화'));
+    await tester.pumpAndSettle();
+    expect(preparations, 2);
+    expect(client.createCalls, 1);
+    expect(client.activateCalls, 2);
+    expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+  });
 
   for (final result in ['cancel', 'exception']) {
     testWidgets(
@@ -517,7 +516,7 @@ void main() {
               return preparations == 1 ? pending.future : Future.value(true);
             },
             onBack: () {},
-            onCreated: (_) {},
+            onCreated: (_, {bool activationUnverified = false}) {},
             onShowAlarms: () {},
           ),
         ),
@@ -588,4 +587,145 @@ void main() {
       );
     }
   }
+  for (final action in [
+    'logout',
+    'other-user',
+    'same-user-login',
+    'navigation',
+  ]) {
+    for (final phase in [
+      'mutation-success',
+      'mutation-failure',
+      'recovery',
+      'delete',
+      'preparation',
+    ]) {
+      testWidgets(
+        '$action during detail $phase discards late results before rebuild',
+        (tester) async {
+          final lifecycle = NotificationLifecycle(f.auth);
+          addTearDown(lifecycle.dispose);
+          final pending = Completer<Alarm>();
+          final deletion = Completer<void>();
+          final preparation = Completer<bool>();
+          var prepareCalls = 0;
+          if (phase == 'preparation') {
+            client.activateAlarm = (_) async => sample;
+          }
+          await pumpHome(
+            tester,
+            notifications: lifecycle,
+            prepare: (_) async {
+              prepareCalls++;
+              return prepareCalls == 1 ? true : preparation.future;
+            },
+          );
+          await start(tester);
+          await tester.pumpAndSettle();
+          final lookupsBefore = client.detailIds.length;
+          client.detail = (_) => pending.future;
+          client.deactivateAlarm = (_) => phase == 'recovery'
+              ? Future.error(TimeoutException('mutation lost'))
+              : pending.future;
+          if (phase == 'delete') {
+            client.deleteAlarm = (_) => deletion.future;
+            await tester.tap(find.text('삭제'));
+            await tester.pumpAndSettle();
+            await tester.tap(find.widgetWithText(TextButton, '삭제').last);
+          } else {
+            await tester.tap(
+              find.text(phase == 'preparation' ? '활성화' : '비활성화'),
+            );
+          }
+          await tester.pump();
+          final readsBeforeInvalidation = client.detailIds.length;
+          if (action == 'logout') {
+            await f.auth.logout();
+          } else if (action == 'other-user' || action == 'same-user-login') {
+            await f.switchUser(action == 'other-user' ? 'B' : 'A');
+          } else {
+            // Invalidate the navigation epoch while the old screen is still mounted.
+            client.detail = (id) async => const Alarm(
+              id: 99,
+              transitType: AlarmTransitType.bus,
+              status: AlarmStatus.followUp,
+              routeNumber: 'other route',
+              stopName: 'other stop',
+              notifyOneStopBefore: false,
+              notifyOneStopAfter: true,
+            );
+            lifecycle.receive({
+              'type': 'ALARM_EVENT',
+              'alarmId': '99',
+              'eventType': 'ARRIVED',
+              'notificationEventId': '999',
+            });
+          }
+          if (phase == 'mutation-failure') {
+            pending.completeError(TimeoutException('late failure'));
+          } else {
+            pending.complete(sample);
+          }
+          deletion.complete();
+          preparation.complete(true);
+          await tester.pumpAndSettle();
+          expect(client.createCalls, 1);
+          expect(client.activateCalls, 1);
+          expect(
+            client.deactivateCalls,
+            phase == 'delete' || phase == 'preparation' ? 0 : 1,
+          );
+          expect(client.deleteCalls, phase == 'delete' ? 1 : 0);
+          expect(
+            readsBeforeInvalidation,
+            lookupsBefore + (phase == 'recovery' ? 1 : 0),
+          );
+          expect(
+            client.detailIds.length,
+            readsBeforeInvalidation + (action == 'navigation' ? 1 : 0),
+          );
+          expect(find.text('상태: INACTIVE · 비활성'), findsNothing);
+          if (action == 'navigation') {
+            expect(find.text('other route · other stop'), findsOneWidget);
+            expect(find.text('상태: FOLLOW_UP · 한 정거장 후 추적 중'), findsOneWidget);
+          } else {
+            expect(find.byType(AlarmDetailScreen), findsNothing);
+          }
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+        },
+      );
+    }
+  }
+
+  testWidgets(
+    'lost activation and failed lookup preserve created ID without POST retry',
+    (tester) async {
+      client.activateAlarm = (_) async =>
+          throw TimeoutException('activation lost');
+      client.detail = (_) async => throw TimeoutException('lookup failed');
+      await pumpHome(tester, prepare: (_) async => true);
+      await start(tester);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<AlarmDetailScreen>(find.byType(AlarmDetailScreen))
+            .alarmId,
+        sample.id,
+      );
+      expect(find.text('상태: 확인 필요'), findsOneWidget);
+      expect(find.text('상태: INACTIVE · 비활성'), findsNothing);
+      expect(client.detailIds, [sample.id]);
+      await tester.pump(const Duration(seconds: 30));
+      expect(client.createCalls, 1);
+      expect(client.activateCalls, 1);
+      client.detail = (_) async => withStatus(AlarmStatus.active);
+      await tester.tap(find.text('현재 상태 다시 조회'));
+      await tester.pumpAndSettle();
+      expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+      expect(client.detailIds, [sample.id, sample.id]);
+      expect(client.createCalls, 1);
+      expect(client.activateCalls, 1);
+    },
+  );
 }

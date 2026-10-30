@@ -24,7 +24,7 @@ class BusRouteStopScreen extends StatefulWidget {
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
   final VoidCallback onBack;
   final AlarmClient alarmClient;
-  final ValueChanged<Alarm> onCreated;
+  final void Function(Alarm alarm, {bool activationUnverified}) onCreated;
   final VoidCallback onShowAlarms;
   final Future<bool> Function(BuildContext context)? beforeActivate;
   final bool Function()? isRequestCurrent;
@@ -68,7 +68,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
   }
 
   Future<void> _load() async {
-    if (_creating) return;
+    if (_creating || _outcomeUnknown) return;
     final request = ++_requestGeneration;
     final routeId = widget.route.id;
     setState(() {
@@ -148,8 +148,12 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
       var alarm = createdAlarm;
       try {
         alarm = await client.activate(createdAlarm.id);
+        if (alarm.id != createdAlarm.id) throw const AlarmApiException();
       } catch (_) {
-        // Creation succeeded; recover in detail without creating another alarm.
+        if (current()) {
+          widget.onCreated(createdAlarm, activationUnverified: true);
+        }
+        return;
       }
       if (current()) widget.onCreated(alarm);
     } on AlarmApiException catch (error) {
@@ -166,11 +170,11 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           () => _createMessage =
               '현재 정류장 정보로 선택한 알림 조건을 생성할 수 없습니다. 목록을 새로 조회해 주세요.',
         );
-      } else if (error.statusCode == null) {
+      } else if (!error.isCreationRejected) {
         setState(() {
           _outcomeUnknown = true;
           _createMessage =
-              '알람 생성 결과를 확인할 수 없습니다. 중복 생성을 피하려면 알람 목록에서 생성 여부를 확인해 주세요.';
+              '알람 생성 요청이 서버에 반영됐을 수 있습니다. 중복 생성을 피하려면 알람 목록에서 먼저 확인해 주세요.';
         });
       } else {
         setState(() => _createMessage = '알람을 생성하지 못했습니다.');
@@ -180,7 +184,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
         setState(() {
           _outcomeUnknown = true;
           _createMessage =
-              '알람 생성 결과를 확인할 수 없습니다. 중복 생성을 피하려면 알람 목록에서 생성 여부를 확인해 주세요.';
+              '알람 생성 요청이 서버에 반영됐을 수 있습니다. 중복 생성을 피하려면 알람 목록에서 먼저 확인해 주세요.';
         });
       }
     } finally {

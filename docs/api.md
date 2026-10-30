@@ -141,7 +141,9 @@ Request body:
 
 `targetStopOccurrenceId`가 존재하지 않으면 `404 Not Found`다. 첫 occurrence에 `notifyOneStopBefore: true` 또는 마지막 occurrence에 `notifyOneStopAfter: true`를 요청하면 `400 Bad Request`다. Backend는 해당 option을 `false`로 변경해 생성하지 않는다. first/last 판정은 `stopOrder`가 1 또는 최대값인지가 아니라 predecessor/successor occurrence의 실제 존재 여부를 사용한다.
 
-Flutter가 stale `targetStopOccurrenceId`로 `404 Not Found`를 받으면 old ID를 현재 Stop에 추측 매칭하거나 POST를 자동 재시도하지 않는다. 사용자가 Stop 목록에서 다시 선택하는 흐름으로 복구한다. Alarm create는 idempotency contract가 없으므로 timeout만으로 자동 POST 재시도하지 않는다.
+Flutter가 stale `targetStopOccurrenceId`로 `404 Not Found`를 받으면 old ID를 현재 Stop에 추측 매칭하거나 POST를 자동 재시도하지 않는다. 사용자가 Stop 목록에서 다시 선택하는 흐름으로 복구한다. Alarm create는 Request Identity 기반 idempotency contract가 없다. Flutter는 올바른 `201` Alarm response를 받은 경우에만 생성 성공으로 처리한다. HTTP 5xx(500/502/503/504 포함), 408, Timeout·Transport/연결 단절·응답 유실, 잘못된 성공 JSON과 그 밖의 판단 불가 오류는 생성 결과 불확실이다. 계약상 생성 전 거부가 확인되는 400 `INVALID_REQUEST`/`INVALID_ALARM_REQUEST`, 404 `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명확한 인증·권한 거부만 기존 거부 의미를 유지하며 모든 4xx를 안전한 재시도로 취급하지 않는다. 불확실한 생성은 자동 재전송·활성화를 하지 않고 같은 화면의 생성·정류장 선택·옵션 변경을 막은 채 목록 확인을 안내한다.
+
+현재 요청에는 `clientRequestId`가 없고 Alarm response에는 원래 `targetStopOccurrenceId`도 없다. 목록 조회 성공이나 동일 노선·정류장 이름·옵션의 Alarm은 특정 생성 요청 성공의 증거가 아니다. Flutter는 이를 자동 연결하지 않으며, 정확한 중복 생성 방지·요청 식별/복구의 서버 설계 후보 및 후속 검증은 [TASK-804 3단계의 TASK-802 책임 구분](task-list.md#task-804-3단계--flutter-alarm-응답-유실-복구-및-중복-생성-책임-구분-2026-10-31)을 따른다. 이번 단계에서 서버 멱등성 API를 추가하지 않았다.
 
 ### 알림 목록 조회
 
@@ -196,6 +198,12 @@ DELETE /api/v1/alarms/{alarmId}
 ```
 
 현재 인증된 User가 소유한 Alarm을 삭제한다. 성공은 response body 없는 `204 No Content`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다. 삭제는 active monitoring뿐 아니라 Alarm row에 저장된 진행 중 follow-up runtime과 공유 PK BusAlarmTarget을 함께 제거한다. TASK-707에서 확정한 대로 NotificationEvent/Delivery와 원본 Alarm ID는 보존하고 PENDING만 FAILED/DISPATCH_NOT_ALLOWED로 종료한다. terminal/실제 attempt 결과는 보존하며 진행·접수 중 FCM 회수는 보장하지 않는다. [삭제 transaction](architecture.md#alarm-삭제-transaction-task-707)을 따른다.
+
+### Flutter Alarm mutation 결과 확인 (TASK-804 3단계)
+
+생성 성공 뒤 활성화 실패는 생성 response의 ID를 보존하고 상세에서 `GET /api/v1/alarms/{alarmId}`로 현재 상태를 확인한다. 활성화·비활성화·삭제의 5xx/Timeout/Transport/응답 파싱 실패 등 결과 불확실 오류도 원래 ID로 한 번 GET한다. GET 성공은 조회 시점의 상태이며 직전 Mutation이 원인이라는 증거는 아니다. 조회 실패 시 최신 상태를 확정하지 않고 추가 Mutation을 막으며 명시적 재조회를 제공한다. 자동 POST/DELETE 재전송은 없다. 정상 Mutation 성공과 제한 시간 안의 기존 401 Refresh/최대 1회 Replay 정책은 유지한다.
+
+삭제의 정상 `204`만 기존 성공 Navigation을 수행한다. 불확실한 삭제 뒤 GET 200은 조회 시점에 Alarm이 남아 있음을 표시하며, GET 404 `ALARM_NOT_FOUND`는 삭제/현재 계정의 접근 불가를 구분하지 않는다. 404만으로 이전 DELETE 성공을 단정하거나 자동 이동하지 않고, 접근할 수 없는 Alarm임을 안내한 뒤 사용자가 목록으로 이동할 수 있다. 상세의 Session/navigation/request 수명 보호는 [Architecture](architecture.md#flutter-alarm-응답-유실-복구-task-804-3단계)를 따른다.
 
 ### Alarm response
 
@@ -563,7 +571,7 @@ TASK-804 2단계부터 MVC 기본 오류와 `ResponseStatusException`·`@Respons
 
 TASK-804 2단계에서는 두 local Handler를 유지하면서, 다른 Controller의 예상 밖 Exception에도 같은 고정 JSON 500 fallback을 추가했다. 실행 순서는 Controller-local Handler → 기존 Advice → Spring의 상태/기본 MVC Resolver → 마지막 fallback이다. 정상적인 MVC 4xx와 명시적인 503을 500으로 변경하지 않으며, MVC에서 발생한 Security 예외는 기존 Filter 처리에 맡긴다. 신규 fallback 로그는 예외 type만 기록하고 message·cause·요청/Token/SQL/Provider 원문은 기록하지 않는다. TASK-805의 구조화 Logging은 별도 책임이다.
 
-이미 응답이 commit됐거나 Client 연결이 끊어진 경우는 새 JSON으로 교체할 수 없다. 공통 JSON 500도 DB 미저장이나 rollback 완료를 보장하지 않으므로 기존 요청 identity와 commit 결과 재확인 정책을 유지한다. 전체 Endpoint 오류 Matrix와 Flutter Alarm 생성 실패·응답 유실 복구 및 TASK-804 최종 완료 판단은 후속 단계에 남는다.
+이미 응답이 commit됐거나 Client 연결이 끊어진 경우는 새 JSON으로 교체할 수 없다. 공통 JSON 500도 DB 미저장이나 rollback 완료를 보장하지 않으므로 기존 요청 identity와 commit 결과 재확인 정책을 유지한다. Flutter Alarm 생성·Mutation 응답 유실 복구는 위 TASK-804 3단계 정책을 따른다. 전체 Endpoint 오류 Matrix와 TASK-804 최종 완료 판단은 후속 단계에 남는다.
 
 Alarm API의 error code와 HTTP status는 다음과 같다.
 

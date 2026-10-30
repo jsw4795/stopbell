@@ -682,6 +682,50 @@ Flutter는 제품을 수정하지 않았다. `alarm_api_client_test.dart`에 신
 
 TASK-804는 `[ ]`이며 남은 작업은 (1) 전체 Endpoint 오류 Matrix 최종 검증, (2) Flutter Alarm 생성 실패·응답 유실 복구, (3) TASK-802 중복 방지 책임/경계 확정, (4) 최종 Backend·Flutter 회귀, (5) TASK-804 완료 판단이다. `METADATA_UNAVAILABLE`은 독립 의미/정책이 확정되지 않아 추가하지 않았다. 본 단계 성공 및 Commit·Push도 TASK-804 전체 완료를 뜻하지 않는다.
 
+### TASK-804 3단계 — Flutter Alarm 응답 유실 복구 및 중복 생성 책임 구분 (2026-10-31)
+
+`main`, HEAD `bed17dfa8846d996a96cfe9a7359372ca1e21b83`, tracked/untracked 변경 없는 상태에서 시작했다. 위 분석과 1·2단계 및 기존 감사 기록은 당시 결과 그대로 보존한다. 이번 결과는 TASK-804 3단계에 한정하며 TASK-804/TASK-802는 `[ ]`, TASK-814/TASK-816은 `[x]`와 다른 모든 Task 상태를 유지한다.
+
+#### 변경과 복구 경계
+
+- 제품 변경은 Flutter `BusRouteStopScreen`, `AlarmDetailScreen`, `AlarmHome`, `AlarmApiClient` 4개 파일이다. 기존 5개 테스트 파일을 보강/호환 수정하고 `api.md`·`architecture.md`를 필요한 범위만 동기화했다. Backend Controller/Service/Repository/DTO·DB/Migration·Dependency·AuthSession/AuthenticatedApiClient·Boarding/Notification 제품과 Push 준비 정책은 변경하지 않았다.
+- 생성은 올바른 HTTP 201 Alarm response만 성공이다. 500/502/503/504와 모든 5xx, 408, Timeout·Transport/연결 단절·응답 유실, 성공 JSON 파싱 실패 및 판단 불가 오류를 결과 불확실로 분류한다. 문서에 정의된 생성 전 거부 조합만 확정 거부로 처리하며 알 수 없는 4xx나 생성 API에 정의되지 않은 ALARM_NOT_FOUND도 재생성 허용 근거로 쓰지 않는다. API Client는 성공 JSON 파싱 실패의 HTTP status도 보존한다.
+- 기존 `_outcomeUnknown`으로 같은 화면의 Create·정류장 선택·옵션 변경·새로고침을 차단하고 서버에 반영됐을 가능성과 목록 확인을 안내한다. 중복 탭/보관된 callback도 추가 POST를 실행하지 않으며 자동 Create 재시도·Activate는 없다. 기존 stale target의 목록 재조회/선택 초기화와 INVALID_ALARM_REQUEST의 수동 새로고침, Push 준비 실패/취소 시 HTTP 미전송 재시도는 유지한다.
+- 생성 성공 뒤 Activate 실패는 원래 Alarm ID와 `activationUnverified`를 상세로 전달한다. 상세는 즉시 원래 ID를 GET하며 생성 당시 INACTIVE를 최신 서버 상태로 확정하지 않는다. 조회 실패 시 ‘상태: 확인 필요’와 명시적 재조회를 제공하고 새 Alarm을 만들지 않는다.
+- 상세 Activate/Deactivate의 불확실 오류는 같은 ID를 한 번 GET한다. 조회 중과 조회 실패 뒤에는 모든 Mutation을 막는다. 성공 GET만 조회 시점 실제 상태로 반영하며 직전 Mutation이 원인이라고 주장하지 않는다. 명시적 재조회 성공 후 UI를 다시 허용하고 POST를 자동 반복하지 않는다. FOLLOW_UP 추적과 다시 활성화/비활성화 Lifecycle은 유지하며 미확인 재활성화로 추적을 반복 초기화하지 않는다.
+- Delete 정상 204는 기존 목록 Navigation이다. 불확실한 Delete는 같은 ID GET으로 확인하며 200은 조회 시점 잔존 상태, 404 ALARM_NOT_FOUND는 삭제/현재 계정 접근 불가를 구분하지 않는 안내다. 404로 삭제 성공을 확정하거나 자동 이동하지 않고 사용자가 목록 이동을 선택한다. GET 실패에는 미확인 잠금과 재조회를 제공하며 DELETE 자동 재전송은 없다.
+- 상세에도 기존 Home의 Auth generation·User/login identity·navigation epoch callback을 전달한다. request generation·원래 Alarm ID·Client identity·mounted를 함께 검사해 logout, 계정 변경/같은 계정 재로그인, 화면 이탈/다른 알림 선택 시 늦은 성공·실패·GET을 폐기한다. ID/Client 교체·dispose는 이전 요청을 무효화하고 GET 중 Mutation/중복 GET을 막는다. 무효화 직후 rebuild 전에도 후속 GET/POST/Navigation을 막는다. 제한 시간 안의 기존 401 Refresh/최대 1회 Replay, Timeout 뒤 늦은 401의 Refresh/Replay 차단은 유지한다.
+
+상세 HTTP/복구 정책은 [API](api.md#flutter-alarm-mutation-결과-확인-task-804-3단계), 실행/수명 경계는 [Architecture](architecture.md#flutter-alarm-응답-유실-복구-task-804-3단계)가 소유한다. 이번 단계는 Phase 종료 감사나 실기기/서버 배포 검증으로 확대하지 않는다.
+
+#### TASK-802 책임과 현재 API 한계
+
+현재 `POST /api/v1/alarms`에는 clientRequestId가 없고 AlarmResponse에는 원래 targetStopOccurrenceId가 없다. 목록 조회 성공이나 노선 번호·정류장 이름·옵션의 일치는 이전 특정 생성 요청 성공의 증거가 아니다. Flutter는 목록의 유사 Alarm을 자동 연결하지 않으며 임의 ID/Flutter 전용 Request ID를 추가하지 않는다. 화면 메모리 잠금은 해당 화면의 중복 전송 억제일 뿐 앱 재진입·재시작·복수 기기까지의 서버 멱등성 보장이 아니다.
+
+TASK-804는 실패/불확실성을 성공으로 위장하지 않는 UX, 중복 자동 Mutation 억제, 원래 ID GET 복구와 Session 보호를 담당한다. TASK-802의 기존 Duplicate Prevention Test 범위는 Phase 5/7의 Evaluation·activation generation·tracking cycle·Lifecycle 동시성 및 TASK-708의 logical NotificationEvent/recipient Delivery 중복 억제 검증을 보존한다. Alarm 생성 요청의 정확한 중복 방지·결과 식별은 이와 별개의 서버 책임으로 TASK-802에 연결한다.
+
+향후 설계 후보는 User별 Client Request ID, 원본 요청 Fingerprint 비교, DB 수준 identity/unique 식별, 같은 요청에 기존 Alarm 반환, 다른 내용의 명시적 Conflict, 응답 유실 뒤 Request ID 조회다. 이는 이번에 채택/구현한 서버 계약이 아니다. TASK-802에서는 먼저 계약을 결정한 뒤 동일 요청 순차/동시 재전송·응답 유실·transaction commit/rollback·서로 다른 내용 conflict·User별 격리·기존 Alarm 반환/조회 및 기존 Event/Delivery dedup 불변을 검증해야 한다. 현재 API를 BoardingSession UUID 멱등성 API처럼 취급하지 않는다. TASK-802 `[ ]`를 유지한다.
+
+#### 실제 검증 결과
+
+Mock/Fake transport·Push fixture·가상 Timeout만 사용했다. 실제 Google/FCM/Transit 호출, 개발/운영 DB, 실제 iPhone은 사용하지 않았다. Backend 제품/계약을 변경하지 않아 Backend 테스트는 실행하지 않았으며 이전 1,398개 결과를 이번 결과로 합산하지 않는다.
+
+| 단계 | 실행 | 통과 | 실패 | 범위 |
+| --- | ---: | ---: | ---: | --- |
+| Alarm 집중 | 154 | 154 | 0 | alarm_screen / alarm_creation_push / alarm_api_client / alarm_api_client_timeout |
+| 인접 Flutter 회귀 | 203 | 203 | 0 | auth_session / authenticated_api_client / notification_lifecycle / push_registration_service / boarding_session_client / boarding_notification / bus_route_stop_screen / phase6_regression |
+| Flutter 전체, 1회 | 637 | 637 | 0 | flutter test --no-pub --reporter expanded |
+| 테스트 lint 수정 후 관련 재검증 | 131 | 131 | 0 | alarm_screen / alarm_creation_push / alarm_api_client_timeout |
+| 안내 문구 assertion 최종 확인 | 106 | 106 | 0 | alarm_screen / alarm_creation_push |
+| Flutter Analyze 최종 | 1 | 1 | 0 | flutter analyze --no-pub, No issues found |
+| 변경 Dart Format | 9 files | 9 files | 0 | --output=none --set-exit-if-changed |
+
+집중 → 인접 → 전체 → 정적 분석 순서로 실행했다. 전체 회귀 뒤 Analyze가 추가 테스트의 if 중괄호 4곳을 지적해 동작 변경 없이 수정하고 관련 131개와 Analyze를 재검증했다. 기존 부정 assertion도 새 불확실 안내 문구를 검사하도록 맞춘 뒤 Widget 106개를 최종 확인했다. 전체 테스트는 추가 실행하지 않았다. 작성 중 삭제 확인 Dialog의 로딩 표시 문제와 테스트 fixture의 cascade/비동기 assertion 문제를 수정했으며 최종 검증 실패/Skip은 0이다. 단계별 숫자는 중복되므로 합산하지 않는다. 로그는 `/private/tmp/stopbell-alarm-focused-final.log`, `stopbell-alarm-adjacent.log`, `stopbell-flutter-full.log`, `stopbell-alarm-lint-retest.log`, `stopbell-alarm-copy-retest.log`, `stopbell-flutter-analyze-final.log`다.
+
+생성 5xx 후 재생성 허용, 생성 후 활성화 유실을 INACTIVE로 단정, 상세 Mutation 유실 뒤 stale 상태/일반 실패만 표시하던 문제를 해결했다. 정상 성공·Domain 거부·Push 준비 순서와 Session 보호를 보존했다. 기존 task-list 본문/체크박스와 이번 절을 제외한 감사·완료 기록 불변 및 git diff --check를 확인한 후 사용자 지정 subject `fix: TASK-804 recover uncertain alarm mutations`와 실제 개행 bullet body로 명시적 Stage·Commit·Push를 진행한다.
+
+TASK-804 `[ ]`의 남은 조건은 (1) 전체 Endpoint 오류 Matrix 최종 검증, (2) TASK-804 전체 완료 조건 평가, (3) TASK-802로 분리한 서버 중복 방지 책임의 후속 확인이다. 이번 Commit·Push는 3단계 완료만 의미하며 TASK-804 전체 완료를 뜻하지 않는다.
+
 ### 기존 Phase 8 Task 상세 및 실행 dependency
 
 TASK-805는 structured log, 최소 operational metric, alerting contract를 함께 다룬다. metric은 Provider request outcome/latency, Observation staleness/UNKNOWN reason, ACTIVE/FOLLOW_UP Alarm 수, scheduler cycle duration·last completion·overlap, Notification pending 수와 oldest pending delivery age, no-recipient Event, delivery accepted/failure/retry/expired, metadata 마지막 complete sync 성공 age를 후보로 한다. `alarmId`, `deviceId`, `routeId`, `trackingCycleId`, `installationId`는 metric label에 넣지 않는다. Actuator/Micrometer 수준을 기본으로 하고 자체 Prometheus/Grafana stack을 V1 요구로 만들지 않으며 export와 alert destination은 deployment platform에서 정한다. log는 문맥에 필요한 correlation(`requestId`, `operationId`, provider, schedulerCycleId, alarmId, activation generation, trackingCycleId, notificationEventId, deliveryId, elapsedMs, outcome)만 기록한다. Access/Refresh Token, Google ID Token, Firebase credential, 원문 push targeting identifier·installationId, API key가 든 URL/query, 필요 이상의 GPS, raw Provider response 전체는 로그에 남기지 않는다.
