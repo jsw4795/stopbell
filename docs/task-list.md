@@ -292,7 +292,7 @@ FCM targeting identifier와 Device field/column 길이는 TASK-701/702, activati
 
 Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경 조건에서 검증하고, V1 운영에 필요한 최소 품질을 갖춘다. Phase 8은 activation generation, stale scheduler result 보호, Alarm Evaluation/tracking의 중복 억제, lifecycle concurrency, NotificationEvent atomic uniqueness, lifecycle·logical NotificationEvent·Event 시점 recipient Delivery의 atomic commit, durable pending dispatch recovery, Device별 delivery uniqueness, failure/retry state를 처음 구현하는 단계가 아니다.
 
-- [ ] TASK-801 Alarm Evaluation Test 보강
+- [x] TASK-801 Alarm Evaluation Test 보강
 - [x] TASK-802 Duplicate Prevention Test 보강
 - [ ] TASK-803 외부 provider response mapping Test 보강: 실제 관찰 response를 민감 정보를 제거한 golden fixture로 만들고 synthetic edge fixture를 함께 사용한다. fixture에는 provider, operation, 관찰 시점 또는 provenance를 남기되 credential은 제거한다. 실제 Provider 호출이나 scheduled live canary는 일반 PR CI 또는 V1 필수 infrastructure로 두지 않는다.
 - [x] TASK-804 API validation/error handling Test 보강: 오류 body shape를 안정적으로 통일하되 모든 오류 의미를 합치지 않는다. `INVALID_REQUEST`, `UNAUTHENTICATED`·`ACCESS_DENIED`, resource-specific `NOT_FOUND`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명시적 concurrency/stale conflict, Google·Transit·일반 서비스 장애의 구분된 503, `INTERNAL_SERVER_ERROR`와 MVC 상태 보존을 검증하며 예상치 못한 Exception을 400으로 바꾸지 않는다.
@@ -310,6 +310,21 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 - [x] TASK-816 프로젝트 종합 감사 후속 결함 수정
   - 목적: 종합 감사에서 발견한 AUD-01~AUD-13을 중요도에 따라 검토·수정하고 관련 테스트와 문서를 보강한다. 하나의 상위 Task로 관리하며 실제 수정·필수 검증 완료 전까지 `[ ]`를 유지한다.
   - 등록 범위 (2026-10-29): Task와 작업 계획만 추가한다. 이번 등록은 코드·Migration·테스트·Dependency·DB 변경이나 실제 Provider 호출·FCM 발송을 포함하지 않으며, 후속 지시 없이 수정에 착수하지 않는다. 기존 Task 번호와 완료 상태를 유지한다.
+
+### TASK-801 — Alarm Evaluation 검증 (2026-10-31)
+
+기준 `a4b6181d3413970e8b594446c05bf30927f111c9`, 기존 작업 트리 변경 없음. [평가 정책](architecture.md#8-알림-평가)과 ADR-007/010을 기준으로 기존 구현과 테스트를 확인했다. 제품 코드, 정책 임계값, Dependency, Request Identity 및 Notification 중복 방지 계약은 변경하지 않았다.
+
+| 영역 | 기존 검증과 중복 테스트를 추가하지 않은 근거 |
+|---|---|
+| Baseline·판정 | `BusAlarmEvaluatorTest`가 predecessor의 BEFORE, 서울 직접 ARRIVED와 TAGO GPS 근거, 추적 차량 PASSED 및 우선순위를 확인한다. ID/order 충돌은 UNKNOWN으로 보존한다. |
+| 시각·Observation | 같은 차량 중복 관측 격리, stale/future, Provider 시각 동일·역행·누락, 수신시각과 order 역행 및 정상 관측 복구를 확인한다. 같은 정류장 ID의 다른 order 충돌도 기존 테스트가 차단한다. |
+| 소실·FOLLOW_UP | roster presence와 상세 부재를 분리하고 실제 부재 뒤 새 cycle을 확인한다. FOLLOW_UP 복구 UUID, 다른 차량 무시, 중복 및 시각 충돌과 복구를 검증한다. |
+| Scheduler·Lifecycle | scheduler 테스트는 실제 evaluator의 오래된 재시도 차단과 정상 도착 복구 및 stale 결과의 memory 미반영을 확인한다. lifecycle과 MySQL decision 테스트는 generation, ARRIVED→FOLLOW_UP→INACTIVE, 만료, 원자적 Event/Delivery와 stale 결과를 확인한다. |
+
+신규 테스트는 4개 메서드, parameter 사례를 포함해 7회 실행이다. TAGO GPS 100m 양쪽, 방향 충돌로 인한 잘못된 ARRIVED/PASSED 차단과 동일 cycle 복구, FOLLOW_UP 만료 직전·정각·이후, ACTIVE memory 초기화 후 baseline-after의 거짓 PASSED 방지를 확인한다. 필수 제품 결함은 발견되지 않았다.
+
+Java/Gradle JVM 21 및 offline Gradle, 기존 Testcontainers MySQL을 사용했다. 관련 5개 클래스는 132회, Backend 전체 82개 클래스는 1,432회 실행했으며 각각 실패 0·오류 0·skip 0이다. 수치는 JUnit XML 집계다. 전체 실행 종료 중 종료된 테스트 DB에 대한 연결 풀 경고가 있었으나 Gradle과 XML은 성공이다. 실제 Transit Provider·FCM·기기 호출은 수행하지 않았다. ACTIVE 메모리 초기화는 실제 프로세스 재시작이 아니며 초기화 전 Event와 새 cycle의 중복 억제는 보장하지 않는다. 실제 restart/recovery는 TASK-811, 실제 Provider fixture와 기기 검증은 TASK-803·710·711·908의 책임을 유지한다. 순환 노선의 동일 Stop ID가 다른 order로 관측되는 경우 기존 보수적 충돌 처리이며 실제 운행에서의 occurrence 판별은 이번 synthetic 테스트로 입증하지 않는다.
 
 ### TASK-802 1단계 — 기존 중복 방지 검증 보강 및 Alarm 생성 멱등성 설계 판단 (2026-10-31)
 
