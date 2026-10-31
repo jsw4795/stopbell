@@ -104,7 +104,8 @@ class AuthenticationErrorDispatchIntegrationTest {
         assertThat(response.statusCode()).isEqualTo(404);
         assertThat(response.body()).doesNotContain("stackTrace", "java.lang");
         assertError(response, 404, "NOT_FOUND", "Requested resource was not found.");
-        assertThat(get("/actuator/health", null).statusCode()).isEqualTo(200);
+        // This security test deliberately excludes the database; the endpoint stays public but is unready.
+        assertThat(get("/actuator/health", null).statusCode()).isEqualTo(503);
     }
 
     private void assertError(HttpResponse<String> response, int status, String code, String message) {

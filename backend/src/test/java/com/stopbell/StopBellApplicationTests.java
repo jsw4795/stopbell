@@ -48,9 +48,15 @@ class StopBellApplicationTests {
     }
 
     @Test
-    @DisplayName("Health endpoint는 UP 상태를 반환한다")
-    void health_endpoint_returns_up() throws Exception {
+    @DisplayName("DB가 없는 테스트 Context는 DOWN이고 liveness는 UP이다")
+    void health_reports_missing_database_without_marking_process_dead() throws Exception {
         mockMvc.perform(get("/actuator/health"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value("DOWN"));
+        mockMvc.perform(get("/actuator/health/readiness"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status").value("DOWN"));
+        mockMvc.perform(get("/actuator/health/liveness"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"));
     }
