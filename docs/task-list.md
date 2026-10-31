@@ -293,7 +293,7 @@ FCM targeting identifier와 Device field/column 길이는 TASK-701/702, activati
 Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경 조건에서 검증하고, V1 운영에 필요한 최소 품질을 갖춘다. Phase 8은 activation generation, stale scheduler result 보호, Alarm Evaluation/tracking의 중복 억제, lifecycle concurrency, NotificationEvent atomic uniqueness, lifecycle·logical NotificationEvent·Event 시점 recipient Delivery의 atomic commit, durable pending dispatch recovery, Device별 delivery uniqueness, failure/retry state를 처음 구현하는 단계가 아니다.
 
 - [ ] TASK-801 Alarm Evaluation Test 보강
-- [ ] TASK-802 Duplicate Prevention Test 보강
+- [x] TASK-802 Duplicate Prevention Test 보강
 - [ ] TASK-803 외부 provider response mapping Test 보강: 실제 관찰 response를 민감 정보를 제거한 golden fixture로 만들고 synthetic edge fixture를 함께 사용한다. fixture에는 provider, operation, 관찰 시점 또는 provenance를 남기되 credential은 제거한다. 실제 Provider 호출이나 scheduled live canary는 일반 PR CI 또는 V1 필수 infrastructure로 두지 않는다.
 - [x] TASK-804 API validation/error handling Test 보강: 오류 body shape를 안정적으로 통일하되 모든 오류 의미를 합치지 않는다. `INVALID_REQUEST`, `UNAUTHENTICATED`·`ACCESS_DENIED`, resource-specific `NOT_FOUND`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명시적 concurrency/stale conflict, Google·Transit·일반 서비스 장애의 구분된 503, `INTERNAL_SERVER_ERROR`와 MVC 상태 보존을 검증하며 예상치 못한 Exception을 400으로 바꾸지 않는다.
 - [ ] TASK-805 구조화된 Logging, 최소 Operational Metrics 및 Alerting contract 추가
@@ -392,6 +392,16 @@ TASK-802의 남은 조건은 위 미검증 경계의 필요성 판단, 생성 �
 - 같은 실행 내 재시도는 단조 경과 시간과 로컬 시각을 확인하고 30일 이상 또는 시계 불일치를 차단한다. 재시작 시 단조 시간 연속성을 검증할 수 없어 재전송은 차단하고 GET 및 중복 가능성을 안내한 명시적 새 생성 경로를 제공한다. 30일 미만 자체는 서버 기록의 존재를 보증하지 않는다.
 - 집중 검증과 Alarm·Auth·Boarding 회귀를 실행했다. 첫 전체 Flutter 실행에서 세션 identity를 읽을 수 없는 기존 테스트 token 및 secure storage fixture로 8개가 실패해 수정하고 해당 두 파일 15개를 재검증했다. 이후 생성 화면의 영속 경계를 강화해 전체 회귀를 다시 실행했으며 648개가 모두 통과했다. `flutter analyze`도 통과했다. 실제 iPhone·FCM 및 운영 네트워크 장애는 검증하지 않았다.
 - 5단계에서 Backend·Flutter 통합, 실제 restart·배포 경계와 전체 완료 조건을 검증한다. Dependency와 Backend 제품 코드·Migration 변경은 없다.
+
+### TASK-802 5단계 — 최종 통합 검증 및 완료 판정 (2026-10-31)
+
+`main`의 `b45ffd9ed865c21c3d5076f6c2f84208c72dc806`, 변경 없는 작업 트리에서 시작했다. 제품 코드·Dependency·Migration은 변경하지 않았다.
+
+- **Backend:** 기존 `AlarmCreationIntegrationTest` 17개를 MySQL 8.4.11 Testcontainers와 MockMvc로 재실행해 모두 통과했다. 동일 UUID 순차·동시 요청, 다른 내용 409, User 격리, UNIQUE 충돌 후 별도 transaction 복구, INSERT 실패 시 Alarm/요청 기록 rollback과 동일 ID 재시도, 삭제 tombstone 410, 30일 이후 cleanup 및 재생성 가능성, cleanup 경합을 확인했다. ACTIVE/FOLLOW_UP 상태·generation·기존 NotificationEvent/Delivery 보존도 확인했다. 응답 유실은 commit 뒤 응답 폐기 시뮬레이션이며 실제 네트워크 단절은 아니다. GET 404는 rollback의 증거가 아니다.
+- **실제 HTTP와 재시작:** 별도 MySQL 8.4.11 컨테이너에서 V1~V21을 적용하고 실제 Spring Boot 서버를 실행했다. HTTP 생성 201과 활성화 200 뒤 서버 프로세스를 정상 종료·재시작해 GET 200과 동일 POST 201이 기존 ACTIVE ID를 반환했고 DB에서 Alarm 1개, 요청 기록 1개, generation 1을 확인했다. 실제 Flutter `AlarmApiClient`도 같은 서버에 HTTP GET과 POST를 보내 같은 ID와 ACTIVE를 확인했다. 이 일회성 연결 검증은 앱 전체 E2E나 실제 네트워크 단절 시험이 아니다.
+- **Flutter:** 생성 controller·API·화면·Phase 6 회귀 88개, timeout·Push 준비·Session 전환 회귀 79개, 실제 HTTP 연결 1개가 통과했다. Push 준비 후 UUID v4와 Secure Storage 저장 뒤 POST, 재생성된 controller의 원본 복구, 같은 실행 내 명시적 동일 요청 재시도, 404 불확실성 보존, 409/410, 400/401/5xx·timeout·잘못된 응답, 다른 User/Session과 늦은 응답 격리, 정리 실패 시 신규 생성 차단을 기존 테스트와 구현으로 확인했다. Secure Storage는 테스트 mock이며 실제 OS 저장소나 앱 프로세스 재시작은 아니다. 재시작 후에는 동일 POST를 차단하고 GET을 제공하며 명시적 새 생성 전 화면과 확인 대화상자에서 중복 위험을 안내한다.
+- **호환성과 범위:** 서버 선배포 후 신규 Flutter 순서다. 기존 Client의 ID 없는 생성은 계속 허용되나 멱등성은 없다. 신규 Client를 구형 서버에 먼저 배포하는 조합은 지원하지 않는다. V21은 독립 table을 추가하고 기존 Alarm을 backfill하지 않는다. 새 DB migration과 기존 `UserIdentityMigrationIntegrationTest` 8개 통과를 확인했으며 운영 데이터 규모의 DDL lock·배포·복구 검증은 수행하지 않았다.
+- **실행과 판정:** 기존 3단계 Backend 전체 1,425개, 4단계 Flutter 전체 648개 통과 기록을 재사용했다. 이번에는 제품 코드 변경이 없어 전체 suite를 반복하지 않았다. Flutter 추가 실행에서 존재하지 않는 파일 지정으로 한 번 로딩 오류가 났고 유효한 두 파일만 재실행해 79개가 통과했다. 실제 iPhone·FCM, 운영 배포, 장애 중 강제 종료와 실제 네트워크 단절은 미검증이며 각각 별도 운영 검증 범위다. 핵심 중복 방지, 영속성·원자성, 복구·Session 격리, lifecycle 및 알림 기록 보호, legacy·만료 정책의 필수 조건을 충족해 TASK-802를 `[x]`로 완료한다.
 
 ### TASK-804 API 오류 계약 분석 및 구현 계획 (2026-10-30)
 
