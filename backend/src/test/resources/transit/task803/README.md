@@ -5,3 +5,5 @@ All files are DOCUMENTED_OBSERVATION_RECONSTRUCTION, not captured HTTP responses
 Vehicle and stop identifiers are consistent test aliases; route context is a test alias. TAGO GPS is synthetic, deliberately rounded replacement rather than observed coordinates; Seoul GPS and vehicle numbers are omitted. No credential or request URL is included. DTO and Observation expectations are explicit in `ProviderObservedFixtureTest`.
 
 Synthetic malformed, empty, security and boundary cases live in the client and mapper test source, not in these reconstructed fixtures. They do not assert observed provider behavior.
+
+No OBSERVED_SANITIZED fixture is available here: the observation documents record fields and values but do not preserve the complete HTTP responses. TASK-803 remains open until a preserved actual response can be sanitized and verified as a golden fixture. No new provider call was authorized for this documentation correction.

@@ -294,7 +294,7 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 
 - [x] TASK-801 Alarm Evaluation Test 보강
 - [x] TASK-802 Duplicate Prevention Test 보강
-- [x] TASK-803 외부 provider response mapping Test 보강: 실제 관찰 response를 민감 정보를 제거한 golden fixture로 만들고 synthetic edge fixture를 함께 사용한다. fixture에는 provider, operation, 관찰 시점 또는 provenance를 남기되 credential은 제거한다. 실제 Provider 호출이나 scheduled live canary는 일반 PR CI 또는 V1 필수 infrastructure로 두지 않는다.
+- [ ] TASK-803 외부 provider response mapping Test 보강: 실제 관찰 response를 민감 정보를 제거한 golden fixture로 만들고 synthetic edge fixture를 함께 사용한다. fixture에는 provider, operation, 관찰 시점 또는 provenance를 남기되 credential은 제거한다. 실제 Provider 호출이나 scheduled live canary는 일반 PR CI 또는 V1 필수 infrastructure로 두지 않는다.
 - [x] TASK-804 API validation/error handling Test 보강: 오류 body shape를 안정적으로 통일하되 모든 오류 의미를 합치지 않는다. `INVALID_REQUEST`, `UNAUTHENTICATED`·`ACCESS_DENIED`, resource-specific `NOT_FOUND`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명시적 concurrency/stale conflict, Google·Transit·일반 서비스 장애의 구분된 503, `INTERNAL_SERVER_ERROR`와 MVC 상태 보존을 검증하며 예상치 못한 Exception을 400으로 바꾸지 않는다.
 - [ ] TASK-805 구조화된 Logging, 최소 Operational Metrics 및 Alerting contract 추가
 - [ ] TASK-806 Secret 관리 검토
@@ -312,6 +312,8 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
   - 등록 범위 (2026-10-29): Task와 작업 계획만 추가한다. 이번 등록은 코드·Migration·테스트·Dependency·DB 변경이나 실제 Provider 호출·FCM 발송을 포함하지 않으며, 후속 지시 없이 수정에 착수하지 않는다. 기존 Task 번호와 완료 상태를 유지한다.
 
 ### TASK-803 — Provider 응답 매핑 검증 (2026-10-31)
+
+검증 범위 정정: 아래의 관측 문서 기반 재구성 fixture, Synthetic edge, Provider Client·Mapper 및 Scheduler 회귀와 Backend 전체 테스트는 완료됐다. 다만 원래 완료 조건인 **보존된 실제 HTTP 응답을 비식별 처리한 Golden Fixture**는 확보하지 못했다. 기존 관측 문서에는 실제 필드와 값이 기록돼 있지만 원본 응답 전체는 보존돼 있지 않으며, 이번 정리 작업에서는 새 Provider 호출을 허용하지 않는다. 따라서 TASK-803은 `[ ]`로 유지하고 실제 원본 확보와 비식별 fixture 검증을 별도 후속 작업으로 추적한다. 이 잔여 조건은 독립적인 TASK-805 이후 작업을 차단하지 않는다.
 
 기준 `19aa981d4317a6b6b566842d8cc48713468debb2`. 기존 Client·Mapper 테스트가 정상 empty와 Provider/Protocol/HTTP 오류, TAGO count 불일치 및 차량 ID 누락, 서울 JSON/XML·XXE·시각 및 차량 ID 오류를 검증한다. Scheduler·평가기 테스트는 부분 실패, 오래된·동일·역행 시각 및 충돌 관측을 확인한다.
 
