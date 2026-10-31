@@ -7,6 +7,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.Set;
 
 import com.stopbell.notification.client.NotificationSendResult;
+import com.stopbell.common.observability.OperationalMetrics;
 import com.stopbell.notification.entity.Device;
 import com.stopbell.notification.entity.NotificationDelivery;
 import com.stopbell.notification.entity.NotificationDeliveryStatus;
@@ -15,6 +16,7 @@ import com.stopbell.notification.repository.DeviceRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionSynchronization;
 
 /** Mutates managed entities inside caller-owned Delivery → Device transactions. */
 public class DurableNotificationAttemptHandler implements NotificationAttemptHandler {
@@ -27,6 +29,19 @@ public class DurableNotificationAttemptHandler implements NotificationAttemptHan
     private final NotificationRetryPolicy retry;
     private final DeviceRepository devices;
     private final Clock clock;
+    private OperationalMetrics metrics;
+
+    void setOperationalMetrics(OperationalMetrics metrics) {
+        this.metrics = metrics;
+    }
+
+    private void recordAfterCommit(OperationalMetrics.DeliveryTransition transition) {
+        if (metrics != null && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { metrics.delivery(transition); }
+            });
+        }
+    }
 
     public DurableNotificationAttemptHandler(NotificationRetryPolicy retry, DeviceRepository devices, Clock clock) {
         this.retry = retry;
@@ -42,10 +57,12 @@ public class DurableNotificationAttemptHandler implements NotificationAttemptHan
         }
         if (!now.isBefore(delivery.getExpiresAt())) {
             delivery.expire(now);
+            recordAfterCommit(OperationalMetrics.DeliveryTransition.EXPIRED);
             return false;
         }
         if (delivery.getAttemptCount() >= retry.maxAttempts()) {
             delivery.markFailed("ATTEMPT_LIMIT_REACHED", now);
+            recordAfterCommit(OperationalMetrics.DeliveryTransition.FAILED);
             return false;
         }
         return !delivery.getNextAttemptAt().isAfter(now);
@@ -57,11 +74,13 @@ public class DurableNotificationAttemptHandler implements NotificationAttemptHan
         requireTransaction();
         if (!now.isBefore(delivery.getExpiresAt())) {
             delivery.expire(now);
+            recordAfterCommit(OperationalMetrics.DeliveryTransition.EXPIRED);
         } else {
             // DEVICE_MISSING is impossible under the FK; use the existing dispatch local allowlist.
             String code = reason == NotificationRecipientPreflight.Rejection.DEVICE_MISSING
                     ? "DISPATCH_NOT_ALLOWED" : "RECIPIENT_" + reason.name();
             delivery.markFailed(code, now);
+            recordAfterCommit(OperationalMetrics.DeliveryTransition.FAILED);
         }
     }
 
@@ -105,12 +124,19 @@ public class DurableNotificationAttemptHandler implements NotificationAttemptHan
                 result.result(), delivery.getLastFailureCode(), delivery.getAttemptCount(),
                 delivery.getStatus() == NotificationDeliveryStatus.PENDING,
                 delivery.getStatus() == NotificationDeliveryStatus.EXPIRED, result.elapsedMs());
+        recordAfterCommit(switch (delivery.getStatus()) {
+            case ACCEPTED -> OperationalMetrics.DeliveryTransition.ACCEPTED;
+            case FAILED -> OperationalMetrics.DeliveryTransition.FAILED;
+            case EXPIRED -> OperationalMetrics.DeliveryTransition.EXPIRED;
+            case PENDING -> OperationalMetrics.DeliveryTransition.RETRY_SCHEDULED;
+        });
     }
 
     @Override
     public void expireBeforeSend(NotificationDelivery delivery, NotificationAttemptSnapshot snapshot, LocalDateTime now) {
         requireTransaction();
         delivery.expire(now);
+        recordAfterCommit(OperationalMetrics.DeliveryTransition.EXPIRED);
     }
 
     private void cleanup(NotificationDispatchTarget target) {

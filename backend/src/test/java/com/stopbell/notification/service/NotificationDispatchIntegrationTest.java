@@ -87,6 +87,30 @@ class NotificationDispatchIntegrationTest {
     }
 
     @Test
+    void pending_metrics_query_includes_both_sources_and_excludes_terminal_deliveries() {
+        Fixture alarm = fixture();
+        long session = sessionFixture();
+        assertThat(deliveries.countByStatus(NotificationDeliveryStatus.PENDING)).isEqualTo(2);
+        assertThat(deliveries.findOldestPendingCreatedAt()).isEqualTo(NOW.minusSeconds(2));
+        terminate(session);
+        assertThat(deliveries.countByStatus(NotificationDeliveryStatus.PENDING)).isEqualTo(1);
+        assertThat(deliveries.findOldestPendingCreatedAt()).isEqualTo(NOW);
+        terminate(alarm.deliveryId());
+        assertThat(deliveries.findOldestPendingCreatedAt()).isNull();
+    }
+
+    @Test
+    void expiry_sweep_counts_committed_transition_only_once() {
+        Fixture alarm = fixture();
+        var metrics = mock(com.stopbell.common.observability.OperationalMetrics.class);
+        attempts.setOperationalMetrics(metrics);
+        jdbc.update("update notification_deliveries set expires_at=? where id=?", NOW, alarm.deliveryId());
+        attempts.expireDuePending(alarm.deliveryId());
+        attempts.expireDuePending(alarm.deliveryId());
+        verify(metrics).delivery(com.stopbell.common.observability.OperationalMetrics.DeliveryTransition.EXPIRED);
+    }
+
+    @Test
     @DisplayName("Session backlog는 LIMIT 전에 제외되어 Alarm batch와 기존 FCM payload를 보존한다")
     void exclude_session_backlog_before_alarm_limit() {
         List<Long> sessionIds = new ArrayList<>();

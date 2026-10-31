@@ -624,3 +624,20 @@ Kubernetes, multi-region, read replica, blue/green deployment framework는 V1 �
 3. 합리적인 범위에서 외부 제공자 세부 사항을 핵심 알림 규칙과 분리한다.
 4. 알림을 유발하는 작업에는 멱등성을 고려한다.
 5. 비즈니스 결정은 코드뿐 아니라 문서에도 남긴다.
+
+### 운영 관측 및 alerting 계약 (TASK-805)
+
+Actuator가 제공하는 Micrometer registry를 사용한다. `stopbell.transit.request` timer는 polling cycle에서 실제 시작한 TAGO 위치·서울 roster/detail 호출의 provider, operation, SUCCESS/실패 종류와 시간을 기록한다. 같은 cycle의 공유 결과는 한 번만 계측하며 mapper 이후 오류는 이 호출 결과에 포함하지 않는다. `stopbell.monitoring.evaluation`은 Event 후보 선택 여부/후속 추적 만료, `stopbell.monitoring.cycle`은 cycle 종료와 시간, `stopbell.monitoring.last.completion`은 마지막 정상 종료 시각의 Unix 초를 기록한다. 정상 종료에는 개별 group 실패를 격리한 cycle도 포함된다. 0은 이 프로세스에서 아직 완료하지 않았다는 뜻이다. Provider 호출·평가·cycle은 고정 필드 key=value debug log로 남긴다. 기존 오류 경로는 예외 원문과 stack을 기록하지 않는다.
+
+`stopbell.notification.provider` timer는 dispatch의 정규화된 Provider 결과와 실제 FCM 요청 시작 여부 및 전체 호출 시간을 기록한다. ACCEPTED는 Provider 접수이지 단말 표시가 아니다. `stopbell.notification.delivery.transition`은 담당 handler와 만료 sweep에서 commit 확인 후 ACCEPTED/FAILED/EXPIRED/RETRY_SCHEDULED를 계측한다. 최초 생성 시 이미 만료된 Delivery나 다른 경로의 상태 변경은 이 counter에 포함되지 않으며 commit 응답 유실과 프로세스 종료 때 count가 누락될 수 있다. Counter와 timer는 프로세스 메모리의 운영 신호이며 durable 감사 기록이 아니다. `stopbell.notification.pending`과 `stopbell.notification.pending.oldest.age`는 두 source의 모든 PENDING 수와 Delivery `createdAt` 기준 UTC queue age 초를 DB에서 읽는다. 빈 backlog의 age는 0이고 DB 조회 실패는 NaN이다. 이는 Event 관측부터의 지연이 아니다. `stopbell.alarm.count`는 ACTIVE/FOLLOW_UP 상태의 DB 건수다. Gauge 수집마다 DB 조회가 발생하므로 운영 수집 주기와 DB 부하를 함께 관리한다.
+
+모든 사용자 정의 tag는 열거형 provider/operation/outcome/status/result 또는 boolean만 사용한다. Alarm·Event·Delivery·Device·User·Route·차량·설치본 식별자와 credential, raw URL/body, GPS를 tag에 넣지 않는다. 신규 event log에도 같은 민감정보를 넣지 않는다. 신규 계측에는 Dependency를 추가하지 않는다. 기본 web 노출은 기존 health만 유지하며 registry 수집 경로, 접근 제어, 보존 기간, 경보 목적지는 TASK-813 deployment에서 선택한다. 따라서 현재 코드만으로 외부 수집이나 실제 경보가 활성화되지는 않는다.
+
+운영 환경에서 다음을 지속 구간과 트래픽 규모에 맞춰 경보한다. 구체 임계값과 목적지는 실제 운영 측정 후 결정하며, 관측 누락을 정상 0으로 해석하지 않는다.
+
+- Monitoring 활성화 중 마지막 완료 시각이 정상 cycle 주기와 timeout budget을 넘거나 값이 장기간 수집되지 않음: Scheduler 중단·DB·Provider 및 프로세스 상태 확인
+- Provider 결과의 실패율 또는 지연이 지속 상승: provider/operation별 실패 종류와 외부 상태 확인. 원격 Provider의 일시적 실패만으로 readiness를 내리지 않음
+- pending 건수와 oldest age가 지속 증가하거나 expiry/retry/final failure가 증가: dispatch 활성화·설정·DB·FCM 상태와 원래 freshness 확인. 접수는 표시 성공으로 간주하지 않음
+- Gauge NaN, 수집 실패 또는 프로세스 재시작으로 시계열이 끊김: DB와 수집 경로를 별도 장애로 확인. counter 초기화와 설정상 비활성화 기간을 고려
+
+이 계약은 alert destination, 특정 vendor, self-hosted monitoring stack 또는 운영 임계값을 확정하지 않는다. Metadata sync age와 관측별 staleness/UNKNOWN 원인 등 추가 후보는 현재 계측 범위 밖이다.

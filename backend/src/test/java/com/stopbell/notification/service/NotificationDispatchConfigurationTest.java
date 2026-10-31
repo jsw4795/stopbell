@@ -30,6 +30,8 @@ class NotificationDispatchConfigurationTest {
             .withBean(DeviceRepository.class, () -> mock(DeviceRepository.class))
             .withBean(PlatformTransactionManager.class, () -> mock(PlatformTransactionManager.class))
             .withBean(FcmProviderClient.class, () -> mock(FcmProviderClient.class))
+            .withBean(com.stopbell.common.observability.OperationalMetrics.class,
+                    () -> mock(com.stopbell.common.observability.OperationalMetrics.class))
             .withBean("transitMetadataClock", Clock.class, Clock::systemUTC);
 
     @Test

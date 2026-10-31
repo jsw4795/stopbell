@@ -3,6 +3,7 @@ package com.stopbell.notification.service;
 import java.time.Clock;
 
 import com.stopbell.boarding.repository.BoardingSessionRepository;
+import com.stopbell.common.observability.OperationalMetrics;
 import com.stopbell.boarding.service.BoardingTrackingRuntime;
 import com.stopbell.notification.client.FcmProviderClient;
 import com.stopbell.notification.client.FcmClientProperties;
@@ -31,8 +32,10 @@ public class NotificationDispatchConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "notification.dispatch", name = "enabled", havingValue = "true")
     NotificationAttemptHandler notificationAttemptHandler(NotificationRetryPolicy retry, DeviceRepository devices,
-            @Qualifier("transitMetadataClock") Clock clock) {
-        return new DurableNotificationAttemptHandler(retry, devices, clock);
+            @Qualifier("transitMetadataClock") Clock clock, OperationalMetrics metrics) {
+        DurableNotificationAttemptHandler handler = new DurableNotificationAttemptHandler(retry, devices, clock);
+        handler.setOperationalMetrics(metrics);
+        return handler;
     }
 
     @Bean
@@ -41,9 +44,12 @@ public class NotificationDispatchConfiguration {
             NotificationAttemptHandler handler, NotificationDeliveryRepository deliveries,
             DeviceRepository devices, PlatformTransactionManager manager, FcmProviderClient provider,
             BoardingSessionRepository sessions, BoardingTrackingRuntime runtime,
-            @Qualifier("transitMetadataClock") Clock clock) {
+            @Qualifier("transitMetadataClock") Clock clock, OperationalMetrics metrics) {
         NotificationDispatchAttemptService attempts = new NotificationDispatchAttemptService(deliveries,
                 new NotificationRecipientPreflight(devices), handler, manager, clock, sessions, runtime);
-        return new NotificationDispatchWorker(properties, deliveries, attempts, provider, clock, runtime);
+        attempts.setOperationalMetrics(metrics);
+        NotificationDispatchWorker worker = new NotificationDispatchWorker(properties, deliveries, attempts, provider, clock, runtime);
+        worker.setOperationalMetrics(metrics);
+        return worker;
     }
 }

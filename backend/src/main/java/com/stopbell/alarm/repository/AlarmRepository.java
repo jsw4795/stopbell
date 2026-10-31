@@ -16,6 +16,8 @@ import jakarta.persistence.LockModeType;
 
 public interface AlarmRepository extends JpaRepository<Alarm, Long> {
 
+    long countByStatus(AlarmStatus status);
+
     @EntityGraph(attributePaths = "busAlarmTarget")
     List<Alarm> findAllByUserIdOrderByCreatedAtDesc(Long userId);
 

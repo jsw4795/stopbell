@@ -77,6 +77,22 @@ class DurableNotificationAttemptHandlerTest {
         }
     }
 
+    @Test
+    void delivery_metric_is_recorded_only_after_commit() {
+        var metrics = mock(com.stopbell.common.observability.OperationalMetrics.class);
+        handler.setOperationalMetrics(metrics);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            var snapshot = handler.beginAttempt(delivery, target, NOW);
+            handler.completeAttempt(delivery, snapshot, result(NotificationProviderResult.RETRYABLE, NOW));
+            verifyNoInteractions(metrics);
+            TransactionSynchronizationManager.getSynchronizations().forEach(sync -> sync.afterCommit());
+            verify(metrics).delivery(com.stopbell.common.observability.OperationalMetrics.DeliveryTransition.RETRY_SCHEDULED);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(NotificationProviderResult.class)
     @DisplayName("마지막 attempt budget이 소진돼도 명확한 접수는 ACCEPTED이고 다른 결과는 FAILED이다")

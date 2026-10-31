@@ -27,6 +27,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.support.TransactionTemplate;
+import com.stopbell.common.observability.OperationalMetrics;
 
 /** Owns transaction/lock boundaries and bounded result reapplication. */
 public class NotificationDispatchAttemptService {
@@ -38,6 +39,11 @@ public class NotificationDispatchAttemptService {
     private final TransactionTemplate transaction;
     private final BoardingSessionRepository sessions;
     private final BoardingTrackingRuntime runtime;
+    private OperationalMetrics metrics;
+
+    void setOperationalMetrics(OperationalMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     public NotificationDispatchAttemptService(NotificationDeliveryRepository deliveries,
             NotificationRecipientPreflight recipients, NotificationAttemptHandler handler,
@@ -206,15 +212,20 @@ public class NotificationDispatchAttemptService {
 
     /** A configuration-blocked worker may sweep expiry without spending any new attempt. */
     public void expireDuePending(long id) {
-        transaction.executeWithoutResult(status -> {
+        Boolean expired = transaction.execute(status -> {
             NotificationDelivery delivery = deliveries.findByIdForUpdate(id).orElse(null);
             LocalDateTime now = now();
             if (delivery != null && delivery.getStatus() == NotificationDeliveryStatus.PENDING
                     && !now.isBefore(delivery.getExpiresAt())) {
                 delivery.expire(now);
                 deliveries.flush();
+                return true;
             }
+            return false;
         });
+        if (Boolean.TRUE.equals(expired) && metrics != null) {
+            metrics.delivery(OperationalMetrics.DeliveryTransition.EXPIRED);
+        }
     }
 
     public void expireBeforeSend(NotificationAttemptSnapshot snapshot) {

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.stopbell.notification.client.FcmProviderClient;
+import com.stopbell.common.observability.OperationalMetrics;
 import com.stopbell.notification.client.NotificationSendResult;
 import com.stopbell.notification.entity.NotificationProviderResult;
 import com.stopbell.notification.entity.NotificationSourceType;
@@ -35,6 +36,11 @@ public class NotificationDispatchWorker {
     private boolean configurationBlocked;
     private final BoardingTrackingRuntime runtime;
     private long readyCursor;
+    private OperationalMetrics metrics;
+
+    void setOperationalMetrics(OperationalMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     public NotificationDispatchWorker(NotificationDispatchProperties properties,
             NotificationDeliveryRepository deliveries, NotificationDispatchAttemptService attempts,
@@ -138,6 +144,7 @@ public class NotificationDispatchWorker {
             return;
         }
         NotificationSendResult result = provider.send(snapshot.target().request());
+        if (metrics != null) metrics.notification(result);
         if (result.result() == NotificationProviderResult.CONFIGURATION) {
             // Fail closed until configuration repair + Backend restart. Expiry sweeps remain enabled.
             configurationBlocked = true;

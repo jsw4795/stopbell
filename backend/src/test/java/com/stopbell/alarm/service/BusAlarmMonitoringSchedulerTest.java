@@ -22,6 +22,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.BusAlarmTarget;
@@ -46,6 +49,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.slf4j.LoggerFactory;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -404,6 +408,38 @@ class BusAlarmMonitoringSchedulerTest {
 
         verify(monitored, never()).waitBeforeRetry();
         verify(evaluator, never()).evaluate(any(), any(), anySet(), anyList(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void unexpected_polling_failures_do_not_log_exception_details(boolean onRetry) {
+        Alarm alarm = tagoActiveAlarm(false);
+        when(pollingService.findMonitoringGroups()).thenReturn(List.of(new BusAlarmPollingGroup(
+                new BusPollingKey(TransitProvider.TAGO, "route-1", "31010"), List.of(alarm))));
+        var failure = new IllegalStateException("secret-marker", new RuntimeException("cause-marker"));
+        if (onRetry) {
+            when(tagoClient.fetchVehicleLocations(any()))
+                    .thenThrow(providerFailure(TransitProviderClientFailureKind.HTTP)).thenThrow(failure);
+        } else {
+            when(tagoClient.fetchVehicleLocations(any())).thenThrow(failure);
+        }
+        Logger logger = (Logger) LoggerFactory.getLogger(BusAlarmMonitoringScheduler.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            scheduler.pollMonitoringAlarms();
+            var event = appender.list.stream()
+                    .filter(item -> item.getFormattedMessage().contains(onRetry
+                            ? "polling retry failed" : "polling group failed"))
+                    .findFirst().orElseThrow();
+            assertThat(event.getFormattedMessage()).contains("failureType=IllegalStateException")
+                    .doesNotContain("secret-marker", "cause-marker", "route-1");
+            assertThat(event.getThrowableProxy()).isNull();
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
     }
 
     @Test

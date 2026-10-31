@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import com.stopbell.boarding.service.BoardingSessionPollingService;
+import com.stopbell.common.observability.OperationalMetrics;
 import com.stopbell.transit.service.VehiclePollingCycle;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.AlarmStatus;
@@ -32,6 +33,7 @@ import com.stopbell.transit.mapper.TagoTransitObservationMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.event.ContextClosedEvent;
 import org.springframework.context.event.EventListener;
@@ -61,6 +63,12 @@ public class BusAlarmMonitoringScheduler {
     private final Map<AlarmEvaluationKey, BusAlarmEvaluationState> evaluationStates = new HashMap<>();
     private final Map<AlarmEvaluationKey, PendingDecision> pendingDecisions = new HashMap<>();
     private volatile boolean stopping;
+    private OperationalMetrics metrics;
+
+    @Autowired(required = false)
+    void setOperationalMetrics(OperationalMetrics metrics) {
+        this.metrics = metrics;
+    }
 
     public BusAlarmMonitoringScheduler(
             BusAlarmPollingService pollingService,
@@ -96,8 +104,20 @@ public class BusAlarmMonitoringScheduler {
         if (stopping || Thread.currentThread().isInterrupted()) {
             return;
         }
+        long started = System.nanoTime();
+        OperationalMetrics.CycleOutcome outcome = OperationalMetrics.CycleOutcome.FAILED;
+        try {
+            pollCycle();
+            outcome = !stopping && !Thread.currentThread().isInterrupted()
+                    ? OperationalMetrics.CycleOutcome.COMPLETED : OperationalMetrics.CycleOutcome.INTERRUPTED;
+        } finally {
+            if (metrics != null) metrics.monitoringCycle(System.nanoTime() - started, outcome);
+        }
+    }
+
+    private void pollCycle() {
         VehiclePollingCycle cycle = new VehiclePollingCycle(tagoVehicleLocationClient, seoulBusVehicleLocationClient,
-                seoulBusVehicleDetailClient, clock);
+                seoulBusVehicleDetailClient, clock, metrics);
         // Reconcile before loading monitoring groups: an ambiguous ARRIVED/after commit may already be INACTIVE.
         Set<AlarmEvaluationKey> replayed = new LinkedHashSet<>(pendingDecisions.keySet());
         for (AlarmEvaluationKey key : replayed) {
@@ -118,8 +138,8 @@ public class BusAlarmMonitoringScheduler {
                 logProviderFailure(group, null, exception, false);
                 retryTargets.add(new RetryTarget(group, null));
             } catch (RuntimeException exception) {
-                log.warn("Bus Alarm polling group failed: provider={}, route={}",
-                        group.key().provider(), group.key().externalRouteId(), exception);
+                log.warn("Bus Alarm polling group failed: provider={}, failureType={}",
+                        group.key().provider(), exception.getClass().getSimpleName());
             }
         }
         if (stopping || Thread.currentThread().isInterrupted()) {
@@ -134,7 +154,7 @@ public class BusAlarmMonitoringScheduler {
             return;
         }
         VehiclePollingCycle retryCycle = new VehiclePollingCycle(tagoVehicleLocationClient,
-                seoulBusVehicleLocationClient, seoulBusVehicleDetailClient, clock);
+                seoulBusVehicleLocationClient, seoulBusVehicleDetailClient, clock, metrics);
         for (RetryTarget target : retryTargets) {
             if (stopping || Thread.currentThread().isInterrupted()) {
                 return;
@@ -148,8 +168,8 @@ public class BusAlarmMonitoringScheduler {
             } catch (TransitProviderClientException exception) {
                 logProviderFailure(target.group(), target.vehicleId(), exception, true);
             } catch (RuntimeException exception) {
-                log.warn("Bus Alarm polling retry failed: provider={}, route={}",
-                        target.group().key().provider(), target.group().key().externalRouteId(), exception);
+                log.warn("Bus Alarm polling retry failed: provider={}, failureType={}",
+                        target.group().key().provider(), exception.getClass().getSimpleName());
             }
         }
     }
@@ -282,6 +302,9 @@ public class BusAlarmMonitoringScheduler {
         Optional<TransitEvent> selectedEvent = BusAlarmLifecycleService.selectEvent(
                 result.eventCandidates(), alarm.getStatus()
         );
+        if (metrics != null) metrics.evaluation(selectedEvent.isPresent() ? OperationalMetrics.Evaluation.EVENT
+                : result.followUpExpired() ? OperationalMetrics.Evaluation.FOLLOW_UP_EXPIRED
+                : OperationalMetrics.Evaluation.NO_EVENT);
         BusAlarmEvaluationResult selectedResult = new BusAlarmEvaluationResult(
                 selectedEvent.map(List::of).orElseGet(List::of), result.nextState(), result.followUpExpired()
         );

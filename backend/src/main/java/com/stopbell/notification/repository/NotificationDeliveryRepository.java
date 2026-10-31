@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.stopbell.notification.entity.NotificationDelivery;
+import com.stopbell.notification.entity.NotificationDeliveryStatus;
 import com.stopbell.notification.entity.NotificationSourceType;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Pageable;
@@ -13,6 +14,11 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 
 public interface NotificationDeliveryRepository extends JpaRepository<NotificationDelivery, Long> {
+
+    long countByStatus(NotificationDeliveryStatus status);
+
+    @Query("select min(delivery.createdAt) from NotificationDelivery delivery where delivery.status = 'PENDING'")
+    LocalDateTime findOldestPendingCreatedAt();
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select delivery from NotificationDelivery delivery where delivery.id = :id")
