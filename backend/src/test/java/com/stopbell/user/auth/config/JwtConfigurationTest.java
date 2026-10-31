@@ -31,6 +31,12 @@ class JwtConfigurationTest {
                 .hasMessage("JWT secret must be at least 256 bits for HS256");
     }
 
+    @Test
+    void properties_string_does_not_expose_signing_key() {
+        assertThat(jwtProperties("synthetic-secret-marker").toString())
+                .isEqualTo("JwtProperties[redacted]");
+    }
+
     private JwtProperties jwtProperties(String secret) {
         return new JwtProperties(secret, "stopbell", Duration.ofHours(1));
     }

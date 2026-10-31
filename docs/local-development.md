@@ -125,7 +125,6 @@ DB_PASSWORD
 JWT_SECRET
 GOOGLE_SERVER_CLIENT_ID
 PUBLIC_DATA_SERVICE_KEY
-SEOUL_BUS_SERVICE_KEY
 FCM_PROJECT_ID
 GOOGLE_APPLICATION_CREDENTIALS
 ```
@@ -137,6 +136,8 @@ GOOGLE_APPLICATION_CREDENTIALS
 Local profile은 Spring Boot Config Data import로 Backend 디렉터리의 상위 경로(저장소 루트)에 있는 `.env`를 optional properties file로 자동 로드한다. 따라서 일반적인 실행 방식인 `cd backend && ./gradlew bootRun`과 Backend 프로젝트를 working directory로 사용하는 IDE/STS 실행에서 별도 Environment Variable 등록 없이 `.env`의 `KEY=value` 설정을 사용할 수 있다. `.env`가 없는 경우에도 Local profile의 설정 로딩은 실패하지 않는다.
 
 `.env`는 Git에 커밋하지 않으며, `.env.example`에는 필요한 key만 유지한다. 운영·배포 환경에서는 OS Environment Variable 또는 배포 환경의 Secret 관리 기능을 사용한다. Spring Boot 기본 property precedence에 따라 OS Environment Variable과 command-line property는 `.env`에서 import한 Config Data보다 우선한다.
+
+`PUBLIC_DATA_SERVICE_KEY`는 TAGO와 서울 Transit 설정에 공통으로 주입된다. `GOOGLE_SERVER_CLIENT_ID`와 `FCM_PROJECT_ID`는 식별 설정이며 비밀 인증키가 아니다. FCM은 기본 비활성이고 활성화 시 `FCM_ENABLED`, `FCM_PROJECT_ID`와 저장소 밖 Service Account JSON의 `GOOGLE_APPLICATION_CREDENTIALS` 경로를 사용한다. 실제 private key 파일을 `.env`나 예제 파일에 복사하지 않는다. Test profile의 설정은 격리된 합성 값이며 운영에서 재사용하지 않는다. JWT 서명 키는 UTF-8 기준 최소 32 bytes이고 충분한 무작위성이 필요하다. 키 교체는 기존 Access Token 검증에 영향을 주므로 운영 시점과 재인증 영향을 계획한다. 운영 Secret 주입·권한·교체·회수와 사고 대응의 실제 적용 검증은 TASK-813에서 수행한다.
 
 ------------------------------------------------------------------------
 

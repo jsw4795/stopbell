@@ -18,4 +18,9 @@ public record JwtProperties(String secret, String issuer, Duration accessTokenEx
             throw new IllegalArgumentException("JWT access token expiration must be positive");
         }
     }
+
+    @Override
+    public String toString() {
+        return "JwtProperties[redacted]";
+    }
 }

@@ -17,6 +17,18 @@ import org.springframework.mock.env.MockEnvironment;
 class TransitClientPropertiesConfigurationTest {
 
     @Test
+    void properties_strings_do_not_expose_keys_or_urls() {
+        var tago = new TransitClientProperties.Tago("https://synthetic.example/path?key=secret-marker",
+                "https://synthetic.example/metadata", "synthetic-key");
+        var seoul = new TransitClientProperties.Seoul("http://ws.bus.go.kr", "synthetic-key");
+        var properties = new TransitClientProperties(Duration.ofSeconds(2), Duration.ofSeconds(5),
+                Duration.ofSeconds(30), tago, seoul);
+        assertThat(tago.toString()).isEqualTo("Tago[redacted]");
+        assertThat(seoul.toString()).isEqualTo("Seoul[redacted]");
+        assertThat(properties.toString()).isEqualTo("TransitClientProperties[redacted]");
+    }
+
+    @Test
     @DisplayName("하나의 공공데이터 Service Key와 기본 Base URL을 두 Provider에 바인딩한다")
     void bind_public_data_service_key_and_default_base_urls() throws IOException {
         MockEnvironment environment = new MockEnvironment()

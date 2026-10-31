@@ -23,12 +23,22 @@ public record TransitClientProperties(
         }
     }
 
+    @Override
+    public String toString() {
+        return "TransitClientProperties[redacted]";
+    }
+
     public record Tago(String baseUrl, String metadataBaseUrl, String serviceKey) {
 
         public Tago {
             requireNotBlank(baseUrl, "TAGO base URL");
             requireNotBlank(metadataBaseUrl, "TAGO metadata base URL");
             requireNotBlank(serviceKey, "TAGO service key");
+        }
+
+        @Override
+        public String toString() {
+            return "Tago[redacted]";
         }
     }
 
@@ -44,6 +54,11 @@ public record TransitClientProperties(
                 throw new IllegalArgumentException("Seoul bus base URL must be the official HTTP ws.bus.go.kr origin");
             }
             requireNotBlank(serviceKey, "Seoul bus service key");
+        }
+
+        @Override
+        public String toString() {
+            return "Seoul[redacted]";
         }
     }
 
