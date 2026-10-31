@@ -149,6 +149,20 @@ class TagoVehicleLocationClientTest {
         assertFailure(TransitProviderClientFailureKind.PROTOCOL, () -> client.fetchVehicleLocations(request()));
     }
 
+    @Test
+    @DisplayName("TAGO 합성 오류 응답의 잘못된 숫자·형식·불완전 목록은 정상 empty로 처리하지 않는다")
+    void synthetic_invalid_responses_are_protocol_failures() {
+        for (String body : new String[] {
+                "{not-json",
+                "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":[{\"nodeord\":\"bad\"}]},\"totalCount\":1}}}",
+                "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":[]},\"totalCount\":2}}}"
+        }) {
+            server.reset();
+            expectRequest().andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+            assertFailure(TransitProviderClientFailureKind.PROTOCOL, () -> client.fetchVehicleLocations(request()));
+        }
+    }
+
     private VehicleLocationRequest<TagoVehicleLocationRequestContext> request() {
         return new VehicleLocationRequest<>("GGB200000112", new TagoVehicleLocationRequestContext("31010"));
     }

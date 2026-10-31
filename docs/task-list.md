@@ -294,7 +294,7 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 
 - [x] TASK-801 Alarm Evaluation Test 보강
 - [x] TASK-802 Duplicate Prevention Test 보강
-- [ ] TASK-803 외부 provider response mapping Test 보강: 실제 관찰 response를 민감 정보를 제거한 golden fixture로 만들고 synthetic edge fixture를 함께 사용한다. fixture에는 provider, operation, 관찰 시점 또는 provenance를 남기되 credential은 제거한다. 실제 Provider 호출이나 scheduled live canary는 일반 PR CI 또는 V1 필수 infrastructure로 두지 않는다.
+- [x] TASK-803 외부 provider response mapping Test 보강: 실제 관찰 response를 민감 정보를 제거한 golden fixture로 만들고 synthetic edge fixture를 함께 사용한다. fixture에는 provider, operation, 관찰 시점 또는 provenance를 남기되 credential은 제거한다. 실제 Provider 호출이나 scheduled live canary는 일반 PR CI 또는 V1 필수 infrastructure로 두지 않는다.
 - [x] TASK-804 API validation/error handling Test 보강: 오류 body shape를 안정적으로 통일하되 모든 오류 의미를 합치지 않는다. `INVALID_REQUEST`, `UNAUTHENTICATED`·`ACCESS_DENIED`, resource-specific `NOT_FOUND`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명시적 concurrency/stale conflict, Google·Transit·일반 서비스 장애의 구분된 503, `INTERNAL_SERVER_ERROR`와 MVC 상태 보존을 검증하며 예상치 못한 Exception을 400으로 바꾸지 않는다.
 - [ ] TASK-805 구조화된 Logging, 최소 Operational Metrics 및 Alerting contract 추가
 - [ ] TASK-806 Secret 관리 검토
@@ -310,6 +310,16 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 - [x] TASK-816 프로젝트 종합 감사 후속 결함 수정
   - 목적: 종합 감사에서 발견한 AUD-01~AUD-13을 중요도에 따라 검토·수정하고 관련 테스트와 문서를 보강한다. 하나의 상위 Task로 관리하며 실제 수정·필수 검증 완료 전까지 `[ ]`를 유지한다.
   - 등록 범위 (2026-10-29): Task와 작업 계획만 추가한다. 이번 등록은 코드·Migration·테스트·Dependency·DB 변경이나 실제 Provider 호출·FCM 발송을 포함하지 않으며, 후속 지시 없이 수정에 착수하지 않는다. 기존 Task 번호와 완료 상태를 유지한다.
+
+### TASK-803 — Provider 응답 매핑 검증 (2026-10-31)
+
+기준 `19aa981d4317a6b6b566842d8cc48713468debb2`. 기존 Client·Mapper 테스트가 정상 empty와 Provider/Protocol/HTTP 오류, TAGO count 불일치 및 차량 ID 누락, 서울 JSON/XML·XXE·시각 및 차량 ID 오류를 검증한다. Scheduler·평가기 테스트는 부분 실패, 오래된·동일·역행 시각 및 충돌 관측을 확인한다.
+
+`backend/src/test/resources/transit/task803/README.md`에 출처와 한계를 남겼다. 2026-09-09 실측 문서의 TAGO 300번 Location과 서울 roster·detail 도착→운행 관찰을 `DOCUMENTED_OBSERVATION_RECONSTRUCTION`으로 재구성했다. 원본 전체 응답이 아니며 item 수와 envelope는 축약·구성했다. 차량·정류장과 요청 노선은 가명, TAGO GPS는 인공 대체값이고 서울 GPS·차량번호는 생략했다. 각 클라이언트 DTO부터 Observation까지 요청 노선, 위치 순서, 좌표, 서울 flag와 KST→UTC 변환을 검증한다. 기존 및 신규 테스트의 정상 empty·잘못된 JSON/숫자·불완전 응답·XXE 등은 `SYNTHETIC`이다. 실제 보존 원본을 비식별한 `OBSERVED_SANITIZED` fixture는 없다.
+
+Java/Gradle JVM 21과 offline Gradle을 사용했다. Provider 집중 6개 클래스 52회, Scheduler·평가기 2개 클래스 107회, Backend 전체 83개 클래스 1,435회 모두 실패·오류·skip 0이다. JUnit XML 집계이며 전체 종료 중 종료된 격리 DB에 대한 연결 풀 경고가 있었으나 Gradle과 XML은 성공이다.
+
+추가 테스트는 재구성 흐름 2개와 TAGO 합성 오류 1개이며 제품 결함이나 제품 코드·Dependency 변경은 없다. 서울 `sectOrd`를 detail `stOrd`와 같은 occurrence로 가정하지 않는다. 원본 전체 응답, 실제 전체 차량 목록 및 GPS 정밀도, Provider 현행 동작·실시간 지연·물리적 정차와 기기 수신은 검증하지 않았다. 실제 Provider·Credential·FCM·운영 DB는 사용하지 않았다.
 
 ### TASK-801 — Alarm Evaluation 검증 (2026-10-31)
 
