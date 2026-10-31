@@ -267,6 +267,50 @@ class BusAlarmDecisionIntegrationTest {
     }
 
     @Test
+    @DisplayName("commit 전 rollback은 부분 결과를 남기지 않고 원래 identity를 재검증해 한 번만 저장한다")
+    void retries_original_candidate_after_pre_commit_rollback() {
+        Alarm alarm = alarm(true);
+        device(alarm.getUser());
+        var commits = new java.util.concurrent.atomic.AtomicInteger();
+        PlatformTransactionManager failingOnce = new PlatformTransactionManager() {
+            @Override
+            public org.springframework.transaction.TransactionStatus getTransaction(org.springframework.transaction.TransactionDefinition definition) {
+                return transactionManager.getTransaction(definition);
+            }
+            @Override
+            public void commit(org.springframework.transaction.TransactionStatus status) {
+                if (commits.incrementAndGet() == 1) {
+                    transactionManager.rollback(status);
+                    assertThat(alarms.findById(alarm.getId()).orElseThrow().getStatus()).isEqualTo(AlarmStatus.ACTIVE);
+                    assertThat(alarms.findById(alarm.getId()).orElseThrow().getFollowUpTrackingCycleId()).isNull();
+                    assertThat(events.count()).isZero();
+                    assertThat(deliveries.count()).isZero();
+                    throw new org.springframework.transaction.TransactionSystemException("commit rolled back");
+                }
+                transactionManager.commit(status);
+            }
+            @Override
+            public void rollback(org.springframework.transaction.TransactionStatus status) {
+                transactionManager.rollback(status);
+            }
+        };
+        BusAlarmLifecycleService service = new BusAlarmLifecycleService(alarms, events, deliveries, devices, ttlPolicy, failingOnce, clock);
+        TransitEvent event = event(TransitEventType.ARRIVED, CYCLE, NOW);
+        var result = service.applyIfCurrent(key(alarm), AlarmStatus.ACTIVE,
+                new BusAlarmEvaluationResult(List.of(event), BusAlarmEvaluationState.initial(), false), NOW);
+
+        assertThat(commits.get()).isEqualTo(2);
+        assertThat(result.outcome()).isEqualTo(BusAlarmDecisionResult.Outcome.COMMITTED);
+        assertThat(result.followUpTrackingCycleId()).isEqualTo(CYCLE);
+        assertThat(events.count()).isOne();
+        var saved = events.findAll().getFirst();
+        assertThat(saved.getActivationGeneration()).isEqualTo(alarm.getActivationGeneration());
+        assertThat(saved.getTrackingCycleId()).isEqualTo(CYCLE);
+        assertThat(saved.getEventType()).isEqualTo(TransitEventType.ARRIVED);
+        assertThat(deliveries.count()).isOne();
+    }
+
+    @Test
     @DisplayName("실제 Event UNIQUE 충돌 전체 rollback 뒤 새 transaction의 exact 조회로만 duplicate를 분류한다")
     void resolves_real_unique_conflict_after_rollback() {
         Alarm alarm = alarm(true);

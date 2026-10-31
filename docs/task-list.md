@@ -311,6 +311,52 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
   - 목적: 종합 감사에서 발견한 AUD-01~AUD-13을 중요도에 따라 검토·수정하고 관련 테스트와 문서를 보강한다. 하나의 상위 Task로 관리하며 실제 수정·필수 검증 완료 전까지 `[ ]`를 유지한다.
   - 등록 범위 (2026-10-29): Task와 작업 계획만 추가한다. 이번 등록은 코드·Migration·테스트·Dependency·DB 변경이나 실제 Provider 호출·FCM 발송을 포함하지 않으며, 후속 지시 없이 수정에 착수하지 않는다. 기존 Task 번호와 완료 상태를 유지한다.
 
+### TASK-802 1단계 — 기존 중복 방지 검증 보강 및 Alarm 생성 멱등성 설계 판단 (2026-10-31)
+
+시작 기준은 `main`의 `41d3211cefb945a735b54c7e7cce2e24384fe659`, 기존 변경 없음이다. 이 단계는 TASK-802 완료나 새 API 정책의 확정이 아니다. TASK-802와 다른 모든 체크박스를 유지한다.
+
+#### 구현과 기존 Coverage Matrix
+
+Evaluation은 차량 추적 상태와 cycle UUID로 소비된 후보를 억제한다. Lifecycle Service는 Alarm row write lock 후 generation과 현재 상태를 재검증하고 Event exact locking read를 수행한다. 동일 logical identity `(alarm_id, activation_generation, tracking_cycle_id, event_type)`는 `uk_notification_events_logical_identity`, 동일 Event·Device는 `uk_notification_deliveries_event_device`가 강제한다. Lifecycle 변경, Event와 최초 eligible Device별 Delivery는 같은 REQUIRES_NEW transaction에서 commit 또는 rollback된다. 이후 dispatch는 별도 transaction과 외부 전송이다. 상세 계약은 [Architecture](architecture.md#notification-decision-transaction-task-708)와 [Database](database.md#phase-7-notification-persistence-contract)를 따른다.
+
+| 영역 | 시나리오 | 기존 assertion 근거 | 수준 | 공백과 조치 |
+|---|---|---|---|---|
+| Evaluation | 같은 관측·cycle 반복 | `BusAlarmEvaluatorTest.uses_predecessor_snapshot_and_deduplicates_before`는 후보가 비어 있음을 확인 | Unit | 중복 추가 불필요 |
+| Tracking | 차량 부재 뒤 새 cycle | `BusAlarmEvaluatorTest`의 missing grace 및 FOLLOW_UP UUID 불일치 테스트 | Unit | 실제 restart는 TASK-811 |
+| Generation | 중복 활성화·재활성화·늦은 결과 | `BusAlarmDecisionIntegrationTest.distinguishes_all_identity_components`와 `preserves_follow_up_and_rejects_stale_lifecycle`는 generation과 stale 결과 확인 | MySQL | 중복 추가 불필요 |
+| Event | 동일 identity·payload·시각·늦은 Device | `commits_fan_out_and_preserves_duplicate`는 전체 Event/Delivery/Alarm row를 비교 | MySQL | 중복 추가 불필요 |
+| Event | 다른 type·cycle·generation | `distinguishes_all_identity_components`와 `NotificationPersistenceIntegrationTest.persist_identity_and_enforce_uniqueness` | MySQL | 다른 Alarm 독립 identity는 schema 및 코드 정적 확인 |
+| Delivery | 동일 Event·Device와 다른 Device | persistence UNIQUE 위반 및 decision의 다중 recipient assertion | MySQL | 중복 추가 불필요 |
+| Delivery | ownership A→B→A·revision·terminal | decision의 `current_read_coordinates_ownership_transfer`, `NotificationDispatchIntegrationTest`의 owner/generation 및 FID rotation, persistence의 terminal 보존 | MySQL, 외부 Provider 대체 | 실제 FCM 표시 검증 아님 |
+| Transaction | Event 뒤 Delivery UNIQUE/FK/CHECK 실패 | `rolls_back_everything_on_delivery_failure`, `rejects_delivery_unique_as_event_duplicate`는 lifecycle·Event·Delivery rollback 및 오류 전파 확인 | MySQL | Event INSERT의 독립 FK/CHECK 오류 주입은 미검증 |
+| Transaction | commit 응답 유실 | `reconciles_lost_commit_response`는 실제 commit 뒤 예외와 원본 Event/Delivery 유지 확인 | MySQL, 응답 유실 주입 | 실제 네트워크 단절은 미검증 |
+| Transaction | commit 전 rollback | 기존 Delivery 오류 rollback과 unit 재시도는 결합된 commit 경계 재시도를 직접 확인하지 않음 | MySQL | `retries_original_candidate_after_pre_commit_rollback` 추가 |
+| Concurrency | 동일 candidate | `serializes_concurrent_same_candidate`는 두 작업의 COMMITTED/DUPLICATE 및 한 Event/Delivery 확인 | MySQL, 동시 시작 latch | 실제 deadlock은 미주입. unit `bounds_transient_database_retries`의 transient 예외와 두 번 제한은 별도 확인 |
+| Lifecycle | deactivate/reactivate/delete 경쟁 | `coordinates_alarm_mutation_with_decision`은 mutation이 잠금을 먼저 얻은 순서의 stale 및 무생성 확인 | MySQL, latch | 반대 순서의 명시적 경쟁은 미검증 |
+| Restart | FOLLOW_UP UUID 복구 | `preserves_follow_up_and_rejects_stale_lifecycle`는 빈 memory로 재평가한 원래 UUID와 after·만료 확인 | MySQL 및 evaluator, process 재시작 아님 | 실제 restart/ACTIVE 연속성은 TASK-811 |
+| Alarm Create | 동일 POST | `api.md`의 Request ID 부재; 생성 멱등성 계약 없음 | 정적 분석 | 아래 정책 결정 필요 |
+
+Scheduler mock 테스트 `replays_original_decision_until_commit_is_confirmed`는 원래 candidate·시간을 재사용하고 duplicate 확인 뒤 memory에 반영하며 `refuses_memory_for_incompatible_duplicate`는 generation/cycle 불일치 시 반영하지 않음을 확인한다. 신규 MySQL 테스트는 첫 commit 전에 실제 rollback해 ACTIVE와 빈 runtime/Event/Delivery를 확인하고, 다음 transaction이 같은 generation·UUID·type으로 한 Event와 한 Delivery를 commit함을 확인한다. 이는 실제 DB 장애나 process crash 재현은 아니다. FCM 접수 뒤 응답 유실·종료 시 기기 중복 표시 및 OS exactly-once는 보장하지 않는다. TASK-709의 retry 정책과 TASK-811의 restart 책임을 유지한다.
+
+#### Alarm 생성 멱등성: 결정 전 비교 및 권고
+
+| 선택 | 장점 | 한계 |
+|---|---|---|
+| A 현 API 유지 | DB/API 변경과 배포 부담이 없고 기존 Client 호환 | 응답 유실 시 생성 결과를 정확히 식별할 수 없고 수동 재생성·복수 기기에서 중복 가능; 자동 재전송 금지와 현재 안내 유지 |
+| B 서버 요청 identity | 동일 원본 요청의 commit 불확실성을 안전하게 복구 가능 | 저장·보존·삭제·충돌 계약, migration 및 durable Client intent가 필요하고 배포 순서와 운영 복잡도가 증가 |
+
+**권고: V1의 안정적인 생성 복구를 위해 B를 도입하는 것이 필요하다.** 사용자 경험상 화면 잠금과 목록 확인은 특정 요청 결과를 입증하지 못한다. 단, 이는 구현 제안이며 승인된 계약이 아니다. 서로 다른 기기에서 각자 새 ID를 발급한 독립 요청까지 자동으로 같은 의도로 합치지는 못한다.
+
+최소 후보는 인증 User와 Client Request ID의 복합 UNIQUE를 갖는 별도 durable 요청 기록, canonical 원본 요청 fingerprint와 결과 참조를 Alarm 생성과 같은 transaction에 저장하는 것이다. 같은 User/ID·같은 body는 최초 결과를 재조회하고 다른 body는 conflict, 다른 User의 같은 ID는 독립 범위로 처리한다. 동시 요청은 DB UNIQUE를 최종 방어로 사용하고 실패 transaction을 종료한 뒤 새 transaction으로 exact 조회하며 rollback에는 기록이 없어 lifecycle/입력을 재검증한다. 서버 재시작과 commit 후 응답 유실도 동일 ID로 복구한다. 원본 metadata snapshot과 요청 fingerprint를 현재 metadata 변경과 분리해야 한다. 기존 Event/Delivery identity는 이 생성 요청 identity와 독립이다.
+
+삭제 후 재전송에 새 Alarm을 만들지 않도록 별도 tombstone/결과 기록을 보존하는 방식을 권고한다. 삭제 후 응답을 404/410/별도 결과 중 무엇으로 표현할지, 보존 기간·만료 후 ID 재사용과 보장 범위, canonicalization, 최초 응답과 현재 상태 중 반환 방식, 조회 endpoint, 개인정보와 저장 상한은 개발자 결정이 필요하다. 무기한 보존 또는 임의 TTL을 이번에 확정하지 않는다. Alarm row에 UUID만 두면 삭제 뒤 중복 방지와 결과 복구를 보장하지 못한다.
+
+Backend는 계약 확정 후 API/Service, 원자적 요청 기록 및 migration, conflict/조회·보존 처리와 동시성 테스트가 필요하다. Flutter는 전송 전 User/session에 묶인 원본 ID와 body의 durable pending intent, 재시작 후 복구 및 계정 전환 보호가 필요하다. 기존 Alarm row는 별도 신규 요청 기록 없이 호환 가능하나 과거 요청을 소급 식별할 수 없다. 이전 Client에 필드를 optional로 허용하면 하위 호환되지만 그 요청은 멱등성이 없다. 필수 전환 여부·배포 순서와 혼합 버전 운영 정책은 별도 결정한다. DB migration의 lock/rollback·보존량, 중간 버전 배포와 응답 변경 위험을 검토해야 한다. 신규 테스트는 User 격리, body conflict, 순차/동시 중복, commit 응답 유실, rollback, 삭제·만료·재시작, metadata 변경 및 legacy Client와 기존 Notification 불변을 포함한다. 실제 HTTP와 process restart를 각각 구분한다.
+
+검증 결과: Java/Gradle JVM 21, offline Gradle 및 Testcontainers MySQL 사용. 변경 클래스 집중 13개, Alarm·Notification·Boarding 관련 회귀 885개, Backend 전체 1,408개가 각각 실패 0·오류 0·skip 0으로 통과했다. 수치는 각 실행의 JUnit XML 집계다. 최초 집중 실행은 테스트의 UUID와 문자열 비교 오류 1건으로 실패했으며 assertion 타입을 수정한 뒤 재실행했다. 관련 및 전체 실행 종료 중 이미 종료된 테스트 DB 연결에 대한 pool 경고가 있었으나 Gradle과 XML은 성공이다. 실제 FCM/Transit 호출과 Flutter 전체 회귀는 실행하지 않았다.
+
+TASK-802의 남은 조건은 위 미검증 경계의 필요성 판단, 생성 멱등성 정책과 범위 결정, 승인 시 Backend·Flutter·migration 및 관련 검증, 최종 회귀와 완료 판정이다. 제품 코드·API·Migration·Dependency 변경은 없다.
+
 ### TASK-804 API 오류 계약 분석 및 구현 계획 (2026-10-30)
 
 **분석 전용 결과: A안(기존 GlobalExceptionHandler·Security 경계의 최소 보강, 두 Controller-local Handler 유지)을 추천한다.** 기준은 `main`, HEAD `47493ea3ef3f70d37d258d81d90521f7bb6e6f3d`이며 시작 시 tracked/untracked 변경은 없었다. 이 절만 추가하며 TASK-804 `[ ]`, TASK-814 `[x]`, TASK-816 `[x]`와 다른 Task 상태·기존 감사/완료 기록을 유지한다. 아래 권고는 구현·새 정책 확정·HTTP 실행 검증을 뜻하지 않는다.
