@@ -604,6 +604,7 @@ MySQL pending dispatch를 처리하는 in-process worker는 Phase 7 기본 구�
 V1 production은 하나의 persistent Spring Boot runtime, durable MySQL, HTTPS/domain 또는 동등한 secure public endpoint, runtime secret injection, restart policy와 deployment smoke를 필요로 한다. 특정 vendor/product를 지금 정하지 않으며 development `docker-compose.yml`은 production topology가 아니다.
 
 Backend image는 Java 21 runtime, Gradle Wrapper build 또는 CI-built bootJar, non-root 실행, SIGTERM 전달, UTC timezone, stdout/stderr logging, health/readiness integration과 graceful shutdown budget을 갖는 재현 가능한 runtime image를 목표로 한다. image size 최적화는 correctness보다 우선하지 않는다.
+TASK-808은 고정 digest JRE와 재현 가능한 bootJar, UID 10001, exec-form Java, UTC 및 readiness healthcheck를 사용한다. Image의 graceful shutdown phase 기본 예산은 60초다. 정확한 재현 빌드 조건과 한계는 [Local Development](local-development.md#task-808-backend-runtime-image)를 따른다. 이는 운영 배포, 다중 환경의 보안 업데이트 또는 실제 recovery 완료를 의미하지 않는다.
 
 liveness는 JVM/process 생존을, readiness는 DB 연결, Flyway migration 적용 완료, 필요한 component 초기화, scheduler/outbox worker 실행 가능을 뜻한다. Provider/FCM의 일시적 장애는 Backend readiness를 DOWN으로 만들지 않는다. Provider 최근 실패, scheduler last completion, outbox backlog, metadata 마지막 complete sync age는 business/dependency health로 관찰하되 public response에 상세 내용을 과도하게 노출하지 않는다.
 

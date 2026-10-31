@@ -566,3 +566,21 @@ Local profile은 위 Backend Setup, 외부 Service Account 경로와 opt-in FCM/
 현재 소스의 신규 세션은 실제 목적지를 유지하고 2정거장 전(기본)/1정거장 전 준비 알림만 생성한다. 현재 빌드와 과거 §24~27 E2E 산출물은 구분하며 예전 설치본/Backend로 새 정책을 검증했다고 하지 않는다. 기존 개발 DB에는 V20을 아직 적용하지 않았다. 향후 승인된 실행 시 기존 MySQL/설정/데이터를 보존하고 정상 Flyway로 V20을 적용한 뒤 새 세션에서 확인한다. 기존 NULL offset 세션·대기 알림은 기존 정책이므로 새 정책 E2E와 혼동하지 않는다.
 
 이번 작업은 Testcontainers의 격리 MySQL, Provider mock/loopback FCM HTTP fixture, Flutter 자동 테스트와 서명 없는 iOS build만 사용한다. 실제 Provider·FCM·기기 설치/실행은 별도 승인 범위이며 monitoring/dispatch/FCM 설정과 Credential을 변경하지 않는다. 실제 무정차 stOrd 갱신·회차/반복 occurrence·수신/tap 검증은 [증거 보고서 §28](research/TASK-908-provider-evidence.md#28-하차-전-단일-알림과-이동-진행-평가-2026-10-29)을 따른다. Backend와 터널을 시작해 두지 않으며 TASK-908은 미완료로 유지한다.
+
+### TASK-808 Backend runtime image
+
+Backend 디렉터리에서 Java 21 Gradle Wrapper로 `./gradlew bootJar`를 실행하면 `build/libs/stopbell.jar`가 생성된다. Docker build context는 이 JAR만 포함하며 `.env`와 소스·개발 credential을 포함하지 않는다. Dockerfile은 digest로 고정한 Java 21 JRE, UID/GID 10001, UTC, exec-form Java entrypoint와 readiness healthcheck를 사용한다. 기본 `production` profile에는 로컬 `.env` import가 없으며 DB 설정과 인증 설정은 실행 환경에서 주입한다. 실제 FCM 사용 시 저장소 밖 Service Account 파일을 UID 10001이 읽을 수 있도록 별도로 마운트한다.
+
+같은 플랫폼에서 이미지 ID까지 재현하려면 BuildKit 0.20.2의 timestamp 정규화를 사용한다. 다음은 ARM64 예이며 다른 아키텍처는 `--platform`을 명시해 별도로 빌드한다. builder 생성·제거는 이 예의 전용 builder만 대상으로 한다.
+
+```sh
+cd backend
+./gradlew bootJar
+docker buildx create --name stopbell-repro --driver docker-container --driver-opt image=moby/buildkit:v0.20.2
+docker buildx build --builder stopbell-repro --platform linux/arm64 --build-arg SOURCE_DATE_EPOCH=0 --output type=docker,name=stopbell:local,rewrite-timestamp=true .
+docker buildx rm stopbell-repro
+```
+
+일반 `docker build -t stopbell:local .`도 실행 가능한 이미지를 만들지만 구형 Docker/BuildKit은 생성 시각 차이로 이미지 ID가 매번 달라질 수 있다. 동일한 base digest·플랫폼·Gradle/JDK·dependency와 빌드 도구가 필요하며 플랫폼 간 동일 digest를 주장하지 않는다. Base image의 보안 업데이트는 digest를 검토·교체한 뒤 재검증한다.
+
+`/actuator/health/readiness`가 200이 될 때만 healthcheck가 성공한다. fresh DB에는 별도의 metadata bootstrap이 필요하다. 이미지의 graceful shutdown phase 기본 예산은 60초이며 배포 환경의 종료 유예는 이보다 짧지 않아야 한다. 이 값은 모든 단계의 전체 종료 SLA가 아니고 사용자 설정 timeout을 강제로 제한하지 않는다. 실제 운영 배포·secret injection과 restart/recovery 검증은 TASK-813/811 책임이다.
