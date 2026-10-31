@@ -54,7 +54,7 @@ class UserIdentityMigrationIntegrationTest {
     @Test
     @DisplayName("Fresh DB의 전체 Migration은 Identity NOT NULL과 Provider별 복합 UNIQUE를 유지한다")
     void migrate_fresh_database() {
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(20);
+        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(21);
         assertIdentitySchema();
         insertIdentity("GOOGLE", "same-sub");
         insertIdentity("APPLE", "same-sub");
@@ -154,7 +154,7 @@ class UserIdentityMigrationIntegrationTest {
 
     private void assertLatestAndNoOp() {
         Flyway latest = flyway("latest", true);
-        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("20");
+        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("21");
         assertThat(latest.validateWithResult().validationSuccessful).isTrue();
         var history = jdbc.queryForList("select * from flyway_schema_history order by installed_rank");
         assertThat(latest.migrate().migrationsExecuted).isZero();

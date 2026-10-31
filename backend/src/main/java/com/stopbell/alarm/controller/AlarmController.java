@@ -5,6 +5,7 @@ import java.util.List;
 import com.stopbell.alarm.dto.AlarmResponse;
 import com.stopbell.alarm.dto.CreateAlarmRequest;
 import com.stopbell.alarm.service.AlarmService;
+import com.stopbell.alarm.service.AlarmCreationService;
 import com.stopbell.user.auth.service.JwtTokenService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
@@ -23,17 +24,25 @@ import org.springframework.web.bind.annotation.RestController;
 public class AlarmController {
 
     private final AlarmService alarmService;
+    private final AlarmCreationService alarmCreationService;
     private final JwtTokenService jwtTokenService;
 
-    public AlarmController(AlarmService alarmService, JwtTokenService jwtTokenService) {
+    public AlarmController(AlarmService alarmService, AlarmCreationService alarmCreationService, JwtTokenService jwtTokenService) {
         this.alarmService = alarmService;
+        this.alarmCreationService = alarmCreationService;
         this.jwtTokenService = jwtTokenService;
     }
 
     @PostMapping("/api/v1/alarms")
     @ResponseStatus(HttpStatus.CREATED)
     public AlarmResponse create(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody CreateAlarmRequest request) {
-        return alarmService.create(jwtTokenService.extractUserId(jwt), request);
+        Long userId = jwtTokenService.extractUserId(jwt);
+        return request.clientRequestId() == null ? alarmService.create(userId, request) : alarmCreationService.create(userId, request);
+    }
+
+    @GetMapping("/api/v1/alarm-creation-requests/{clientRequestId}")
+    public AlarmResponse findCreation(@AuthenticationPrincipal Jwt jwt, @PathVariable String clientRequestId) {
+        return alarmCreationService.find(jwtTokenService.extractUserId(jwt), clientRequestId);
     }
 
     @GetMapping("/api/v1/alarms")

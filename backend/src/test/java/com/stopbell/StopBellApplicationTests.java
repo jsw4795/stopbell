@@ -59,6 +59,16 @@ class StopBellApplicationTests {
     static class TestRepositoryConfiguration {
 
         @Bean
+        com.stopbell.alarm.repository.AlarmCreationRequestRepository alarmCreationRequestRepository() {
+            return mock(com.stopbell.alarm.repository.AlarmCreationRequestRepository.class);
+        }
+
+        @Bean
+        org.springframework.jdbc.core.JdbcTemplate jdbcTemplate() {
+            return mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        }
+
+        @Bean
         UserRepository userRepository() {
             return mock(UserRepository.class);
         }

@@ -1,6 +1,6 @@
 # ADR-013: Alarm 생성 Request Identity와 유한 보존
 
-- 상태: 채택됨 (구현 예정)
+- 상태: 채택됨 (Backend 구현, Flutter 예정)
 - 날짜: 2026-10-31
 
 ## 배경

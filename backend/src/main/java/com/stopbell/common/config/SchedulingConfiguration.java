@@ -19,6 +19,11 @@ public class SchedulingConfiguration {
         return scheduler("notification-dispatch-");
     }
 
+    @Bean
+    ThreadPoolTaskScheduler alarmCreationCleanupScheduler() {
+        return scheduler("alarm-creation-cleanup-");
+    }
+
     private ThreadPoolTaskScheduler scheduler(String threadNamePrefix) {
         var scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(1);

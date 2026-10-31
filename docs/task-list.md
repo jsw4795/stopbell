@@ -371,6 +371,18 @@ TASK-802의 남은 조건은 위 미검증 경계의 필요성 판단, 생성 �
 
 후속 3단계에서 새 Flyway migration, DTO/검증, repository, transaction 및 해당 UNIQUE만 식별하는 복구, GET/삭제 tombstone, 제한 batch cleanup과 실제 MySQL 동시성·HTTP 테스트를 함께 구현한다. 기존 Alarm은 backfill하지 않는다. DDL lock·배포/rollback, 보존량, cleanup 실패 관측 및 서버 선배포/legacy 혼합 운영을 검증한다. 4단계는 Flutter durable intent와 session/navigation 보호, 응답 유실·명시적 재시도 및 client/widget 검증이다. 5단계는 순차/동시 중복, 다른 body/User, commit 응답 유실·rollback·metadata 변경·서버 재시작·삭제·만료와 cleanup 경합, legacy, Notification 회귀와 Backend/Flutter 전체 회귀를 확인한 뒤 TASK-802 완료를 판단한다. 기존 구현에서 이 단계에 별도 설계 결정을 요구하는 미해결 정책은 없다. MySQL 제약 식별·격리/lock·cleanup 성능과 실제 배포 호환성은 구현 단계의 필수 검증 사항이다.
 
+### TASK-802 3단계 — Backend Alarm 생성 멱등성 구현 및 MySQL 검증 (2026-10-31)
+
+`main` / `868d0d30d4b916d036292fc93a691bfbc690d98e`의 미커밋 V21과 migration 기대값 변경을 보존해 작업했다. Backend 구현이며 TASK-802는 `[ ]`, TASK-804·814·816은 `[x]`를 유지한다. Flutter 제품 코드와 dependency는 변경하지 않았다.
+
+- **Persistence:** `V21__create_alarm_creation_requests.sql`, `AlarmCreationRequest`, `AlarmCreationRequestRepository`를 추가했다. User FK, User/UUID UNIQUE, ASCII binary UUID v4·variant CHECK, SHA-256 raw `BINARY(32)`, UTC `DATETIME(6)`과 만료 index를 사용한다. Alarm FK와 기존 row backfill은 없다.
+- **API와 비교:** `CreateAlarmRequest`는 ID 생략과 명시적 null을 구분하고 기존 Boolean의 생략·null은 false로 정규화한다. `AlarmController`와 `AlarmCreationService`는 검증된 User/ID와 `v1:<occurrence>:<before>:<after>`의 SHA-256을 사용한다. 동일 요청은 현재 Alarm을 201, 다른 body는 409, 조회는 200/404, 삭제된 결과는 410, 잘못된 UUID는 400으로 처리한다. ID 미포함 legacy는 기존 비멱등 생성이다.
+- **원자성과 경합:** READ COMMITTED transaction에서 User 행을 먼저 잠가 metadata 검증 전 같은 User의 생성을 직렬화하고, Alarm과 기록을 함께 저장한다. 요청 기록의 UNIQUE가 최종 경계이며 해당 MySQL 중복키만 실패 transaction 종료 후 새 transaction에서 조회·비교한다. 다른 DB 오류는 정상 중복으로 변환하지 않는다. 요청 기록을 먼저 확인하므로 metadata 변경 후에도 같은 요청을 복구한다. 현재 상태 조회는 lifecycle이나 Notification을 변경하지 않는다.
+- **Tombstone과 보존:** Alarm 삭제 시 기존 pending Delivery 종료와 Event 보존을 유지하고 요청 기록은 남긴다. `AlarmCreationCleanup`은 매 시간 만료 기록을 최대 500건 삭제하며 삭제 전까지 멱등성 계약을 유지한다. 기록은 UTC 생성 시각부터 30일을 보존하고 실제 삭제 후에는 같은 ID가 새 요청이 될 수 있다. 실패는 스케줄러 로그에 남으며 이후 실행에서 재시도한다.
+- **MySQL·HTTP 집중 검증:** `AlarmCreationIntegrationTest` 17개는 UUID/CHECK·UNIQUE, legacy/null, fingerprint와 409/404/410, 사용자 격리, ACTIVE/FOLLOW_UP 및 기존 Event/Delivery 보존, 삭제, 만료·batch, GET/POST/삭제와 cleanup 경합을 검증했다. `concurrent_same_request`, `concurrent_different_request`, `concurrent_same_id_for_different_users`, `concurrent_replay_after_metadata_changes`는 실제 DB와 barrier/latch를 사용한다. `unique_collision_reloads_after_rollback`은 테스트 전용 외부 writer 주입으로 실제 UNIQUE 충돌과 새 transaction 복구를 확인했다. `request_insert_failure_rolls_back_alarm`은 각 INSERT 실패와 재시도를, `recover_after_committed_response_is_discarded`는 commit된 응답 폐기 후 복구를 검증했다. 실제 네트워크 단절이나 서버 프로세스 재시작을 주입한 검증은 아니다.
+- **회귀:** 수정한 Device API와 Alarm·Notification·Boarding·인증 관련 선택 검증이 통과했다. 전체 Backend `env -u JAVA_HOME ./gradlew test --offline --max-workers=1`은 **82개 클래스, 1,425개 실행·1,425개 통과, 실패 0·오류 0·Skip 0, BUILD SUCCESSFUL**이다. 종료 시 이미 중지된 테스트 컨테이너에 연결 풀이 재접속을 시도하는 경고가 출력됐다. Java 21과 격리된 MySQL 8.4.11 Testcontainers를 사용했다.
+- **남은 작업:** 4단계에서 Flutter durable pending intent, 원본 요청 ID/body와 session 보호, 결과 조회·명시적 재시도·410 안내와 Flutter 회귀를 구현한다. 5단계에서 Backend·Flutter 통합, 재시작 및 실제 배포 경계 등을 검증하고 TASK-802 전체 완료 조건을 평가한다. GET 404는 최초 요청의 rollback 증거가 아니다.
+
 ### TASK-804 API 오류 계약 분석 및 구현 계획 (2026-10-30)
 
 **분석 전용 결과: A안(기존 GlobalExceptionHandler·Security 경계의 최소 보강, 두 Controller-local Handler 유지)을 추천한다.** 기준은 `main`, HEAD `47493ea3ef3f70d37d258d81d90521f7bb6e6f3d`이며 시작 시 tracked/untracked 변경은 없었다. 이 절만 추가하며 TASK-804 `[ ]`, TASK-814 `[x]`, TASK-816 `[x]`와 다른 Task 상태·기존 감사/완료 기록을 유지한다. 아래 권고는 구현·새 정책 확정·HTTP 실행 검증을 뜻하지 않는다.

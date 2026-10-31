@@ -45,7 +45,7 @@ class LoginMigrationIntegrationTest {
     @Test
     @DisplayName("Fresh 로그인과 최신 DB 재적용 뒤 재로그인은 User와 Alarm 소유권 및 독립 Refresh Session을 보존한다")
     void preserve_login_and_ownership_after_no_op_migration() throws Exception {
-        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("20");
+        assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("21");
         assertThat(users.count()).isZero();
         // Supply the verified-identity boundary fixture without contacting Google.
         ExternalIdentity identity = new ExternalIdentity(AuthProvider.GOOGLE, "migration-login-sub");

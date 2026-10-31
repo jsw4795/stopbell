@@ -200,7 +200,7 @@ class NotificationSourceMigrationIntegrationTest {
         assertThat(jdbc.queryForList("select * from notification_events order by id")).isEqualTo(allEvents);
         assertThat(jdbc.queryForList("select * from notification_deliveries order by id")).isEqualTo(allDeliveries);
         var sessionsV19 = jdbc.queryForList("select * from boarding_sessions order by id");
-        var v20 = Flyway.configure().dataSource(dataSource).load();
+        var v20 = Flyway.configure().dataSource(dataSource).target("20").load();
         assertThat(v20.migrate().migrationsExecuted).isEqualTo(1);
         v20.validate();
         assertThat(v20.migrate().migrationsExecuted).isZero();
