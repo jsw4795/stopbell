@@ -8,10 +8,12 @@ import 'alarm.dart';
 
 abstract class AlarmClient {
   Future<Alarm> create({
+    String? clientRequestId,
     required int targetStopOccurrenceId,
     required bool notifyOneStopBefore,
     required bool notifyOneStopAfter,
   });
+  Future<Alarm> findCreation(String clientRequestId);
   Future<List<Alarm>> findAll();
   Future<Alarm> findById(int alarmId);
   Future<Alarm> activate(int alarmId);
@@ -26,6 +28,7 @@ class AlarmApiClient implements AlarmClient {
 
   @override
   Future<Alarm> create({
+    String? clientRequestId,
     required int targetStopOccurrenceId,
     required bool notifyOneStopBefore,
     required bool notifyOneStopAfter,
@@ -41,6 +44,7 @@ class AlarmApiClient implements AlarmClient {
       '/api/v1/alarms',
       headers: const {'Content-Type': 'application/json'},
       body: jsonEncode({
+        'clientRequestId': ?clientRequestId,
         'targetStopOccurrenceId': targetStopOccurrenceId,
         'notifyOneStopBefore': notifyOneStopBefore,
         'notifyOneStopAfter': notifyOneStopAfter,
@@ -48,6 +52,13 @@ class AlarmApiClient implements AlarmClient {
     );
     return _alarm(response.statusCode, response.bodyBytes, 201);
   }
+
+  @override
+  Future<Alarm> findCreation(String clientRequestId) => _getAlarm(
+    'GET',
+    '/api/v1/alarm-creation-requests/${Uri.encodeComponent(clientRequestId)}',
+    200,
+  );
 
   @override
   Future<List<Alarm>> findAll() async {

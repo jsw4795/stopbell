@@ -1,3 +1,5 @@
+import 'alarm_creation_test_fake.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -34,6 +36,8 @@ class StubAlarms extends Fake implements AlarmClient {
   Future<List<Alarm>> Function()? list;
   Future<Alarm> Function(int)? detail;
   Future<Alarm> Function(int, bool, bool)? createAlarm;
+  Future<Alarm> Function(String)? findCreationResult;
+  String? creationRequestId;
   Future<Alarm> Function(int)? activateAlarm;
   Future<Alarm> Function(int)? deactivateAlarm;
   Future<void> Function(int)? deleteAlarm;
@@ -53,10 +57,12 @@ class StubAlarms extends Fake implements AlarmClient {
 
   @override
   Future<Alarm> create({
+    String? clientRequestId,
     required int targetStopOccurrenceId,
     required bool notifyOneStopBefore,
     required bool notifyOneStopAfter,
   }) {
+    creationRequestId = clientRequestId;
     createCalls++;
     return createAlarm!(
       targetStopOccurrenceId,
@@ -64,6 +70,9 @@ class StubAlarms extends Fake implements AlarmClient {
       notifyOneStopAfter,
     );
   }
+
+  @override
+  Future<Alarm> findCreation(String id) => findCreationResult!(id);
 
   @override
   Future<Alarm> activate(int id) {
@@ -132,6 +141,7 @@ Widget stopScreen(
       route: const BusRoute(id: 754, routeNumber: '7000', regionName: '수원시'),
       findStops: findStops,
       alarmClient: client,
+      creationController: ScreenCreationFake(client),
       beforeActivate: beforeActivate,
       onBack: () {},
       onCreated: onCreated ?? (_, {bool activationUnverified = false}) {},

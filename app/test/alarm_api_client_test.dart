@@ -65,6 +65,37 @@ Map<String, Object> alarm([int id = 15, String status = 'INACTIVE']) => {
 };
 
 void main() {
+  test(
+    'creation ID and body are preserved for POST and result lookup',
+    () async {
+      const id = '12345678-1234-4234-8234-123456789abc';
+      final client = await alarmClient(
+        MockClient((request) async {
+          if (request.method == 'POST') {
+            expect(jsonDecode(request.body), {
+              'clientRequestId': id,
+              'targetStopOccurrenceId': 12345,
+              'notifyOneStopBefore': true,
+              'notifyOneStopAfter': false,
+            });
+            return jsonResponse(jsonEncode(alarm()), 201);
+          }
+          expect(request.url.path, '/api/v1/alarm-creation-requests/$id');
+          return jsonResponse(jsonEncode(alarm(15, 'FOLLOW_UP')), 200);
+        }),
+      );
+      expect(
+        (await client.create(
+          clientRequestId: id,
+          targetStopOccurrenceId: 12345,
+          notifyOneStopBefore: true,
+          notifyOneStopAfter: false,
+        )).id,
+        15,
+      );
+      expect((await client.findCreation(id)).status, AlarmStatus.followUp);
+    },
+  );
   for (final entry in {
     400: ('INVALID_REQUEST', 'Request is invalid.'),
     404: ('NOT_FOUND', 'Requested resource was not found.'),

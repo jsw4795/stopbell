@@ -383,6 +383,16 @@ TASK-802의 남은 조건은 위 미검증 경계의 필요성 판단, 생성 �
 - **회귀:** 수정한 Device API와 Alarm·Notification·Boarding·인증 관련 선택 검증이 통과했다. 전체 Backend `env -u JAVA_HOME ./gradlew test --offline --max-workers=1`은 **82개 클래스, 1,425개 실행·1,425개 통과, 실패 0·오류 0·Skip 0, BUILD SUCCESSFUL**이다. 종료 시 이미 중지된 테스트 컨테이너에 연결 풀이 재접속을 시도하는 경고가 출력됐다. Java 21과 격리된 MySQL 8.4.11 Testcontainers를 사용했다.
 - **남은 작업:** 4단계에서 Flutter durable pending intent, 원본 요청 ID/body와 session 보호, 결과 조회·명시적 재시도·410 안내와 Flutter 회귀를 구현한다. 5단계에서 Backend·Flutter 통합, 재시작 및 실제 배포 경계 등을 검증하고 TASK-802 전체 완료 조건을 평가한다. GET 404는 최초 요청의 rollback 증거가 아니다.
 
+### TASK-802 4단계 — Flutter Alarm 생성 복구 (2026-10-31)
+
+`e7ed692a5829367bb9d4b91fd7f40d7eb4156688`에서 시작했다. TASK-802 전체는 `[ ]`를 유지하며 TASK-804·814·816 상태는 변경하지 않는다.
+
+- Flutter는 Push 준비 뒤 UUID v4와 원본 body, User/login session 및 최초 시각을 Secure Storage에 기록하고 저장 성공 뒤에만 POST한다. Session별 직렬화와 request ID 비교 삭제로 늦은 정리가 새 요청을 지우지 않는다.
+- 불확실한 결과는 원본 intent를 유지하고 명시적 조회 또는 원본 재시도를 제공한다. 조회 404는 불확실로 남고 409는 충돌을 안내하며 410은 삭제 결과로 처리한다. 복구한 Alarm은 자동 활성화하지 않는다. 정리 실패 시 새 생성을 막는다.
+- 같은 실행 내 재시도는 단조 경과 시간과 로컬 시각을 확인하고 30일 이상 또는 시계 불일치를 차단한다. 재시작 시 단조 시간 연속성을 검증할 수 없어 재전송은 차단하고 GET 및 중복 가능성을 안내한 명시적 새 생성 경로를 제공한다. 30일 미만 자체는 서버 기록의 존재를 보증하지 않는다.
+- 집중 검증과 Alarm·Auth·Boarding 회귀를 실행했다. 첫 전체 Flutter 실행에서 세션 identity를 읽을 수 없는 기존 테스트 token 및 secure storage fixture로 8개가 실패해 수정하고 해당 두 파일 15개를 재검증했다. 이후 생성 화면의 영속 경계를 강화해 전체 회귀를 다시 실행했으며 648개가 모두 통과했다. `flutter analyze`도 통과했다. 실제 iPhone·FCM 및 운영 네트워크 장애는 검증하지 않았다.
+- 5단계에서 Backend·Flutter 통합, 실제 restart·배포 경계와 전체 완료 조건을 검증한다. Dependency와 Backend 제품 코드·Migration 변경은 없다.
+
 ### TASK-804 API 오류 계약 분석 및 구현 계획 (2026-10-30)
 
 **분석 전용 결과: A안(기존 GlobalExceptionHandler·Security 경계의 최소 보강, 두 Controller-local Handler 유지)을 추천한다.** 기준은 `main`, HEAD `47493ea3ef3f70d37d258d81d90521f7bb6e6f3d`이며 시작 시 tracked/untracked 변경은 없었다. 이 절만 추가하며 TASK-804 `[ ]`, TASK-814 `[x]`, TASK-816 `[x]`와 다른 Task 상태·기존 감사/완료 기록을 유지한다. 아래 권고는 구현·새 정책 확정·HTTP 실행 검증을 뜻하지 않는다.

@@ -1,7 +1,10 @@
+import 'alarm_creation_test_fake.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:stopbell/features/alarm/alarm.dart';
 import 'package:stopbell/features/alarm/alarm_home.dart';
 import 'package:stopbell/features/alarm/alarm_detail_screen.dart';
@@ -31,6 +34,7 @@ void main() {
   late StubAlarms client;
   late List<String> calls;
   setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
     f = PushFixture();
     calls = [];
     client = StubAlarms()
@@ -128,6 +132,32 @@ void main() {
     expect(calls, ['create', 'activate']);
     expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
   });
+
+  testWidgets(
+    'lost create response recovers original FOLLOW_UP without activation',
+    (tester) async {
+      client.createAlarm = (_, _, _) async => throw TimeoutException('lost');
+      await pumpHome(tester);
+      await start(tester);
+      await tester.pumpAndSettle();
+      final requestId = client.creationRequestId;
+      expect(requestId, isNotNull);
+      expect(client.activateCalls, 0);
+      await tester.tap(find.text('알람 목록 보기'));
+      await tester.pumpAndSettle();
+      client.findCreationResult = (id) async {
+        expect(id, requestId);
+        return withStatus(AlarmStatus.followUp);
+      };
+      await tester.tap(find.text('원래 생성 결과 조회'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('확인한 알람 보기'));
+      await tester.pumpAndSettle();
+      expect(find.text('상태: FOLLOW_UP · 한 정거장 후 추적 중'), findsOneWidget);
+      expect(client.createCalls, 1);
+      expect(client.activateCalls, 0);
+    },
+  );
 
   testWidgets('partial success verifies original ID before manual activation', (
     tester,
@@ -511,6 +541,7 @@ void main() {
             ),
             findStops: (_) async => [stop],
             alarmClient: client,
+            creationController: ScreenCreationFake(client),
             beforeActivate: (_) {
               preparations++;
               return preparations == 1 ? pending.future : Future.value(true);

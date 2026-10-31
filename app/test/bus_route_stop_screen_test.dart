@@ -1,3 +1,5 @@
+import 'alarm_creation_test_fake.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -46,6 +48,7 @@ Widget screen(Future<List<BusRouteStopOccurrence>> Function(int) findStops) =>
           findStops: findStops,
           onBack: () {},
           alarmClient: EmptyAlarmClient(),
+          creationController: ScreenCreationFake(EmptyAlarmClient()),
           onCreated: (_, {bool activationUnverified = false}) {},
           onShowAlarms: () {},
         ),

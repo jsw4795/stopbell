@@ -141,15 +141,15 @@ Request body:
 
 `targetStopOccurrenceId`가 존재하지 않으면 `404 Not Found`다. 첫 occurrence에 `notifyOneStopBefore: true` 또는 마지막 occurrence에 `notifyOneStopAfter: true`를 요청하면 `400 Bad Request`다. Backend는 해당 option을 `false`로 변경해 생성하지 않는다. first/last 판정은 `stopOrder`가 1 또는 최대값인지가 아니라 predecessor/successor occurrence의 실제 존재 여부를 사용한다.
 
-Flutter가 stale `targetStopOccurrenceId`로 `404 Not Found`를 받으면 old ID를 현재 Stop에 추측 매칭하거나 POST를 자동 재시도하지 않는다. 사용자가 Stop 목록에서 다시 선택하는 흐름으로 복구한다. 현재 Flutter는 Request Identity를 전송하지 않으므로 해당 생성은 멱등성이 없다. Flutter는 올바른 `201` Alarm response를 받은 경우에만 생성 성공으로 처리한다. HTTP 5xx(500/502/503/504 포함), 408, Timeout·Transport/연결 단절·응답 유실, 잘못된 성공 JSON과 그 밖의 판단 불가 오류는 생성 결과 불확실이다. 계약상 생성 전 거부가 확인되는 400 `INVALID_REQUEST`/`INVALID_ALARM_REQUEST`, 404 `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명확한 인증·권한 거부만 기존 거부 의미를 유지하며 모든 4xx를 안전한 재시도로 취급하지 않는다. 불확실한 생성은 자동 재전송·활성화를 하지 않고 같은 화면의 생성·정류장 선택·옵션 변경을 막은 채 목록 확인을 안내한다.
+Flutter가 stale `targetStopOccurrenceId`로 `404 Not Found`를 받으면 old ID를 현재 Stop에 추측 매칭하거나 POST를 자동 재시도하지 않는다. 사용자가 Stop 목록에서 다시 선택하는 흐름으로 복구한다. Flutter는 올바른 `201` Alarm response를 받은 경우에만 생성 성공으로 처리한다. HTTP 5xx(500/502/503/504 포함), 408, Timeout·Transport/연결 단절·응답 유실, 잘못된 성공 JSON과 그 밖의 판단 불가 오류는 생성 결과 불확실이다. 계약상 생성 전 거부가 확인되는 400 `INVALID_REQUEST`/`INVALID_ALARM_REQUEST`, 404 `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명확한 인증·권한 거부만 기존 거부 의미를 유지하며 모든 4xx를 안전한 재시도로 취급하지 않는다. 불확실한 생성은 원래 요청을 보존하고 자동 재전송·활성화하지 않는다. 사용자는 원래 결과를 조회하거나 허용된 경우 같은 요청을 명시적으로 재전송할 수 있다.
 
-현재 Flutter 요청에는 `clientRequestId`가 없고 Alarm response에는 원래 `targetStopOccurrenceId`도 없다. 목록 조회 성공이나 동일 노선·정류장 이름·옵션의 Alarm은 특정 생성 요청 성공의 증거가 아니다. Flutter는 이를 자동 연결하지 않는다. 서버 멱등성 API는 구현됐으며 Flutter의 durable intent 및 결과 조회 연결은 후속 단계다.
+Flutter는 생성 전 원본 UUID와 body를 영속 저장하고 결과 조회에 같은 UUID를 사용한다. Alarm response에는 원래 `targetStopOccurrenceId`가 없으므로 목록의 유사 Alarm을 특정 생성 요청의 결과로 자동 연결하지 않는다.
 
 <a id="alarm-생성-멱등성-확정-계약-task-802-2단계-미구현"></a>
 
 ### Alarm 생성 멱등성 계약 (TASK-802)
 
-Backend는 아래 계약을 구현했다. Flutter 연동은 후속 단계이며 서버를 먼저 배포하고 신규 Flutter를 배포한다. 기존 Client의 필드 미포함 요청은 기존처럼 매번 독립 생성하며 멱등성 보장이 없다. 구버전 지원 종료는 별도 운영 정책으로 결정한다. 신규 Client는 body에 소문자 canonical hyphenated UUID v4 `clientRequestId`를 반드시 보낸다. 생략만 legacy로 취급하고 명시적 null, 빈 값, 대문자·잘못된 형식·버전/variant는 `400 INVALID_REQUEST` (`Request is invalid.`)다. 나머지 필드와 초기 `201` 계약은 위와 같다.
+Backend와 Flutter는 아래 계약을 구현했다. 서버를 먼저 배포하고 신규 Flutter를 배포한다. 기존 Client의 필드 미포함 요청은 기존처럼 매번 독립 생성하며 멱등성 보장이 없다. 구버전 지원 종료는 별도 운영 정책으로 결정한다. 신규 Client는 body에 소문자 canonical hyphenated UUID v4 `clientRequestId`를 반드시 보낸다. 생략만 legacy로 취급하고 명시적 null, 빈 값, 대문자·잘못된 형식·버전/variant는 `400 INVALID_REQUEST` (`Request is invalid.`)다. 나머지 필드와 초기 `201` 계약은 위와 같다.
 
 서버는 인증 User와 ID를 함께 식별하고 검증된 양수 `targetStopOccurrenceId`, 정규화된 두 Boolean으로 원본 요청을 비교한다. 생략 또는 null Boolean은 현 구현처럼 false다. 같은 User/ID와 같은 내용의 POST는 현재 Alarm을 `201 Created`와 기존 `AlarmResponse`로 반환한다. 이는 최초 응답의 snapshot 재현이 아니므로 상태가 달라질 수 있다. 같은 ID에 다른 내용이면 현재 metadata 검증이나 삭제 여부보다 먼저 `409 ALARM_CREATION_REQUEST_CONFLICT`, message `Alarm creation request conflicts with the original request.`를 반환한다. 같은 UUID라도 다른 User는 독립이다. 새 ID는 새 생성 의도다. ID는 권한 증명이 아니다.
 

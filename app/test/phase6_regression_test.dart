@@ -19,7 +19,7 @@ import 'package:stopbell/features/transit/bus_route_stop_client.dart';
 import 'package:stopbell/main.dart';
 
 const storedPair = TokenPair(
-  accessToken: 'stored-access',
+  accessToken: 'header.eyJzdWIiOiIxIn0.stored-access',
   refreshToken: 'stored-refresh',
 );
 final baseUrl = Uri.parse('http://localhost:8080');
@@ -120,7 +120,16 @@ http.Response? selectionResponse(http.Request request) {
     case 'GET /api/v1/bus-routes/1390/stops':
       return jsonResponse(stops);
     case 'POST /api/v1/alarms':
-      expect(jsonDecode(request.body), {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(
+        body.remove('clientRequestId'),
+        matches(
+          RegExp(
+            r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+          ),
+        ),
+      );
+      expect(body, {
         'targetStopOccurrenceId': 54321,
         'notifyOneStopBefore': false,
         'notifyOneStopAfter': true,
@@ -157,16 +166,20 @@ void main() {
           listCalls++;
           expect(
             token,
-            listCalls == 1 ? 'Bearer stored-access' : 'Bearer rotated-access',
+            listCalls == 1
+                ? 'Bearer header.eyJzdWIiOiIxIn0.stored-access'
+                : 'Bearer header.eyJzdWIiOiIxIn0.rotated-access',
           );
           return jsonResponse(listCalls == 1 ? [] : [alarm('ACTIVE')]);
         }
         if (path == 'POST /api/v1/alarms/15/activate') {
-          if (token == 'Bearer stored-access') return jsonResponse({}, 401);
-          expect(token, 'Bearer rotated-access');
+          if (token == 'Bearer header.eyJzdWIiOiIxIn0.stored-access') {
+            return jsonResponse({}, 401);
+          }
+          expect(token, 'Bearer header.eyJzdWIiOiIxIn0.rotated-access');
           return activation.future;
         }
-        expect(token, 'Bearer stored-access');
+        expect(token, 'Bearer header.eyJzdWIiOiIxIn0.stored-access');
         return selectionResponse(request) ?? fail('Unexpected request: $path');
       });
       addTearDown(transport.close);
@@ -177,7 +190,7 @@ void main() {
 
       refresh.complete(
         jsonResponse({
-          'accessToken': 'rotated-access',
+          'accessToken': 'header.eyJzdWIiOiIxIn0.rotated-access',
           'refreshToken': 'rotated-refresh',
         }),
       );
@@ -234,7 +247,7 @@ void main() {
         if (path == 'POST /auth/google') {
           expect(jsonDecode(request.body), {'idToken': 'fixture-google-id'});
           return jsonResponse({
-            'accessToken': 'login-access',
+            'accessToken': 'header.eyJzdWIiOiIxIn0.login-access',
             'refreshToken': 'login-refresh',
           });
         }
@@ -243,15 +256,17 @@ void main() {
           listCalls++;
           expect(
             token,
-            listCalls == 1 ? 'Bearer stored-access' : 'Bearer login-access',
+            listCalls == 1
+                ? 'Bearer header.eyJzdWIiOiIxIn0.stored-access'
+                : 'Bearer header.eyJzdWIiOiIxIn0.login-access',
           );
           return jsonResponse(listCalls == 1 ? [] : [alarm('INACTIVE')]);
         }
         if (path == 'GET /api/v1/alarms/15') {
-          expect(token, 'Bearer login-access');
+          expect(token, 'Bearer header.eyJzdWIiOiIxIn0.login-access');
           return jsonResponse(alarm('INACTIVE'));
         }
-        expect(token, 'Bearer stored-access');
+        expect(token, 'Bearer header.eyJzdWIiOiIxIn0.stored-access');
         if (path == 'POST /api/v1/alarms/15/activate') {
           return jsonResponse({}, 401);
         }

@@ -180,11 +180,11 @@ Backend는 인증과 형식/정규화 검증 후 User 행을 잠그고 `(userId,
 
 기록 재조회와 cleanup은 해당 요청 row의 lock을 사용해 직렬화한다. 결과 조회는 해당 User의 Alarm을 읽고 삭제와 경합하면 조회 시점의 상태 또는 Gone을 반환한다. 삭제는 기존 Alarm lock/lifecycle 및 Notification 정책을 유지한다. 기록은 Alarm과 FK 없이 남는다. Commit 성공 후 응답 유실은 GET 또는 같은 POST로 복구한다. rollback에는 둘 다 없으므로 같은 ID로 현재 metadata를 다시 검증해 생성할 수 있다. GET 404는 진행 중인 최초 POST를 배제하지 못한다. UNIQUE 경합, 예외 식별, 격리 수준 및 cleanup과 삭제 경합은 실제 MySQL 테스트로 검증한다.
 
-후속 Flutter 구현은 사용자 확정 → Push 준비 → `Random.secure` UUID v4 한 번 생성 → 원본 body와 User/login Session identity를 Secure Storage에 저장하고 성공 확인 → POST 순서다. `newBoardingRequestId`의 난수/비트 설정과 `SecureBoardingIntentStorage`의 session별 key 및 비동기 직렬화 패턴을 재사용할 수 있으나 Boarding 도메인 payload는 공유하지 않는다. 현재 `AuthSession`은 token 저장의 session identity를 재시작·refresh에 유지하고 재로그인 때 새로 발급한다. 각 await 뒤 기존 auth generation·User/session identity·navigation epoch를 확인하며 다른 session 기록을 복구하지 않는다. 같은 session 내 이전 정리가 새 intent를 삭제하지 않도록 저장·삭제를 직렬화하고 ID 비교 후 삭제한다.
+Flutter 구현은 사용자 확정 → Push 준비 → `Random.secure` UUID v4 한 번 생성 → 원본 body와 User/login Session identity를 Secure Storage에 저장하고 성공 확인 → POST 순서다. `newBoardingRequestId`의 난수/비트 설정과 `SecureBoardingIntentStorage`의 session별 key 및 비동기 직렬화 패턴을 재사용할 수 있으나 Boarding 도메인 payload는 공유하지 않는다. 현재 `AuthSession`은 token 저장의 session identity를 재시작·refresh에 유지하고 재로그인 때 새로 발급한다. 각 await 뒤 기존 auth generation·User/session identity·navigation epoch를 확인하며 다른 session 기록을 복구하지 않는다. 같은 session 내 이전 정리가 새 intent를 삭제하지 않도록 저장·삭제를 직렬화하고 ID 비교 후 삭제한다.
 
 정상 생성 또는 GET 확인 시 원래 Alarm ID를 사용하고 생성 intent 정리를 확인한다. 정리 실패 시 결과를 보존하고 정리 재시도를 제공하며 새 생성을 막는다. 불확실 응답, 5xx, timeout, 잘못된 응답, GET 404/실패는 intent를 유지하고 자동 POST·새 UUID·자동 활성화를 금지한다. 명시적 재조회 또는 원본 ID/body 재시도를 제공한다. 410은 삭제된 결과로 표시하고 정리 뒤 사용자가 명시적으로 새 생성할 때만 새 ID를 발급한다. 명백한 생성 전 거부도 안전하게 정리한 후 재선택한다. 로컬 저장에는 token, credential, FID, provider 응답을 넣지 않는다.
 
-장기 미사용 intent는 보존 만료 후 재전송으로 중복될 수 있다. 로컬 생성 시각을 저장해 30일 이상이거나 시계 신뢰성이 불명확하면 재전송을 차단하고 사용자에게 결과 불확실과 중복 가능성을 안내한다. 로컬 시계는 서버 보존의 증명이 아니므로 30일 미만이어도 절대 보장을 주장하지 않는다. 생성 결과 확인은 활성화 성공의 증거가 아니다. 기존 Push 준비 → 생성 → 활성화 순서를 유지하고, 복구 후 활성화 여부를 자동 추정하지 않으며 TASK-804의 원래 Alarm ID 조회/명시적 복구를 따른다. 생성 ID를 activate/deactivate/delete의 멱등성 ID로 사용하지 않는다.
+장기 미사용 intent는 보존 만료 후 재전송으로 중복될 수 있다. 로컬 생성 시각을 저장해 30일 이상이거나 시계 신뢰성이 불명확하면 재전송을 차단하고 사용자에게 결과 불확실과 중복 가능성을 안내한다. 재시작 후에는 경과 시간의 연속성을 증명할 수 없어 같은 POST 재전송을 차단하고 GET 조회 및 중복 위험을 안내한 명시적 새 생성만 제공한다. 실행 중에는 단조 경과 시간과 로컬 시각의 차이도 확인한다. 로컬 시계는 서버 보존의 증명이 아니므로 30일 미만이어도 절대 보장을 주장하지 않는다. 생성 결과 확인은 활성화 성공의 증거가 아니다. 기존 Push 준비 → 생성 → 활성화 순서를 유지하고, 복구 후 활성화 여부를 자동 추정하지 않으며 TASK-804의 원래 Alarm ID 조회/명시적 복구를 따른다. 생성 ID를 activate/deactivate/delete의 멱등성 ID로 사용하지 않는다.
 
 ### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
 

@@ -13,6 +13,8 @@ import '../boarding/boarding_creation_intent.dart';
 import '../notification/notification_lifecycle.dart';
 import 'alarm.dart';
 import 'alarm_api_client.dart';
+import 'alarm_creation_controller.dart';
+import 'alarm_creation_intent.dart';
 import 'alarm_detail_screen.dart';
 import 'alarm_list_screen.dart';
 
@@ -31,6 +33,7 @@ class AlarmHome extends StatefulWidget {
     this.findBoardingCandidates,
     this.boardingSessionClient,
     this.boardingIntentStorage,
+    this.alarmIntentStorage,
   });
 
   final AlarmClient client;
@@ -41,6 +44,7 @@ class AlarmHome extends StatefulWidget {
   final FindBoardingCandidates? findBoardingCandidates;
   final BoardingSessionClient? boardingSessionClient;
   final BoardingIntentStorage? boardingIntentStorage;
+  final AlarmIntentStorage? alarmIntentStorage;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
 
@@ -57,6 +61,7 @@ class _AlarmHomeState extends State<AlarmHome> {
   Alarm? _createdAlarm;
   bool _activationUnverified = false;
   late final int _sessionGeneration;
+  late final AlarmCreationController _creation;
 
   @override
   void initState() {
@@ -64,9 +69,20 @@ class _AlarmHomeState extends State<AlarmHome> {
     _sessionGeneration = widget.authSession.generation;
     _userIdentity = widget.authSession.userIdentity;
     _loginIdentity = widget.authSession.sessionIdentity;
+    _creation = AlarmCreationController(
+      widget.authSession,
+      widget.client,
+      widget.alarmIntentStorage ?? const SecureAlarmIntentStorage(),
+    );
+    _creation.addListener(_creationChanged);
+    _creation.initialize();
     widget.authSession.addListener(_authChanged);
     widget.notifications?.addListener(_notificationChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _notificationChanged());
+  }
+
+  void _creationChanged() {
+    if (_current) setState(() {});
   }
 
   bool get _current =>
@@ -100,6 +116,8 @@ class _AlarmHomeState extends State<AlarmHome> {
   void dispose() {
     widget.authSession.removeListener(_authChanged);
     widget.notifications?.removeListener(_notificationChanged);
+    _creation.removeListener(_creationChanged);
+    _creation.dispose();
     super.dispose();
   }
 
@@ -197,6 +215,10 @@ class _AlarmHomeState extends State<AlarmHome> {
       _Page.list => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_creation.message != null ||
+              _creation.pending != null ||
+              _creation.result != null)
+            _creationRecovery(),
           if (widget.findBoardingCandidates != null)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -226,7 +248,7 @@ class _AlarmHomeState extends State<AlarmHome> {
                 });
               },
               onCreate: () {
-                if (_current) {
+                if (_current && !_creation.blocked) {
                   setState(() {
                     _navigationEpoch++;
                     _page = _Page.search;
@@ -270,6 +292,7 @@ class _AlarmHomeState extends State<AlarmHome> {
         route: _route!,
         findStops: widget.findStops,
         alarmClient: widget.client,
+        creationController: _creation,
         beforeActivate: widget.beforeActivate,
         isRequestCurrent: () =>
             _current && epoch == _navigationEpoch && _page == _Page.stops,
@@ -305,5 +328,96 @@ class _AlarmHomeState extends State<AlarmHome> {
         onBack: _showList,
       ),
     };
+  }
+
+  Widget _creationRecovery() => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_creation.message != null) Text(_creation.message!),
+        if (!_creation.initialized)
+          OutlinedButton(
+            onPressed: _creation.initialize,
+            child: const Text('저장된 요청 다시 확인'),
+          ),
+        if (_creation.pending != null) ...[
+          const Text('알람 생성 요청이 서버에 반영됐을 수 있습니다.'),
+          OutlinedButton(
+            onPressed: _creation.busy
+                ? null
+                : () {
+                    final epoch = _navigationEpoch;
+                    _creation.recover(
+                      navigationCurrent: () =>
+                          _current && epoch == _navigationEpoch,
+                    );
+                  },
+            child: const Text('원래 생성 결과 조회'),
+          ),
+          if (_creation.canRetry)
+            OutlinedButton(
+              onPressed: _creation.busy
+                  ? null
+                  : () {
+                      final epoch = _navigationEpoch;
+                      _creation.recover(
+                        retry: true,
+                        navigationCurrent: () =>
+                            _current && epoch == _navigationEpoch,
+                      );
+                    },
+              child: const Text('원래 요청 재시도'),
+            )
+          else ...[
+            const Text(
+              '요청 시각을 신뢰할 수 없거나 보존 기간이 지났습니다. 새로 생성하면 알람이 중복될 수 있습니다.',
+            ),
+            OutlinedButton(
+              onPressed: _creation.busy ? null : _confirmNewCreation,
+              child: const Text('새 알람 생성 선택'),
+            ),
+          ],
+        ],
+        if (_creation.result != null)
+          OutlinedButton(
+            onPressed: () {
+              final alarm = _creation.result!;
+              setState(() {
+                _navigationEpoch++;
+                _alarmId = alarm.id;
+                _createdAlarm = alarm;
+                _activationUnverified = false;
+                _page = _Page.detail;
+              });
+            },
+            child: const Text('확인한 알람 보기'),
+          ),
+      ],
+    ),
+  );
+
+  Future<void> _confirmNewCreation() async {
+    final epoch = _navigationEpoch;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('새 알람 생성'),
+        content: const Text('이전 요청이 이미 생성되었을 수 있어 새 알람이 중복될 수 있습니다. 계속할까요?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('새로 생성'),
+          ),
+        ],
+      ),
+    );
+    if (_current && epoch == _navigationEpoch && confirmed == true) {
+      await _creation.discardForNewCreation();
+    }
   }
 }

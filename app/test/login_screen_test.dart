@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
 import 'package:stopbell/features/auth/backend_auth_client.dart';
 import 'package:stopbell/features/auth/google_auth_service.dart';
@@ -16,7 +17,7 @@ import 'package:stopbell/main.dart';
 import 'alarm_test_fakes.dart';
 
 const pair = TokenPair(
-  accessToken: 'fixture-access',
+  accessToken: 'header.eyJzdWIiOiIxIn0.fixture',
   refreshToken: 'fixture-refresh',
 );
 
@@ -118,6 +119,7 @@ class FlowAlarms extends Fake implements AlarmClient {
   Future<Alarm> findById(int id) => detail(id);
   @override
   Future<Alarm> create({
+    String? clientRequestId,
     required int targetStopOccurrenceId,
     required bool notifyOneStopBefore,
     required bool notifyOneStopAfter,
@@ -138,6 +140,7 @@ class FlowAlarms extends Fake implements AlarmClient {
 }
 
 void main() {
+  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
   testWidgets('route candidate opens its stops and back returns to search', (
     tester,
   ) async {

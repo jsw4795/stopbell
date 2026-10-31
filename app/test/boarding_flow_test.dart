@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:stopbell/core/authenticated_api_client.dart';
@@ -23,6 +24,7 @@ void main() {
   late Future<http.Response> Function(http.Request) candidateResponse;
 
   Future<void> pump(WidgetTester tester) async {
+    FlutterSecureStorage.setMockInitialValues({});
     tester.view.physicalSize = const Size(1000, 1800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);

@@ -1,3 +1,5 @@
+import 'alarm_creation_test_fake.dart';
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -492,6 +494,7 @@ void main() {
                 ),
               ],
               alarmClient: f.client,
+              creationController: ScreenCreationFake(f.client),
               onBack: () {},
               onCreated: (_, {bool activationUnverified = false}) => created++,
               onShowAlarms: () => showList++,
@@ -563,6 +566,7 @@ void main() {
                 ),
               ],
               alarmClient: f.client,
+              creationController: ScreenCreationFake(f.client),
               onBack: () {},
               onCreated: (_, {bool activationUnverified = false}) => created++,
               onShowAlarms: () => lists++,

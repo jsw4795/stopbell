@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../alarm/alarm.dart';
 import '../alarm/alarm_api_client.dart';
+import '../alarm/alarm_creation_controller.dart';
 import 'bus_route.dart';
 import 'bus_route_stop_occurrence.dart';
 
@@ -16,6 +17,7 @@ class BusRouteStopScreen extends StatefulWidget {
     required this.alarmClient,
     required this.onCreated,
     required this.onShowAlarms,
+    required this.creationController,
     this.beforeActivate,
     this.isRequestCurrent,
   });
@@ -28,6 +30,7 @@ class BusRouteStopScreen extends StatefulWidget {
   final VoidCallback onShowAlarms;
   final Future<bool> Function(BuildContext context)? beforeActivate;
   final bool Function()? isRequestCurrent;
+  final AlarmCreationController creationController;
 
   @override
   State<BusRouteStopScreen> createState() => _BusRouteStopScreenState();
@@ -139,13 +142,23 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
         return;
       }
       if (!current()) return;
-      final createdAlarm = await client.create(
-        targetStopOccurrenceId: id,
-        notifyOneStopBefore: before,
-        notifyOneStopAfter: after,
-      );
+      final controller = widget.creationController;
+      final createdAlarm = await controller.create(id, before, after, current);
+      if (createdAlarm == null) {
+        if (current()) {
+          setState(() {
+            _outcomeUnknown = controller.pending != null;
+            _createMessage = controller.message ?? '요청을 저장하거나 전송하지 못했습니다.';
+          });
+        }
+        return;
+      }
       if (!current()) return;
       var alarm = createdAlarm;
+      if (createdAlarm.status != AlarmStatus.inactive) {
+        widget.onCreated(createdAlarm);
+        return;
+      }
       try {
         alarm = await client.activate(createdAlarm.id);
         if (alarm.id != createdAlarm.id) throw const AlarmApiException();
