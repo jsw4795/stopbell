@@ -295,7 +295,7 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 - [ ] TASK-801 Alarm Evaluation Test 보강
 - [ ] TASK-802 Duplicate Prevention Test 보강
 - [ ] TASK-803 외부 provider response mapping Test 보강: 실제 관찰 response를 민감 정보를 제거한 golden fixture로 만들고 synthetic edge fixture를 함께 사용한다. fixture에는 provider, operation, 관찰 시점 또는 provenance를 남기되 credential은 제거한다. 실제 Provider 호출이나 scheduled live canary는 일반 PR CI 또는 V1 필수 infrastructure로 두지 않는다.
-- [ ] TASK-804 API validation/error handling Test 보강: 오류 body shape를 안정적으로 통일하되 모든 오류 의미를 합치지 않는다. 최소 `INVALID_REQUEST`, `UNAUTHENTICATED`, resource-specific `NOT_FOUND`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명시적 concurrency/stale conflict, `METADATA_UNAVAILABLE`, `INTERNAL_SERVER_ERROR`를 검증하며 예상치 못한 Exception을 400으로 바꾸지 않는다.
+- [x] TASK-804 API validation/error handling Test 보강: 오류 body shape를 안정적으로 통일하되 모든 오류 의미를 합치지 않는다. `INVALID_REQUEST`, `UNAUTHENTICATED`·`ACCESS_DENIED`, resource-specific `NOT_FOUND`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명시적 concurrency/stale conflict, Google·Transit·일반 서비스 장애의 구분된 503, `INTERNAL_SERVER_ERROR`와 MVC 상태 보존을 검증하며 예상치 못한 Exception을 400으로 바꾸지 않는다.
 - [ ] TASK-805 구조화된 Logging, 최소 Operational Metrics 및 Alerting contract 추가
 - [ ] TASK-806 Secret 관리 검토
 - [ ] TASK-807 Health / Readiness 계약 검증
@@ -725,6 +725,212 @@ Mock/Fake transport·Push fixture·가상 Timeout만 사용했다. 실제 Google
 생성 5xx 후 재생성 허용, 생성 후 활성화 유실을 INACTIVE로 단정, 상세 Mutation 유실 뒤 stale 상태/일반 실패만 표시하던 문제를 해결했다. 정상 성공·Domain 거부·Push 준비 순서와 Session 보호를 보존했다. 기존 task-list 본문/체크박스와 이번 절을 제외한 감사·완료 기록 불변 및 git diff --check를 확인한 후 사용자 지정 subject `fix: TASK-804 recover uncertain alarm mutations`와 실제 개행 bullet body로 명시적 Stage·Commit·Push를 진행한다.
 
 TASK-804 `[ ]`의 남은 조건은 (1) 전체 Endpoint 오류 Matrix 최종 검증, (2) TASK-804 전체 완료 조건 평가, (3) TASK-802로 분리한 서버 중복 방지 책임의 후속 확인이다. 이번 Commit·Push는 3단계 완료만 의미하며 TASK-804 전체 완료를 뜻하지 않는다.
+
+### TASK-804 4단계 — 전체 API 오류 계약 최종 검증 및 완료 판정 (2026-10-31)
+
+`main`, HEAD `4715af8172e2be582a26ca3c988b3930008996b8`, tracked/untracked 변경 없는 상태에서 시작했다. 위 분석과 1·2·3단계 및 기존 감사 기록은 당시 결과 그대로 보존한다. 이번 절은 현재 Controller·ErrorCode·Client·실행 결과를 대조한 **최종 검증**이다. 과거 분석의 22개 ErrorCode·미구현 후보·후속 완료 조건과 구분한다. TASK-804만 `[x]`로 변경하고 TASK-802 `[ ]`, TASK-814/816 `[x]` 및 다른 Task 상태는 유지한다. Phase 8 종료 감사나 다음 Task 착수는 아니다.
+
+#### 현재 Endpoint와 ErrorCode 전체 목록
+
+제품 Controller는 Auth·Alarm·BusRoute·BoardingCandidate·Device·BoardingSession **6개**, 명시적 Method/Path 조합은 **20개**다. 아래 Endpoint Matrix가 현재 전체 목록이며, 위 분석의 Endpoint 목록을 소스와 다시 대조해 추가·삭제가 없음을 확인했다. BoardingSession collection GET의 `scope=current`와 `clientRequestId`는 하나의 mapping이다. 별도로 운영 `GET /actuator/health` 1개와 framework 오류 처리 `/error`가 있다. 암시적 HEAD/OPTIONS는 새 제품 API로 세지 않는다. Notification/FCM·metadata bootstrap·scheduler의 별도 HTTP Controller는 없다.
+
+현재 enum은 **30개**이며 아래가 전부다. `HTTP_<status>`는 enum 추가가 아닌 generic fallback이다. 고정 message는 [API 오류 형식](api.md#5-오류-형식), Device/Boarding 계약과 [ErrorCode](../backend/src/main/java/com/stopbell/common/error/ErrorCode.java)를 대조했다. 기존 30개의 status/message는 이번 작업에서 변경하지 않았다.
+
+| HTTP | 현재 ErrorCode 전체 목록 |
+| ---: | --- |
+| 400 | `INVALID_REQUEST`, `INVALID_ALARM_REQUEST` |
+| 401 | `UNAUTHENTICATED` |
+| 403 | `ACCESS_DENIED`, `DEVICE_CREDENTIAL_INVALID` |
+| 404 | `NOT_FOUND`, `ALARM_NOT_FOUND`, `BUS_ROUTE_NOT_FOUND`, `TARGET_STOP_OCCURRENCE_NOT_FOUND`, `DEVICE_NOT_FOUND`, `BOARDING_SESSION_NOT_FOUND` |
+| 405 | `METHOD_NOT_ALLOWED` |
+| 406 | `NOT_ACCEPTABLE` |
+| 409 | `DEVICE_OWNERSHIP_CONFLICT`, `DEVICE_PLATFORM_CONFLICT`, `DEVICE_REGISTRATION_STALE`, `DEVICE_REVISION_CONFLICT`, `DEVICE_PUSH_TARGET_CONFLICT`, `BOARDING_CANDIDATE_CHANGED`, `BOARDING_SESSION_CONFLICT`, `BOARDING_REQUEST_CONFLICT`, `BOARDING_REVISION_CONFLICT`, `BOARDING_TARGET_NOT_AHEAD`, `BOARDING_RECONFIRM_REQUIRED`, `BOARDING_TRACKING_UNSUPPORTED` |
+| 415 | `UNSUPPORTED_MEDIA_TYPE` |
+| 500 | `INTERNAL_SERVER_ERROR` |
+| 503 | `SOCIAL_IDENTITY_UNAVAILABLE`, `TRANSIT_TEMPORARILY_UNAVAILABLE`, `SERVICE_UNAVAILABLE` |
+
+`BOARDING_TARGET_NOT_AHEAD`는 이전 Backend 호환 enum으로 현행 제품 throw 지점이 없다. 목록·status·Owner 문서 보존을 정적으로 확인했으며, 도달할 수 없는 HTTP 오류를 만들어 PASS라고 하지 않는다. `METADATA_UNAVAILABLE`은 독립 트리거/의미가 없어 추가하지 않기로 한 기존 결정을 유지하고 TASK-804 본문의 폐기 후보만 현재 503 계약으로 정리했다. Alarm Create의 현행 metadata 부재는 `TARGET_STOP_OCCURRENCE_NOT_FOUND`이며 `BUS_ROUTE_NOT_FOUND`를 던지지 않는다. Route 404는 Stops/후보 경로에서 검증한다.
+
+#### 전체 Endpoint 오류 Matrix
+
+표의 테스트 약어는 아래 실제 클래스다. **H**는 RANDOM_PORT Embedded Tomcat/loopback HTTP(제품 Controller·Security·Resolver, Service 경계 예외 주입), **M**은 실제 Filter/Controller/Service와 격리 MySQL Testcontainers를 사용하는 MockMvc다. 따라서 H의 예외 주입은 Domain/DB commit 검증이 아니며 M과 구분한다. PASS는 이번 최종 suite에서 실행한 해당 테스트의 결과다. 모든 Endpoint에 존재하지 않는 Domain 오류를 조합하지 않는다.
+
+| 약어 | 테스트 클래스 | 실행 경계 |
+| --- | --- | --- |
+| MH | `MvcErrorHttpIntegrationTest` | H |
+| ED | `AuthenticationErrorDispatchIntegrationTest` | H |
+| AU | `AuthControllerIntegrationTest` | M |
+| AL | `AlarmServiceIntegrationTest` | M + 명시한 Service 직접 검증 |
+| DE | `DeviceApiIntegrationTest` | M |
+| BS | `BoardingSessionApiIntegrationTest` | M + 명시한 Service/Transaction 검증 |
+| BC | `BoardingCandidateApiIntegrationTest` | M |
+| RS | `BusRouteSearchIntegrationTest` | M |
+| ST | `BusRouteStopIntegrationTest` | M + Service 직접 검증 |
+
+보호된 17개 mapping은 같은 Security rule을 사용한다. 누락/무효 JWT의 HTTP 401은 영역별 기존 테스트(AL.reject_unauthenticated_alarm_api_request, DE.require_jwt_for_all_endpoints, BS.require_jwt/reconfirm_authentication_and_ownership, BC.require_valid_jwt, RS.require_authentication, ST.require_authentication)와 아래 공통 Security Matrix로 함께 검증했다. 모든 mapping에 동일 JWT case를 복제하지 않았다. `/auth/*`의 지정 POST만 공개이고 잘못된 Bearer를 함께 보내면 Controller 전에 인증 실패할 수 있다.
+
+| Endpoint | HTTP Method | 오류 상황 | 기대 HTTP | 기대 Code | 검증 테스트 | 결과 |
+| --- | --- | --- | ---: | --- | --- | --- |
+| `/auth/google` | POST | body 누락/깨진 JSON | 400 | INVALID_REQUEST | MH.reject_invalid_request | PASS |
+| `/auth/google` | POST | 잘못된 Credential/실제 Token parser 실패 | 401 | UNAUTHENTICATED | AU.reject_invalid_google_credential/reject_real_malformed_google_credential | PASS |
+| `/auth/google` | POST | Google 검증 I/O 장애 | 503 | SOCIAL_IDENTITY_UNAVAILABLE | AU.return_service_unavailable_when_google_identity_verification_fails, MH.preserve_authentication_contracts | PASS |
+| `/auth/google` | POST | 예상 밖 Runtime/DB 실패 | 500 | INTERNAL_SERVER_ERROR | MH.normalize_public_unexpected_failure | PASS |
+| `/auth/refresh` | POST | body 누락/깨진 JSON | 400 | INVALID_REQUEST | MH.reject_invalid_request | PASS |
+| `/auth/refresh` | POST | unknown/만료/Rotation 뒤 재사용/null/blank | 401 | UNAUTHENTICATED | AU.reject_unknown_refresh_token/reject_expired_refresh_token/reject_reused_refresh_token/reject_blank_or_null_refresh_token | PASS |
+| `/auth/logout` | POST | body 누락/깨진 JSON | 400 | INVALID_REQUEST | MH.reject_invalid_request | PASS |
+| `/api/v1/alarms` | POST | 필수값/null/타입/범위/JSON/Bean Validation | 400 | INVALID_REQUEST | AL.reject_invalid_target_stop_occurrence_id/reject_missing_or_malformed_request_body, MH.reject_invalid_request | PASS |
+| `/api/v1/alarms` | POST | 첫/마지막 occurrence의 불가능한 옵션 | 400 | INVALID_ALARM_REQUEST | AL.reject_boundary_alarm_request | PASS |
+| `/api/v1/alarms` | POST | 인증 후 User 소실 | 401 | UNAUTHENTICATED | MH.preserve_missing_authenticated_user + AL.reject_missing_authenticated_user(Service 직접) | PASS |
+| `/api/v1/alarms` | POST | stale/없는 target occurrence | 404 | TARGET_STOP_OCCURRENCE_NOT_FOUND | AL.return_target_stop_occurrence_not_found | PASS |
+| `/api/v1/alarms` | GET | JWT 없음 | 401 | UNAUTHENTICATED | MH.preserve_authentication_contracts, AL.reject_unauthenticated_alarm_api_request | PASS |
+| `/api/v1/alarms` | GET | Runtime/DataAccess/Transaction 실패 | 500 | INTERNAL_SERVER_ERROR | MH.normalize_unexpected_failure | PASS |
+| `/api/v1/alarms/{alarmId}` | GET | Path 타입/0/음수 | 400 | INVALID_REQUEST | MH.reject_path_and_query_errors/reject_nonpositive_alarm_id | PASS |
+| `/api/v1/alarms/{alarmId}` | GET | 양수 부재/다른 owner | 404 | ALARM_NOT_FOUND | AL.return_alarm_not_found_for_missing_or_other_user_alarm/authenticated_get_returns_not_found_for_missing_alarm | PASS |
+| `/api/v1/alarms/{alarmId}/activate` | POST | 0/음수 Path | 400 | INVALID_REQUEST | MH.reject_nonpositive_alarm_id | PASS |
+| `/api/v1/alarms/{alarmId}/activate` | POST | 양수 부재/다른 owner | 404 | ALARM_NOT_FOUND | AL.return_alarm_not_found_for_missing_or_other_user_alarm/authenticated_post_activate_returns_not_found_for_other_users_alarm | PASS |
+| `/api/v1/alarms/{alarmId}/deactivate` | POST | 0/음수 Path | 400 | INVALID_REQUEST | MH.reject_nonpositive_alarm_id | PASS |
+| `/api/v1/alarms/{alarmId}/deactivate` | POST | 양수 부재/다른 owner | 404 | ALARM_NOT_FOUND | AL.return_alarm_not_found_for_missing_or_other_user_alarm/authenticated_post_deactivate_returns_not_found_for_other_users_active_alarm | PASS |
+| `/api/v1/alarms/{alarmId}` | DELETE | 0/음수 Path | 400 | INVALID_REQUEST | MH.reject_nonpositive_alarm_id | PASS |
+| `/api/v1/alarms/{alarmId}` | DELETE | 양수 부재/다른 owner | 404 | ALARM_NOT_FOUND | AL.return_alarm_not_found_for_missing_or_other_user_alarm/authenticated_delete_rejects_other_users_alarm | PASS |
+| `/api/v1/bus-routes` | GET | 필수 query 누락/blank | 400 | INVALID_REQUEST | RS.reject_missing_or_blank_query, MH.reject_path_and_query_errors | PASS |
+| `/api/v1/bus-routes` | GET | JWT 없음 | 401 | UNAUTHENTICATED | RS.require_authentication + 공통 Security 검증 | PASS |
+| `/api/v1/bus-routes/{routeId}/stops` | GET | Path 타입/비양수 | 400 | INVALID_REQUEST | ST.reject_invalid_route_id, MH.reject_path_and_query_errors | PASS |
+| `/api/v1/bus-routes/{routeId}/stops` | GET | Route 부재 | 404 | BUS_ROUTE_NOT_FOUND | ST.return_bus_route_not_found | PASS |
+| `/api/v1/bus-routes/{routeId}/stops` | GET | Route는 있으나 occurrence 0개(invariant) | 500 | INTERNAL_SERVER_ERROR | ST.reject_route_without_occurrences(실제 DB/HTTP 추가) | PASS |
+| `/api/v1/bus-routes/{routeId}/boarding-candidates` | GET | 필수 query/Path·Query 타입/비양수/다른 Route occurrence | 400 | INVALID_REQUEST | BC.invalid_ids/reject_other_route_occurrences, MH.reject_path_and_query_errors | PASS |
+| `/api/v1/bus-routes/{routeId}/boarding-candidates` | GET | Route 부재 | 404 | BUS_ROUTE_NOT_FOUND | BC.missing_metadata | PASS |
+| `/api/v1/bus-routes/{routeId}/boarding-candidates` | GET | 목적/승차 occurrence 부재 | 404 | TARGET_STOP_OCCURRENCE_NOT_FOUND | BC.missing_metadata | PASS |
+| `/api/v1/bus-routes/{routeId}/boarding-candidates` | GET | Provider 장애/upstream 401 | 503 | TRANSIT_TEMPORARILY_UNAVAILABLE | BC.provider_error_response/upstream_unauthorized_is_not_client_unauthorized | PASS |
+| `/api/v1/devices` | POST | strict DTO/UUID/header/형식/범위 | 400 | INVALID_REQUEST | DE.reject_invalid_input_without_coercion | PASS |
+| `/api/v1/devices` | POST | credential 불일치 | 403 | DEVICE_CREDENTIAL_INVALID | DE.enforce_credentials_platform_authority_and_limits | PASS |
+| `/api/v1/devices` | POST | ownership/generation 불일치 | 409 | DEVICE_OWNERSHIP_CONFLICT | DE.transfer_ownership_and_reject_old_generations | PASS |
+| `/api/v1/devices` | POST | platform 변경 | 409 | DEVICE_PLATFORM_CONFLICT | DE.enforce_credentials_platform_authority_and_limits | PASS |
+| `/api/v1/devices` | POST | 낮은 revision | 409 | DEVICE_REGISTRATION_STALE | DE.rotate_target_and_enforce_revision | PASS |
+| `/api/v1/devices` | POST | 같은 revision의 다른 상태 | 409 | DEVICE_REVISION_CONFLICT | DE.rotate_target_and_enforce_revision | PASS |
+| `/api/v1/devices` | POST | 다른 설치본의 FID 점유/식별된 UNIQUE 경합 | 409 | DEVICE_PUSH_TARGET_CONFLICT | DE.enforce_credentials_platform_authority_and_limits/roll_back_target_uniqueness_races | PASS |
+| `/api/v1/devices` | POST | 미분류 실제 FK 오류 | 500 | INTERNAL_SERVER_ERROR | DE.report_unclassified_database_failure_safely | PASS |
+| `/api/v1/devices/{installationId}` | GET | UUID/header/credential 형식 오류 | 400 | INVALID_REQUEST | DE.reject_invalid_input_without_coercion | PASS |
+| `/api/v1/devices/{installationId}` | GET | credential 불일치 | 403 | DEVICE_CREDENTIAL_INVALID | DE.look_up_state_without_mutation_or_owner_disclosure | PASS |
+| `/api/v1/devices/{installationId}` | GET | 설치본 부재 | 404 | DEVICE_NOT_FOUND | DE.look_up_state_without_mutation_or_owner_disclosure | PASS |
+| `/api/v1/devices/{installationId}` | GET | local DataAccess 실패 | 500 | INTERNAL_SERVER_ERROR | MH.preserve_local_persistence_handlers | PASS |
+| `/api/v1/devices/disable` | POST | 필수값/strict 타입/header 오류 | 400 | INVALID_REQUEST | DE.reject_invalid_input_without_coercion | PASS |
+| `/api/v1/devices/disable` | POST | credential 불일치 | 403 | DEVICE_CREDENTIAL_INVALID | DE.enforce_credentials_platform_authority_and_limits | PASS |
+| `/api/v1/devices/disable` | POST | 부재/다른 owner | 404 | DEVICE_NOT_FOUND | DE.look_up_state_without_mutation_or_owner_disclosure/transfer_ownership_and_reject_old_generations | PASS |
+| `/api/v1/devices/disable` | POST | generation 불일치 | 409 | DEVICE_OWNERSHIP_CONFLICT | DE.transfer_ownership_and_reject_old_generations | PASS |
+| `/api/v1/devices/disable` | POST | 낮은 revision/동일 revision의 다른 상태 | 409 | DEVICE_REGISTRATION_STALE / DEVICE_REVISION_CONFLICT | DE.disable_and_reactivate_only_current_device | PASS |
+| `/api/v1/boarding-sessions` | POST | strict body/UUID/필수값/옵션 오류 | 400 | INVALID_REQUEST | BS.invalid_create_body/reject_invalid_preparation_choice | PASS |
+| `/api/v1/boarding-sessions` | POST | 만료/타 User/변경된 candidate·metadata | 409 | BOARDING_CANDIDATE_CHANGED | BS.reject_invalid_reference_and_number/provider_metadata_and_target_failures | PASS |
+| `/api/v1/boarding-sessions` | POST | 동일 UUID의 다른 원본 요청 | 409 | BOARDING_REQUEST_CONFLICT | BS.request_and_session_conflicts | PASS |
+| `/api/v1/boarding-sessions` | POST | 다른 미종료 Session | 409 | BOARDING_SESSION_CONFLICT | BS.request_and_session_conflicts | PASS |
+| `/api/v1/boarding-sessions` | POST | 검증되지 않은 차량/운행 근거 | 409 | BOARDING_TRACKING_UNSUPPORTED | BS.reject_unsupported_moving_creation/known_run_end_does_not_create_session | PASS |
+| `/api/v1/boarding-sessions` | POST | Provider 재검증 장애 | 503 | TRANSIT_TEMPORARILY_UNAVAILABLE | BS.provider_metadata_and_target_failures | PASS |
+| `/api/v1/boarding-sessions/{sessionId}` | GET | Path 타입 | 400 | INVALID_REQUEST | MH.reject_path_and_query_errors | PASS |
+| `/api/v1/boarding-sessions/{sessionId}` | GET | 인증 후 User 소실 | 401 | UNAUTHENTICATED | MH.preserve_missing_authenticated_user | PASS |
+| `/api/v1/boarding-sessions/{sessionId}` | GET | 부재/다른 owner | 404 | BOARDING_SESSION_NOT_FOUND | BS.query_and_cancel_with_ownership | PASS |
+| `/api/v1/boarding-sessions/{sessionId}` | GET | local Transaction 실패 | 500 | INTERNAL_SERVER_ERROR | BS.report_transaction_failure_over_http_safely, MH.preserve_local_persistence_handlers | PASS |
+| `/api/v1/boarding-sessions` | GET | query 조합/중복/UUID 오류 | 400 | INVALID_REQUEST | BS.invalid_query | PASS |
+| `/api/v1/boarding-sessions` | GET | JWT 없음/무효 | 401 | UNAUTHENTICATED | BS.require_jwt + 공통 Security 검증 | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/reconfirm` | POST | strict revision/body 오류 | 400 | INVALID_REQUEST | BS.reconfirm_invalid_body | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/reconfirm` | POST | JWT 없음 | 401 | UNAUTHENTICATED | BS.reconfirm_authentication_and_ownership + 공통 Security 검증 | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/reconfirm` | POST | 부재/다른 owner | 404 | BOARDING_SESSION_NOT_FOUND | BS.reconfirm_authentication_and_ownership | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/reconfirm` | POST | reference 소실/identity·target·metadata 변경 | 409 | BOARDING_CANDIDATE_CHANGED | BS.reconfirm_expired_reference/reconfirm_identity_and_target_change/reconfirm_metadata_race | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/reconfirm` | POST | stale revision/경합 | 409 | BOARDING_REVISION_CONFLICT | BS.reconfirm_success_and_lost_response_retry | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/reconfirm` | POST | 보류 외 상태/terminal | 409 | BOARDING_RECONFIRM_REQUIRED | BS.reconfirm_requires_suspension | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/reconfirm` | POST | 실제 Event FK 실패 | 500 | INTERNAL_SERVER_ERROR | BS.report_database_failure_over_http_safely | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/cancel` | POST | strict revision/body 오류 | 400 | INVALID_REQUEST | BS.invalid_revision_body | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/cancel` | POST | 다른 owner | 404 | BOARDING_SESSION_NOT_FOUND | BS.query_and_cancel_with_ownership | PASS |
+| `/api/v1/boarding-sessions/{sessionId}/cancel` | POST | stale revision | 409 | BOARDING_REVISION_CONFLICT | BS.cancel_requires_current_revision | PASS |
+
+예상 밖 500은 모든 Endpoint에 같은 예외를 주입하는 방식 대신 실제 DB 실패와 공개 Auth·Alarm·Device·Boarding의 공통/local Handler 경로를 검증했다. 아래 공통 Matrix를 포함해 판단하며, 실행하지 않은 Endpoint별 500 조합을 개별 PASS로 주장하지 않는다. 각 Endpoint에 적용되는 같은 Servlet binding·Security·Resolver 정책은 기존 테스트를 재사용했다. Boarding 생성/재확인에서 metadata.read()가 전달하는 BUS_ROUTE_NOT_FOUND/TARGET_STOP_OCCURRENCE_NOT_FOUND 404와 Provider 재검증의 503도 현재 소스 경로를 확인했으며, metadata 실증은 BC.missing_metadata, 503 실증은 BS.provider_metadata_and_target_failures, 공개 code 직렬화는 MH의 공통 Advice 검증을 재사용한다. 이 공통 경계 검증을 별도 Boarding HTTP 예외 주입 실행으로 세지 않는다.
+
+#### 공통 HTTP·Security·Auth·MVC와 우선순위
+
+| Endpoint/경계 | HTTP Method | 오류 상황 | 기대 HTTP | 기대 Code | 검증 테스트 | 결과 |
+| --- | --- | --- | ---: | --- | --- | --- |
+| 테스트 인증 경계와 제품 보호 API | GET 등 | JWT 없음/변조/만료/issuer/exp 누락/잘못된 Bearer | 401 | UNAUTHENTICATED | SecurityConfigurationIntegrationTest의 reject_request_without_bearer_token/reject_tampered_access_token/reject_expired_access_token/reject_access_token_with_invalid_issuer/reject_missing_expiry/reject_malformed_bearer | PASS |
+| 테스트 인증 경계 | GET | sub 누락·빈 값·0·음수·비숫자·선행 0·overflow·JSON 숫자형 | 401 | UNAUTHENTICATED | SecurityConfigurationIntegrationTest.reject_invalid_subject_before_authentication/reject_numeric_subject_claim | PASS |
+| 테스트 deny 경계/MVC Security 예외 | GET | 인증된 권한 거부 / 미인증 | 403 / 401 | ACCESS_DENIED / UNAUTHENTICATED | SecurityConfigurationIntegrationTest.distinguish_access_denied_from_unauthenticated, MH.preserve_security_exception_boundary | PASS |
+| `/api/v1/missing-path` | GET | 미등록 URL | 404 | NOT_FOUND | MH.preserve_default_mvc_status | PASS |
+| `/api/v1/alarms` | PUT | 미지원 Method | 405 | METHOD_NOT_ALLOWED | MH.preserve_default_mvc_status(Allow 보존) | PASS |
+| `/api/v1/alarms` | GET | Accept 협상 실패 | 406 | NOT_ACCEPTABLE | MH.preserve_not_acceptable(지원 media type header 보존) | PASS |
+| `/api/v1/alarms` | POST | text/plain 요청 body | 415 | UNSUPPORTED_MEDIA_TYPE | MH.preserve_unsupported_media_type | PASS |
+| `/auth/google`의 예외 주입 | POST | 명시적 일반 서비스 이용 불가 | 503 | SERVICE_UNAVAILABLE | MH.preserve_response_status_exception | PASS |
+| `/auth/google`의 예외 주입 | POST | 기타 명시적 HTTP 상태 | 408/418/422/429/502/504 | HTTP_408 / HTTP_418 / HTTP_422 / HTTP_429 / HTTP_502 / HTTP_504 | MH.preserve_response_status_exception | PASS |
+| Servlet test probe → `/error` | GET | sendError 404/500/503 | 원래 상태 | NOT_FOUND / INTERNAL_SERVER_ERROR / SERVICE_UNAVAILABLE | MH.preserve_servlet_error_dispatch | PASS |
+| annotation/원인 annotation test probe | GET | @ResponseStatus | 404 | NOT_FOUND | MH.preserve_annotated_exception | PASS |
+| header/return validation test probe | GET | 필수 Header 누락 / 반환값 Validation 실패 | 400 / 500 | INVALID_REQUEST / INTERNAL_SERVER_ERROR | MH.distinguish_binding_from_return_validation | PASS |
+| Device/Boarding 실제 Controller | GET | local persistence Handler 우선 | 500 | INTERNAL_SERVER_ERROR | MH.preserve_local_persistence_handlers(local 로그, fallback 로그 부재) | PASS |
+| Alarm/Auth 및 Domain Controller | GET/POST | Global Advice가 Domain/Auth/입력 Validation 처리 | 기존 400/401/403/404/409/503 | 기존 Domain/Auth code | MH.preserve_alarm_domain_error/preserve_device_domain_error/preserve_boarding_domain_error/preserve_transit_unavailable/preserve_authentication_contracts | PASS |
+| 공개 Auth/보호 API → `/error` | POST/GET | ERROR 재진입에서 Security가 원래 상태를 덮지 않음 | 원래 4xx/5xx | 상태별 고정 code | ED.preserve_public_error_dispatch_status/keep_original_request_protected, MH.preserve_response_status_exception | PASS |
+
+실행 순서는 **Controller-local Handler → Global Advice → Spring 상태/기본 Resolver → 마지막 500 fallback**으로 유지된다. Security 예외는 MVC fallback이 삼키지 않는다. 400 입력 검증과 500 반환값 검증, Domain 403/404/409와 generic HTTP_409, Google/Transit/일반 503을 구분했다. HTTP 오류 공통 helper는 `application/json`, 정확한 `{code,message}` key 집합, 고정 message 및 synthetic Token/SQL/경로/원인 marker 비노출을 검사한다. Allow·Accept·Bearer challenge와 기본 Security header도 기존 테스트로 확인했다. timestamp/path/status/traceId/requestId/stackTrace나 예외 정보를 추가하지 않았다. Alarm Domain 두 구체적 predecessor/successor message는 기존 계약대로 보존한다.
+
+정상 계약도 함께 회귀했다. AU의 실제 Google fixture Login·Refresh Rotation/재사용 거부·다른 Session 보존·Logout/반복 Logout 204 무본문, AL의 Create 201·목록/상세 200·삭제 204·ACTIVE 멱등 및 FOLLOW_UP 전이, DE의 최초 등록 201/동일 intent 200·상태/disable 200, BS의 최초 생성 201/동일 UUID 200·조회/재확인/취소 200, RS/ST의 검색/정류장 200·검색 없음 빈 배열과 BC의 AVAILABLE/EMPTY/PARTIAL 200이 통과했다. JWT 정상 양수 Long 문자열/Long.MAX_VALUE 인증도 통과했다. 실제 Google parser와 공개키 I/O 분리는 `GoogleIdentityVerifierTest` 16개, JWT 발급/검증 방어는 `JwtConfigurationTest`·`JwtTokenServiceTest`로 함께 확인했다. Token Pair 원자성/로그인 경쟁·Refresh Session 책임을 재설계하지 않았다.
+
+#### Flutter 오류·Mutation 복구와 Session/Race
+
+아래는 전체 Flutter suite에서 실행한 기존 테스트다. 이번 단계에서 Flutter 제품·테스트는 변경하지 않고 3단계 최종 커밋 뒤 수정된 assertion/lint까지 포함한 전체 상태를 다시 실행했다.
+
+| 경계 | 실제 검증 | 테스트 파일/근거 | 결과 |
+| --- | --- | --- | --- |
+| Create 정상/확정 거부 | 201만 성공, 400/401/403 및 stale target 404의 문서상 status/code 조합, unknown code/잘못된 status 보수 분류 | alarm_api_client_test, alarm_screen_test, bus_route_stop_screen_test | PASS |
+| Create 불확실 결과 | 500/502/503/504/기타 5xx/408, Timeout·Transport·응답 유실, malformed 201; 성공·실패 확정 금지, 중복 탭/보관 callback·선택/옵션 변경·자동 POST/Activate 차단, 목록 안내 | alarm_api_client_timeout_test의 real HTTP failure/late create success, alarm_screen_test의 uncertainty 사례 | PASS |
+| Create 뒤 Activate 실패 | 생성 ID·activationUnverified 전달, 원래 ID GET, 생성 당시 INACTIVE를 현재 상태로 단정하지 않음 | alarm_creation_push_test의 partial success, alarm_screen_test | PASS |
+| Activate/Deactivate/FOLLOW_UP | 정상 전이, timeout/500/잘못된 성공 응답 후 원래 ID 1회 GET, GET 중/실패 뒤 Mutation 잠금, 명시 재조회, GET은 조회 시점 상태만 표시 | alarm_screen_test의 activate/deactivate/follow-up 및 wrong-ID recovery | PASS |
+| Delete | 정상 204, timeout/5xx 뒤 원래 ID GET 200/404/실패, 자동 DELETE 없음, 404를 삭제 성공으로 단정/자동 이동하지 않음 | alarm_screen_test의 failed delete/delete recovery/GET failure | PASS |
+| Session/Navigation/Dispose | logout·다른 User·같은 User 재로그인·Auth generation/login identity·navigation epoch, 다른 Alarm ID·Client 교체·dispose, 늦은 Mutation/GET 폐기와 후속 GET/POST/Navigation 없음 | alarm_creation_push_test의 detail phase별 stale 응답, alarm_screen_test의 replacing Alarm ID/disposed detail, notification_lifecycle_test | PASS |
+| Timeout 이후 늦은 401 | Alarm 모든 operation의 뒤늦은 Refresh/Replay 차단, 하나의 15초 예산, 공유 Refresh의 다른 유효 요청 보존 | alarm_api_client_timeout_test, authenticated_api_client_test | PASS |
+| Auth 상태/오류 | JSON 401과 503 구분, Refresh 401만 Pair 삭제, 5xx/timeout Pair 보존, single-flight·원자 저장·Session identity·Logout 직렬화, Auth POST 자동 재전송 없음 | backend_auth_client_test, auth_session_test, authenticated_api_client_test, token_pair_storage_test | PASS |
+| Device | 정확한 credential/resource/revision code, unknown/빈/깨진 500도 pending 보존, 원래 payload/revision, 계정 전환/늦은 401 보호 | device_api_client_test, push_registration_service_test | PASS |
+| BoardingSession | 원래 UUID/body/login identity 보존, GET 복구 우선, 5xx/timeout/파싱 불확실과 409 분리, 명시적 동일 요청 재시도·계정/epoch 보호 | boarding_session_client_test, boarding_session_controller_test 및 flow/screen 회귀 | PASS |
+| Candidate/Route | Provider 503≠인증 401, code/HTTP 보존과 안전 fallback, Route GET의 status 기반 일반 오류·정상 응답 | boarding_candidate_client_test, bus_route_search_client_test, bus_route_stop_client_test | PASS |
+
+#### 발견한 검증 공백과 최소 보강
+
+TASK-804 제품 결함이나 새 설계 판단이 필요한 문서·구현 충돌은 발견하지 않았다. 제품 코드 수정은 **0개**다. 다음 기존 테스트 **4개 파일만** 보강했다.
+
+- `MvcErrorHttpIntegrationTest`: HTTP_408 1개, local Handler 없는 TransactionException 500 1개, 공개 Auth 세 POST의 body 누락/깨진 JSON 6개, 유효 JWT 뒤 Alarm/Boarding User 소실 401 및 ERROR dispatch 1개를 추가했다. 총 73→82개, 신규 실행 case 9개다. 예외 주입은 HTTP 분류/우선순위 검증이며 실제 DB 장애라고 주장하지 않는다.
+- `BusRouteStopIntegrationTest`: 기존 빈 traversal Service invariant 사례에 실제 Controller/DB 요청의 고정 두 필드 JSON 500을 추가했다. Unit/Service 예외 확인만으로 HTTP 계약이 증명된 것으로 보던 공백을 해소했다.
+- `BoardingSessionApiIntegrationTest`, `BoardingCandidateApiIntegrationTest`: 기존 Domain 400/404/409/503 사례의 code assertion을 status·정확한 두 필드·Content-Type·고정 message까지 강화했다. 기존 시나리오/DB assertion·동시성/rollback 검증은 보존했다.
+
+새 Dependency·DB Schema/Flyway·운영 설정·인증/Domain/API 정책·Provider mapping·Notification·Boarding Lifecycle 변경은 없다. 테스트 삭제/Skip/약화, 새 Task나 devlog 변경도 없다.
+
+#### 최종 회귀 실행 결과
+
+Java/Gradle JVM **21.0.12.1**, Wrapper **8.14.3**, 격리 DB **mysql:8.4.11 Testcontainers/Flyway**를 사용했다. 초기 Gradle 캐시·Docker socket의 sandbox 접근 제한은 허용된 권한 확장으로 해결했고 Dependency·운영 설정을 변경하지 않았다. 실제 개발/운영 DB·Google/Transit Provider/FCM/Firebase credential·iPhone은 사용하지 않았다. 외부 SDK/HTTP 검증은 Mock/실제 로컬 parser/실패 transport/loopback 서버로 제한했다.
+
+전체 회귀 명령은 `backend`에서 `env -u JAVA_HOME ./gradlew test --offline --max-workers=1`, `app`에서 `flutter test --no-pub --reporter expanded`와 `flutter analyze --no-pub`를 각각 실행했다. 집중 테스트는 같은 Gradle 명령에 변경한 네 클래스의 `--tests`만 지정했다.
+
+| 실행 | 클래스/파일 | 실행 / 통과 | 실패 / 오류 / Skip | 결과 |
+| --- | ---: | ---: | --- | --- |
+| 1차 Backend 집중 | 4 classes | 219 / 219 | 0 / 0 / 0 | BUILD SUCCESSFUL(58초) |
+| 최종 Backend 집중 | 4 classes | 226 / 226 | 0 / 0 / 0 | BUILD SUCCESSFUL(50초) |
+| 최종 Backend 전체 | 81 classes | 1,407 / 1,407 | 0 / 0 / 0 | BUILD SUCCESSFUL(6분 45초) |
+| 최종 Flutter 전체 | 34 test files | 637 / 637 | 0 / 0 / 0 | All tests passed! |
+| Flutter Analyze | app | 1 / 1 | 0 / 0 / 0 | No issues found! |
+| 3단계 변경 Dart Format 재확인 | 9 files | 9 / 9 | 0 / 0 / 0 | 0 changed |
+
+집중 테스트 후 전체 실행을 시작했다가 Matrix 대조에서 Auth body/인증 후 User 소실 경계를 추가로 확인해 그 실행을 중단했다(exit 130). 해당 부분 실행은 최종 성공 수로 합산하지 않았다. 보강 뒤 최종 집중→최종 전체를 다시 실행했다. 최종 Backend JUnit XML의 suite 집계와 testcase 수가 일치하며 **기존 1,398 + 신규 9 = 1,407개**다. 실행 단계 간 중복은 합산하지 않는다. Flutter는 직전 3단계 최종 커밋과 이번 최종 상태가 동일하며 이번에는 전체 637개와 Analyze를 모두 실행했다. 이번 Dart 변경은 없지만 직전 단계 9개 파일도 `dart format --output=none --set-exit-if-changed`로 확인했다.
+
+최종 실행 완료 시각(KST)은 Backend **2026-10-31 12:25:22 KST**, Flutter **2026-10-31 12:13:31 KST**, Analyze **2026-10-31 12:14:00 KST**다. 최종 전체 회귀 뒤 제품 동작/테스트 의미에 영향을 주는 코드를 변경하지 않았으며 이후 변경은 이 기록·완료 표시 및 API 문서의 최소 동기화뿐이다. 전체 suite가 최종 코드 상태와 일치한다. 검증 중 실제 제품/test 실패를 숨기거나 assertion을 약화하지 않았다.
+
+실행 로그는 `/private/tmp/stopbell-task804-step4-{focused,focused-final,backend-full,flutter-full,flutter-analyze}.log`, Backend JUnit XML/집계는 `/private/tmp/stopbell-task804-step4-{focused,focused-final,full}-results/`에 보존한다. 종료 시 기존 개발 MySQL Container `978144708abb`만 그대로 남고 이번 격리 Testcontainers는 정리됐음을 확인했다. 기존 Container/Volume은 변경하지 않았다.
+
+#### TASK-802 책임과 남은 한계
+
+TASK-804에서 오류 HTTP/code/shape·기존 정책 보존, 화면 내 중복 자동 Mutation 차단, 결과 불확실 표시, 원래 Alarm ID GET 복구, Session/늦은 응답 보호를 검증했다. `POST /api/v1/alarms`에는 Request Identity 기반 서버 멱등성이 없고 목록의 유사 Alarm을 이전 요청 결과로 연결하지 않는다. 목록 조회 성공이나 GET 404는 특정 Mutation의 commit/rollback 증거가 아니다. 화면 메모리 잠금은 앱 재진입/재시작/복수 기기·동시 생성의 정확한 중복 방지 보장이 아니다.
+
+TASK-802 `[ ]`에는 기존 Evaluation·activation generation/tracking cycle·Lifecycle 경쟁·logical Event/recipient Delivery dedup 검증을 유지한다. Alarm 생성의 User별 Client Request ID·원본 fingerprint·동일 요청 식별/기존 Alarm 반환·다른 내용 conflict·응답 유실 조회·순차/동시 요청·commit/rollback·User 격리 설계 채택 여부와 검증도 후속 서버 책임으로 남긴다. 이번에 멱등성 계약을 채택/구현하거나 TASK-802를 완료하지 않았다. 서버 멱등성 부재는 TASK-804 완료 차단 사유가 아니다.
+
+이미 commit된 HTTP 응답/끊긴 연결에 새 JSON 전달, 실제 DB 네트워크 단절·프로세스 restart, 실제 Google/Transit/FCM·iPhone/OS 동작은 보장·검증 범위 밖이다. Actuator DOWN 503은 health body 계약이며 Application Domain 오류와 합치지 않고 TASK-807에 남긴다. RouteSearch/Stop의 읽기 전용 wrapper는 같은 login에서 Timeout 뒤 늦은 401의 Refresh/GET replay를 별도 취소하지 않는 기존 분석 한계를 유지한다. Auth generation이 바뀐 이전 Session 응답은 공통 Client가 폐기하며, 이 한계를 Alarm Mutation의 Timeout/중복 전송 보호까지 일반화하지 않는다. 인증 전체 read 요청 수명 확대는 이번에 선행 설계하지 않았다.
+
+#### 완료 조건 평가와 문서/Git 범위
+
+실제 20개 mapping 및 30개 enum을 식별하고 Endpoint별 도달 경로와 공통 경계를 대조했다. 400 Validation, Security/Auth 401·403, Domain 404·409, Google/Transit/일반 503, 안전한 MVC 500, 상태/Header/ERROR dispatch와 비노출, 정상 응답, Flutter Create 불확실성/원래 ID 조회/중복 Mutation 차단, Session/Race·기존 인증/Domain 정책과 TASK-802 책임을 확인했다. Backend 전체·Flutter 전체·Analyze·Format이 통과했으며 TASK-804 범위의 미해결 차단 결함은 없다.
+
+**TASK-804: `[x]` — 최종 완료 조건 전부 충족.** Owner 문서/API·Architecture·관련 요구사항/Domain/ADR과 현재 구현의 정합성을 확인했다. `api.md`의 후속 단계 문장을 이 최종 결과 링크로 갱신하고, BUS_ROUTE_NOT_FOUND가 Alarm 설정의 Route 정류장 조회 단계에 해당함을 명확히 했다. occurrence ID 기반 생성의 TARGET_STOP_OCCURRENCE_NOT_FOUND와 기존 status/code는 그대로이며 설계 변경은 없다. 이미 정확한 Architecture와 다른 Owner는 수정하지 않았다. task-list의 폐기된 METADATA_UNAVAILABLE 후보와 TASK-804 체크만 최소 동기화했다. 기존 분석/1·2·3단계·다른 완료 기록과 TASK-802 등 다른 체크박스는 유지한다.
+
+Commit은 보강한 Java 테스트 4개와 문서 2개만 명시적으로 Stage한다. 사용자 지정 subject `test: TASK-804 complete API error contract verification` 및 실제 개행 한국어 bullet 3줄로 작성하고, Commit 전 status/diff/diff --check·staged diff와 Commit 후 `git log -1 --pretty=full` 형식을 확인한다. `main`에서 정상 Push하고 원격 main과 HEAD 일치를 확인해 최종 보고하며 다른 Task는 시작하지 않는다.
 
 ### 기존 Phase 8 Task 상세 및 실행 dependency
 

@@ -66,6 +66,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
@@ -223,7 +224,7 @@ class BoardingSessionApiIntegrationTest {
         mvc.perform(auth(postSession(REQUEST_ID, ref).content(content), owner)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.notificationOffsetStops").value(offset));
         mvc.perform(auth(postSession(REQUEST_ID, ref).content(content.replace(":" + offset + "}", ":" + (3 - offset) + "}")), owner))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BOARDING_REQUEST_CONFLICT"));
+                .andExpect(status().isConflict()).andExpect(apiError(ErrorCode.BOARDING_REQUEST_CONFLICT));
     }
 
     @ParameterizedTest
@@ -311,11 +312,11 @@ class BoardingSessionApiIntegrationTest {
         supportFixture();
         service.create(owner.getId(), request(REQUEST_ID, "ref"));
         mvc.perform(auth(postSession(REQUEST_ID, "changed-ref"), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_REQUEST_CONFLICT"));
+                .andExpect(apiError(ErrorCode.BOARDING_REQUEST_CONFLICT));
         mvc.perform(auth(postSession(REQUEST_ID, "ref").content(body(REQUEST_ID, "ref").replace(NUMBER, NUMBER + " ")), owner))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BOARDING_REQUEST_CONFLICT"));
+                .andExpect(status().isConflict()).andExpect(apiError(ErrorCode.BOARDING_REQUEST_CONFLICT));
         mvc.perform(auth(postSession(UUID.randomUUID().toString(), "ref"), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_SESSION_CONFLICT"));
+                .andExpect(apiError(ErrorCode.BOARDING_SESSION_CONFLICT));
     }
 
     @Test
@@ -327,8 +328,8 @@ class BoardingSessionApiIntegrationTest {
         mvc.perform(auth(get(path), owner)).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(original.id()));
         mvc.perform(auth(get("/api/v1/boarding-sessions?scope=current"), owner)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
-        mvc.perform(auth(get(path), other)).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("BOARDING_SESSION_NOT_FOUND"));
-        mvc.perform(auth(get("/api/v1/boarding-sessions/999999"), owner)).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("BOARDING_SESSION_NOT_FOUND"));
+        mvc.perform(auth(get(path), other)).andExpect(status().isNotFound()).andExpect(apiError(ErrorCode.BOARDING_SESSION_NOT_FOUND));
+        mvc.perform(auth(get("/api/v1/boarding-sessions/999999"), owner)).andExpect(status().isNotFound()).andExpect(apiError(ErrorCode.BOARDING_SESSION_NOT_FOUND));
         mvc.perform(auth(post(path + "/cancel").contentType("application/json").content("{\"expectedRevision\":0}"), other))
                 .andExpect(status().isNotFound());
         mvc.perform(auth(get("/api/v1/boarding-sessions?clientRequestId=" + REQUEST_ID), other))
@@ -355,7 +356,7 @@ class BoardingSessionApiIntegrationTest {
                 .orElseThrow().suspend(0, BoardingStateReason.VEHICLE_MISSING, UTC_NOW));
         String path = "/api/v1/boarding-sessions/" + original.id() + "/cancel";
         mvc.perform(auth(post(path).contentType("application/json").content("{\"expectedRevision\":0}"), owner))
-                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("BOARDING_REVISION_CONFLICT"));
+                .andExpect(status().isConflict()).andExpect(apiError(ErrorCode.BOARDING_REVISION_CONFLICT));
         mvc.perform(auth(post(path).contentType("application/json").content("{\"expectedRevision\":1}"), owner))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("CANCELLED")).andExpect(jsonPath("$.revision").value(2));
         assertThatThrownBy(() -> new TransactionTemplate(manager).executeWithoutResult(status ->
@@ -370,7 +371,7 @@ class BoardingSessionApiIntegrationTest {
     @DisplayName("누락되거나 중복되거나 지원하지 않는 조회 query는 400이다")
     void invalid_query(String query) throws Exception {
         mvc.perform(auth(get("/api/v1/boarding-sessions" + query), owner)).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+                .andExpect(apiError(ErrorCode.INVALID_REQUEST));
     }
 
     @ParameterizedTest
@@ -379,7 +380,7 @@ class BoardingSessionApiIntegrationTest {
     @DisplayName("취소 revision은 생략할 수 없는 0 이상의 정수다")
     void invalid_revision_body(String body) throws Exception {
         mvc.perform(auth(post("/api/v1/boarding-sessions/1/cancel").contentType("application/json").content(body), owner))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+                .andExpect(status().isBadRequest()).andExpect(apiError(ErrorCode.INVALID_REQUEST));
     }
 
     @ParameterizedTest
@@ -388,7 +389,7 @@ class BoardingSessionApiIntegrationTest {
     @DisplayName("생성 body는 canonical UUID와 문자열 reference 및 전체 번호를 요구한다")
     void invalid_create_body(String body) throws Exception {
         mvc.perform(auth(post("/api/v1/boarding-sessions").contentType("application/json").content(body), owner))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+                .andExpect(status().isBadRequest()).andExpect(apiError(ErrorCode.INVALID_REQUEST));
     }
 
     @Test
@@ -396,10 +397,10 @@ class BoardingSessionApiIntegrationTest {
     void reject_invalid_reference_and_number() throws Exception {
         String reference = candidateRef();
         mvc.perform(auth(postSession(REQUEST_ID, reference), other)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
+                .andExpect(apiError(ErrorCode.BOARDING_CANDIDATE_CHANGED));
         time.set(NOW.plusSeconds(61));
         mvc.perform(auth(postSession(REQUEST_ID, reference), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
+                .andExpect(apiError(ErrorCode.BOARDING_CANDIDATE_CHANGED));
         assertThat(sessions.count()).isZero();
     }
 
@@ -637,9 +638,9 @@ class BoardingSessionApiIntegrationTest {
         clearInvocations(validator);
         mvc.perform(reconfirmRequest(id, 1, "ref")).andExpect(status().isUnauthorized());
         mvc.perform(auth(reconfirmRequest(id, 1, "ref"), other)).andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("BOARDING_SESSION_NOT_FOUND"));
+                .andExpect(apiError(ErrorCode.BOARDING_SESSION_NOT_FOUND));
         mvc.perform(auth(reconfirmRequest(999999L, 1, "ref"), owner)).andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("BOARDING_SESSION_NOT_FOUND"));
+                .andExpect(apiError(ErrorCode.BOARDING_SESSION_NOT_FOUND));
         verifyNoInteractions(validator);
     }
 
@@ -659,7 +660,7 @@ class BoardingSessionApiIntegrationTest {
         assertThat(recovered.getTraversal()).isEqualTo(original.getTraversal());
         assertThat(recovered.getCreatedAt()).isEqualTo(original.getCreatedAt());
         mvc.perform(auth(reconfirmRequest(id, 1, "ref"), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_REVISION_CONFLICT"));
+                .andExpect(apiError(ErrorCode.BOARDING_REVISION_CONFLICT));
         assertThat(sessions.findById(id).orElseThrow().getCheckpoint()).isEqualTo(recovered.getCheckpoint());
         assertThat(sessions.count()).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(1);
@@ -683,7 +684,7 @@ class BoardingSessionApiIntegrationTest {
         String reference = candidateRef();
         time.set(NOW.plusSeconds(61));
         mvc.perform(auth(reconfirmRequest(id, 1, reference), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
+                .andExpect(apiError(ErrorCode.BOARDING_CANDIDATE_CHANGED));
         assertThat(sessions.findById(id).orElseThrow().getRevision()).isEqualTo(1);
     }
 
@@ -708,7 +709,7 @@ class BoardingSessionApiIntegrationTest {
                 original.routeNumber(), original.targetName());
         doReturn(changed).when(validator).validate(anyLong(), anyString(), anyString());
         mvc.perform(auth(reconfirmRequest(id, 1, "ref"), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
+                .andExpect(apiError(ErrorCode.BOARDING_CANDIDATE_CHANGED));
         assertThat(sessions.findById(id).orElseThrow().getRevision()).isEqualTo(1);
     }
 
@@ -735,7 +736,7 @@ class BoardingSessionApiIntegrationTest {
         });
         long revision = sessions.findById(id).orElseThrow().getRevision();
         mvc.perform(auth(reconfirmRequest(id, revision, "ref"), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_RECONFIRM_REQUIRED"));
+                .andExpect(apiError(ErrorCode.BOARDING_RECONFIRM_REQUIRED));
         assertThat(sessions.findById(id).orElseThrow().getStatus().name()).isEqualTo(state);
     }
 
@@ -782,7 +783,7 @@ class BoardingSessionApiIntegrationTest {
             return start;
         }).when(validator).validate(anyLong(), anyString(), anyString());
         mvc.perform(auth(reconfirmRequest(id, 1, "ref"), owner)).andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("BOARDING_CANDIDATE_CHANGED"));
+                .andExpect(apiError(ErrorCode.BOARDING_CANDIDATE_CHANGED));
         assertThat(sessions.findById(id).orElseThrow().getRevision()).isEqualTo(1);
     }
 
@@ -1603,7 +1604,18 @@ class BoardingSessionApiIntegrationTest {
 
     private void expectError(String reference, String code, int status) throws Exception {
         mvc.perform(auth(postSession(REQUEST_ID, reference), owner)).andExpect(status().is(status))
-                .andExpect(jsonPath("$.code").value(code));
+                .andExpect(apiError(ErrorCode.valueOf(code)));
         assertThat(sessions.count()).isZero();
+    }
+
+    private ResultMatcher apiError(ErrorCode code) {
+        return result -> {
+            assertThat(result.getResponse().getStatus()).isEqualTo(code.getHttpStatus().value());
+            assertThat(result.getResponse().getContentType()).isEqualTo("application/json");
+            var error = json.readTree(result.getResponse().getContentAsString());
+            assertThat(error.propertyNames()).containsExactlyInAnyOrder("code", "message");
+            assertThat(error.get("code").asString()).isEqualTo(code.name());
+            assertThat(error.get("message").asString()).isEqualTo(code.getMessage());
+        };
     }
 }

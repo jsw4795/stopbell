@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.client.SeoulBusVehicleDetailClient;
 import com.stopbell.transit.client.SeoulBusVehicleLocationClient;
 import com.stopbell.transit.client.TagoVehicleLocationClient;
@@ -33,17 +34,21 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
+import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Testcontainers
 class BoardingCandidateApiIntegrationTest {
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+
     @Container
     @ServiceConnection
     static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
@@ -133,7 +138,7 @@ class BoardingCandidateApiIntegrationTest {
         when(tago.fetchVehicleLocations(any())).thenThrow(
                 TransitProviderClientException.protocol(TransitProvider.TAGO, "operation", new RuntimeException("secret")));
         mvc.perform(auth(request())).andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.code").value("TRANSIT_TEMPORARILY_UNAVAILABLE"))
+                .andExpect(apiError(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE))
                 .andExpect(jsonPath("$.message").value("Transit is temporarily unavailable."));
     }
 
@@ -151,7 +156,7 @@ class BoardingCandidateApiIntegrationTest {
 
         mvc.perform(request().header("Authorization", "Bearer " + token))
                 .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.code").value("TRANSIT_TEMPORARILY_UNAVAILABLE"))
+                .andExpect(apiError(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE))
                 .andExpect(jsonPath("$.message").value("Transit is temporarily unavailable."));
 
         verify(seoul, times(1)).fetchVehicleLocations(any());
@@ -173,7 +178,7 @@ class BoardingCandidateApiIntegrationTest {
                 "/api/v1/bus-routes/1/boarding-candidates?targetStopOccurrenceId=1&boardingStopOccurrenceId=-1"
         }) {
             mvc.perform(auth(get(path))).andExpect(status().isBadRequest())
-                    .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+                    .andExpect(apiError(ErrorCode.INVALID_REQUEST));
         }
         verifyNoInteractions(tago, seoul, detail);
     }
@@ -183,12 +188,12 @@ class BoardingCandidateApiIntegrationTest {
     void missing_metadata() throws Exception {
         mvc.perform(auth(get("/api/v1/bus-routes/999999999/boarding-candidates")
                         .param("targetStopOccurrenceId", target.getId().toString())))
-                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("BUS_ROUTE_NOT_FOUND"));
+                .andExpect(status().isNotFound()).andExpect(apiError(ErrorCode.BUS_ROUTE_NOT_FOUND));
         mvc.perform(auth(get("/api/v1/bus-routes/{id}/boarding-candidates", route.getId())
                         .param("targetStopOccurrenceId", "999999999")))
-                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("TARGET_STOP_OCCURRENCE_NOT_FOUND"));
+                .andExpect(status().isNotFound()).andExpect(apiError(ErrorCode.TARGET_STOP_OCCURRENCE_NOT_FOUND));
         mvc.perform(auth(request().param("boardingStopOccurrenceId", "999999999")))
-                .andExpect(status().isNotFound()).andExpect(jsonPath("$.code").value("TARGET_STOP_OCCURRENCE_NOT_FOUND"));
+                .andExpect(status().isNotFound()).andExpect(apiError(ErrorCode.TARGET_STOP_OCCURRENCE_NOT_FOUND));
         verifyNoInteractions(tago, seoul, detail);
     }
 
@@ -200,9 +205,9 @@ class BoardingCandidateApiIntegrationTest {
                 stops.saveAndFlush(new BusStop(TransitProvider.SEOUL_BUS, "seoul-stop", "같은 이름", null, null)), 10));
         mvc.perform(auth(get("/api/v1/bus-routes/{id}/boarding-candidates", route.getId())
                         .param("targetStopOccurrenceId", other.getId().toString())))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+                .andExpect(status().isBadRequest()).andExpect(apiError(ErrorCode.INVALID_REQUEST));
         mvc.perform(auth(request().param("boardingStopOccurrenceId", other.getId().toString())))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+                .andExpect(status().isBadRequest()).andExpect(apiError(ErrorCode.INVALID_REQUEST));
         verifyNoInteractions(tago, seoul, detail);
     }
 
@@ -213,5 +218,16 @@ class BoardingCandidateApiIntegrationTest {
 
     private MockHttpServletRequestBuilder auth(MockHttpServletRequestBuilder request) {
         return request.header("Authorization", "Bearer " + jwt.createAccessToken(7L));
+    }
+
+    private ResultMatcher apiError(ErrorCode code) {
+        return result -> {
+            assertThat(result.getResponse().getStatus()).isEqualTo(code.getHttpStatus().value());
+            assertThat(result.getResponse().getContentType()).isEqualTo("application/json");
+            var error = JSON.readTree(result.getResponse().getContentAsString());
+            assertThat(error.propertyNames()).containsExactlyInAnyOrder("code", "message");
+            assertThat(error.get("code").asString()).isEqualTo(code.name());
+            assertThat(error.get("message").asString()).isEqualTo(code.getMessage());
+        };
     }
 }

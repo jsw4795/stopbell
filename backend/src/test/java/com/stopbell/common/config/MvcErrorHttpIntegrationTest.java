@@ -1,6 +1,8 @@
 package com.stopbell.common.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -94,8 +96,9 @@ class MvcErrorHttpIntegrationTest {
     @MethodSource("invalidRequests")
     @DisplayName("기존 API의 body·필드·타입·범위·Enum·UUID 검증 실패는 실제 HTTP에서 고정 JSON 400이다")
     void reject_invalid_request(String path, String body) throws Exception {
-        assertError(request("POST", path, body, true, "application/json", "application/json"), ErrorCode.INVALID_REQUEST);
-        verifyNoInteractions(alarms, devices, sessions);
+        assertError(request("POST", path, body, !path.startsWith("/auth/"), "application/json", "application/json"),
+                ErrorCode.INVALID_REQUEST);
+        verifyNoInteractions(alarms, devices, sessions, google);
     }
 
     static Stream<Arguments> invalidRequests() {
@@ -112,7 +115,9 @@ class MvcErrorHttpIntegrationTest {
                 "{\"clientRequestId\":\"not-a-uuid\",\"candidateRef\":\"candidate\"}",
                 "{\"clientRequestId\":\"12345678-1234-4234-8234-123456789abc\",\"candidateRef\":\"\"}")
                 .map(body -> Arguments.of("/api/v1/boarding-sessions", body));
-        return Stream.of(alarms, devices, sessions).flatMap(stream -> stream);
+        Stream<Arguments> auth = Stream.of("/auth/google", "/auth/refresh", "/auth/logout")
+                .flatMap(path -> Stream.of("", "{").map(body -> Arguments.of(path, body)));
+        return Stream.of(alarms, devices, sessions, auth).flatMap(stream -> stream);
     }
 
     @ParameterizedTest
@@ -167,7 +172,7 @@ class MvcErrorHttpIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {400, 401, 403, 404, 405, 406, 409, 415, 418, 422, 429, 500, 502, 503, 504})
+    @ValueSource(ints = {400, 401, 403, 404, 405, 406, 408, 409, 415, 418, 422, 429, 500, 502, 503, 504})
     @DisplayName("공개 Auth의 ResponseStatusException은 reason·cause 노출 없이 지정 상태를 ERROR dispatch로 보존한다")
     void preserve_response_status_exception(int status) throws Exception {
         when(google.verify("fixture")).thenThrow(new ResponseStatusException(HttpStatusCode.valueOf(status),
@@ -206,12 +211,14 @@ class MvcErrorHttpIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"runtime", "database"})
-    @DisplayName("local Handler가 없는 Alarm의 Runtime·DB 실패는 안전한 공통 JSON 500이며 로그도 민감 원문을 제외한다")
+    @ValueSource(strings = {"runtime", "database", "transaction"})
+    @DisplayName("local Handler가 없는 Alarm의 Runtime·DB·Transaction 실패는 안전한 공통 JSON 500이며 로그도 민감 원문을 제외한다")
     void normalize_unexpected_failure(String kind, CapturedOutput output) throws Exception {
-        RuntimeException failure = kind.equals("database")
-                ? new DataIntegrityViolationException(PRIVATE, new IllegalStateException(PRIVATE))
-                : new IllegalStateException(PRIVATE);
+        RuntimeException failure = switch (kind) {
+            case "database" -> new DataIntegrityViolationException(PRIVATE, new IllegalStateException(PRIVATE));
+            case "transaction" -> new TransactionSystemException(PRIVATE, new IllegalStateException(PRIVATE));
+            default -> new IllegalStateException(PRIVATE);
+        };
         when(alarms.findAll(42L)).thenThrow(failure);
         assertError(get("/api/v1/alarms"), ErrorCode.INTERNAL_SERVER_ERROR);
         assertThat(output).contains("Unhandled MVC failure: exceptionType=" + failure.getClass().getSimpleName())
@@ -286,6 +293,20 @@ class MvcErrorHttpIntegrationTest {
                 "application/json", "application/json"), ErrorCode.UNAUTHENTICATED);
         assertError(request("POST", "/auth/google", "{\"idToken\":\"unavailable\"}", false,
                 "application/json", "application/json"), ErrorCode.SOCIAL_IDENTITY_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("JWT 인증 뒤 User가 소실된 Application 요청도 ERROR dispatch에서 JSON 401을 보존한다")
+    void preserve_missing_authenticated_user() throws Exception {
+        when(alarms.create(eq(42L), any())).thenThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, PRIVATE));
+        when(sessions.find(42L, 1L)).thenThrow(new ResponseStatusException(HttpStatus.UNAUTHORIZED, PRIVATE));
+        var alarm = request("POST", "/api/v1/alarms", "{\"targetStopOccurrenceId\":1}", true,
+                "application/json", "application/json");
+        var session = get("/api/v1/boarding-sessions/1");
+        assertError(alarm, ErrorCode.UNAUTHENTICATED);
+        assertError(session, ErrorCode.UNAUTHENTICATED);
+        assertErrorDispatch(alarm, 401);
+        assertErrorDispatch(session, 401);
     }
 
     @Test

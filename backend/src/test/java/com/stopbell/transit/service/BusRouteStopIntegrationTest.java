@@ -2,6 +2,7 @@ package com.stopbell.transit.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -20,6 +21,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.json.JsonCompareMode;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.junit.jupiter.Container;
@@ -133,13 +135,22 @@ class BusRouteStopIntegrationTest {
     }
 
     @Test
-    @DisplayName("occurrence가 없는 Route는 metadata invariant 위반으로 실패한다")
-    void reject_route_without_occurrences() {
+    @DisplayName("occurrence가 없는 Route는 invariant 실패와 안전한 HTTP 500을 반환한다")
+    void reject_route_without_occurrences() throws Exception {
         BusRoute route = route("route-without-occurrences");
 
         assertThatThrownBy(() -> busRouteStopService.findAll(route.getId()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("Bus route metadata must contain at least one stop occurrence");
+
+        mockMvc.perform(get("/api/v1/bus-routes/{routeId}/stops", route.getId())
+                        .header("Authorization", authorization()))
+                .andExpect(status().isInternalServerError())
+                .andExpect(content()
+                        .contentTypeCompatibleWith("application/json"))
+                .andExpect(content().json("""
+                        {"code":"INTERNAL_SERVER_ERROR","message":"An internal server error occurred."}
+                        """, JsonCompareMode.STRICT));
     }
 
     private BusRoute route(String externalRouteId) {

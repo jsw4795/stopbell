@@ -571,9 +571,9 @@ TASK-804 2단계부터 MVC 기본 오류와 `ResponseStatusException`·`@Respons
 
 TASK-804 2단계에서는 두 local Handler를 유지하면서, 다른 Controller의 예상 밖 Exception에도 같은 고정 JSON 500 fallback을 추가했다. 실행 순서는 Controller-local Handler → 기존 Advice → Spring의 상태/기본 MVC Resolver → 마지막 fallback이다. 정상적인 MVC 4xx와 명시적인 503을 500으로 변경하지 않으며, MVC에서 발생한 Security 예외는 기존 Filter 처리에 맡긴다. 신규 fallback 로그는 예외 type만 기록하고 message·cause·요청/Token/SQL/Provider 원문은 기록하지 않는다. TASK-805의 구조화 Logging은 별도 책임이다.
 
-이미 응답이 commit됐거나 Client 연결이 끊어진 경우는 새 JSON으로 교체할 수 없다. 공통 JSON 500도 DB 미저장이나 rollback 완료를 보장하지 않으므로 기존 요청 identity와 commit 결과 재확인 정책을 유지한다. Flutter Alarm 생성·Mutation 응답 유실 복구는 위 TASK-804 3단계 정책을 따른다. 전체 Endpoint 오류 Matrix와 TASK-804 최종 완료 판단은 후속 단계에 남는다.
+이미 응답이 commit됐거나 Client 연결이 끊어진 경우는 새 JSON으로 교체할 수 없다. 공통 JSON 500도 DB 미저장이나 rollback 완료를 보장하지 않으므로 기존 요청 identity와 commit 결과 재확인 정책을 유지한다. Flutter Alarm 생성·Mutation 응답 유실 복구는 위 TASK-804 3단계 정책을 따른다. 전체 Endpoint 오류 Matrix, 최종 Backend·Flutter 회귀와 TASK-804 완료 판단은 [4단계 최종 검증 결과](task-list.md#task-804-4단계--전체-api-오류-계약-최종-검증-및-완료-판정-2026-10-31)를 따른다.
 
-Alarm API의 error code와 HTTP status는 다음과 같다.
+Alarm 설정·관리 흐름의 error code와 HTTP status는 다음과 같다. `BUS_ROUTE_NOT_FOUND`는 Route 정류장 조회 단계에서 사용하며, occurrence ID를 받는 Alarm 생성의 metadata 부재는 `TARGET_STOP_OCCURRENCE_NOT_FOUND`로 처리한다.
 
 | Code | HTTP status | 의미 |
 | --- | --- | --- |
