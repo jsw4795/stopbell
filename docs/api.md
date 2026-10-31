@@ -145,6 +145,21 @@ Flutter가 stale `targetStopOccurrenceId`로 `404 Not Found`를 받으면 old ID
 
 현재 요청에는 `clientRequestId`가 없고 Alarm response에는 원래 `targetStopOccurrenceId`도 없다. 목록 조회 성공이나 동일 노선·정류장 이름·옵션의 Alarm은 특정 생성 요청 성공의 증거가 아니다. Flutter는 이를 자동 연결하지 않으며, 정확한 중복 생성 방지·요청 식별/복구의 서버 설계 후보 및 후속 검증은 [TASK-804 3단계의 TASK-802 책임 구분](task-list.md#task-804-3단계--flutter-alarm-응답-유실-복구-및-중복-생성-책임-구분-2026-10-31)을 따른다. 이번 단계에서 서버 멱등성 API를 추가하지 않았다.
 
+### Alarm 생성 멱등성 확정 계약 (TASK-802 2단계, 미구현)
+
+아래는 후속 Backend·Flutter 배포를 위한 **확정 설계**이며 위 현재 API의 구현 상태를 바꾸지 않는다. 서버를 먼저 배포하고 신규 Flutter를 배포한다. 기존 Client의 필드 미포함 요청은 기존처럼 매번 독립 생성하며 멱등성 보장이 없다. 구버전 지원 종료는 별도 운영 정책으로 결정한다. 신규 Client는 body에 소문자 canonical hyphenated UUID v4 `clientRequestId`를 반드시 보낸다. 생략만 legacy로 취급하고 명시적 null, 빈 값, 대문자·잘못된 형식·버전/variant는 `400 INVALID_REQUEST` (`Request is invalid.`)다. 나머지 필드와 초기 `201` 계약은 위와 같다.
+
+서버는 인증 User와 ID를 함께 식별하고 검증된 양수 `targetStopOccurrenceId`, 정규화된 두 Boolean으로 원본 요청을 비교한다. 생략 또는 null Boolean은 현 구현처럼 false다. 같은 User/ID와 같은 내용의 POST는 현재 Alarm을 `201 Created`와 기존 `AlarmResponse`로 반환한다. 이는 최초 응답의 snapshot 재현이 아니므로 상태가 달라질 수 있다. 같은 ID에 다른 내용이면 현재 metadata 검증이나 삭제 여부보다 먼저 `409 ALARM_CREATION_REQUEST_CONFLICT`, message `Alarm creation request conflicts with the original request.`를 반환한다. 같은 UUID라도 다른 User는 독립이다. 새 ID는 새 생성 의도다. ID는 권한 증명이 아니다.
+
+```http
+GET /api/v1/alarm-creation-requests/{clientRequestId}
+Authorization: Bearer <access-token>
+```
+
+인증 User의 기록과 Alarm이 존재하면 `200 OK`와 **현재** `AlarmResponse`를 반환한다. 같은 내용의 POST 재전송 또는 GET에서 기록은 있지만 Alarm이 삭제됐다면 `410 ALARM_CREATION_RESULT_GONE`, message `Alarm created by this request is no longer available.`을 반환하고 새 Alarm을 만들지 않는다. 결과 snapshot을 살아 있는 Alarm처럼 반환하지 않는다. 기록이 없거나 다른 User의 기록뿐이면 `404 ALARM_CREATION_REQUEST_NOT_FOUND`, message `Alarm creation request was not found.`이다. 미커밋 처리 중에도 404일 수 있어 실패나 rollback의 증거가 아니다. 별도 processing 상태는 노출하지 않는다. 잘못된 UUID는 400 `INVALID_REQUEST`, 인증이 없거나 유효하지 않으면 401 `UNAUTHENTICATED`, 서버 장애는 기존 5xx 오류 계약이다. 오류 body는 기존 `{ "code": "...", "message": "..." }` 두 필드만 사용한다. ID는 POST와 GET에 같은 엄격한 UUID 형식을 적용한다.
+
+요청 기록은 서버 UTC 기록 시각부터 최소 30일 보존하고 이후 cleanup이 실제 삭제할 때까지 위 계약을 적용한다. 삭제가 완료된 뒤 같은 ID는 신규 요청으로 처리될 수 있으며 중복 방지를 보장하지 않는다. GET 404는 미처리·처리 중·만료 후 삭제를 구분하지 못한다. 오래된 불확실 요청의 무조건 재전송을 허용하지 않으며 사용자에게 중복 가능성을 알리고 명시적으로 새 생성을 선택하게 한다. 기간·동시성 및 cleanup 경계는 [DB 설계](database.md#alarm_creation_requests-task-802-설계-미구현)와 [실행 흐름](architecture.md#alarm-생성-멱등성-실행-설계-task-802-미구현)을 따른다.
+
 ### 알림 목록 조회
 
 ```http

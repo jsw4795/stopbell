@@ -172,6 +172,18 @@ TimeoutException은 기존대로 호출자에게 전달한다. 늦은 성공을 
 
 `AlarmHome`의 기존 Auth generation·User/login identity·navigation epoch를 상세의 `isRequestCurrent`에도 전달해 logout/계정 전환이나 알림 선택이 화면 dispose보다 먼저 일어나도 후속 Mutation/GET/UI/Navigation을 막는다. 상세는 자체 request generation·Alarm ID·Client identity·mounted를 각 await 뒤에 확인하고, ID/Client 교체와 dispose에서 이전 요청을 무효화한다. GET 중 중복 조회와 Mutation을 직렬로 차단해 오래된 조회가 새 Mutation을 덮지 못하게 한다. Push 준비 실패는 HTTP 미전송 상태이므로 재시도 가능하며, 삭제 확인 Dialog 뒤에도 같은 수명을 확인한다. 기존 `AuthenticatedApiClient`/`AuthSession`과 Timeout 이후 늦은 401의 Refresh/Replay 차단 정책은 변경하지 않는다. 이미 전송한 서버 작업의 취소나 서버 수준의 생성 멱등성을 보장하는 경계는 아니다.
 
+### Alarm 생성 멱등성 실행 설계 (TASK-802, 미구현)
+
+후속 구현에서 인증과 형식/정규화 검증 후 `(userId, clientRequestId)`를 먼저 조회하고 fingerprint를 비교한다. 기존 기록이면 현재 metadata 생성 검증을 건너뛰어 [API 결과](api.md#alarm-생성-멱등성-확정-계약-task-802-2단계-미구현)를 반환한다. 없으면 별도 짧은 쓰기 transaction에서 기존 metadata validation, Alarm과 요청 기록 저장 및 flush/commit을 원자적으로 수행한다. 생성된 Alarm만 또는 기록만 commit되지 않는다. DB UNIQUE가 최종 경계다. 동일 ID 경쟁에서 패자는 자신의 Alarm을 포함한 transaction 전체를 rollback한다. constraint 이름과 MySQL duplicate-key 원인으로 **해당 UNIQUE 위반만** 식별하고 transaction 종료 뒤 새 transaction과 persistence context에서 정확한 User/ID를 조회·비교한다. 다른 무결성 오류는 그대로 오류 처리하며 무한 재시도하지 않는다. 승자의 rollback, lock timeout/deadlock, commit 불명확 또는 새 조회에 기록이 없는 경우 성공으로 꾸미지 않고 오류/불확실로 남긴다. 이후 Client가 원래 ID와 body로 명시적 재시도할 수 있다. 다른 User의 같은 ID는 독립이다. Blind upsert, INSERT IGNORE, JVM lock이나 실패 transaction 재조회에 의존하지 않는다.
+
+기록 재조회와 cleanup은 해당 요청 row의 lock을 사용해 직렬화한다. 결과 조회는 해당 User의 Alarm을 읽고 삭제와 경합하면 조회 시점의 상태 또는 Gone을 반환한다. 삭제는 기존 Alarm lock/lifecycle 및 Notification 정책을 유지한다. 기록은 Alarm과 FK 없이 남는다. Commit 성공 후 응답 유실은 GET 또는 같은 POST로 복구한다. rollback에는 둘 다 없으므로 같은 ID로 현재 metadata를 다시 검증해 생성할 수 있다. GET 404는 진행 중인 최초 POST를 배제하지 못한다. UNIQUE 경합, 예외 식별, 격리 수준 및 cleanup과 삭제 경합은 실제 MySQL 테스트로 검증한다.
+
+Flutter는 사용자 확정 → Push 준비 → `Random.secure` UUID v4 한 번 생성 → 원본 body와 User/login Session identity를 Secure Storage에 저장하고 성공 확인 → POST 순서다. `newBoardingRequestId`의 난수/비트 설정과 `SecureBoardingIntentStorage`의 session별 key 및 비동기 직렬화 패턴을 재사용할 수 있으나 Boarding 도메인 payload는 공유하지 않는다. 현재 `AuthSession`은 token 저장의 session identity를 재시작·refresh에 유지하고 재로그인 때 새로 발급한다. 각 await 뒤 기존 auth generation·User/session identity·navigation epoch를 확인하며 다른 session 기록을 복구하지 않는다. 같은 session 내 이전 정리가 새 intent를 삭제하지 않도록 저장·삭제를 직렬화하고 ID 비교 후 삭제한다.
+
+정상 생성 또는 GET 확인 시 원래 Alarm ID를 사용하고 생성 intent 정리를 확인한다. 정리 실패 시 결과를 보존하고 정리 재시도를 제공하며 새 생성을 막는다. 불확실 응답, 5xx, timeout, 잘못된 응답, GET 404/실패는 intent를 유지하고 자동 POST·새 UUID·자동 활성화를 금지한다. 명시적 재조회 또는 원본 ID/body 재시도를 제공한다. 410은 삭제된 결과로 표시하고 정리 뒤 사용자가 명시적으로 새 생성할 때만 새 ID를 발급한다. 명백한 생성 전 거부도 안전하게 정리한 후 재선택한다. 로컬 저장에는 token, credential, FID, provider 응답을 넣지 않는다.
+
+장기 미사용 intent는 보존 만료 후 재전송으로 중복될 수 있다. 로컬 생성 시각을 저장해 30일 이상이거나 시계 신뢰성이 불명확하면 재전송을 차단하고 사용자에게 결과 불확실과 중복 가능성을 안내한다. 로컬 시계는 서버 보존의 증명이 아니므로 30일 미만이어도 절대 보장을 주장하지 않는다. 생성 결과 확인은 활성화 성공의 증거가 아니다. 기존 Push 준비 → 생성 → 활성화 순서를 유지하고, 복구 후 활성화 여부를 자동 추정하지 않으며 TASK-804의 원래 Alarm ID 조회/명시적 복구를 따른다. 생성 ID를 activate/deactivate/delete의 멱등성 ID로 사용하지 않는다.
+
 ### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
 
 로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 목적·선택 승차 지점을 선택한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.

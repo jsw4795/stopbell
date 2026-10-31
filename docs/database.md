@@ -189,6 +189,28 @@ TASK-708 설계에 따라 V14에서 적용한 runtime 확장은 `follow_up_track
 
 기존 FOLLOW_UP row의 원래 UUID는 차량 ID/시간이나 초기 NotificationHistory로 복원할 수 없다. TASK-707 migration 적용 전 기존 follow-up이 정상 완료/기존 5분 정책으로 만료되어 FOLLOW_UP row가 없음을 확인하고 monitoring을 멈춘 상태에서 적용한다. 남은 row가 있으면 migration 적용을 진행하지 않으며 임의 UUID backfill은 금지한다. V6/V11 등 기존 Migration은 수정하지 않고 적용 순번에 맞는 새 Migration을 작성한다. Domain과 ARRIVED producer 연결도 같은 TASK-707에서 수행해 새 CHECK를 만족하지 못하는 중간 구현을 남기지 않는다.
 
+### alarm_creation_requests (TASK-802 설계, 미구현)
+
+기존 row의 소급 backfill 없이 신규 ID 요청만 저장한다. 다음은 후속 migration의 목표이며 현재 Schema가 아니다.
+
+```text
+id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY
+user_id BIGINT NOT NULL REFERENCES users(id)
+client_request_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL
+request_fingerprint BINARY(32) NOT NULL
+alarm_id BIGINT NOT NULL
+created_at DATETIME(6) NOT NULL
+expires_at DATETIME(6) NOT NULL
+UNIQUE uk_alarm_creation_requests_user_request (user_id, client_request_id)
+INDEX idx_alarm_creation_requests_expiry (expires_at, id)
+```
+
+`alarm_id`는 생성된 ID의 독립 기록이며 Alarm FK나 cascade가 없다. User 범위로 Alarm을 조회해 부재면 tombstone으로 해석한다. 기존 auto-increment Alarm ID를 재사용하거나 수동으로 재할당하지 않는 운영 전제가 필요하다. 삭제 transaction에 별도 기록 갱신이 필요 없고 기존 Notification 보존 정책도 바뀌지 않는다. User FK는 기존 정책을 따른다. 향후 User 삭제 정책은 별도로 결정한다. CHECK로 `expires_at > created_at`과 canonical UUID v4 형식을 강제한다. 시각은 UTC이며 `expires_at = created_at + 30일`이다. 기록은 만료 시각 전에 삭제하지 않는다.
+
+Fingerprint는 SHA-256의 32 raw bytes다. 입력은 UTF-8 ASCII 문자열 `v1:<양수 Long의 10진수>:<before 0 또는 1>:<after 0 또는 1>`이다. 예를 들어 `v1:12345:0:0`. Request ID·User·JSON 표기·metadata는 포함하지 않는다. 버전 접두사는 canonical 형식 변화 시 기존 비교 규칙 보존을 위한 것이다. 충돌 비교는 이 digest를 사용한다.
+
+만료된 row도 물리 삭제까지 동일하게 처리하며 조회 시 만료 기준으로 무시하지 않는다. 후속 Backend는 expiry index를 이용한 제한된 batch cleanup을 실제 구현하고 재시작 후 재개·실패 관측을 제공한다. Cleanup과 재전송/조회 경합은 DB transaction의 row lock으로 직렬화하고 삭제가 먼저 commit되면 신규 요청이 될 수 있다. 예상 생성량과 row/index 저장량, batch 주기·부하 및 백업/복구 후 만료 처리도 배포 전 검증한다. 30일은 기록 시각 기준이며 긴 transaction의 commit 시각 기준 30일을 주장하지 않는다.
+
 ### bus_alarm_targets
 
 Bus-specific 장기 Alarm 설정을 공통 `alarms`의 nullable column으로 펼치지 않고 공유 PK Entity/table로 저장한다. 한 Alarm은 최대 하나의 BusAlarmTarget을 가지며 `alarm_id`는 PK이자 `alarms.id` FK다. FK는 `ON DELETE CASCADE`이므로 Alarm 삭제 시 orphan Target이 남지 않는다.

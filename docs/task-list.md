@@ -357,6 +357,20 @@ Backend는 계약 확정 후 API/Service, 원자적 요청 기록 및 migration,
 
 TASK-802의 남은 조건은 위 미검증 경계의 필요성 판단, 생성 멱등성 정책과 범위 결정, 승인 시 Backend·Flutter·migration 및 관련 검증, 최종 회귀와 완료 판정이다. 제품 코드·API·Migration·Dependency 변경은 없다.
 
+### TASK-802 2단계 — Alarm 생성 서버 멱등성 계약 확정 (2026-10-31)
+
+시작 기준 `main` / `b2c8bf4adaac9d4aa23a18da382780e6f19cadf9`, 작업 트리 변경 없음. 이 단계는 **설계 확정, 미구현**이며 TASK-802는 `[ ]`다. 기존 TASK-802 1단계와 TASK-804 완료 기록 및 다른 Task 상태를 유지한다. B안인 서버 Request Identity를 채택한다. 최종 계약과 근거는 [API](api.md#alarm-생성-멱등성-확정-계약-task-802-2단계-미구현), [DB](database.md#alarm_creation_requests-task-802-설계-미구현), [실행 흐름](architecture.md#alarm-생성-멱등성-실행-설계-task-802-미구현), [ADR-013](adr/ADR-013-alarm-creation-idempotency.md)을 따른다.
+
+현재 `AlarmController`는 201을 고정하고 `AlarmService.create`는 User·current metadata 검증 후 매번 Alarm과 BusAlarmTarget을 저장한다. 조회는 User별이며 삭제는 Alarm lock 뒤 pending Delivery를 종료하고 Alarm을 삭제한다. Request ID 기록은 없다. Flutter `AlarmApiClient`는 201만 성공으로 인정하고 화면은 Push 준비 → create → activate를 수행한다. `AuthSession` identity는 재시작/refresh에 유지되고 새 로그인에 바뀐다. Boarding UUID 생성 및 session별 Secure Storage 직렬화는 참고 가능하다. 기존 Migration의 User FK, UTC DATETIME(6), ascii_bin UUID 및 Notification 보존을 유지한다.
+
+- **Identity와 API:** body의 canonical UUID v4와 인증 User 조합. 신규 Client는 필수, 필드 미포함 legacy는 기존 비멱등 생성이다. 같은 요청은 현재 Alarm을 201, 다른 canonical body는 409 `ALARM_CREATION_REQUEST_CONFLICT` (`Alarm creation request conflicts with the original request.`). GET `/api/v1/alarm-creation-requests/{clientRequestId}`은 현재 Alarm 200, 삭제 410 `ALARM_CREATION_RESULT_GONE` (`Alarm created by this request is no longer available.`), 기록 부재/타 User 404 `ALARM_CREATION_REQUEST_NOT_FOUND` (`Alarm creation request was not found.`). 삭제된 동일 POST도 410이며 body 충돌은 우선 409다. 잘못된 UUID는 400, 인증 실패는 401, 장애는 기존 5xx다. 오류는 기존 code/message 두 필드다.
+- **Fingerprint/DB:** 검증·정규화된 occurrence ID와 두 Boolean의 버전 있는 canonical 문자열을 SHA-256으로 저장한다. 별도 요청 테이블의 `(user_id, client_request_id)` UNIQUE가 최종 방어선이고 `alarm_id`는 FK 없는 불변 참조다. Alarm과 기록은 단일 transaction으로 commit한다. 30일 보존 이후 batch cleanup이 실제 삭제하면 같은 ID도 새 요청으로 처리될 수 있다. 유한 tombstone의 보장 한계를 숨기지 않는다.
+- **경합과 복구:** identity 확인을 metadata validation보다 먼저 한다. 동시 요청은 UNIQUE에서 패자의 전체 transaction을 rollback하고 해당 제약 위반만 새 transaction에서 정확히 조회·비교한다. 그 외 오류를 duplicate로 숨기거나 무한 재시도하지 않는다. commit 성공·응답 유실은 같은 ID GET/POST로 복구한다. rollback은 양쪽 기록이 없어 동일 요청을 현재 metadata로 재검증한다. GET 404는 처리 중 또는 cleanup 이후일 수도 있어 rollback 증거가 아니다. 다른 User는 격리한다.
+- **Flutter:** Push 준비 후 원본 ID/body, User/session 및 최소 문맥을 Secure Storage에 성공적으로 기록한 뒤 POST한다. 불확실하면 보존하고 명시적 GET/같은 요청 재시도만 허용한다. session 전환, 앱 재시작, 삭제 410, 정리 실패와 오래된 비동기 정리를 보호한다. 만료 가능성이 있거나 시계를 신뢰할 수 없는 오래된 intent는 재전송하지 않고 중복 위험을 안내한다. 원래 Alarm ID 확보와 활성화 성공은 별개이며 TASK-804 복구 및 Auth generation/navigation epoch를 유지한다. Token·credential·FID·Provider 원본을 저장하지 않는다.
+- **범위:** 서로 다른 ID/기기의 의도는 합치지 않는다. NotificationEvent/Delivery identity, FCM과 기기 표시의 exactly-once 보장은 이 결정과 독립이다.
+
+후속 3단계에서 새 Flyway migration, DTO/검증, repository, transaction 및 해당 UNIQUE만 식별하는 복구, GET/삭제 tombstone, 제한 batch cleanup과 실제 MySQL 동시성·HTTP 테스트를 함께 구현한다. 기존 Alarm은 backfill하지 않는다. DDL lock·배포/rollback, 보존량, cleanup 실패 관측 및 서버 선배포/legacy 혼합 운영을 검증한다. 4단계는 Flutter durable intent와 session/navigation 보호, 응답 유실·명시적 재시도 및 client/widget 검증이다. 5단계는 순차/동시 중복, 다른 body/User, commit 응답 유실·rollback·metadata 변경·서버 재시작·삭제·만료와 cleanup 경합, legacy, Notification 회귀와 Backend/Flutter 전체 회귀를 확인한 뒤 TASK-802 완료를 판단한다. 기존 구현에서 이 단계에 별도 설계 결정을 요구하는 미해결 정책은 없다. MySQL 제약 식별·격리/lock·cleanup 성능과 실제 배포 호환성은 구현 단계의 필수 검증 사항이다.
+
 ### TASK-804 API 오류 계약 분석 및 구현 계획 (2026-10-30)
 
 **분석 전용 결과: A안(기존 GlobalExceptionHandler·Security 경계의 최소 보강, 두 Controller-local Handler 유지)을 추천한다.** 기준은 `main`, HEAD `47493ea3ef3f70d37d258d81d90521f7bb6e6f3d`이며 시작 시 tracked/untracked 변경은 없었다. 이 절만 추가하며 TASK-804 `[ ]`, TASK-814 `[x]`, TASK-816 `[x]`와 다른 Task 상태·기존 감사/완료 기록을 유지한다. 아래 권고는 구현·새 정책 확정·HTTP 실행 검증을 뜻하지 않는다.
