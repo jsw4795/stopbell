@@ -148,6 +148,53 @@ class PassedNotificationDispatchIntegrationTest {
         assertActive(fixture);
     }
 
+    @Test
+    @DisplayName("원자 fan-out 뒤 접수 응답과 DB 반영 사이 중단을 다중 Device별로 복구한다")
+    void fan_out_and_ambiguous_acceptance_recover_independently() {
+        Fixture fixture = fixture("최근 정류장", 3, true);
+        var ids = jdbc.queryForList("select id from notification_deliveries where notification_event_id=? order by id",
+                Long.class, fixture.eventId());
+        assertThat(ids).hasSize(2);
+        var provider = mock(FcmProviderClient.class);
+        when(provider.send(any())).thenAnswer(call -> {
+            assertNoTransaction();
+            NotificationSendRequest request = call.getArgument(0);
+            assertPayload(request, fixture, expectedBody("최근 정류장", 3));
+            assertThat(request.expiresAt()).isEqualTo(NOW.plusSeconds(60));
+            return new NotificationSendResult(NotificationProviderResult.ACCEPTED, null, null,
+                    clock.instant(), 1, true);
+        });
+
+        // Simulate loss after Provider acceptance but before the result transaction.
+        var started = attempts().beginAttempt(ids.getFirst()).orElseThrow();
+        provider.send(started.target().request());
+        new NotificationDispatchWorker(new NotificationDispatchProperties(true, 50, Duration.ofSeconds(1)),
+                deliveries, attempts(), provider, clock).dispatchPending();
+        assertThat(deliveries.findById(ids.getFirst()).orElseThrow().getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+        assertThat(deliveries.findById(ids.get(1)).orElseThrow().getStatus()).isEqualTo(NotificationDeliveryStatus.ACCEPTED);
+
+        String rotatedFid = "rotated-" + UUID.randomUUID();
+        when(clock.instant()).thenReturn(NOW.plusSeconds(25));
+        tx.executeWithoutResult(status -> {
+            Device device = devices.findByIdForUpdate(fixture.deviceId()).orElseThrow();
+            device.register(rotatedFid, 1, UTC.plusSeconds(25));
+            entityManager.persist(new Device(device.getUser(), UUID.randomUUID().toString(), "a".repeat(64),
+                    DevicePlatform.IOS, UUID.randomUUID().toString(), 0, UTC.plusSeconds(25)));
+        });
+        new NotificationDispatchWorker(new NotificationDispatchProperties(true, 50, Duration.ofSeconds(1)),
+                deliveries, attempts(), provider, clock).dispatchPending();
+        var recovered = deliveries.findById(ids.getFirst()).orElseThrow();
+        assertThat(recovered.getStatus()).isEqualTo(NotificationDeliveryStatus.ACCEPTED);
+        assertThat(recovered.getAttemptCount()).isEqualTo(2);
+        assertThat(recovered.getExpiresAt()).isEqualTo(UTC.plusSeconds(60));
+        assertThat(deliveries.findById(ids.get(1)).orElseThrow().getAttemptCount()).isOne();
+        assertThat(deliveries.count()).isEqualTo(2);
+        var requests = org.mockito.ArgumentCaptor.forClass(NotificationSendRequest.class);
+        verify(provider, times(3)).send(requests.capture());
+        assertThat(requests.getAllValues().getLast().fid()).isEqualTo(rotatedFid);
+        assertActive(fixture);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"expired", "disabled", "owner-changed", "generation-changed"})
     @DisplayName("저장된 PASSED 위치가 있어도 만료·비활성·소유자·generation 변경 Delivery는 전송하지 않는다")
@@ -191,6 +238,10 @@ class PassedNotificationDispatchIntegrationTest {
     }
 
     private Fixture fixture(String name, Integer stops) {
+        return fixture(name, stops, false);
+    }
+
+    private Fixture fixture(String name, Integer stops, boolean twoDevices) {
         long[] identity = tx.execute(status -> {
             User user = new User(AuthProvider.GOOGLE, UUID.randomUUID().toString());
             entityManager.persist(user);
@@ -201,13 +252,18 @@ class PassedNotificationDispatchIntegrationTest {
             Device device = new Device(user, UUID.randomUUID().toString(), "a".repeat(64), DevicePlatform.IOS,
                     UUID.randomUUID().toString(), 0, UTC);
             entityManager.persist(device);
+            if (twoDevices) {
+                entityManager.persist(new Device(user, UUID.randomUUID().toString(), "a".repeat(64),
+                        DevicePlatform.IOS, UUID.randomUUID().toString(), 0, UTC));
+            }
             entityManager.flush();
             return new long[] {alarm.getId(), device.getId()};
         });
         UUID cycle = UUID.randomUUID();
         commitPassed(identity[0], cycle, name, stops, NOW);
         long eventId = jdbc.queryForObject("select id from notification_events where alarm_id=?", Long.class, identity[0]);
-        long deliveryId = jdbc.queryForObject("select id from notification_deliveries where notification_event_id=?", Long.class, eventId);
+        long deliveryId = jdbc.queryForList("select id from notification_deliveries where notification_event_id=? order by id",
+                Long.class, eventId).getFirst();
         return new Fixture(identity[0], identity[1], eventId, deliveryId, cycle);
     }
 
