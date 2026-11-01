@@ -995,6 +995,7 @@ class BusAlarmMonitoringSchedulerTest {
         var realEvaluator = new BusAlarmEvaluator(mock(BusRouteTraversalService.class));
         var monitored = spy(realSeoulScheduler(rosterClient, detailClient, realEvaluator, clock));
         Alarm alarm = seoulEvaluationAlarm();
+        when(alarm.isInitialBaselinePending()).thenReturn(true);
         when(alarm.getBusAlarmTarget().isNotifyOneStopBefore()).thenReturn(true);
         when(pollingService.findMonitoringGroups()).thenReturn(List.of(seoulGroup(alarm, "route-1")));
         when(rosterClient.fetchVehicleLocations(any())).thenReturn(seoulRoster("A", "B"));

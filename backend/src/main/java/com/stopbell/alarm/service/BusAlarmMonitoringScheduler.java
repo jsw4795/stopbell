@@ -305,7 +305,8 @@ public class BusAlarmMonitoringScheduler {
                 : result.followUpExpired() ? OperationalMetrics.Evaluation.FOLLOW_UP_EXPIRED
                 : OperationalMetrics.Evaluation.NO_EVENT);
         BusAlarmEvaluationResult selectedResult = new BusAlarmEvaluationResult(
-                selectedEvent.map(List::of).orElseGet(List::of), result.nextState(), result.followUpExpired()
+                selectedEvent.map(List::of).orElseGet(List::of), result.nextState(), result.followUpExpired(),
+                result.expectedInitialBaselinePending()
         );
         PendingDecision decision = new PendingDecision(alarm.getStatus(), selectedResult, now);
         pendingDecisions.put(key, decision);

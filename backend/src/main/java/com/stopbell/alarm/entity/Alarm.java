@@ -44,6 +44,9 @@ public class Alarm {
     @Column(name = "activation_generation", nullable = false)
     private long activationGeneration;
 
+    @Column(name = "initial_baseline_pending", nullable = false)
+    private boolean initialBaselinePending;
+
     @Column(name = "follow_up_vehicle_tracking_id", length = 255)
     private String followUpVehicleTrackingId;
 
@@ -120,6 +123,14 @@ public class Alarm {
         return activationGeneration;
     }
 
+    public boolean isInitialBaselinePending() {
+        return initialBaselinePending;
+    }
+
+    public void completeInitialBaseline() {
+        initialBaselinePending = false;
+    }
+
     public void activate() {
         if (transitType == TransitType.BUS && busAlarmTarget == null) {
             throw new IllegalStateException("Bus alarm cannot activate without a BusAlarmTarget");
@@ -127,6 +138,7 @@ public class Alarm {
         if (status != AlarmStatus.ACTIVE) {
             activationGeneration++;
             status = AlarmStatus.ACTIVE;
+            initialBaselinePending = true;
             clearFollowUpRuntime();
         }
     }

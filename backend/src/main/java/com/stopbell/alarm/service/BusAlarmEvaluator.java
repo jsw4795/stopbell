@@ -86,13 +86,14 @@ public class BusAlarmEvaluator {
         validateObservationRoute(target, observations);
 
         return switch (alarm.getStatus()) {
-            case ACTIVE -> evaluateActive(target, state, presentVehicleIds, observations, now, completePresence);
+            case ACTIVE -> evaluateActive(alarm, target, state, presentVehicleIds, observations, now, completePresence);
             case FOLLOW_UP -> evaluateFollowUp(alarm, target, state, presentVehicleIds, observations, now);
             case INACTIVE -> throw new IllegalStateException("Inactive alarm cannot be evaluated");
         };
     }
 
     private BusAlarmEvaluationResult evaluateActive(
+            Alarm alarm,
             BusAlarmTarget target,
             BusAlarmEvaluationState state,
             Set<String> presentVehicleIds,
@@ -123,7 +124,7 @@ public class BusAlarmEvaluator {
 
             PositionRelation relation = positionOf(target, observation);
             if (!next.baselineEstablished()) {
-                evaluateBaseline(target, next, observation, relation, now, events);
+                evaluateBaseline(target, next, observation, relation, now, events, !alarm.isInitialBaselinePending());
                 continue;
             }
             evaluateActiveVehicle(target, next, observation, relation, now, events);
@@ -131,7 +132,8 @@ public class BusAlarmEvaluator {
         if (!next.baselineEstablished()) {
             next.establishBaseline();
         }
-        return new BusAlarmEvaluationResult(events, next.freeze(), false);
+        return new BusAlarmEvaluationResult(events, next.freeze(), false,
+                state.baselineEstablished() ? null : alarm.isInitialBaselinePending());
     }
 
     private void evaluateBaseline(
@@ -140,11 +142,16 @@ public class BusAlarmEvaluator {
             TransitObservation observation,
             PositionRelation relation,
             Instant now,
-            List<TransitEvent> events
+            List<TransitEvent> events,
+            boolean recovering
     ) {
         switch (relation) {
             case BEFORE_TARGET -> {
                 VehicleTrackingState tracking = VehicleTrackingState.beginBeforeTarget(observation, now);
+                if (recovering && java.util.Objects.equals(target.getPredecessorExternalStopId(), observation.currentStopExternalId())
+                        && java.util.Objects.equals(target.getPredecessorStopOrder(), observation.currentStopOrder())) {
+                    tracking = tracking.emit(TransitEventType.ONE_STOP_BEFORE, observation, now);
+                }
                 next.trackedVehicles().put(observation.vehicleTrackingId(), tracking);
                 emitOneStopBeforeIfEligible(target, tracking, observation, now, events, next.trackedVehicles());
             }

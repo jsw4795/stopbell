@@ -203,6 +203,10 @@ Alarm은 새 monitoring activation cycle마다 증가하는 `activationGeneratio
 
 ACTIVE vehicle tracking은 기존 Phase 5 결정대로 V1에서 memory 기반일 수 있다. `trackingCycleId`는 DB transaction ID가 아니라 logical vehicle tracking cycle identity로 cycle 시작 시 한 번 생성한다. 같은 logical cycle의 lifecycle transaction이 deadlock 등으로 retry되어도 identity를 다시 만들지 않으며 retry로 Notification dedup uniqueness를 우회해서는 안 된다. TransitEvent 발생 시 이 identity를 durable NotificationEvent에 복사한다. ACTIVE restart 뒤에는 이전 tracking을 새 cycle과 임의로 연결하지 않고 safe recovery baseline을 사용한다. FOLLOW_UP은 아래의 원래 cycle identity 복원 계약을 따른다. Notification correctness를 이유로 raw TransitObservation 또는 ACTIVE tracking 전체를 영속하지 않는다.
 
+### TASK-811 최초 baseline 영속 결정
+
+개발자 결정에 따라 generation별 최초 baseline 대기 여부만 Alarm에 저장한다. 신규 활성화는 기존 즉시 알림을 유지하고, 기존 ACTIVE의 재시작은 predecessor만으로 ONE_STOP_BEFORE를 재발행하지 않는다. 잠긴 Alarm의 generation·status·baseline 기대값을 검증하고 선택 Event·Delivery와 최초 평가 완료를 한 transaction에서 commit한다. raw Observation과 ACTIVE tracking 전체는 저장하지 않는다. 다른 차량 cycle이나 FCM 접수 뒤 응답 유실에 따른 모든 중복은 보장 범위 밖이다. 자세한 Schema는 [Database](../database.md#alarms), 실행은 [Architecture](../architecture.md#alarm과-vehicle-tracking-lifecycle)를 따른다.
+
 ### Duplicate identity
 
 다음 중복 책임을 분리한다.
@@ -221,7 +225,7 @@ Logical Notification의 identity는 `(alarmId, activationGeneration, trackingCyc
 
 #### 현재 구현 조사와 보장 한계
 
-아래는 TASK-708 설계 당시 조사다. 이후 Schema/Entity/FOLLOW_UP 저장은 TASK-707, 원래 UUID를 사용하는 평가기 복원과 atomic decision은 TASK-708에서 구현했다. 아래 당시 한계 중 ACTIVE restart 항목은 유지한다.
+아래는 TASK-708 설계 당시 조사다. 이후 Schema/Entity/FOLLOW_UP 저장은 TASK-707, 원래 UUID를 사용하는 평가기 복원과 atomic decision은 TASK-708에서 구현했다. 아래 당시 ACTIVE restart 한계는 TASK-811의 generation별 baseline 영속 결정으로 보완했다.
 
 - `Alarm`/V11은 activation generation을 영속하고 기존 증가 규칙을 구현했다. `VehicleTrackingState.begin()`/`beginBeforeTarget()`은 UUID를 생성하며 `observe()`/`emit()`은 같은 ID를 유지한다. `TransitEvent`는 UUID와 event type을 전달한다.
 - `BusAlarmEvaluationState.forFollowUp()`은 정상 process 안에서 ARRIVED 차량의 cycle을 유지한다. 반면 `Alarm`/V6에는 차량 ID와 시작·만료 시각만 있고 cycle ID는 없다. `BusAlarmEvaluator.evaluateFollowUp()`은 memory tracking이 없으면 `begin()`으로 새 UUID를 만든다. 따라서 현재 FOLLOW_UP 복구는 차량 correlation은 가능하지만 ARRIVED와 ONE_STOP_AFTER의 cycle identity continuity는 보장하지 못한다.

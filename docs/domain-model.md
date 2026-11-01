@@ -228,6 +228,8 @@ TASK-702의 `notification.entity.Device`, `DevicePlatform`과 V13 매핑을 유�
 
 `activationGeneration`은 서로 다른 monitoring activation cycle을 구분하는 persisted semantic generation이며 `BIGINT NOT NULL DEFAULT 0`으로 저장한다. `INACTIVE → ACTIVE`와 `FOLLOW_UP → ACTIVE`에서 증가하여 deactivate 후 reactivate, FOLLOW_UP 중 reactivate, stale scheduler result와 이전 activation의 Notification candidate를 현재 activation과 구분한다. `ACTIVE → ACTIVE`에서는 증가하지 않는다. lifecycle mutation과 Scheduler 결과 반영은 Alarm row `PESSIMISTIC_WRITE` 하나로 보호하며 `@Version`, CAS, optimistic locking을 함께 추가하지 않는다.
 
+`initialBaselinePending`은 현재 generation의 최초 baseline 평가 대기 여부다. 새 activation에서 true가 되고 성공적인 최초 평가 결정과 함께 false로 commit되며 ACTIVE 중복 활성화는 값을 유지한다. 정확한 저장·복구 계약은 [Database](database.md#alarms)를 따른다.
+
 `startFollowUp(vehicleTrackingId, trackingCycleId, startedAt, expiresAt)`은 ACTIVE이며 `notifyOneStopAfter`가 설정된 Bus Alarm에서만 FOLLOW_UP을 시작한다. 만료시간 숫자는 이 Domain이 정하지 않고 호출자가 명시적으로 전달한다. `completeFollowUp()`은 FOLLOW_UP을 INACTIVE로 전환하고 runtime을 지운다.
 
 FOLLOW_UP이면 non-blank `followUpVehicleTrackingId`, 원래 UUID `followUpTrackingCycleId`, `followUpStartedAt`, `followUpExpiresAt`이 모두 존재하고 expiry가 start보다 뒤여야 한다. FOLLOW_UP이 아니면 네 runtime field는 모두 비어 있어야 한다. after 옵션과 runtime의 교차-table 불변 조건은 Domain이, runtime field의 완전성과 status 조합은 Domain과 Database CHECK가 함께 강제한다.
@@ -659,7 +661,7 @@ TASK-509의 V1 evidence policy는 다음과 같다. `observedAt`과 서울의 `p
 
 `TransitObservation`과 ACTIVE Vehicle tracking state 전체는 V1에서 영속하지 않는다. Scheduler는 `(alarmId, activationGeneration)` key로 ACTIVE/FOLLOW_UP evaluation state를 memory에 보관하고 restart 뒤에는 `initial()` baseline으로 시작한다. Provider I/O 뒤 lifecycle 반영 직전에 `PESSIMISTIC_WRITE`로 current generation/status를 다시 검증하므로 stale result는 lifecycle과 memory state 모두 바꾸지 않는다. Durable Notification dedup에 필요한 activation generation, tracking cycle identity, event type은 TransitEvent에서 `NotificationEvent`로 전달한다. `TransitEvent`는 type, vehicle tracking ID, UUID cycle ID, latest observed time/position, optional provider data time 및 PASSED의 optional metadata-derived `stopsPastTarget`을 provider-neutral하게 전달한다.
 
-TASK-708 평가기는 FOLLOW_UP memory가 없을 때 `followUpTrackingCycleId`로 원래 cycle identity를 복원한다. 새 UUID나 과거 Observation을 만들지 않고 현재의 fresh Observation으로 기존 after 판정만 수행한다. DB retry는 선택한 `TransitEvent`와 원래 evaluation result를 재사용하며 evaluator 재실행으로 UUID를 바꾸지 않는다. ACTIVE restart의 새 cycle과 이전 cycle은 자동 연결하지 않는다. FOLLOW_UP UUID 재생성 한계는 TASK-708에서 해결했고 ACTIVE baseline 재발행의 기존 한계는 [ADR-010의 조사 결과](adr/ADR-010-notification-device-and-durable-delivery.md#현재-구현-조사와-보장-한계)를 따른다.
+TASK-708 평가기는 FOLLOW_UP memory가 없을 때 `followUpTrackingCycleId`로 원래 cycle identity를 복원한다. 새 UUID나 과거 Observation을 만들지 않고 현재의 fresh Observation으로 기존 after 판정만 수행한다. DB retry는 선택한 `TransitEvent`와 원래 evaluation result를 재사용하며 evaluator 재실행으로 UUID를 바꾸지 않는다. ACTIVE restart의 새 cycle과 이전 cycle은 자동 연결하지 않는다. FOLLOW_UP UUID 재생성 한계는 TASK-708에서 해결했고 ACTIVE 최초 baseline 대기 여부만 Alarm에 영속해 재시작 시 predecessor 단독 재발행을 막으며 상세는 [TASK-811 결정](adr/ADR-010-notification-device-and-durable-delivery.md#task-811-최초-baseline-영속-결정)을 따른다.
 
 ------------------------------------------------------------------------
 

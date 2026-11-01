@@ -165,7 +165,7 @@ TASK-710 iPhone foreground/background/terminated/tap 검증
 TASK-711 최종 E2E/regression
 ```
 
-TASK-701~709의 구현과 개별 correctness 검증은 완료됐다. TASK-706 당시 handler 부재 제한은 TASK-709의 production Handler·FCM 정적 설정 gate로 대체했으며 dispatch는 여전히 기본 false다. 격리 환경의 자동 E2E/regression TASK-711은 완료했으며 실제 iPhone 전체 검증 TASK-710과 실제 restart 검증 TASK-811은 미완료다.
+TASK-701~709의 구현과 개별 correctness 검증은 완료됐다. TASK-706 당시 handler 부재 제한은 TASK-709의 production Handler·FCM 정적 설정 gate로 대체했으며 dispatch는 여전히 기본 false다. 격리 자동 E2E/regression TASK-711과 격리 실제 restart 검증 TASK-811은 완료했으며 실제 iPhone 전체 검증 TASK-710은 미완료다.
 
 각 Task는 자기 correctness test를 함께 작성한다. TASK-711은 테스트를 몰아서 처음 작성하는 Task가 아니라 최종 E2E/regression 보강이다. Phase 7에서 logical DB uniqueness, stale activation 보호, Event 시점의 multi-device recipient 확정, durable pending recovery, invalid registration conditional cleanup, bounded retry와 실제 iOS 상태별/tap 검증을 갖추며 Phase 8에 미루지 않는다.
 
@@ -189,12 +189,10 @@ TASK-805 Logging / Metrics / Alerts
 TASK-807 Health / Readiness
         ↓
 TASK-808 Backend Docker image
-        ↓
-TASK-813 Production deployment / migration / backup & recovery
-        ↓
-TASK-811 Restart / graceful shutdown / recovery 검증
-        ↓
-TASK-810 실제 iPhone notification latency 측정
+        ├→ TASK-811 격리 Restart / graceful shutdown / recovery 검증
+        └→ TASK-813 Production deployment / migration / backup & recovery
+                 ↓
+             TASK-810 실제 iPhone notification latency 측정
 ```
 
 TASK-809의 초기 CI는 Java 21, Gradle Wrapper, Backend build/test와 Testcontainers/MySQL/Flyway 검증, 고정 Flutter version의 `flutter analyze`, test가 생긴 뒤 `flutter test`를 포함한다. 이후 Phase 5~7 correctness test를 계속 포함한다. 실제 Provider 호출, production Firebase credential, 실제 FCM 전송, signed iOS archive는 일반 PR CI에 넣지 않으며 TASK-808 뒤 image build/smoke를 추가할 수 있다.

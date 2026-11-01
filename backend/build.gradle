@@ -39,6 +39,7 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    systemProperty 'task811.test.classpath', sourceSets.test.runtimeClasspath.asPath
 }
 
 tasks.withType(AbstractArchiveTask).configureEach {

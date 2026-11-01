@@ -33,6 +33,7 @@ class AlarmTest {
 
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
         assertThat(alarm.getActivationGeneration()).isOne();
+        assertThat(alarm.isInitialBaselinePending()).isTrue();
     }
 
     @Test
@@ -40,11 +41,13 @@ class AlarmTest {
     void activate_when_alarm_is_already_active() {
         Alarm alarm = createBusAlarm(null, null);
         alarm.activate();
+        alarm.completeInitialBaseline();
 
         alarm.activate();
 
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
         assertThat(alarm.getActivationGeneration()).isOne();
+        assertThat(alarm.isInitialBaselinePending()).isFalse();
     }
 
     @Test
@@ -68,12 +71,14 @@ class AlarmTest {
     @DisplayName("후속 추적 중 다시 활성화하면 이전 후속 문맥을 지우고 새 활성 주기를 시작한다")
     void activate_when_follow_up_clears_runtime() {
         Alarm alarm = followUpAlarm();
+        alarm.completeInitialBaseline();
 
         alarm.activate();
 
         assertThat(alarm.getStatus()).isEqualTo(AlarmStatus.ACTIVE);
         assertFollowUpRuntimeIsCleared(alarm);
         assertThat(alarm.getActivationGeneration()).isEqualTo(2);
+        assertThat(alarm.isInitialBaselinePending()).isTrue();
     }
 
     @Test

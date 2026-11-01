@@ -110,10 +110,31 @@ class AlarmMigrationIntegrationTest {
 
         Flyway.configure()
                 .dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword())
+                .target(MigrationVersion.fromVersion("21"))
                 .load()
                 .migrate();
 
         assertThat(jdbcTemplate.queryForObject("select count(*) from bus_alarm_targets", Integer.class)).isEqualTo(1);
+        jdbcTemplate.update("insert into devices (user_id, installation_id, installation_credential_hash, platform, "
+                        + "current_push_target_id, registration_revision, enabled, last_registered_at, created_at, updated_at) "
+                        + "values (?, ?, ?, 'IOS', 'synthetic-target', 0, true, ?, ?, ?)",
+                userId, "12345678-1234-4123-8123-123456789abc", "a".repeat(64), now, now, now);
+        jdbcTemplate.update("insert into notification_events (source_type, alarm_id, user_id, activation_generation, "
+                        + "tracking_cycle_id, event_type, observed_at, event_detected_at, created_at) "
+                        + "values ('ALARM', ?, ?, 0, ?, 'ONE_STOP_BEFORE', ?, ?, ?)",
+                firstBusAlarmId, userId, "12345678-1234-4123-8123-123456789abc", now, now, now);
+        jdbcTemplate.update("insert into notification_deliveries (notification_event_id, device_id, recipient_ownership_generation, "
+                        + "status, next_attempt_at, expires_at, created_at, updated_at) "
+                        + "values ((select id from notification_events limit 1), (select id from devices limit 1), 0, 'PENDING', ?, ?, ?, ?)",
+                now, now.plusMinutes(1), now, now);
+        var oldEvent = jdbcTemplate.queryForMap("select * from notification_events");
+        var oldDelivery = jdbcTemplate.queryForMap("select * from notification_deliveries");
+        Flyway.configure().dataSource(mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword()).load().migrate();
+        assertThat(jdbcTemplate.queryForObject(
+                "select initial_baseline_pending from alarms where transit_type='BUS' and status='ACTIVE'", Boolean.class))
+                .isFalse();
+        assertThat(jdbcTemplate.queryForMap("select * from notification_events")).isEqualTo(oldEvent);
+        assertThat(jdbcTemplate.queryForMap("select * from notification_deliveries")).isEqualTo(oldDelivery);
 
         jdbcTemplate.update(
                 "insert into alarms (user_id, transit_type, status, created_at, updated_at) values (?, ?, ?, ?, ?)",

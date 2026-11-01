@@ -121,6 +121,13 @@ public class BusAlarmLifecycleService {
         if (alarm.getStatus() != expectedStatus || !validCandidate(alarm, result, event, detectedAt, now)) {
             return BusAlarmDecisionResult.current(STALE, alarm);
         }
+        if (result.expectedInitialBaselinePending() != null
+                && result.expectedInitialBaselinePending() != alarm.isInitialBaselinePending()) {
+            return BusAlarmDecisionResult.current(STALE, alarm);
+        }
+        if (Boolean.TRUE.equals(result.expectedInitialBaselinePending())) {
+            alarm.completeInitialBaseline();
+        }
         if (result.followUpExpired()) {
             alarm.completeFollowUp();
         } else if (event != null) {

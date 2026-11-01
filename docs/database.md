@@ -168,6 +168,7 @@ user_id BIGINT NOT NULL REFERENCES users(id)
 transit_type VARCHAR(20) NOT NULL
 status VARCHAR(20) NOT NULL
 activation_generation BIGINT NOT NULL DEFAULT 0 CHECK (activation_generation >= 0)
+initial_baseline_pending BOOLEAN NOT NULL DEFAULT FALSE
 follow_up_vehicle_tracking_id VARCHAR(255) NULL
 follow_up_tracking_cycle_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL
 follow_up_started_at DATETIME(6) NULL
@@ -184,6 +185,8 @@ V6 Migration은 nullable `status`를 먼저 추가하고 기존 `active=true`를
 Transit API 조회 실패, Notification 발송 결과, ARRIVED/PASSED Event는 Alarm status로 저장하지 않는다. ACTIVE 중 차량별 tracking 및 Event consumption field도 이 table에 추가하지 않으며 TASK-509/708에서 별도 책임을 결정한다.
 
 `activation_generation`은 서로 다른 activation cycle을 구분하는 persisted semantic generation이다. 새 Alarm은 0에서 시작하고 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서 증가하며 `ACTIVE → ACTIVE`는 generation 증가와 baseline reset 없이 idempotent하다. Deactivate 뒤 reactivate, FOLLOW_UP 중 reactivate와 stale scheduler 결과를 구분한다. V11 Migration은 0 이상 CHECK를 함께 추가한다. lifecycle mutation과 Scheduler 결과 반영은 결과 적용 직전의 짧은 Alarm row `PESSIMISTIC_WRITE` transaction으로 보호하며 Provider I/O 중에는 lock을 잡지 않는다.
+
+V22는 `initial_baseline_pending`을 기본 false로 추가해 기존 ACTIVE Alarm을 복구 대상으로 보존한다. INACTIVE/FOLLOW_UP에서 새 ACTIVE generation을 시작할 때 true로 바뀌고 ACTIVE 중복 활성화는 값을 유지한다. 정상 최초 평가의 false 전이는 기존 Alarm 행 잠금 아래 generation·status·기대 baseline 검증 후 Event와 Delivery의 같은 transaction에서 commit한다. rollback은 모두 되돌리고 commit 응답 유실 시 원본 결정으로 재확인한다. ACTIVE 차량별 상태·Observation이나 새 테이블은 저장하지 않는다. 이전 Backend는 신규 활성화 때 이 필드를 설정하지 않으므로 이전·신규 Backend를 혼합 실행하지 않고 기존 단일 Backend 배포 경계를 유지한다.
 
 TASK-708 설계에 따라 V14에서 적용한 runtime 확장은 `follow_up_tracking_cycle_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL` 하나다. Alarm은 UUID를 명시적으로 받아 저장하며 종료 시 함께 제거한다. TASK-708 평가기는 persisted 원래 UUID를 사용해 FOLLOW_UP memory를 복원한다. ARRIVED candidate의 UUID를 소문자 canonical hyphenated 형식으로 저장하며 ACTIVE history나 Observation을 저장하지 않는다. V14는 기존 `ck_alarms_lifecycle`을 FOLLOW_UP에서 기존 세 runtime 값과 cycle ID가 모두 non-null이고 expiry > start, INACTIVE/ACTIVE에서 네 값이 모두 NULL인 조건으로 교체했다. UUID 형식은 `ck_alarms_follow_up_tracking_cycle_id`에서 NULL 또는 아래 Event UUID와 같은 canonical 형식만 허용한다. `CHECK`의 UNKNOWN 통과를 막도록 status별 `IS NOT NULL`/`IS NULL` 조건을 명시한다. 복구는 기존 status index로 Alarm을 읽으므로 cycle ID index/FK는 추가하지 않는다.
 

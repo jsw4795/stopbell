@@ -10,8 +10,14 @@ import com.stopbell.transit.domain.TransitEvent;
 public record BusAlarmEvaluationResult(
         List<TransitEvent> eventCandidates,
         BusAlarmEvaluationState nextState,
-        boolean followUpExpired
+        boolean followUpExpired,
+        Boolean expectedInitialBaselinePending
 ) {
+
+    public BusAlarmEvaluationResult(List<TransitEvent> eventCandidates, BusAlarmEvaluationState nextState,
+            boolean followUpExpired) {
+        this(eventCandidates, nextState, followUpExpired, null);
+    }
 
     public BusAlarmEvaluationResult {
         eventCandidates = List.copyOf(eventCandidates);

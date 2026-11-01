@@ -162,7 +162,7 @@ class BusAlarmDecisionIntegrationTest {
     }
 
     @Test
-    @DisplayName("ACTIVE 메모리 초기화는 같은 predecessor의 before Event를 새 cycle로 중복 저장한다")
+    @DisplayName("ACTIVE 재시작 baseline은 동일 predecessor의 before Event를 중복 저장하지 않는다")
     void characterizes_active_restart_before_duplicate() {
         Alarm alarm = alarm(false);
         device(alarm.getUser());
@@ -174,17 +174,155 @@ class BusAlarmDecisionIntegrationTest {
                 .extracting(TransitEvent::type).isEqualTo(TransitEventType.ONE_STOP_BEFORE);
         assertThat(decisions.applyIfCurrent(key(alarm), AlarmStatus.ACTIVE, first, NOW).outcome())
                 .isEqualTo(BusAlarmDecisionResult.Outcome.COMMITTED);
+        assertThat(alarms.findById(alarm.getId()).orElseThrow().isInitialBaselinePending()).isFalse();
+        assertThat(evaluator.evaluate(alarm, first.nextState(), List.of(observation), NOW).eventCandidates()).isEmpty();
 
         Alarm reloaded = alarms.findById(alarm.getId()).orElseThrow();
         var afterMemoryLoss = evaluator.evaluate(reloaded, BusAlarmEvaluationState.initial(), List.of(observation), NOW);
-        assertThat(afterMemoryLoss.eventCandidates()).singleElement()
-                .extracting(TransitEvent::type).isEqualTo(TransitEventType.ONE_STOP_BEFORE);
-        assertThat(afterMemoryLoss.eventCandidates().getFirst().trackingCycleId())
-                .isNotEqualTo(first.eventCandidates().getFirst().trackingCycleId());
+        assertThat(afterMemoryLoss.eventCandidates()).isEmpty();
         assertThat(decisions.applyIfCurrent(key(reloaded), AlarmStatus.ACTIVE, afterMemoryLoss, NOW).outcome())
                 .isEqualTo(BusAlarmDecisionResult.Outcome.COMMITTED);
-        assertThat(events.count()).isEqualTo(2);
-        assertThat(deliveries.count()).isEqualTo(2);
+        assertThat(evaluator.evaluate(reloaded, afterMemoryLoss.nextState(), List.of(observation), NOW)
+                .eventCandidates()).isEmpty();
+        assertThat(events.count()).isOne();
+        assertThat(deliveries.count()).isOne();
+        var later = new com.stopbell.transit.domain.TransitObservation(
+                TransitProvider.SEOUL_BUS, "route", "vehicle-1", "beyond", 4,
+                null, null, null, null, null, NOW.plusSeconds(1), null, com.stopbell.transit.domain.ArrivalEvidence.MOVING);
+        assertThat(evaluator.evaluate(reloaded, afterMemoryLoss.nextState(), List.of(later), NOW.plusSeconds(1))
+                .eventCandidates()).singleElement().extracting(TransitEvent::type).isEqualTo(TransitEventType.PASSED);
+    }
+
+    @Test
+    @DisplayName("첫 평가 경합과 이전 generation 결과는 새 baseline을 덮어쓰지 않는다")
+    void baseline_is_guarded_by_generation_and_current_row() throws Exception {
+        Alarm alarm = alarm(false);
+        device(alarm.getUser());
+        var observation = new com.stopbell.transit.domain.TransitObservation(
+                TransitProvider.SEOUL_BUS, "route", "vehicle-1", "before", 2,
+                null, null, null, null, null, NOW, null, com.stopbell.transit.domain.ArrivalEvidence.MOVING);
+        var first = evaluator.evaluate(alarm, BusAlarmEvaluationState.initial(), List.of(observation), NOW);
+        var competing = evaluator.evaluate(alarm, BusAlarmEvaluationState.initial(), List.of(observation), NOW);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var a = pool.submit(() -> { start.await(); return decisions.applyIfCurrent(key(alarm), AlarmStatus.ACTIVE, first, NOW); });
+            var b = pool.submit(() -> { start.await(); return decisions.applyIfCurrent(key(alarm), AlarmStatus.ACTIVE, competing, NOW); });
+            start.countDown();
+            assertThat(List.of(a.get(15, TimeUnit.SECONDS).outcome(), b.get(15, TimeUnit.SECONDS).outcome()))
+                    .containsExactlyInAnyOrder(BusAlarmDecisionResult.Outcome.COMMITTED, BusAlarmDecisionResult.Outcome.STALE);
+        }
+        assertThat(events.count()).isOne();
+        assertThat(deliveries.count()).isOne();
+        tx.executeWithoutResult(status -> {
+            Alarm current = alarms.findByIdForUpdate(alarm.getId()).orElseThrow();
+            current.activate();
+            assertThat(current.isInitialBaselinePending()).isFalse();
+            current.deactivate();
+            current.activate();
+            assertThat(current.isInitialBaselinePending()).isTrue();
+        });
+        assertThat(decisions.applyIfCurrent(key(alarm), AlarmStatus.ACTIVE, competing, NOW).outcome())
+                .isEqualTo(BusAlarmDecisionResult.Outcome.STALE);
+        assertThat(alarms.findById(alarm.getId()).orElseThrow().isInitialBaselinePending()).isTrue();
+    }
+
+    @Test
+    @DisplayName("실제 Backend JVM SIGTERM 후 재시작은 predecessor Event와 Delivery를 중복 생성하지 않는다")
+    void process_restart_keeps_baseline_and_pending_delivery() throws Exception {
+        Alarm alarm = alarm(false);
+        device(alarm.getUser());
+        java.nio.file.Path temp = java.nio.file.Files.createTempDirectory("task811-restart-");
+        try {
+            runProbe(alarm.getId(), temp, "first", "COMMITTED:1");
+            // Synthetic previously retried row, due now; restart must retain its consumed budget and expiry.
+            jdbc.update("update notification_deliveries set attempt_count=1, last_attempt_at=UTC_TIMESTAMP(6), "
+                    + "last_attempt_registration_revision=0, last_provider_result='RETRYABLE', "
+                    + "last_failure_code='UNAVAILABLE', next_attempt_at=UTC_TIMESTAMP(6)");
+            var before = jdbc.queryForMap("select status, attempt_count, next_attempt_at, expires_at from notification_deliveries");
+            runProbe(alarm.getId(), temp, "second", "COMMITTED:0");
+            assertThat(events.count()).isOne();
+            assertThat(deliveries.count()).isOne();
+            assertThat(jdbc.queryForMap("select status, attempt_count, next_attempt_at, expires_at from notification_deliveries"))
+                    .isEqualTo(before);
+            runProbe(alarm.getId(), temp, "dispatch", "DISPATCHED");
+            var after = jdbc.queryForMap("select status, attempt_count, expires_at from notification_deliveries");
+            assertThat(after.get("status")).isEqualTo("ACCEPTED");
+            assertThat(((Number) after.get("attempt_count")).intValue()).isEqualTo(2);
+            assertThat(after.get("expires_at")).isEqualTo(before.get("expires_at"));
+        } finally {
+            try (var files = java.nio.file.Files.list(temp)) {
+                for (var file : files.toList()) java.nio.file.Files.deleteIfExists(file);
+            }
+            java.nio.file.Files.deleteIfExists(temp);
+        }
+    }
+
+    @Test
+    @DisplayName("별도 Backend 프로세스는 FOLLOW_UP의 기존 cycle UUID를 복구한다")
+    void process_restart_restores_follow_up() throws Exception {
+        Instant now = Instant.now();
+        org.mockito.Mockito.when(clock.instant()).thenReturn(now);
+        Alarm alarm = alarm(true);
+        TransitEvent arrival = event(TransitEventType.ARRIVED, CYCLE, now);
+        assertThat(decisions.applyIfCurrent(key(alarm), AlarmStatus.ACTIVE,
+                new BusAlarmEvaluationResult(List.of(arrival), BusAlarmEvaluationState.initial(), false, true), now).outcome())
+                .isEqualTo(BusAlarmDecisionResult.Outcome.COMMITTED);
+        java.nio.file.Path temp = java.nio.file.Files.createTempDirectory("task811-followup-");
+        try {
+            runProbe(alarm.getId(), temp, "followup", "COMMITTED:1");
+            assertThat(alarms.findById(alarm.getId()).orElseThrow().getStatus()).isEqualTo(AlarmStatus.INACTIVE);
+            assertThat(events.findAll()).allSatisfy(row -> assertThat(row.getTrackingCycleId()).isEqualTo(CYCLE));
+        } finally {
+            try (var files = java.nio.file.Files.list(temp)) {
+                for (var file : files.toList()) java.nio.file.Files.deleteIfExists(file);
+            }
+            java.nio.file.Files.deleteIfExists(temp);
+        }
+    }
+
+    @Test
+    @DisplayName("SIGTERM 시 미완료 transaction은 rollback되고 재시작 뒤 최초 baseline이 평가된다")
+    void process_shutdown_rolls_back_inflight_baseline() throws Exception {
+        Alarm alarm = alarm(false);
+        java.nio.file.Path temp = java.nio.file.Files.createTempDirectory("task811-inflight-");
+        try {
+            runProbe(alarm.getId(), temp, "inflight", "IN_FLIGHT");
+            assertThat(alarms.findById(alarm.getId()).orElseThrow().isInitialBaselinePending()).isTrue();
+            assertThat(events.count()).isZero();
+            runProbe(alarm.getId(), temp, "first", "COMMITTED:1");
+            assertThat(alarms.findById(alarm.getId()).orElseThrow().isInitialBaselinePending()).isFalse();
+            assertThat(events.count()).isOne();
+        } finally {
+            try (var files = java.nio.file.Files.list(temp)) {
+                for (var file : files.toList()) java.nio.file.Files.deleteIfExists(file);
+            }
+            java.nio.file.Files.deleteIfExists(temp);
+        }
+    }
+
+    private void runProbe(Long alarmId, java.nio.file.Path temp, String name, String expected) throws Exception {
+        var marker = temp.resolve(name + ".ready");
+        var log = temp.resolve(name + ".log");
+        Process process = new ProcessBuilder(System.getProperty("java.home") + "/bin/java", "-cp",
+                System.getProperty("task811.test.classpath"), RestartProcessProbe.class.getName(),
+                mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword(), alarmId.toString(), marker.toString(), name)
+                .redirectErrorStream(true).redirectOutput(log.toFile()).start();
+        try {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(60);
+            while (!java.nio.file.Files.exists(marker) && process.isAlive() && System.nanoTime() < deadline) {
+                Thread.sleep(100);
+            }
+            assertThat(java.nio.file.Files.exists(marker)).as("child startup: %s", java.nio.file.Files.readString(log)).isTrue();
+            assertThat(java.nio.file.Files.readString(marker)).isEqualTo(expected);
+        } finally {
+            process.destroy(); // SIGTERM on the supported Unix CI and development environments.
+            if (!process.waitFor(30, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor(10, TimeUnit.SECONDS);
+                throw new AssertionError("Child did not terminate gracefully");
+            }
+        }
+        assertThat(java.nio.file.Files.readString(log)).contains("Shutdown completed");
     }
 
     @Test
@@ -282,13 +420,14 @@ class BusAlarmDecisionIntegrationTest {
         BusAlarmLifecycleService service = new BusAlarmLifecycleService(alarms, events, deliveries, devices, ttlPolicy, ambiguous, clock);
         TransitEvent event = event(TransitEventType.ARRIVED, CYCLE, NOW.minusSeconds(2));
         var result = service.applyIfCurrent(key(alarm), AlarmStatus.ACTIVE,
-                new BusAlarmEvaluationResult(List.of(event), BusAlarmEvaluationState.initial(), false), NOW);
+                new BusAlarmEvaluationResult(List.of(event), BusAlarmEvaluationState.initial(), false, true), NOW);
         assertThat(result.outcome()).isEqualTo(BusAlarmDecisionResult.Outcome.DUPLICATE);
         assertThat(result.followUpTrackingCycleId()).isEqualTo(CYCLE);
         assertThat(events.count()).isOne();
         assertThat(events.findAll().getFirst().getObservedAt()).isEqualTo(UTC.minusSeconds(2));
         assertThat(events.findAll().getFirst().getEventDetectedAt()).isEqualTo(UTC);
         assertThat(deliveries.count()).isOne();
+        assertThat(alarms.findById(alarm.getId()).orElseThrow().isInitialBaselinePending()).isFalse();
         assertThat(deliveries.findAll().getFirst().getExpiresAt()).isEqualTo(UTC.plusSeconds(58));
     }
 
@@ -308,6 +447,7 @@ class BusAlarmDecisionIntegrationTest {
                 if (commits.incrementAndGet() == 1) {
                     transactionManager.rollback(status);
                     assertThat(alarms.findById(alarm.getId()).orElseThrow().getStatus()).isEqualTo(AlarmStatus.ACTIVE);
+                    assertThat(alarms.findById(alarm.getId()).orElseThrow().isInitialBaselinePending()).isTrue();
                     assertThat(alarms.findById(alarm.getId()).orElseThrow().getFollowUpTrackingCycleId()).isNull();
                     assertThat(events.count()).isZero();
                     assertThat(deliveries.count()).isZero();
@@ -323,10 +463,11 @@ class BusAlarmDecisionIntegrationTest {
         BusAlarmLifecycleService service = new BusAlarmLifecycleService(alarms, events, deliveries, devices, ttlPolicy, failingOnce, clock);
         TransitEvent event = event(TransitEventType.ARRIVED, CYCLE, NOW);
         var result = service.applyIfCurrent(key(alarm), AlarmStatus.ACTIVE,
-                new BusAlarmEvaluationResult(List.of(event), BusAlarmEvaluationState.initial(), false), NOW);
+                new BusAlarmEvaluationResult(List.of(event), BusAlarmEvaluationState.initial(), false, true), NOW);
 
         assertThat(commits.get()).isEqualTo(2);
         assertThat(result.outcome()).isEqualTo(BusAlarmDecisionResult.Outcome.COMMITTED);
+        assertThat(alarms.findById(alarm.getId()).orElseThrow().isInitialBaselinePending()).isFalse();
         assertThat(result.followUpTrackingCycleId()).isEqualTo(CYCLE);
         assertThat(events.count()).isOne();
         var saved = events.findAll().getFirst();
