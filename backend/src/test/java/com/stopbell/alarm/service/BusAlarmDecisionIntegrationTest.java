@@ -162,6 +162,32 @@ class BusAlarmDecisionIntegrationTest {
     }
 
     @Test
+    @DisplayName("ACTIVE 메모리 초기화는 같은 predecessor의 before Event를 새 cycle로 중복 저장한다")
+    void characterizes_active_restart_before_duplicate() {
+        Alarm alarm = alarm(false);
+        device(alarm.getUser());
+        var observation = new com.stopbell.transit.domain.TransitObservation(
+                TransitProvider.SEOUL_BUS, "route", "vehicle-1", "before", 2,
+                null, null, null, null, null, NOW, null, com.stopbell.transit.domain.ArrivalEvidence.MOVING);
+        var first = evaluator.evaluate(alarm, BusAlarmEvaluationState.initial(), List.of(observation), NOW);
+        assertThat(first.eventCandidates()).singleElement()
+                .extracting(TransitEvent::type).isEqualTo(TransitEventType.ONE_STOP_BEFORE);
+        assertThat(decisions.applyIfCurrent(key(alarm), AlarmStatus.ACTIVE, first, NOW).outcome())
+                .isEqualTo(BusAlarmDecisionResult.Outcome.COMMITTED);
+
+        Alarm reloaded = alarms.findById(alarm.getId()).orElseThrow();
+        var afterMemoryLoss = evaluator.evaluate(reloaded, BusAlarmEvaluationState.initial(), List.of(observation), NOW);
+        assertThat(afterMemoryLoss.eventCandidates()).singleElement()
+                .extracting(TransitEvent::type).isEqualTo(TransitEventType.ONE_STOP_BEFORE);
+        assertThat(afterMemoryLoss.eventCandidates().getFirst().trackingCycleId())
+                .isNotEqualTo(first.eventCandidates().getFirst().trackingCycleId());
+        assertThat(decisions.applyIfCurrent(key(reloaded), AlarmStatus.ACTIVE, afterMemoryLoss, NOW).outcome())
+                .isEqualTo(BusAlarmDecisionResult.Outcome.COMMITTED);
+        assertThat(events.count()).isEqualTo(2);
+        assertThat(deliveries.count()).isEqualTo(2);
+    }
+
+    @Test
     @DisplayName("0개 recipient도 Event를 보존하고 이미 만료된 유효 결정은 EXPIRED Delivery와 lifecycle을 commit한다")
     void keeps_zero_recipients_and_expired_decisions() {
         Alarm empty = alarm(false);
