@@ -583,6 +583,12 @@ Push payload는 navigation hint에 필요한 최소 정보만 포함하고 권�
 
 세부 결정은 `adr/ADR-010-notification-device-and-durable-delivery.md`를 따른다.
 
+### Analytics 도입 판단 (TASK-812)
+
+현재 V1에는 별도 제품 Analytics나 장기 통계 저장소를 도입하지 않는다. 공식 요구사항에 구체적인 제품 질문과 이를 위한 보존 근거가 없고, 분석 대시보드는 V1 제외 범위다. 장애 진단은 안전한 운영 로그, 현재 전달 품질은 operational metrics와 NotificationEvent/Delivery의 기존 correctness 상태로 관찰한다. 이 데이터는 장기 제품 통계의 Source of Truth가 아니며 Provider ACCEPTED도 단말 표시 성공을 뜻하지 않는다.
+
+향후 제품 질문과 사용 목적이 생기면 필요한 지표·최소 수집 데이터·정확도와 보존 근거, 식별자 및 삭제 영향을 별도로 검토한 뒤 도입 여부를 다시 결정한다. 이번 결정은 기존 operational 데이터의 보존기간이나 삭제 정책을 새로 정하지 않고 SDK·전송·Schema를 추가하지 않는다.
+
 ## 10. 확장 경로 — 필요한 경우에만
 
 ```text

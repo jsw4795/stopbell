@@ -205,7 +205,7 @@ TASK-808은 production topology가 아닌 재현 가능한 Backend runtime image
 
 TASK-814는 persisted operational time을 UTC 의미로 통일하고 host timezone 의존을 제거한다. 다만 그 전 TASK에서 새로 추가하는 timestamp도 처음부터 UTC 의미, test 가능한 Clock과 명시적 Provider timezone parsing을 적용한다. TASK-811은 memory ACTIVE tracking의 safe rebaseline, persisted FOLLOW_UP, durable outbox recovery와 FCM ambiguous acceptance를 restart/shutdown 경계에서 검증한다. 단일 non-overlapping worker는 restart 뒤 PENDING Delivery를 다시 처리하며, FCM accepted 뒤 DB update 전 crash에서는 duplicate 가능성을 허용한다. TASK-810은 Provider freshness, evaluation, outbox, FCM, Backend observable latency를 분리하고 실제 iPhone foreground/background/terminated 반복 측정으로 체감 지연을 보완한다.
 
-TASK-812 Analytics는 실제 제품 질문과 보존 근거가 있을 때만 최소 구현하며 public V1 release blocker가 아니다. `NotificationEvent`/`NotificationDelivery`는 operational correctness 데이터이지 장기 Analytics Source of Truth가 아니다. TASK-815는 public App Store 제출 전에만 실행하는 release blocker이며, 제출 시점의 Apple login/account deletion/privacy disclosure 요건을 검토한다. 이는 Phase 6의 iOS actual-device vertical slice를 막지 않는다.
+TASK-812는 현재 별도 제품 Analytics를 도입하지 않기로 판단했다. 실제 제품 질문과 보존 근거가 생길 때만 재검토하며 public V1 release blocker가 아니다. `NotificationEvent`/`NotificationDelivery`는 operational correctness 데이터이지 장기 Analytics Source of Truth가 아니다. TASK-815는 public App Store 제출 전에만 실행하는 release blocker이며, 제출 시점의 Apple login/account deletion/privacy disclosure 요건을 검토한다. 이는 Phase 6의 iOS actual-device vertical slice를 막지 않는다.
 
 ## Phase 9 — BoardingSession 현재 흐름
 

@@ -305,7 +305,7 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 - [x] TASK-809 CI build/test 구성: GitHub Actions에 읽기 전용 권한과 SHA 고정 Action을 사용한 독립 Backend/Flutter job을 추가했다. Java 21 Gradle build와 격리 MySQL Testcontainers/Flyway, Flutter 3.47.1 lockfile·analyze·test를 실행한다. actionlint 통과, 로컬 Backend 전체 88개 클래스 1,450회 및 Flutter 648회 실패·오류·skip 0, Flutter analyze 무오류다. 종료 중 테스트 DB 연결 풀 경고가 있었으나 Gradle과 XML은 성공이다. 실제 Provider·FCM·Credential·iOS 서명은 CI에 사용하지 않으며 원격 runner 결과는 push 후 확인한다. [실행 경계](local-development.md#task-809-ci-검증)를 따른다.
 - [ ] TASK-810 실제 iPhone 환경에서 notification latency 측정
 - [ ] TASK-811 restart / graceful shutdown / recovery 안전성 검증: **설계 판단 대기**. 기존 [Architecture](architecture.md#alarm과-vehicle-tracking-lifecycle)는 ACTIVE restart 후 predecessor만으로 ONE_STOP_BEFORE 재발행을 금지하고, 최초 활성화에서는 같은 위치의 즉시 알림을 요구한다. 기존 [ADR-010 조사](adr/ADR-010-notification-device-and-durable-delivery.md#task-708-설계-당시-구현-조사)는 evaluator의 차이를 명시했다. 이번 격리 MySQL 특성화에서 동일 ACTIVE Alarm·차량·관측을 메모리 초기화 전후로 평가하면 서로 다른 cycle의 Event 2개와 Delivery 2개가 실제 commit됨을 확인했다. 메모리 초기화 모의이며 실제 프로세스 restart·기기 전송 검증은 아니다. 초기 활성화와 기존 ACTIVE 복구를 경합 없이 구별할 실행 경계 또는 영속 근거의 선택이 필요해 임의 확정하지 않는다. 관련 결정·delivery recovery·Scheduler shutdown 3개 클래스 50회 실패·오류·skip 0; 나머지 실제 프로세스 restart/recovery 검증은 미완료다.
-- [ ] TASK-812 Analytics / 장기 통계 필요성 결정 및 필요한 경우에만 최소 구현
+- [x] TASK-812 Analytics / 장기 통계 필요성 결정 및 필요한 경우에만 최소 구현: 현재 공식 요구사항에 별도 수집을 정당화할 구체적인 제품 질문과 보존 근거가 없어 V1에서 별도 제품 Analytics·장기 통계 저장소를 도입하지 않는다. 운영 로그·지표와 NotificationEvent/Delivery의 correctness 역할을 유지하고, 향후 목적·최소 데이터·보존·삭제 근거가 생기면 재검토한다. 기존 Schema·보존 정책·Dependency·코드는 변경하지 않았다. [판단과 경계](architecture.md#analytics-도입-판단-task-812)를 따른다.
 - [ ] TASK-813 Production deployment / migration / backup & recovery readiness
 - [x] TASK-814 Production UTC time contract 및 timestamp consistency
 - [ ] TASK-815 iOS public App Store release readiness
@@ -1105,7 +1105,7 @@ TASK-811 Restart / graceful shutdown / recovery 검증
 TASK-810 실제 iPhone notification latency 측정
 ```
 
-TASK-815는 public App Store 제출 전에 수행하고 TASK-812는 제품 Analytics 필요성이 확인될 때 수행한다.
+TASK-815는 public App Store 제출 전에 수행한다. TASK-812는 현재 별도 Analytics를 도입하지 않기로 판단했으며, 실제 제품 질문과 보존 근거가 생기면 재검토한다.
 
 Future Consideration:
 
