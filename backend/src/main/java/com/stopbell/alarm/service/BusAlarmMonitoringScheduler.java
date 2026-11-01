@@ -135,7 +135,7 @@ public class BusAlarmMonitoringScheduler {
                 pollGroup(group, groupRetries, cycle);
                 retryTargets.addAll(groupRetries);
             } catch (TransitProviderClientException exception) {
-                logProviderFailure(group, null, exception, false);
+                logProviderFailure(exception, false);
                 retryTargets.add(new RetryTarget(group, null));
             } catch (RuntimeException exception) {
                 log.warn("Bus Alarm polling group failed: provider={}, failureType={}",
@@ -166,7 +166,7 @@ public class BusAlarmMonitoringScheduler {
                     retrySeoulDetail(target, retryCycle);
                 }
             } catch (TransitProviderClientException exception) {
-                logProviderFailure(target.group(), target.vehicleId(), exception, true);
+                logProviderFailure(exception, true);
             } catch (RuntimeException exception) {
                 log.warn("Bus Alarm polling retry failed: provider={}, failureType={}",
                         target.group().key().provider(), exception.getClass().getSimpleName());
@@ -223,7 +223,7 @@ public class BusAlarmMonitoringScheduler {
             try {
                 observations.addAll(seoulMapper.map(request, vehicleId, cycle.detail(vehicleId).response()));
             } catch (TransitProviderClientException exception) {
-                logProviderFailure(group, vehicleId, exception, retryTargets == null);
+                logProviderFailure(exception, retryTargets == null);
                 if (retryTargets != null) {
                     retryTargets.add(new RetryTarget(group, vehicleId));
                 }
@@ -248,11 +248,10 @@ public class BusAlarmMonitoringScheduler {
         }
     }
 
-    private void logProviderFailure(BusAlarmPollingGroup group, String vehicleId,
-            TransitProviderClientException exception, boolean retry) {
-        log.warn("Bus Alarm provider failure: provider={}, operation={}, failureKind={}, route={}, vehicle={}, attempt={}",
+    private void logProviderFailure(TransitProviderClientException exception, boolean retry) {
+        log.warn("Bus Alarm provider failure: provider={}, operation={}, failureKind={}, attempt={}",
                 exception.provider(), exception.operation(), exception.failureKind(),
-                group.key().externalRouteId(), vehicleId, retry ? "retry-final" : "first-retry-pending");
+                retry ? "retry-final" : "first-retry-pending");
     }
 
     private Set<String> selectSeoulDetailVehicleIds(List<Alarm> alarms, Set<String> rosterVehicleIds) {

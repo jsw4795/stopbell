@@ -442,6 +442,50 @@ class BusAlarmMonitoringSchedulerTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void provider_failures_do_not_log_route_vehicle_or_exception_details(boolean detailFailure) {
+        var roster = mock(SeoulBusVehicleLocationClient.class);
+        var detail = mock(SeoulBusVehicleDetailClient.class);
+        var monitored = seoulScheduler(roster, detail);
+        var alarm = seoulActiveAlarm(1L, "route-sensitive-marker");
+        when(pollingService.findMonitoringGroups())
+                .thenReturn(List.of(seoulGroup(alarm, "route-sensitive-marker")));
+        var failure = TransitProviderClientException.transport(TransitProvider.SEOUL_BUS, "fixture-operation",
+                new IllegalStateException("cause-sensitive-marker"));
+        var evaluation = new BusAlarmEvaluationResult(List.of(), BusAlarmEvaluationState.initial(), false);
+        when(evaluator.evaluate(any(), any(), anySet(), anyList(), any())).thenReturn(evaluation);
+        when(lifecycleService.applyIfCurrent(any(), any(), any(), any(Instant.class))).thenAnswer(applied());
+        if (detailFailure) {
+            when(roster.fetchVehicleLocations(any())).thenReturn(seoulRoster("vehicle-sensitive-marker"));
+            when(detail.fetchVehicleDetail("vehicle-sensitive-marker")).thenThrow(failure);
+        } else {
+            when(roster.fetchVehicleLocations(any())).thenThrow(failure);
+        }
+        Logger logger = (Logger) LoggerFactory.getLogger(BusAlarmMonitoringScheduler.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            monitored.pollMonitoringAlarms();
+            var events = appender.list.stream()
+                    .filter(item -> item.getFormattedMessage().contains("Bus Alarm provider failure"))
+                    .toList();
+            assertThat(events).hasSize(2);
+            assertThat(events).allSatisfy(event -> {
+                assertThat(event.getFormattedMessage())
+                        .contains("provider=SEOUL_BUS", "operation=fixture-operation", "failureKind=TRANSPORT")
+                        .doesNotContain("route-sensitive-marker", "vehicle-sensitive-marker", "cause-sensitive-marker");
+                assertThat(event.getThrowableProxy()).isNull();
+            });
+            assertThat(events.get(0).getFormattedMessage()).contains("attempt=first-retry-pending");
+            assertThat(events.get(1).getFormattedMessage()).contains("attempt=retry-final");
+        } finally {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+
     @Test
     @DisplayName("detail 재시도 결과가 stale이면 첫 평가 state를 덮어쓰지 않는다")
     void stale_detail_retry_keeps_first_applied_state() {
