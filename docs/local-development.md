@@ -584,3 +584,9 @@ docker buildx rm stopbell-repro
 일반 `docker build -t stopbell:local .`도 실행 가능한 이미지를 만들지만 구형 Docker/BuildKit은 생성 시각 차이로 이미지 ID가 매번 달라질 수 있다. 동일한 base digest·플랫폼·Gradle/JDK·dependency와 빌드 도구가 필요하며 플랫폼 간 동일 digest를 주장하지 않는다. Base image의 보안 업데이트는 digest를 검토·교체한 뒤 재검증한다.
 
 `/actuator/health/readiness`가 200이 될 때만 healthcheck가 성공한다. fresh DB에는 별도의 metadata bootstrap이 필요하다. 이미지의 graceful shutdown phase 기본 예산은 60초이며 배포 환경의 종료 유예는 이보다 짧지 않아야 한다. 이 값은 모든 단계의 전체 종료 SLA가 아니고 사용자 설정 timeout을 강제로 제한하지 않는다. 실제 운영 배포·secret injection과 restart/recovery 검증은 TASK-813/811 책임이다.
+
+### TASK-809 CI 검증
+
+GitHub Actions의 `.github/workflows/ci.yml`은 `main` push, pull request 및 수동 실행에서 독립된 Backend와 Flutter job을 실행한다. Backend는 Ubuntu runner의 Docker와 Java 21, Gradle Wrapper로 `./gradlew --no-daemon build`를 실행하며 실제 MySQL/Flyway 검증에는 격리 Testcontainers를 사용한다. Flutter는 3.47.1 stable에서 lockfile을 강제한 dependency resolution 뒤 `flutter analyze --no-pub`와 `flutter test --no-pub`를 실행한다. Action은 commit SHA로 고정하고 읽기 전용 repository permission을 사용한다.
+
+일반 CI에는 실제 Transit Provider 호출, 운영 credential, Firebase 전송 및 서명된 iOS archive를 사용하지 않는다. Testcontainers image와 Flutter/Gradle dependency 다운로드에는 runner 네트워크가 필요하다. 로컬에서 같은 Backend 검증은 `cd backend && ./gradlew --no-daemon build`, Flutter 검증은 `cd app && flutter pub get --enforce-lockfile && flutter analyze --no-pub && flutter test --no-pub`로 수행한다. 운영 배포와 기기 실측을 대체하지 않는다.
