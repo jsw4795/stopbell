@@ -216,7 +216,7 @@ Foreground는 source에 맞는 작은 안내와 상세 보기 선택만 제공�
 
 차량 등록은 명시적 목록 선택 뒤 기존 `PushRegistrationService`/permission/Device 등록을 준비하고 UUID 생성·Secure intent 저장·POST보다 먼저 사용자 선택을 마친다. 미결정 권한은 설명 후 요청하며 거부·등록 실패·미지원 환경은 수신 불가 가능성과 과거 Event recipient가 나중에 늘어나지 않는다는 점을 안내하고 명시적인 `알림 없이 계속`만 허용한다. 준비 성공도 실제 표시나 추적 지원 성공은 아니다. 준비 중에는 중복 확정을 막고 종료 뒤 후보 freshness/Auth/화면 수명을 재검증한다. 준비 실패·이탈은 새 UUID/POST를 만들지 않으며, 이미 불확실한 POST 복구·재시도는 Push 준비와 분리해 원래 UUID/body를 보존한다. 기존 Alarm 활성화 정책은 유지한다.
 
-Fake 수신 callback과 Mock/Fake API로 자동 검증한다. 실제 OS terminated 실행·Firebase/iPhone 표시·실제 버스 E2E는 이 검증의 보장 범위가 아니며 TASK-908과 기존 TASK-710/711에 남는다. Provider별 조건부 지원 범위는 API 계약을 따르며 OS 표시 중복/지연·접수 후 회수 불가 한계를 유지한다.
+Fake 수신 callback과 Mock/Fake API로 자동 검증한다. 실제 OS terminated 실행·Firebase/iPhone 표시·실제 버스 E2E는 이 검증의 보장 범위가 아니며 TASK-908과 기존 TASK-710에 남는다. Provider별 조건부 지원 범위는 API 계약을 따르며 OS 표시 중복/지연·접수 후 회수 불가 한계를 유지한다.
 
 ## 6. 초기 백엔드 경계
 
@@ -307,7 +307,7 @@ Device mutation은 JWT Principal과 별도 installation credential을 검증한�
 
 Flutter는 설치본 counter/credential/generation을 logout에도 보존하고 요청을 session과 함께 snapshot해 계정 변경 뒤 이전 작업이 새 Principal로 재시도되지 않게 한다. Device disable 시도 → Auth logout → local session 종료의 경계를 유지하며 network 실패로 logout을 영구 차단하지 않는다. Offline 즉시 Push 해제와 이미 FCM에 접수된 알림 회수는 보장하지 않는다. 구체 계약/한계는 API 문서가 소유하며 TASK-704는 설치본 전용 serial mutation, durable pending/session snapshot, permission/readiness 및 startup/resume/FID rotation 동기화를 구현했다. Native production bridge는 기존 FlutterFire delegate를 전달·복원하며 smoke와 분리한다. 저장·재설치/복구의 상세 정책은 [ADR-010 Client 구현](adr/ADR-010-notification-device-and-durable-delivery.md#task-704-flutter-설치본등록-lifecycle-구현-2026-10-12)을 따른다.
 
-TASK-705의 `notification.client.FcmProviderClient`는 기존 Google 인증/HTTP dependency로 단일 FID HTTP v1 전송과 정규화 결과만 반환한다. Firebase Admin SDK는 추가하지 않는다. 자동 dispatch가 기본 false일 때 설정·인증은 호출 시 준비하므로 FCM 설정 누락이 Backend startup/readiness를 실패시키지 않는다. Provider I/O는 DB transaction 내부 호출을 거부하며 Event/Delivery/Device/Alarm을 변경하지 않는다. Event 연결·fan-out은 TASK-708, Worker orchestration은 TASK-706, production attempt/result/retry/expiry/cleanup은 TASK-709에서 구현했다. 실제 자동 Firebase/iPhone E2E는 TASK-710/711에 남는다.
+TASK-705의 `notification.client.FcmProviderClient`는 기존 Google 인증/HTTP dependency로 단일 FID HTTP v1 전송과 정규화 결과만 반환한다. Firebase Admin SDK는 추가하지 않는다. 자동 dispatch가 기본 false일 때 설정·인증은 호출 시 준비하므로 FCM 설정 누락이 Backend startup/readiness를 실패시키지 않는다. Provider I/O는 DB transaction 내부 호출을 거부하며 Event/Delivery/Device/Alarm을 변경하지 않는다. Event 연결·fan-out은 TASK-708, Worker orchestration은 TASK-706, production attempt/result/retry/expiry/cleanup은 TASK-709에서 구현했다. 실제 자동 Firebase/iPhone E2E는 TASK-710에 남는다.
 
 전송마다 별도 HTTP client를 소유하고 인증·전송을 포함하는 유한 wall-time budget, 요청 abort 및 종료된 invocation의 후속 HTTP 차단을 적용한다. local opt-in one-shot Smoke는 read-only transaction을 끝낸 뒤 같은 Provider를 한 번 호출하며 공개 API를 만들지 않는다. 구체 인증 지원 범위·재전송 제어·보장 한계는 [ADR-010 TASK-705](adr/ADR-010-notification-device-and-durable-delivery.md#task-705-provider-구현과-제어-gate-2026-10-12), 실행 방법과 실기기 미검증 상태는 [Local Development](local-development.md#task-705-backend-provider-수동-smoke)를 따른다.
 
@@ -353,7 +353,7 @@ TASK-708의 `BusAlarmDecisionResult`는 COMMITTED/DUPLICATE/STALE/RETRY_REQUIRED
 
 Scheduler는 미확인 결정을 `(alarmId, activationGeneration)`별 immutable pending result/expectedStatus/detectedAt으로 메모리에 보관한다. 다음 cycle에서 monitoring group 조회보다 먼저 재확인하므로 응답 유실 뒤 Alarm이 INACTIVE가 되어도 원래 candidate를 잃지 않는다. 재확인 실패 중에는 새 평가를 생략하고 memory nextState를 publish하지 않는다. 이 pending buffer는 process restart 내구성을 주장하지 않으며 ACTIVE의 Phase 5 restart 한계는 그대로다.
 
-`notification.service.NotificationDecisionTtlPolicy`는 `notification.decision.ttl.one-stop-before`, `.arrived`, `.passed`, `.one-stop-after`의 독립 Duration 설정을 제공한다. 네 기본값은 모두 **provisional 개발값 `PT60S`**이며 TASK-709 구현 설정으로 유지한다. 운영값 검증·조정은 TASK-710/711/810에 남는다. 양수·유한하고 DATETIME(6)에서 사라지지 않는 최소 microsecond 정밀도를 요구하며 overflow 값은 거부한다. FOLLOW_UP의 5분 tracking timeout과 별개다. `expiresAt = original observedAt + TTL(type)`이고 DB retry 시 observed/detected 시각과 기한을 변경하지 않는다. 이미 만료된 유효 결정도 lifecycle/Event/recipient identity를 보존하며 Delivery만 최초 EXPIRED로 생성한다. 이 결정 정책은 dispatch/retry scheduling을 수행하지 않는다.
+`notification.service.NotificationDecisionTtlPolicy`는 `notification.decision.ttl.one-stop-before`, `.arrived`, `.passed`, `.one-stop-after`의 독립 Duration 설정을 제공한다. 네 기본값은 모두 **provisional 개발값 `PT60S`**이며 TASK-709 구현 설정으로 유지한다. 운영값 검증·조정은 TASK-710/810에 남는다. 양수·유한하고 DATETIME(6)에서 사라지지 않는 최소 microsecond 정밀도를 요구하며 overflow 값은 거부한다. FOLLOW_UP의 5분 tracking timeout과 별개다. `expiresAt = original observedAt + TTL(type)`이고 DB retry 시 observed/detected 시각과 기한을 변경하지 않는다. 이미 만료된 유효 결정도 lifecycle/Event/recipient identity를 보존하며 Delivery만 최초 EXPIRED로 생성한다. 이 결정 정책은 dispatch/retry scheduling을 수행하지 않는다.
 
 TASK-707은 persistence primitive와 제약을, TASK-708은 위 결정 transaction·dedup/retry 연결·UUID 복원을 구현했다. TASK-706은 commit된 pending Delivery worker를 소유한다. 책임 분담·삭제 제약·현재 recovery 한계는 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-708-중복-방지-설계-2026-10-09)을 따른다.
 
@@ -369,7 +369,7 @@ AlarmService.delete는 기존 인증/소유권 검증과 Alarm PESSIMISTIC_WRITE
 
 두 값은 Event 생성 시점에 확인된 선택적 근거이며 실제 현재 위치가 아니다. 정거장 수는 기존 Evaluator/Traversal이 확인한 동일 traversal의 successor edge 수만 사용하고 dispatch에서 order 차/GPS로 재계산하지 않는다. null·0·음수는 생략한다. 이름은 앞뒤 공백을 제거하고 null·공백뿐인 값·제어 문자·Unicode format/line/paragraph separator·고립 surrogate가 있으면 생략한다. 긴 이름은 surrogate를 분리하지 않고 말줄임표 포함 80 Unicode code point로 제한한다. 선택적 정보가 없어도 일반 PASSED 알림을 보내며 실제 DB 오류를 정보 부재로 숨기지 않는다. 현재 서울·TAGO Observation Mapper는 이름을 null로 두므로 이름을 새로 보강하지 않고 정거장 수만으로도 안내한다.
 
-기본 문장과 선택적 보조 문구·두 alert body의 일치 및 기존 data 계약은 [API](api.md#push-payload와-notification-tap)를 따른다. PASSED 외 Alarm Event와 BOARDING_SESSION은 이 Context를 사용하지 않는다. 판정 우선순위·PASSED 뒤 ACTIVE/다음 차량 감시·identity/UNIQUE·recipient generation/revision·retry/backoff/expiry/cleanup 정책은 변경하지 않는다. 격리 MySQL의 commit·영속성 컨텍스트 분리·전송 경계 재생성 검증은 실제 프로세스 restart E2E나 iPhone 표시 검증을 대체하지 않는다. 실기기 줄바꿈·표시 범위와 수신/tap은 TASK-710/711에 남는다.
+기본 문장과 선택적 보조 문구·두 alert body의 일치 및 기존 data 계약은 [API](api.md#push-payload와-notification-tap)를 따른다. PASSED 외 Alarm Event와 BOARDING_SESSION은 이 Context를 사용하지 않는다. 판정 우선순위·PASSED 뒤 ACTIVE/다음 차량 감시·identity/UNIQUE·recipient generation/revision·retry/backoff/expiry/cleanup 정책은 변경하지 않는다. 격리 MySQL의 commit·영속성 컨텍스트 분리·전송 경계 재생성 검증은 실제 프로세스 restart E2E나 iPhone 표시 검증을 대체하지 않는다. 실기기 줄바꿈·표시 범위와 수신/tap은 TASK-710에 남는다.
 
 #### Notification dispatch worker 구현 (TASK-706)
 
@@ -488,7 +488,7 @@ cycle의 최대 조회/후속 처리 예산은 만료 source별 batch-size(합�
 
 취소 및 polling checkpoint/보류/종료 변경은 Session lock 아래 mutation 전에 이전 revision의 gate를 닫는다. 새 검증 checkpoint는 commit 확인 후만 공개한다. 세션 취소·만료·연속성 상실은 pending을, 목적지 도달은 준비 pending을 원자 종료하며 늦은 결과로 되살리지 않는다. gate 사전 차단 뒤 DB rollback이면 보수적으로 다음 재검증까지 닫힌 상태를 유지할 수 있다. 마지막 메모리 검증과 `FcmProviderClient.send`/실제 HTTP 시작 사이에는 원자성이 없다. 그 사이 취소 commit·Device 변경이 발생하거나 이미 요청이 시작/접수됐다면 회수 또는 새 호출의 완전 차단을 보장하지 않는다. 네트워크 동안 DB lock을 유지하지 않는 기존 한계다. DB 장애/commit 불확실 중에는 gate를 열거나 새 외부 요청을 시작하지 않는다.
 
-TASK-905는 checkpoint/복구와 lifecycle 판단을, TASK-906은 위 atomic Notification 연결·source·gate·fair query·전송 검증을 구현한다. TASK-906의 Backend dispatch 구현과 실제 Provider 지원/기기 표시 검증은 구분한다. 실제 세션 생성·재확인은 무조건 차단하지 않으며 [API의 조건부 지원 범위](api.md#탑승-세션-api-task-903)를 따른다. Flutter 수신·상세는 위 TASK-907 3단계를 따르며 실차/기기 실측은 TASK-908 및 기존 TASK-710/711에 남는다.
+TASK-905는 checkpoint/복구와 lifecycle 판단을, TASK-906은 위 atomic Notification 연결·source·gate·fair query·전송 검증을 구현한다. TASK-906의 Backend dispatch 구현과 실제 Provider 지원/기기 표시 검증은 구분한다. 실제 세션 생성·재확인은 무조건 차단하지 않으며 [API의 조건부 지원 범위](api.md#탑승-세션-api-task-903)를 따른다. Flutter 수신·상세는 위 TASK-907 3단계를 따르며 실차/기기 실측은 TASK-908 및 기존 TASK-710에 남는다.
 
 ### common
 
@@ -577,7 +577,7 @@ FCM request                       → bounded retry로 여러 번 가능
 실제 Device 표시                  → exactly once 보장하지 않음
 ```
 
-Provider `accepted`는 요청 접수를 뜻하며 실제 표시 성공을 뜻하지 않는다. Timeout은 Provider가 접수했는지 알 수 없는 ambiguous 결과다. retry 가능한 Provider result는 `PENDING` Delivery의 attemptCount와 nextAttemptAt으로 재시도한다. 최대 횟수·간격·freshness TTL의 개발 기본값과 상한은 TASK-709에서 구현했으며 [설정 계약](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-구현-설정과-검증-2026-10-13)을 따른다. 실제 지연·운영 적합성 검증은 TASK-710/711/810에 남는다. 모든 attempt를 append-only row로 저장하거나 generic retry framework를 도입하지 않는다.
+Provider `accepted`는 요청 접수를 뜻하며 실제 표시 성공을 뜻하지 않는다. Timeout은 Provider가 접수했는지 알 수 없는 ambiguous 결과다. retry 가능한 Provider result는 `PENDING` Delivery의 attemptCount와 nextAttemptAt으로 재시도한다. 최대 횟수·간격·freshness TTL의 개발 기본값과 상한은 TASK-709에서 구현했으며 [설정 계약](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-구현-설정과-검증-2026-10-13)을 따른다. 실제 지연·운영 적합성 검증은 TASK-710/810에 남는다. 모든 attempt를 append-only row로 저장하거나 generic retry framework를 도입하지 않는다.
 
 Push payload는 navigation hint에 필요한 최소 정보만 포함하고 권한 근거로 사용하지 않는다. Flutter는 Auth Session 초기화 뒤 source별 Alarm/BoardingSession ID navigation entry를 사용해 Backend의 정확한 ID 상세 API에서 ownership/current state를 재확인한다. Permission이 없어도 다른 Device가 수신할 수 있으므로 Alarm 생성·활성화를 금지하지 않는다. 현재 installation logout은 Device unsubscribe/disable을 시도한 뒤 기존 Auth logout과 local session 종료를 수행하되, offline에서는 Backend disable을 즉시 보장하지 않는다.
 

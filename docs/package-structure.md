@@ -293,4 +293,4 @@ Notification tap payload는 navigation hint일 뿐 권한 근거가 아니다. A
 
 - 현재의 화면 전환·생성자 주입·`http` 기반 Client로 부족한 문제가 확인되면 별도 routing/DI/state management library의 필요성과 trade-off를 검토한다.
 - Transit monitoring 비즈니스 로직은 특별한 이유 없이 Flutter Application으로 옮기지 않는다.
-- Auth Session·`AuthenticatedApiClient`·logout hook·resume과 source별 ID navigation은 현재 Device/Notification 흐름에 연결돼 있다. 실제 기기 최종 검증과 운영 보강은 기존 TASK-710/711 및 Phase 8 책임을 따른다.
+- Auth Session·`AuthenticatedApiClient`·logout hook·resume과 source별 ID navigation은 현재 Device/Notification 흐름에 연결돼 있다. 실제 기기 최종 검증과 운영 보강은 TASK-710 및 Phase 8 책임을 따른다.

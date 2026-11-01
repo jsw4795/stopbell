@@ -7,7 +7,7 @@
 | 영역 | 구현 상태 | 남은 검증·책임 |
 | --- | --- | --- |
 | Phase 6 Flutter | TASK-601~609 완료: Google 로그인·Auth 복원/갱신·노선/정류장 선택·Alarm 관리, TASK-608A 표시 계약 반영 | Notification·Boarding의 후행 실기기 검증과 구분 |
-| Phase 7 Notification | TASK-701~709 완료: iOS 기본 연동·권한/Device lifecycle·FCM Client·Event/Delivery·atomic decision·Dispatch·retry/expiry·durable PENDING recovery | TASK-710은 일부 iPhone 수신/tap PASS이나 미완료, TASK-711 최종 E2E·regression 미완료 |
+| Phase 7 Notification | TASK-701~709 완료: iOS 기본 연동·권한/Device lifecycle·FCM Client·Event/Delivery·atomic decision·Dispatch·retry/expiry·durable PENDING recovery | TASK-710은 일부 iPhone 수신/tap PASS이나 미완료, TASK-711 격리 자동 E2E·regression 완료 |
 | Phase 8 Quality | TASK-816 감사·수정·회귀와 후속 책임 연결 완료. TASK-814 UTC callback 수정·다중 timezone/DST·전체 Backend 회귀 및 기존 데이터 무변환 정책 확정 | 실제 운영 데이터의 시간대/정렬 영향과 배포·백업/복구 확인은 TASK-813 운영 적용 조건, 기타 기존 운영 Task 잔여 범위 |
 | Phase 9 BoardingSession | TASK-903 설계와 TASK-904~907 구현 완료. TASK-908 변경으로 번호 입력 없는 명시적 차량 선택·즉시 TRACKING·2정거장 전(기본)/1정거장 전 준비 알림 구현 | 서울 조건부 지원·TAGO 정확한 하차 추적 보류. TASK-908 실제 버스/iPhone E2E 미완료 |
 
@@ -165,7 +165,7 @@ TASK-710 iPhone foreground/background/terminated/tap 검증
 TASK-711 최종 E2E/regression
 ```
 
-TASK-701~709의 구현과 개별 correctness 검증은 완료됐다. TASK-706 당시 handler 부재 제한은 TASK-709의 production Handler·FCM 정적 설정 gate로 대체했으며 dispatch는 여전히 기본 false다. 실제 iPhone 전체 검증 TASK-710과 최종 E2E/regression TASK-711은 미완료다.
+TASK-701~709의 구현과 개별 correctness 검증은 완료됐다. TASK-706 당시 handler 부재 제한은 TASK-709의 production Handler·FCM 정적 설정 gate로 대체했으며 dispatch는 여전히 기본 false다. 격리 환경의 자동 E2E/regression TASK-711은 완료했으며 실제 iPhone 전체 검증 TASK-710과 실제 restart 검증 TASK-811은 미완료다.
 
 각 Task는 자기 correctness test를 함께 작성한다. TASK-711은 테스트를 몰아서 처음 작성하는 Task가 아니라 최종 E2E/regression 보강이다. Phase 7에서 logical DB uniqueness, stale activation 보호, Event 시점의 multi-device recipient 확정, durable pending recovery, invalid registration conditional cleanup, bounded retry와 실제 iOS 상태별/tap 검증을 갖추며 Phase 8에 미루지 않는다.
 
