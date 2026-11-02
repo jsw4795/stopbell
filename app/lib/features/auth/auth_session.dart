@@ -29,6 +29,7 @@ class AuthSession extends ChangeNotifier {
   Future<TokenPair>? _refreshInFlight;
   Future<void>? _initialization;
   Future<void>? _logoutInFlight;
+  bool _loginInFlight = false;
   bool _loggingOut = false;
   String? _rotatedRefreshTokenForLogout;
   bool _refreshRejectedForLogout = false;
@@ -87,19 +88,24 @@ class AuthSession extends ChangeNotifier {
   }
 
   Future<void> login() async {
-    if (_loggingOut || _state != AuthState.unauthenticated) {
+    if (_loggingOut || _loginInFlight || _state != AuthState.unauthenticated) {
       throw const UnauthenticatedSessionException();
     }
-    final generation = _generation;
-    final pair = await _authenticator.login();
-    if (generation != _generation) throw const StaleSessionException();
-    final identity = _newSessionIdentity();
-    await _tokenStorage.save(pair.withSessionIdentity(identity));
-    if (generation != _generation) throw const StaleSessionException();
-    _sessionIdentity = identity;
-    _pair = pair;
-    _generation++;
-    _setState(AuthState.authenticated);
+    _loginInFlight = true;
+    try {
+      final generation = _generation;
+      final pair = await _authenticator.login();
+      if (generation != _generation) throw const StaleSessionException();
+      final identity = _newSessionIdentity();
+      await _tokenStorage.save(pair.withSessionIdentity(identity));
+      if (generation != _generation) throw const StaleSessionException();
+      _sessionIdentity = identity;
+      _pair = pair;
+      _generation++;
+      _setState(AuthState.authenticated);
+    } finally {
+      _loginInFlight = false;
+    }
   }
 
   Future<void> logout({Future<void> Function()? beforeLogout}) {

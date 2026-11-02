@@ -31,6 +31,27 @@ class FakeAuthenticator implements Authenticator {
   }
 }
 
+class PendingAuthenticator implements Authenticator {
+  int calls = 0;
+  final pending = Completer<TokenPair>();
+
+  @override
+  Future<TokenPair> login() {
+    calls++;
+    return pending.future;
+  }
+}
+
+class RetryAuthenticator implements Authenticator {
+  int calls = 0;
+
+  @override
+  Future<TokenPair> login() async {
+    if (++calls == 1) throw StateError('authentication failed');
+    return newPair;
+  }
+}
+
 class FakeStorage implements TokenPairStorage {
   FakeStorage({this.pair});
   TokenPair? pair;
@@ -599,6 +620,47 @@ void main() {
     await expectLater(session.login(), throwsStateError);
     expect(session.currentPair, isNull);
     expect(session.state, AuthState.unauthenticated);
+  });
+
+  test('진행 중인 login의 중복 호출은 provider 및 저장소를 다시 호출하지 않는다', () async {
+    final authenticator = PendingAuthenticator();
+    final storage = FakeStorage();
+    final session = AuthSession(
+      authenticator: authenticator,
+      backend: FakeBackend(),
+      tokenStorage: storage,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    final first = session.login();
+    await expectLater(
+      session.login(),
+      throwsA(isA<UnauthenticatedSessionException>()),
+    );
+    expect(authenticator.calls, 1);
+    authenticator.pending.complete(newPair);
+    await first;
+    expect(storage.saves, 1);
+    expect(session.currentPair, same(newPair));
+  });
+
+  test('login 실패 후 다시 로그인할 수 있다', () async {
+    final authenticator = RetryAuthenticator();
+    final storage = FakeStorage();
+    final session = AuthSession(
+      authenticator: authenticator,
+      backend: FakeBackend(),
+      tokenStorage: storage,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    await expectLater(session.login(), throwsStateError);
+    expect(session.state, AuthState.unauthenticated);
+    await session.login();
+    expect(authenticator.calls, 2);
+    expect(storage.saves, 1);
+    expect(session.currentPair, same(newPair));
+    expect(session.state, AuthState.authenticated);
   });
 
   test('rotation은 새 Pair를 저장하고 current Pair를 교체한다', () async {
