@@ -3,17 +3,20 @@ class AppConfig {
     required this.apiBaseUrl,
     required this.googleIosClientId,
     required this.googleServerClientId,
+    this.requireHttps = false,
   });
 
   factory AppConfig.fromEnvironment() => const AppConfig(
     apiBaseUrl: String.fromEnvironment('API_BASE_URL'),
     googleIosClientId: String.fromEnvironment('GOOGLE_IOS_CLIENT_ID'),
     googleServerClientId: String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID'),
+    requireHttps: bool.fromEnvironment('dart.vm.product'),
   );
 
   final String apiBaseUrl;
   final String googleIosClientId;
   final String googleServerClientId;
+  final bool requireHttps;
 
   void validate() {
     final missing = <String>[
@@ -28,7 +31,8 @@ class AppConfig {
     final uri = Uri.tryParse(apiBaseUrl);
     if (uri == null ||
         !uri.hasAuthority ||
-        (uri.scheme != 'http' && uri.scheme != 'https')) {
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        (requireHttps && uri.scheme != 'https')) {
       throw const AppConfigException('API_BASE_URL 형식이 올바르지 않습니다.');
     }
   }

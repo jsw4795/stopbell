@@ -20,4 +20,20 @@ void main() {
       ),
     );
   });
+  test('release 설정은 HTTP 주소를 거부하고 HTTPS를 허용한다', () {
+    const insecure = AppConfig(
+      apiBaseUrl: 'http://localhost:8080',
+      googleIosClientId: 'ios-client',
+      googleServerClientId: 'server-client',
+      requireHttps: true,
+    );
+    const secure = AppConfig(
+      apiBaseUrl: 'https://api.example.com',
+      googleIosClientId: 'ios-client',
+      googleServerClientId: 'server-client',
+      requireHttps: true,
+    );
+    expect(insecure.validate, throwsA(isA<AppConfigException>()));
+    expect(secure.validate, returnsNormally);
+  });
 }

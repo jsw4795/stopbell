@@ -1,0 +1,21 @@
+# iOS App Store 제출 준비 (TASK-815)
+
+2026-11-02 기준 코드·정적 점검이다. 서명, App Store Connect 등록·업로드, 심사 및 실제 기기 검증은 수행하지 않았다. 제출 직전에 Apple 정책과 SDK 요구사항을 다시 확인한다.
+
+## 현재 구현
+
+- iOS Bundle ID는 `com.stopbell.stopbell`, deployment target은 iOS 15.0, 표시 이름은 Stopbell, Flutter 버전은 `0.1.0+1`이다. 실제 등록 식별자·표시 이름·출시 버전과 일치하는지는 사용자 확인이 필요하다.
+- Release entitlement는 `aps-environment=production`이고 Debug/Profile은 development다. 실제 배포 인증서·provisioning profile의 Push capability와 APNs/Firebase 연결은 미검증이다. Firebase 설정 파일은 프로젝트에 포함되어 있으며 출시 대상 Firebase 앱과 Bundle ID 일치를 확인한다. Google URL scheme과 iOS/Web client ID도 출시 대상과 일치해야 한다. Client secret이나 서버 credential을 앱에 넣지 않는다.
+- `API_BASE_URL`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_SERVER_CLIENT_ID`는 빌드 시 `--dart-define`으로 주입한다. Release는 인증 복원 전에 설정을 검증하며 HTTPS가 아니면 시작을 중단한다. 값은 앱 바이너리에서 추출 가능하므로 secret을 넣지 않는다. 실제 운영 HTTPS 주소와 인증서, 외부 접근성은 별도 검증한다.
+- Google 로그인과 로그아웃·secure storage 기반 세션 복원, 설치본 정보 및 notification lifecycle이 구현되어 있다. 로그아웃은 계정 삭제가 아니다. 실제 앱 종료·재실행, 기존 설치본·Keychain, 기기 변경, Push 수신 및 tap은 출시 빌드에서 재검증해야 한다.
+- 개발용 Firebase smoke는 별도 entrypoint이고 Debug 보호가 있다. 일반 entrypoint의 push 진단 출력은 `kDebugMode`로 제한된다. Release 설정에 개발 API 주소를 넣지 않는다.
+
+## 출시 차단 및 사용자 결정
+
+1. 현재 Google만 primary login으로 제공한다. [Apple Guideline 4.8](https://developer.apple.com/app-store/review/guidelines/)의 예외 해당 여부와 동등한 privacy 요건을 만족하는 추가 로그인 방식을 확인한다. Sign in with Apple을 자동으로 확정하지 않는다.
+2. 앱에서 계정 삭제를 시작하는 기능은 없다. [Apple 계정 삭제 지침](https://developer.apple.com/help/app-review/guideline-reference/5-1-1-account-deletion/)을 충족하도록 삭제 방식과 User·Alarm·Device·RefreshToken·Notification 기록, 법적 보존 및 완료 통지 정책을 결정하고 구현·검증해야 한다.
+3. 실제 수집·전송·보존 데이터와 Firebase/Google 및 기타 SDK를 조사해 개인정보 처리방침과 App Store privacy disclosure를 작성한다. [Apple privacy 안내](https://developer.apple.com/app-store/user-privacy-and-data-use/)와 [SDK privacy manifest/signature 요구](https://developer.apple.com/support/third-party-SDK-requirements/)를 기준으로 최종 archive의 privacy report 및 의존 SDK를 확인한다. 이 문서는 disclosure를 대신하지 않는다.
+4. Apple Developer 계정의 Bundle ID, signing, distribution profile, Push capability, APNs credential 및 Firebase/Google OAuth 설정을 사용자가 확인한다. 실제 credential을 저장소·로그에 넣지 않는다. 알림 권한 거부와 설명, 로그인, 재설치·업데이트, foreground/background/terminated 수신 및 tap을 실제 iPhone에서 검증한다.
+5. 제출 시점의 [Apple SDK 요구사항](https://developer.apple.com/news/upcoming-requirements/?id=04282026a)을 확인한다. 2026-04-28 이후 업로드는 Xcode 26 이상과 iOS 26 이상 SDK가 필요하며, [Apple 제출 안내](https://developer.apple.com/app-store/submitting/)는 2027년 4월부터 iOS 27 SDK 및 iOS 15 이상 target을 예고한다. 출시 메타데이터, 연령 등급, 심사 계정, Privacy Policy URL, archive 서명·업로드와 심사를 사용자가 완료해야 한다.
+
+프로젝트의 알림·기기 실측 및 운영 배포 잔여 조건은 TASK-710/810/813/908을 따른다. 위 정적 검토는 Apple 심사 통과를 보장하지 않는다.

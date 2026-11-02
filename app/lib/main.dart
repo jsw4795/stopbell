@@ -28,6 +28,16 @@ import 'features/transit/bus_route_stop_occurrence.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   final config = AppConfig.fromEnvironment();
+  try {
+    config.validate();
+  } on AppConfigException catch (error) {
+    runApp(
+      MaterialApp(
+        home: Scaffold(body: Center(child: Text(error.message))),
+      ),
+    );
+    return;
+  }
   final backend = BackendAuthClient(
     apiBaseUrl: Uri.tryParse(config.apiBaseUrl) ?? Uri(),
   );
