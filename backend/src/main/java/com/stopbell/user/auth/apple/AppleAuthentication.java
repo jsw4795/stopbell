@@ -1,8 +1,9 @@
 package com.stopbell.user.auth.apple;
 
 import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-/** Authentication building block; deliberately not exposed as an endpoint. */
+/** Verifies Apple credentials before the application login transaction begins. */
 public final class AppleAuthentication {
     private final AppleNonceStore nonces;
     private final AppleIdentityTokenVerifier verifier;
@@ -17,6 +18,9 @@ public final class AppleAuthentication {
     public String issueNonce() { return nonces.issue(); }
 
     public Result authenticate(String identityToken, String authorizationCode, String nonce) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Apple authentication requires no enclosing transaction");
+        }
         nonces.consume(nonce);
         String subject = verifier.verify(identityToken, nonce);
         AppleCodeExchange.Tokens tokens = exchange.exchange(authorizationCode);

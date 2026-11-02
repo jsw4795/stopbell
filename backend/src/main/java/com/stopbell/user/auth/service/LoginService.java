@@ -1,7 +1,10 @@
 package com.stopbell.user.auth.service;
 
+import java.util.function.Consumer;
+
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.dto.TokenResponse;
+import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.UserRepository;
 import org.hibernate.exception.ConstraintViolationException;
@@ -35,13 +38,24 @@ public class LoginService {
     }
 
     public TokenResponse login(ExternalIdentity identity) {
+        return login(identity, null);
+    }
+
+    public TokenResponse loginApple(ExternalIdentity identity, Consumer<User> storeCredential) {
+        if (identity == null || identity.provider() != AuthProvider.APPLE || storeCredential == null) {
+            throw new IllegalArgumentException("Apple identity is required");
+        }
+        return login(identity, storeCredential);
+    }
+
+    private TokenResponse login(ExternalIdentity identity, Consumer<User> storeCredential) {
         try {
             return loginTransaction.execute(status -> {
                 User user = userRepository.findByAuthProviderAndProviderUserId(
                         identity.provider(),
                         identity.providerUserId()
                 ).orElseGet(() -> createUser(identity));
-                return issueTokens(user);
+                return issueTokens(user, storeCredential);
             });
         } catch (IdentityConflict conflict) {
             // execute() has completed rollback and discarded the failed persistence context.
@@ -52,7 +66,7 @@ public class LoginService {
                         && identity.providerUserId().equals(existing.getProviderUserId())
                         && existing.getId() != null && existing.getId() > 0)
                         .orElseThrow(() -> conflict.failure);
-                return issueTokens(user);
+                return issueTokens(user, storeCredential);
             });
         }
     }
@@ -73,7 +87,16 @@ public class LoginService {
         }
     }
 
-    private TokenResponse issueTokens(User user) {
+    private TokenResponse issueTokens(User user, Consumer<User> storeCredential) {
+        if (storeCredential != null) {
+            String providerUserId = user.getProviderUserId();
+            User locked = userRepository.findByIdForUpdate(user.getId())
+                    .filter(existing -> existing.getAuthProvider() == AuthProvider.APPLE
+                            && existing.getProviderUserId().equals(providerUserId))
+                    .orElseThrow(() -> new IllegalStateException("Apple identity is unavailable"));
+            storeCredential.accept(locked);
+            user = locked;
+        }
         return new TokenResponse(
                 jwtTokenService.createAccessToken(user.getId()),
                 refreshTokenService.issue(user)

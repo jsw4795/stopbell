@@ -94,6 +94,13 @@ class AuthControllerIntegrationTest {
     private JwtTokenService jwtTokenService;
 
     @Test
+    void appleEndpointsAreUnavailableWhenDisabled() throws Exception {
+        mockMvc.perform(post("/auth/apple/challenge")).andExpect(status().isNotFound());
+        mockMvc.perform(post("/auth/apple").contentType("application/json").content("{}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("Access Token 없이 Google Login Endpoint에 접근해 Token Pair와 해시 저장 Refresh Token을 받는다")
     void allow_unauthenticated_google_login() throws Exception {
         when(googleIdentityVerifier.verify("valid-google-id-token"))

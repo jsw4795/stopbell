@@ -32,10 +32,24 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 class AppleAuthenticationTest {
     private static final Instant NOW = Instant.parse("2026-11-01T00:00:00Z");
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
+
+    @Test
+    void rejectsExternalAuthenticationInsideTransaction() {
+        var authentication = new AppleAuthentication(new AppleNonceStore(CLOCK),
+                mock(AppleIdentityTokenVerifier.class), mock(AppleCodeExchange.class));
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            assertThatThrownBy(() -> authentication.authenticate("token", "code", "nonce"))
+                    .isInstanceOf(IllegalStateException.class);
+        } finally {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+        }
+    }
 
     private String sign(RSAKey key, String subject, String nonce) throws Exception {
         var builder = new JWTClaimsSet.Builder().issuer("https://appleid.apple.com")

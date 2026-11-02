@@ -6,11 +6,16 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "apple.authentication", name = "enabled", havingValue = "true")
 @EnableConfigurationProperties(AppleAuthenticationProperties.class)
 public class AppleAuthenticationConfiguration {
+    @Bean
+    AppleCredentialStore appleCredentialStore(JdbcTemplate jdbc, AppleCredentialCipher cipher) {
+        return new AppleCredentialStore(jdbc, cipher);
+    }
     @Bean
     AppleCredentialCipher appleCredentialCipher(AppleAuthenticationProperties properties) {
         if (properties.credentialKeys() == null) throw new IllegalStateException("Apple credential keys are required");

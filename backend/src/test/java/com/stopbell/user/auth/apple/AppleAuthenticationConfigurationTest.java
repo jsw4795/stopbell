@@ -7,13 +7,16 @@ import java.util.Base64;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class AppleAuthenticationConfigurationTest {
     private final ApplicationContextRunner context = new ApplicationContextRunner()
             .withUserConfiguration(AppleAuthenticationConfiguration.class)
-            .withBean(Clock.class, Clock::systemUTC);
+            .withBean(Clock.class, Clock::systemUTC)
+            .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class));
 
     @Test
     void disabledByDefaultAndRequiresSecretsWhenEnabled() {

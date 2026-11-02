@@ -121,6 +121,10 @@ UNIQUE(token_hash)
 
 한 User가 여러 Refresh Token을 가질 수 있어 여러 Login Session을 허용한다. Rotation 또는 Logout으로 Token을 무효화할 때는 `token_hash`로 해당 행 하나만 삭제한다. Logout은 만료 여부를 검증하거나 User를 먼저 조회하지 않으며, 삭제 대상이 없어도 성공으로 처리한다. `updated_at`, `revoked_at`, `device_id`, `last_used_at`, `token_family`는 현재 추가하지 않는다.
 
+### apple_credentials
+
+V23은 `user_id BIGINT`를 기본키이자 `users(id)` 외래키로 두고, `encrypted_refresh_token VARCHAR(12000)`에 AES-256-GCM 암호문 envelope만 저장한다. 한 Apple User당 한 행이며 원문 토큰은 저장하지 않는다. 로그인은 소유 User를 잠근 뒤 행을 생성하거나 교체한다. User·credential·StopBell refresh token은 같은 transaction에서 저장된다. 키 주입·교체와 외부 통신 경계는 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다.
+
 ### devices
 
 현재 Schema (`V13__create_devices.sql`):

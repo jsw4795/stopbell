@@ -10,7 +10,7 @@ StopBell Application API의 기본 접두사:
 /api/v1
 ```
 
-인증 endpoint는 기존 `/auth/google`, `/auth/refresh`, `/auth/logout` 경로를 사용한다. 운영·관리 endpoint는 Application API와 분리하여 `/actuator/*`에 둔다.
+인증 endpoint는 `/auth/google`, `/auth/apple/challenge`, `/auth/apple`, `/auth/refresh`, `/auth/logout` 경로를 사용한다. Apple 두 endpoint는 명시적으로 활성화한 경우에만 제공한다. 운영·관리 endpoint는 Application API와 분리하여 `/actuator/*`에 둔다.
 
 ## 2. 설계 규칙
 
@@ -646,6 +646,12 @@ Backend는 `GOOGLE_SERVER_CLIENT_ID`에 설정한 Backend용 Google Server Clien
 ```
 
 이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. 잘못된 Google Credential, 검증 실패, 또는 누락된 `sub`에는 `401 Unauthorized`와 `UNAUTHENTICATED`를 반환한다. Google ID Token의 로컬 compact/JSON 파싱에서 발생하는 `IllegalArgumentException`·`IOException`도 Credential 실패로 구분한다. 파싱 후 Google 공개키 조회 등 Identity 검증 Infrastructure의 I/O 실패에는 Credential 오류로 처리하지 않고 `503 Service Unavailable`과 `SOCIAL_IDENTITY_UNAVAILABLE`을 반환한다. 검증 단계의 임의 RuntimeException을 인증 실패로 통합하지 않는다. 두 오류의 Content-Type과 고정 공개 message는 §5를 따른다.
+
+### Apple 로그인
+
+Apple 인증을 명시적으로 활성화한 경우 인증 없이 `POST /auth/apple/challenge`를 호출해 `{"nonce":"<서버 nonce>"}`를 받는다. 이어 `POST /auth/apple`에 JSON `{"identityToken":"<Apple ID Token>","authorizationCode":"<Apple code>","nonce":"<서버 nonce>"}`를 전달한다. 성공은 Google과 같은 StopBell Access/Refresh Token JSON과 `200`이며 두 응답은 `Cache-Control: no-store`다. 검증 실패·nonce 재사용은 `401 UNAUTHENTICATED`, Apple 인증 서비스 장애는 `503 SOCIAL_IDENTITY_UNAVAILABLE`, DB 또는 설정 실패는 서버 오류다. 누락·손상된 JSON은 기존 MVC 400 정책을 따른다. 비활성화 시 두 경로에 Controller가 없어 404다.
+
+nonce는 단일 프로세스에서 5분간 유효하고 시도 시 한 번만 소비된다. 실패하거나 서버 재시작 시 새 challenge와 Apple 인증이 필요하다. 코드 교환 성공 뒤 DB 실패 또는 응답 유실도 기존 코드를 재시도하지 않고 새 Apple 인증으로 복구한다. 인증과 계정 저장의 경계 및 운영 조건은 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다. 동일 이메일이라도 Apple과 Google 계정은 별도 User다.
 
 ### Refresh Token 재발급
 
