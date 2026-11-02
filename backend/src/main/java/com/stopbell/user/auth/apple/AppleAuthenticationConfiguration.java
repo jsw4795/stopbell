@@ -1,0 +1,28 @@
+package com.stopbell.user.auth.apple;
+
+import java.time.Clock;
+
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration(proxyBeanMethods = false)
+@ConditionalOnProperty(prefix = "apple.authentication", name = "enabled", havingValue = "true")
+@EnableConfigurationProperties(AppleAuthenticationProperties.class)
+public class AppleAuthenticationConfiguration {
+    @Bean
+    AppleCredentialCipher appleCredentialCipher(AppleAuthenticationProperties properties) {
+        if (properties.credentialKeys() == null) throw new IllegalStateException("Apple credential keys are required");
+        return new AppleCredentialCipher(properties.credentialKeyId(), properties.credentialKeys());
+    }
+
+    @Bean
+    AppleAuthentication appleAuthentication(AppleAuthenticationProperties properties, Clock jwtClock) {
+        var clientSecret = new AppleClientSecret(properties.clientId(), properties.teamId(), properties.keyId(),
+                properties.privateKeyPem(), jwtClock);
+        var verifier = new AppleIdentityTokenVerifier(new AppleJwksDecoder(), properties.clientId(), jwtClock);
+        return new AppleAuthentication(new AppleNonceStore(jwtClock), verifier,
+                new AppleCodeExchange(properties.clientId(), clientSecret));
+    }
+}

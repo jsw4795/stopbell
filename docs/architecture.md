@@ -650,3 +650,13 @@ Actuator가 제공하는 Micrometer registry를 사용한다. `stopbell.transit.
 - Gauge NaN, 수집 실패 또는 프로세스 재시작으로 시계열이 끊김: DB와 수집 경로를 별도 장애로 확인. counter 초기화와 설정상 비활성화 기간을 고려
 
 이 계약은 alert destination, 특정 vendor, self-hosted monitoring stack 또는 운영 임계값을 확정하지 않는다. Metadata sync age와 관측별 staleness/UNKNOWN 원인 등 추가 후보는 현재 계측 범위 밖이다.
+
+## Apple 인증 기반 (TASK-815-A)
+
+Apple 인증은 공개 API나 Flutter에 연결되지 않은 Backend 기반 단계다. `AppleJwksDecoder`는 고정된 Apple JWKS 주소에서 공개키를 가져와 RS256과 `kid`를 검사하고 서명을 검증한다. 각 검증에서 키를 다시 조회해 교체를 반영하며, 연결·읽기 timeout과 응답 크기 제한을 적용한다. `AppleIdentityTokenVerifier`는 issuer, audience, subject, 발급·만료 시각과 최초 토큰의 nonce를 확인한다. 공개키 조회 장애와 잘못된 자격 증명을 구분한다. 외부 호출은 transaction 밖에서만 연결해야 한다.
+
+`AppleAuthentication`은 서버에서 생성한 5분 수명의 nonce를 선소비한 뒤 최초 ID token을 검증하고, ES256 client secret으로 Apple의 단일 사용 authorization code를 교환한다. 교환 응답의 서명과 claim을 다시 검증하고 두 subject가 일치할 때만 결과를 반환한다. 불확실한 교환은 자동 재시도하지 않는다. nonce 저장소는 단일 프로세스 메모리에서 최대 10,000개를 유지하고 재시작 시 모두 무효화한다. 다중 인스턴스나 인스턴스 교체 중 연속 로그인을 지원하는 계약은 아직 없으며, 공개 API 연결 전에 공유 저장소 또는 고정 라우팅과 수명·남용 제한을 별도 검증해야 한다. 클라이언트 임의 nonce를 신뢰하지 않는다.
+
+기반은 기본 비활성화다. `apple.authentication.enabled=true`를 지정할 때 외부 설정으로 `client-id`, `team-id`, `key-id`, PKCS#8 `private-key-pem`, `credential-key-id`, `credential-keys` 맵을 주입한다. 비밀은 저장소와 로그에 넣지 않는다. `credential-keys`의 값은 Base64로 인코딩한 32바이트 독립 AES 키다. AES-256-GCM은 무작위 nonce와 User ID를 인증된 추가 데이터로 사용하고 key ID를 암호문에 포함한다. 키 교체 시 신규 key ID를 활성화하고 이전 키를 읽기 전용으로 유지하면서 별도 이관으로 재암호화한 뒤 복구·백업을 확인하고 이전 키를 제거한다. 키 유실 시 해당 credential은 복구할 수 없다. 현재 Apple refresh token은 저장하지 않으며 키 주입과 보관은 운영 환경의 책임이다.
+
+Apple 인증 Endpoint, StopBell User·Token 발급 연결, credential의 원자적 영속화, Flutter 연동과 Apple Developer capability·실기기 검증은 미완료다. 운영 활성화 전 nonce 저장·속도 제한, 외부 장애·timeout, secret 관리와 코드 교환 응답 유실을 포함해 다시 검증한다. TASK-815는 미완료다.

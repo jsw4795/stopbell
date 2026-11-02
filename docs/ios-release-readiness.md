@@ -8,6 +8,7 @@
 - Release entitlement는 `aps-environment=production`이고 Debug/Profile은 development다. 실제 배포 인증서·provisioning profile의 Push capability와 APNs/Firebase 연결은 미검증이다. Firebase 설정 파일은 프로젝트에 포함되어 있으며 출시 대상 Firebase 앱과 Bundle ID 일치를 확인한다. Google URL scheme과 iOS/Web client ID도 출시 대상과 일치해야 한다. Client secret이나 서버 credential을 앱에 넣지 않는다.
 - `API_BASE_URL`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_SERVER_CLIENT_ID`는 빌드 시 `--dart-define`으로 주입한다. Release는 인증 복원 전에 설정을 검증하며 HTTPS가 아니면 시작을 중단한다. 값은 앱 바이너리에서 추출 가능하므로 secret을 넣지 않는다. 실제 운영 HTTPS 주소와 인증서, 외부 접근성은 별도 검증한다.
 - Google 로그인과 로그아웃·secure storage 기반 세션 복원, 설치본 정보 및 notification lifecycle이 구현되어 있다. 로그아웃은 계정 삭제가 아니다. 실제 앱 종료·재실행, 기존 설치본·Keychain, 기기 변경, Push 수신 및 tap은 출시 빌드에서 재검증해야 한다.
+- Apple 로그인은 아직 제공하지 않는다. Backend에 서명·토큰 교환의 미연결 기반만 추가했다. 서버 nonce 저장 범위와 설정·키 교체, 남은 연결 조건은 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다. 회원 탈퇴와 Apple token revocation도 미구현이다.
 - 개발용 Firebase smoke는 별도 entrypoint이고 Debug 보호가 있다. 일반 entrypoint의 push 진단 출력은 `kDebugMode`로 제한된다. Release 설정에 개발 API 주소를 넣지 않는다.
 
 ## 출시 차단 및 사용자 결정

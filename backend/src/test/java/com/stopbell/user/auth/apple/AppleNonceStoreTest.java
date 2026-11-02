@@ -1,0 +1,33 @@
+package com.stopbell.user.auth.apple;
+
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+
+import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class AppleNonceStoreTest {
+    @Test
+    void consumesOnlyIssuedNonceOnceAndRejectsExpired() {
+        Instant now = Instant.parse("2026-11-01T00:00:00Z");
+        class MutableClock extends Clock {
+            Instant instant = now;
+            @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+            @Override public Instant instant() { return instant; }
+        }
+        var clock = new MutableClock();
+        var store = new AppleNonceStore(clock);
+        String nonce = store.issue();
+        store.consume(nonce);
+        assertThatThrownBy(() -> store.consume(nonce)).isInstanceOf(InvalidSocialCredentialException.class);
+        assertThatThrownBy(() -> store.consume("a".repeat(43))).isInstanceOf(InvalidSocialCredentialException.class);
+        String expired = store.issue();
+        clock.instant = now.plus(Duration.ofMinutes(5));
+        assertThatThrownBy(() -> store.consume(expired)).isInstanceOf(InvalidSocialCredentialException.class);
+    }
+}
