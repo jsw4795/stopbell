@@ -28,6 +28,8 @@ class BackupRestoreIntegrationTest {
         JdbcTemplate original = jdbc(source);
         LocalDateTime now = LocalDateTime.of(2026, 1, 1, 0, 0);
         original.update("insert into users (auth_provider, provider_user_id, created_at, updated_at) values ('GOOGLE', 'synthetic', ?, ?)", now, now);
+        original.update("insert into users (auth_provider, provider_user_id, created_at, updated_at) values ('APPLE', 'synthetic-apple', ?, ?)", now, now);
+        original.update("insert into apple_credentials (user_id, encrypted_refresh_token) values (2, 'v1.fixture.synthetic-ciphertext')");
         original.update("insert into alarms (user_id, transit_type, status, created_at, updated_at) values (1, 'BUS', 'ACTIVE', ?, ?)", now, now);
         original.update("insert into devices (user_id, installation_id, installation_credential_hash, platform, current_push_target_id, registration_revision, enabled, last_registered_at, created_at, updated_at) values (1, '12345678-1234-4123-8123-123456789abc', ?, 'IOS', 'synthetic', 0, true, ?, ?, ?)", "a".repeat(64), now, now, now);
         original.update("insert into notification_events (source_type, alarm_id, user_id, activation_generation, tracking_cycle_id, event_type, observed_at, event_detected_at, created_at) values ('ALARM', 1, 1, 0, '12345678-1234-4123-8123-123456789abc', 'ONE_STOP_BEFORE', ?, ?, ?)", now, now, now);
@@ -41,9 +43,9 @@ class BackupRestoreIntegrationTest {
         Flyway restoredFlyway = flyway(destination);
         restoredFlyway.validate();
         assertThat(restoredFlyway.info().pending()).isEmpty();
-        assertThat(restoredFlyway.info().current().getVersion().getVersion()).isEqualTo("22");
+        assertThat(restoredFlyway.info().current().getVersion().getVersion()).isEqualTo("23");
         JdbcTemplate restored = jdbc(destination);
-        for (String table : List.of("users", "alarms", "devices", "notification_events", "notification_deliveries", "flyway_schema_history")) {
+        for (String table : List.of("users", "apple_credentials", "alarms", "devices", "notification_events", "notification_deliveries", "flyway_schema_history")) {
             List<Map<String, Object>> expected = original.queryForList("select * from " + table + " order by 1");
             assertThat(restored.queryForList("select * from " + table + " order by 1")).as(table).isEqualTo(expected);
         }
