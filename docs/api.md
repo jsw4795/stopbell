@@ -653,6 +653,8 @@ Apple 인증을 명시적으로 활성화한 경우 인증 없이 `POST /auth/ap
 
 nonce는 단일 프로세스에서 5분간 유효하고 시도 시 한 번만 소비된다. 실패하거나 서버 재시작 시 새 challenge와 Apple 인증이 필요하다. 코드 교환 성공 뒤 DB 실패 또는 응답 유실도 기존 코드를 재시도하지 않고 새 Apple 인증으로 복구한다. 인증과 계정 저장의 경계 및 운영 조건은 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다. 동일 이메일이라도 Apple과 Google 계정은 별도 User다.
 
+Flutter iOS는 `APPLE_LOGIN_ENABLED`가 true인 경우에만 Apple 버튼을 표시한다. 매번 challenge nonce 원본을 네이티브 인증과 이 API에 전달하며, 실패한 code의 자동 재전송은 없다. Backend와 Client 활성화 설정을 함께 관리한다.
+
 ### Refresh Token 재발급
 
 ```http

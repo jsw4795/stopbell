@@ -23,6 +23,14 @@ class AuthSession extends ChangeNotifier {
   final Authenticator _authenticator;
   final BackendAuthClient _backend;
   final TokenPairStorage _tokenStorage;
+  static final Expando<_StorageQueue> _storageQueues = Expando<_StorageQueue>();
+
+  Future<T> _withStorage<T>(Future<T> Function() operation) {
+    final queue = _storageQueues[_tokenStorage] ??= _StorageQueue();
+    final work = queue.tail.then((_) => operation());
+    queue.tail = work.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return work;
+  }
 
   AuthState _state = AuthState.initializing;
   TokenPair? _pair;
@@ -30,6 +38,7 @@ class AuthSession extends ChangeNotifier {
   Future<void>? _initialization;
   Future<void>? _logoutInFlight;
   bool _loginInFlight = false;
+  bool _disposed = false;
   bool _loggingOut = false;
   String? _rotatedRefreshTokenForLogout;
   bool _refreshRejectedForLogout = false;
@@ -64,6 +73,7 @@ class AuthSession extends ChangeNotifier {
   int get generation => _generation;
   bool get isLoggingOut => _logoutInFlight != null;
   bool isCurrentGeneration(int generation) =>
+      !_disposed &&
       !_loggingOut &&
       _state == AuthState.authenticated &&
       _generation == generation;
@@ -72,40 +82,65 @@ class AuthSession extends ChangeNotifier {
 
   Future<void> _restore() async {
     try {
-      _pair = await _tokenStorage.read();
-      _sessionIdentity = _pair?.sessionIdentity ?? _newSessionIdentity();
-      if (_pair != null && _pair!.sessionIdentity == null) {
-        await _tokenStorage.save(_pair!.withSessionIdentity(_sessionIdentity!));
-      }
+      await _withStorage(() async {
+        _pair = await _tokenStorage.read();
+        _sessionIdentity = _pair?.sessionIdentity ?? _newSessionIdentity();
+        if (_pair != null && _pair!.sessionIdentity == null) {
+          await _tokenStorage.save(
+            _pair!.withSessionIdentity(_sessionIdentity!),
+          );
+        }
+      });
+      if (_disposed) return;
       _setState(
         _pair == null ? AuthState.unauthenticated : AuthState.authenticated,
       );
     } catch (_) {
       _pair = null;
-      _setState(AuthState.unauthenticated);
+      if (!_disposed) _setState(AuthState.unauthenticated);
       rethrow;
     }
   }
 
-  Future<void> login() async {
-    if (_loggingOut || _loginInFlight || _state != AuthState.unauthenticated) {
+  Future<void> login({Authenticator? authenticator}) async {
+    if (_disposed ||
+        _loggingOut ||
+        _loginInFlight ||
+        _state != AuthState.unauthenticated) {
       throw const UnauthenticatedSessionException();
     }
     _loginInFlight = true;
     try {
       final generation = _generation;
-      final pair = await _authenticator.login();
+      final pair = await (authenticator ?? _authenticator).login();
       if (generation != _generation) throw const StaleSessionException();
       final identity = _newSessionIdentity();
-      await _tokenStorage.save(pair.withSessionIdentity(identity));
-      if (generation != _generation) throw const StaleSessionException();
-      _sessionIdentity = identity;
-      _pair = pair;
-      _generation++;
-      _setState(AuthState.authenticated);
+      await _withStorage(() async {
+        if (generation != _generation) throw const StaleSessionException();
+        await _tokenStorage.save(pair.withSessionIdentity(identity));
+        if (generation != _generation) {
+          try {
+            await _tokenStorage.delete();
+          } catch (_) {
+            throw const AuthSessionPersistenceException();
+          }
+          throw const StaleSessionException();
+        }
+        _sessionIdentity = identity;
+        _pair = pair;
+        _generation++;
+        _setState(AuthState.authenticated);
+      });
     } finally {
       _loginInFlight = false;
     }
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _generation++;
+    super.dispose();
   }
 
   Future<void> logout({Future<void> Function()? beforeLogout}) {
@@ -152,7 +187,7 @@ class AuthSession extends ChangeNotifier {
     _rotatedRefreshTokenForLogout = null;
 
     try {
-      await _tokenStorage.delete();
+      await _withStorage(_tokenStorage.delete);
     } catch (_) {
       if (rotatedDuringLogout || _refreshRejectedForLogout) {
         // The previous persisted token may already be invalid. Do not expose
@@ -220,7 +255,7 @@ class AuthSession extends ChangeNotifier {
         _pair = null;
         _generation++;
         _setState(AuthState.unauthenticated);
-        await _tokenStorage.delete();
+        await _withStorage(_tokenStorage.delete);
       }
       rethrow;
     }
@@ -231,7 +266,14 @@ class AuthSession extends ChangeNotifier {
     }
 
     try {
-      await _tokenStorage.save(rotated.withSessionIdentity(_sessionIdentity!));
+      await _withStorage(() async {
+        if (!isCurrentGeneration(generation)) {
+          throw const StaleSessionException();
+        }
+        await _tokenStorage.save(
+          rotated.withSessionIdentity(_sessionIdentity!),
+        );
+      });
     } catch (_) {
       if (!isCurrentGeneration(generation)) {
         if (_loggingOut) _rotatedRefreshTokenForLogout = rotated.refreshToken;
@@ -241,7 +283,7 @@ class AuthSession extends ChangeNotifier {
       _pair = null;
       _setState(AuthState.unauthenticated);
       try {
-        await _tokenStorage.delete();
+        await _withStorage(_tokenStorage.delete);
       } catch (_) {
         // The fixed error below does not expose tokens or storage internals.
       }
@@ -260,6 +302,10 @@ class AuthSession extends ChangeNotifier {
     _state = next;
     notifyListeners();
   }
+}
+
+class _StorageQueue {
+  Future<void> tail = Future<void>.value();
 }
 
 class UnauthenticatedSessionException implements Exception {

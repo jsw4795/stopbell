@@ -18,6 +18,36 @@ class BackendAuthClient {
   Future<TokenPair> login(String idToken) =>
       _requestTokenPair('/auth/google', {'idToken': idToken});
 
+  Future<String> appleChallenge() async {
+    final response = await _post('/auth/apple/challenge', {});
+    if (response.statusCode != 200) {
+      throw BackendAuthException(
+        'Apple 로그인 준비에 실패했습니다. 다시 시도해 주세요.',
+        statusCode: response.statusCode,
+      );
+    }
+    try {
+      final decoded = jsonDecode(response.body);
+      final nonce = decoded is Map<String, dynamic> ? decoded['nonce'] : null;
+      if (nonce is! String || !RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(nonce)) {
+        throw const FormatException();
+      }
+      return nonce;
+    } on FormatException {
+      throw const BackendAuthException('서버 인증 응답이 올바르지 않습니다.');
+    }
+  }
+
+  Future<TokenPair> loginWithApple({
+    required String identityToken,
+    required String authorizationCode,
+    required String nonce,
+  }) => _requestTokenPair('/auth/apple', {
+    'identityToken': identityToken,
+    'authorizationCode': authorizationCode,
+    'nonce': nonce,
+  });
+
   Future<TokenPair> refresh(String refreshToken) =>
       _requestTokenPair('/auth/refresh', {'refreshToken': refreshToken});
 

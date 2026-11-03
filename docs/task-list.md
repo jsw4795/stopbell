@@ -308,7 +308,7 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 - [x] TASK-812 Analytics / 장기 통계 필요성 결정 및 필요한 경우에만 최소 구현: 현재 공식 요구사항에 별도 수집을 정당화할 구체적인 제품 질문과 보존 근거가 없어 V1에서 별도 제품 Analytics·장기 통계 저장소를 도입하지 않는다. 운영 로그·지표와 NotificationEvent/Delivery의 correctness 역할을 유지하고, 향후 목적·최소 데이터·보존·삭제 근거가 생기면 재검토한다. 기존 Schema·보존 정책·Dependency·코드는 변경하지 않았다. [판단과 경계](architecture.md#analytics-도입-판단-task-812)를 따른다.
 - [ ] TASK-813 Production deployment / migration / backup & recovery readiness: 기존 Docker/health/shutdown 설정과 격리 restart 검증을 유지하고 [배포·복구 절차](production-operations.md)를 준비했다. 합성 데이터와 격리 MySQL 두 개를 사용한 fresh V1~V22 migration, 백업·별도 DB 복원 및 User/Alarm/Device/Notification과 Flyway history 비교, V21→V22 보존, migration 실패 시작 차단, readiness 집중 테스트 4회가 통과했다. 실제 운영 배포·secret 주입·backup/restore drill·traffic 차단·종료 예산은 미검증이다. 사용자는 운영 플랫폼과 복구 지점, 오래된 백업의 RefreshToken/Device 처리 정책을 결정하고 실제 복구와 배포를 검증해야 한다.
 - [x] TASK-814 Production UTC time contract 및 timestamp consistency
-- [ ] TASK-815 iOS public App Store release readiness: Release 시작 전 HTTPS API 설정 검증과 [출시 준비 점검](ios-release-readiness.md)을 추가했다. Flutter analyze, 관련 테스트 3회, plist/APNs entitlement 정적 검사와 합성 설정의 서명 없는 iOS Release build가 통과했다. Apple 로그인 Backend API와 암호화 credential 저장을 구현했으나 Flutter 연동, 회원 탈퇴, 실제 운영 endpoint·Firebase/OAuth·서명·기기 검증과 App Store 업로드·심사는 미수행이다. 개인정보 고지, capability/credential, 출시 빌드와 심사를 준비해야 한다.
+- [ ] TASK-815 iOS public App Store release readiness: [출시 준비 점검](ios-release-readiness.md)을 추가했다. Apple 로그인 Backend API·암호화 credential 저장 및 기본 비활성화된 Flutter iOS 연동을 구현했다. 실제 Apple 인증·기기·운영 설정 검증, 회원 탈퇴, App Store 업로드·심사는 미수행이다. 개인정보 고지, capability/credential, 출시 빌드와 심사를 준비해야 한다.
 - [x] TASK-816 프로젝트 종합 감사 후속 결함 수정
   - 목적: 종합 감사에서 발견한 AUD-01~AUD-13을 중요도에 따라 검토·수정하고 관련 테스트와 문서를 보강한다. 하나의 상위 Task로 관리하며 실제 수정·필수 검증 완료 전까지 `[ ]`를 유지한다.
   - 등록 범위 (2026-10-29): Task와 작업 계획만 추가한다. 이번 등록은 코드·Migration·테스트·Dependency·DB 변경이나 실제 Provider 호출·FCM 발송을 포함하지 않으며, 후속 지시 없이 수정에 착수하지 않는다. 기존 Task 번호와 완료 상태를 유지한다.
@@ -1075,7 +1075,7 @@ TASK-814는 persisted operational time을 UTC 의미로 통일한다. `createdAt
 
 TASK-816 / [AUD-12 처리 기록](#aud-12-처리-2026-10-30)은 기존 callback 5개 컬럼의 Host 의존성, 별도 UTC 경로, MySQL 실측 및 기존 데이터 위험을 TASK-814의 근거로 연결한다. 감사 재현 완료는 UTC 결함 수정이나 TASK-814 완료를 의미하지 않는다.
 
-TASK-815는 Phase 6의 iOS development/actual-device vertical slice를 막지 않으며 public App Store 제출 전에만 release blocker다. 제출 시점 Apple 공식 Guideline을 확인해 Google-only primary social login의 Guideline 4.8 준수, 동등한 privacy-preserving login option 필요 여부, in-app account deletion, Privacy Policy, App Store privacy disclosure/data inventory, Firebase/Google 등 third-party SDK disclosure를 검토한다. 지금 Sign in with Apple 구현을 고정하지 않으며 필요할 때 User, Alarm, Device, Refresh Session 등 사용자 연결 데이터의 삭제 범위와 법적 보존 데이터를 정한다.
+TASK-815는 Phase 6의 iOS development/actual-device vertical slice를 막지 않으며 public App Store 제출 전에만 release blocker다. Apple 로그인 Backend와 Flutter 연동은 구현했으며 실제 인증과 출시 검증이 남았다. 제출 시점 Apple 공식 Guideline, in-app account deletion, Privacy Policy, App Store privacy disclosure/data inventory, Firebase/Google 등 third-party SDK disclosure를 검토한다. User, Alarm, Device, Refresh Session 등 사용자 연결 데이터 삭제와 실제 법적 보존·백업 경계는 후속 작업에서 검증한다.
 
 공개 V1 전에는 기존 Domain Task에서 User별 총/ACTIVE Alarm, User별 Device, Route search query 길이/result limit, request body size의 최소 상한을 Provider quota와 실제 규모를 기준으로 결정한다. 별도 generic rate limiter나 Redis rate limiter는 도입하지 않는다. Provider polling은 Route grouping으로 Alarm별 외부 API 증폭을 막는다.
 

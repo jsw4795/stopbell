@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
+import 'package:stopbell/features/auth/apple_auth_service.dart';
 import 'package:stopbell/features/auth/backend_auth_client.dart';
 import 'package:stopbell/features/auth/google_auth_service.dart';
 import 'package:stopbell/features/auth/token_pair.dart';
@@ -77,8 +79,12 @@ StopBellApplication app(
   Future<List<BusRoute>> Function(String)? searchRoutes,
   Future<List<BusRouteStopOccurrence>> Function(int)? findStops,
   AlarmClient? alarmClient,
+  Authenticator? appleAuthenticator,
+  bool appleLoginEnabled = false,
 }) => StopBellApplication(
   authSession: authSession,
+  appleAuthenticator: appleAuthenticator,
+  appleLoginEnabled: appleLoginEnabled,
   searchRoutes: searchRoutes ?? (String _) async => <BusRoute>[],
   findStops: findStops ?? (int _) async => <BusRouteStopOccurrence>[],
   alarmClient: alarmClient ?? EmptyAlarmClient(),
@@ -140,6 +146,90 @@ class FlowAlarms extends Fake implements AlarmClient {
 }
 
 void main() {
+  testWidgets('Apple 버튼은 iOS와 활성화 조건을 모두 만족할 때만 표시한다', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final apple = FakeAuthenticator();
+    await tester.pumpWidget(
+      app(
+        session(FakeAuthenticator(), FakeStorage()),
+        appleAuthenticator: apple,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Apple로 계속하기'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(
+      app(
+        session(FakeAuthenticator(), FakeStorage()),
+        appleAuthenticator: apple,
+        appleLoginEnabled: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Apple로 계속하기'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    await tester.pumpWidget(
+      app(
+        session(FakeAuthenticator(), FakeStorage()),
+        appleAuthenticator: apple,
+        appleLoginEnabled: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Apple로 계속하기'), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Apple 취소는 오류 없이 복귀하고 두 버튼 중복 입력을 막는다', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final google = FakeAuthenticator();
+    final apple = FakeAuthenticator();
+    await tester.pumpWidget(
+      app(
+        session(google, FakeStorage()),
+        appleAuthenticator: apple,
+        appleLoginEnabled: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apple로 계속하기'));
+    await tester.pump();
+    expect(apple.calls, 1);
+    expect(
+      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
+      isNull,
+    );
+    apple.result.completeError(const AppleLoginCanceledException());
+    await tester.pumpAndSettle();
+    expect(find.text('로그인이 실패했습니다. 다시 시도해 주세요.'), findsNothing);
+    expect(find.text('Apple로 계속하기'), findsOneWidget);
+    expect(google.calls, 0);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('Apple 성공은 공통 세션에 저장된 뒤 앱 화면으로 진입한다', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final apple = FakeAuthenticator();
+    final storage = FakeStorage();
+    final authSession = session(FakeAuthenticator(), storage);
+    await tester.pumpWidget(
+      app(authSession, appleAuthenticator: apple, appleLoginEnabled: true),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Apple로 계속하기'));
+    await tester.pump();
+    expect(storage.pair, isNull);
+    apple.result.complete(pair);
+    await tester.pumpAndSettle();
+    expect(authSession.state, AuthState.authenticated);
+    expect(storage.pair?.sessionIdentity, authSession.sessionIdentity);
+    expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
+  });
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
   testWidgets('route candidate opens its stops and back returns to search', (
     tester,

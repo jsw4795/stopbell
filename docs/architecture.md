@@ -653,10 +653,14 @@ Actuator가 제공하는 Micrometer registry를 사용한다. `stopbell.transit.
 
 ## Apple 인증 기반 (TASK-815-A)
 
-Apple 인증은 명시적 활성화 시 공개 Backend API에 연결되며 Flutter에는 아직 연결되지 않았다. `AppleJwksDecoder`는 고정된 Apple JWKS 주소에서 공개키를 가져와 RS256과 `kid`를 검사하고 서명을 검증한다. 각 검증에서 키를 다시 조회해 교체를 반영하며, 연결·읽기 timeout과 응답 크기 제한을 적용한다. `AppleIdentityTokenVerifier`는 issuer, audience, subject, 발급·만료 시각과 최초 토큰의 nonce를 확인한다. 공개키 조회 장애와 잘못된 자격 증명을 구분한다. 외부 호출은 DB transaction 밖에서 수행한다.
+Apple 인증은 명시적 활성화 시 공개 Backend API와 Flutter iOS 로그인에 연결된다. Flutter의 `APPLE_LOGIN_ENABLED` 기본값은 false이고 Backend 활성화 상태와 일치해야 한다. Flutter는 서버 challenge의 nonce 원본으로 네이티브 인증을 요청한 뒤 ID token·code·nonce를 Backend에 전달한다. Backend가 발급한 StopBell Token Pair만 기존 공통 AuthSession에 저장한다. 취소는 인증 실패로 표시하지 않으며 오류·timeout에서 code를 자동 재전송하지 않는다. 각 Provider는 별도 계정이며 화면에서 안내한다.
+
+동일 TokenPairStorage 인스턴스를 공유하는 AuthSession의 복원·저장·삭제는 직렬화한다. 로그인 저장 중 세션이 종료되면 저장이 끝난 뒤 같은 직렬화 경계에서 그 Pair를 제거하고 다음 세션의 복원·저장으로 넘어간다. 저장소가 이 제거를 거부하면 예외를 전파하며 Pair가 남을 수 있다. 별개의 Storage 인스턴스나 별도 프로세스 사이의 원자적 조정은 이 계약에 포함되지 않는다. 정식 앱은 하나의 Storage 인스턴스를 공유한다.
+
+`AppleJwksDecoder`는 고정된 Apple JWKS 주소에서 공개키를 가져와 RS256과 `kid`를 검사하고 서명을 검증한다. 각 검증에서 키를 다시 조회해 교체를 반영하며, 연결·읽기 timeout과 응답 크기 제한을 적용한다. `AppleIdentityTokenVerifier`는 issuer, audience, subject, 발급·만료 시각과 최초 토큰의 nonce를 확인한다. 공개키 조회 장애와 잘못된 자격 증명을 구분한다. 외부 호출은 DB transaction 밖에서 수행한다.
 
 `AppleAuthentication`은 서버에서 생성한 5분 수명의 nonce를 선소비한 뒤 최초 ID token을 검증하고, ES256 client secret으로 Apple의 단일 사용 authorization code를 교환한다. 교환 응답의 서명과 claim을 다시 검증하고 두 subject가 일치할 때만 결과를 반환한다. 불확실한 교환은 자동 재시도하지 않는다. nonce 저장소는 단일 프로세스 메모리에서 최대 10,000개를 유지하고 재시작 시 모두 무효화한다. 다중 인스턴스나 인스턴스 교체 중 연속 로그인을 지원하는 계약은 아직 없다. 공개 challenge에는 자체 rate limit이 없으므로 운영 접근 제어와 요청 폭주 방지를 별도로 준비해야 한다.
 
 기반은 기본 비활성화다. `apple.authentication.enabled=true`를 지정할 때 외부 설정으로 `client-id`, `team-id`, `key-id`, PKCS#8 `private-key-pem`, `credential-key-id`, `credential-keys` 맵을 주입한다. 비밀은 저장소와 로그에 넣지 않는다. `credential-keys`의 값은 Base64로 인코딩한 32바이트 독립 AES 키다. AES-256-GCM은 무작위 nonce와 User ID를 인증된 추가 데이터로 사용하고 key ID를 암호문에 포함한다. 키 교체 시 신규 key ID를 활성화하고 이전 키를 읽기 전용으로 유지하면서 별도 이관으로 재암호화한 뒤 복구·백업을 확인하고 이전 키를 제거한다. 키 유실 시 해당 credential은 복구할 수 없다. Apple refresh token은 암호화하여 저장하며 키 주입과 보관은 운영 환경의 책임이다.
 
-검증과 코드 교환 뒤 별도 transaction에서 Apple User를 조회·생성하고 User write lock 아래 credential을 교체한 뒤 StopBell Token Pair를 발급한다. User, credential과 StopBell refresh token은 함께 commit 또는 rollback한다. 동일 Identity 생성 충돌은 기존 로그인처럼 rollback 뒤 새 transaction에서 재조회한다. Flutter 연동과 Apple Developer capability·실기기 검증은 미완료다. 운영 활성화 전 nonce 저장·속도 제한, 외부 장애·timeout, secret 관리와 코드 교환 응답 유실을 포함해 다시 검증한다. TASK-815는 미완료다.
+검증과 코드 교환 뒤 별도 transaction에서 Apple User를 조회·생성하고 User write lock 아래 credential을 교체한 뒤 StopBell Token Pair를 발급한다. User, credential과 StopBell refresh token은 함께 commit 또는 rollback한다. 동일 Identity 생성 충돌은 기존 로그인처럼 rollback 뒤 새 transaction에서 재조회한다. Apple Developer capability·실기기 검증은 미완료다. 운영 활성화 전 nonce 저장·속도 제한, 외부 장애·timeout, secret 관리와 코드 교환 응답 유실을 포함해 다시 검증한다. TASK-815는 미완료다.

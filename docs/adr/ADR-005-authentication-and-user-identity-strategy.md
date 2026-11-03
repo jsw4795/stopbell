@@ -77,7 +77,7 @@ Flutter는 Access Token과 Refresh Token을 OS Secure Storage에 저장한다. �
 
 ## 재검토 시점
 
-Apple Provider 지원 요구에 따라 Backend 인증 API와 암호화된 Apple credential 저장을 추가했다. 기존 Provider별 User 분리와 StopBell Token 계약을 유지하며, Flutter 연동은 아직 미완료다. 검증·transaction·운영 경계는 [Architecture](../architecture.md#apple-인증-기반-task-815-a)를 따른다.
+Apple Provider 지원 요구에 따라 Backend 인증 API와 암호화된 Apple credential 저장 및 Flutter iOS 연동을 추가했다. 기존 Provider별 User 분리와 StopBell Token 계약을 유지하며 실제 Apple 인증은 미검증이다. 검증·transaction·운영 경계는 [Architecture](../architecture.md#apple-인증-기반-task-815-a)를 따른다.
 
 다음 조건이 확인되면 결정을 재검토한다.
 

@@ -153,7 +153,7 @@ TASK-903의 설계에 TASK-908의 현행 정책을 반영한 요구사항이다.
 
 ## 4. 인증
 
-StopBell은 자체 ID/Password 회원가입을 제공하지 않고 Social Login만 지원한다. 최초 Provider는 Google이며, Apple 로그인은 Backend API를 구현했고 앱 연동과 출시 검증이 남았다. Provider가 다르면 계정을 자동 병합하지 않는다.
+StopBell은 자체 ID/Password 회원가입을 제공하지 않고 Social Login만 지원한다. 최초 Provider는 Google이며, Apple 로그인은 Backend와 Flutter iOS에 연결했고 실제 인증과 출시 검증이 남았다. Provider가 다르면 계정을 자동 병합하지 않는다.
 
 Flutter는 Google ID Token으로 외부 Identity를 증명하고, Backend는 이를 검증한 뒤 StopBell 자체 Access Token과 Refresh Token을 발급한다. Google Token은 StopBell Application API의 장기 인증 Token으로 사용하지 않는다.
 

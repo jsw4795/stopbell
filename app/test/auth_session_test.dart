@@ -76,6 +76,22 @@ class FakeStorage implements TokenPairStorage {
   }
 }
 
+class BlockingLoginStorage extends FakeStorage {
+  final started = Completer<void>();
+  final release = Completer<void>();
+  bool blocked = false;
+
+  @override
+  Future<void> save(TokenPair pair) async {
+    if (!blocked) {
+      blocked = true;
+      started.complete();
+      await release.future;
+    }
+    await super.save(pair);
+  }
+}
+
 class FakeBackend extends BackendAuthClient {
   FakeBackend() : super(apiBaseUrl: Uri.parse('http://localhost:8080'));
   int refreshCalls = 0;
@@ -642,6 +658,125 @@ void main() {
     await first;
     expect(storage.saves, 1);
     expect(session.currentPair, same(newPair));
+  });
+
+  test('Google과 Apple 동시 login은 하나만 실행되며 logout 후 다른 provider를 사용한다', () async {
+    final google = PendingAuthenticator();
+    final apple = FakeAuthenticator();
+    final storage = FakeStorage();
+    final backend = FakeBackend();
+    final session = AuthSession(
+      authenticator: google,
+      backend: backend,
+      tokenStorage: storage,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    final first = session.login();
+    await expectLater(
+      session.login(authenticator: apple),
+      throwsA(isA<UnauthenticatedSessionException>()),
+    );
+    expect(apple.calls, 0);
+    google.pending.complete(newPair);
+    await first;
+    final oldGeneration = session.generation;
+    final oldIdentity = session.sessionIdentity;
+    await session.logout();
+    await session.login(authenticator: apple);
+    expect(apple.calls, 1);
+    expect(session.generation, greaterThan(oldGeneration));
+    expect(session.sessionIdentity, isNot(oldIdentity));
+    expect(storage.pair?.sessionIdentity, session.sessionIdentity);
+  });
+
+  test('선택 provider의 저장 실패는 인증 상태를 변경하지 않는다', () async {
+    final storage = FakeStorage()..saveError = StateError('unavailable');
+    final session = AuthSession(
+      authenticator: FakeAuthenticator(),
+      backend: FakeBackend(),
+      tokenStorage: storage,
+    );
+    addTearDown(session.dispose);
+    await session.initialize();
+    await expectLater(
+      session.login(authenticator: FakeAuthenticator()),
+      throwsStateError,
+    );
+    expect(session.currentPair, isNull);
+    expect(session.state, AuthState.unauthenticated);
+  });
+
+  test('세션 종료 후 늦은 provider 응답은 저장하지 않는다', () async {
+    final apple = PendingAuthenticator();
+    final storage = FakeStorage();
+    final session = AuthSession(
+      authenticator: FakeAuthenticator(),
+      backend: FakeBackend(),
+      tokenStorage: storage,
+    );
+    await session.initialize();
+    final pending = session.login(authenticator: apple);
+    final rejected = expectLater(
+      pending,
+      throwsA(isA<StaleSessionException>()),
+    );
+    session.dispose();
+    apple.pending.complete(newPair);
+    await rejected;
+    expect(storage.saves, 0);
+    expect(storage.pair, isNull);
+  });
+
+  test('종료된 세션의 저장 완료는 새 세션 복구와 로그인보다 먼저 정리된다', () async {
+    final storage = BlockingLoginStorage();
+    final oldSession = AuthSession(
+      authenticator: FakeAuthenticator(),
+      backend: FakeBackend(),
+      tokenStorage: storage,
+    );
+    await oldSession.initialize();
+    final pending = oldSession.login();
+    final stale = expectLater(pending, throwsA(isA<StaleSessionException>()));
+    await storage.started.future;
+    oldSession.dispose();
+    final next = AuthSession(
+      authenticator: FakeAuthenticator(),
+      backend: FakeBackend(),
+      tokenStorage: storage,
+    );
+    addTearDown(next.dispose);
+    final restore = next.initialize();
+    storage.release.complete();
+    await stale;
+    await restore;
+    expect(next.state, AuthState.unauthenticated);
+    expect(storage.pair, isNull);
+    await next.login();
+    expect(next.state, AuthState.authenticated);
+    expect(storage.pair?.sessionIdentity, next.sessionIdentity);
+  });
+
+  test('종료된 세션의 저장 정리 실패는 성공으로 처리하지 않는다', () async {
+    final storage = BlockingLoginStorage()
+      ..deleteError = StateError('unavailable');
+    final session = AuthSession(
+      authenticator: FakeAuthenticator(),
+      backend: FakeBackend(),
+      tokenStorage: storage,
+    );
+    await session.initialize();
+    final pending = session.login();
+    final failed = expectLater(
+      pending,
+      throwsA(isA<AuthSessionPersistenceException>()),
+    );
+    await storage.started.future;
+    session.dispose();
+    storage.release.complete();
+    await failed;
+    expect(storage.pair, isNotNull);
+    expect(session.currentPair, isNull);
   });
 
   test('login 실패 후 다시 로그인할 수 있다', () async {

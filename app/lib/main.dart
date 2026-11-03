@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'core/app_config.dart';
 import 'core/authenticated_api_client.dart';
@@ -17,6 +19,7 @@ import 'features/boarding/boarding_candidate_client.dart';
 import 'features/boarding/boarding_session_client.dart';
 import 'features/boarding/boarding_creation_intent.dart';
 import 'features/auth/backend_auth_client.dart';
+import 'features/auth/apple_auth_service.dart';
 import 'features/auth/auth_session.dart';
 import 'features/auth/google_auth_service.dart';
 import 'features/auth/token_pair_storage.dart';
@@ -68,6 +71,8 @@ void main() {
   runApp(
     StopBellApplication(
       authSession: authSession,
+      appleAuthenticator: AppleAuthService(backend: backend),
+      appleLoginEnabled: config.appleLoginEnabled,
       push: push,
       notifications: notifications,
       searchRoutes: routeSearch.search,
@@ -87,6 +92,8 @@ class StopBellApplication extends StatefulWidget {
     required this.searchRoutes,
     required this.findStops,
     required this.alarmClient,
+    this.appleAuthenticator,
+    this.appleLoginEnabled = false,
     this.push,
     this.notifications,
     this.findBoardingCandidates,
@@ -95,6 +102,8 @@ class StopBellApplication extends StatefulWidget {
   });
 
   final AuthSession authSession;
+  final Authenticator? appleAuthenticator;
+  final bool appleLoginEnabled;
   final PushRegistrationService? push;
   final NotificationLifecycle? notifications;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
@@ -246,6 +255,8 @@ class _StopBellApplicationState extends State<StopBellApplication>
             )
           : LoginScreen(
               authSession: widget.authSession,
+              appleAuthenticator: widget.appleAuthenticator,
+              appleLoginEnabled: widget.appleLoginEnabled,
               push: widget.push,
               notifications: widget.notifications,
               searchRoutes: widget.searchRoutes,
@@ -266,6 +277,8 @@ class LoginScreen extends StatefulWidget {
     required this.searchRoutes,
     required this.findStops,
     required this.alarmClient,
+    this.appleAuthenticator,
+    this.appleLoginEnabled = false,
     this.push,
     this.notifications,
     this.findBoardingCandidates,
@@ -274,6 +287,8 @@ class LoginScreen extends StatefulWidget {
   });
 
   final AuthSession authSession;
+  final Authenticator? appleAuthenticator;
+  final bool appleLoginEnabled;
   final PushRegistrationService? push;
   final NotificationLifecycle? notifications;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
@@ -291,7 +306,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   String? _message;
 
-  Future<void> _login() async {
+  Future<void> _login({Authenticator? authenticator}) async {
     if (_isLoading || widget.authSession.state != AuthState.unauthenticated) {
       return;
     }
@@ -301,7 +316,9 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      await widget.authSession.login();
+      await widget.authSession.login(authenticator: authenticator);
+    } on AppleLoginCanceledException {
+      // Cancellation does not indicate a failed login.
     } on AppConfigException catch (error) {
       if (mounted) setState(() => _message = error.message);
     } on LoginException catch (error) {
@@ -395,9 +412,31 @@ class _LoginScreenState extends State<LoginScreen> {
                   const Text('인증 상태 확인 중...')
                 else ...[
                   ElevatedButton(
-                    onPressed: _isLoading ? null : _login,
+                    onPressed: _isLoading ? null : () => _login(),
                     child: const Text('Google로 계속하기'),
                   ),
+                  if (widget.appleLoginEnabled &&
+                      widget.appleAuthenticator != null &&
+                      !kIsWeb &&
+                      defaultTargetPlatform == TargetPlatform.iOS) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: 240,
+                      child: SignInWithAppleButton(
+                        text: 'Apple로 계속하기',
+                        onPressed: _isLoading
+                            ? null
+                            : () => _login(
+                                authenticator: widget.appleAuthenticator,
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Google과 Apple 계정은 각각 별도로 관리됩니다.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                   if (_isLoading) ...[
                     const SizedBox(height: 16),
                     const CircularProgressIndicator(),

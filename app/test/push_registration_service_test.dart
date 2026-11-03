@@ -11,6 +11,16 @@ import 'package:stopbell/features/notification/push_registration_service.dart';
 import 'notification_test_fakes.dart';
 
 void main() {
+  test('대체 로그인 provider도 같은 세션과 Device 등록을 사용한다', () async {
+    final f = PushFixture();
+    await f.initialize(login: false);
+    addTearDown(f.auth.dispose);
+    final apple = UserAuthenticator()..user = 'APPLE';
+    await f.auth.login(authenticator: apple);
+    expect(await f.service.synchronize(), PushReadiness.ready);
+    expect(f.devices.users, ['APPLE']);
+    expect(f.devices.sessions.single, f.auth.sessionIdentity);
+  });
   test('최초 등록은 durable r1이며 같은 FID resume는 mutation 없이 완료한다', () async {
     final f = PushFixture();
     await f.initialize();
