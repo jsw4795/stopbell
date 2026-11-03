@@ -9,30 +9,29 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+import com.stopbell.support.SharedMySqlExtension;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.mysql.MySQLContainer;
 
-@Testcontainers
+@ExtendWith(SharedMySqlExtension.class)
 class UserIdentityMigrationIntegrationTest {
 
-    // Each invocation owns a new container, including failed Flyway history and DDL.
-    @Container
-    final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    // Each invocation owns a fresh database, including failed Flyway history and DDL.
+    private SharedMySqlExtension.Database mysql;
 
     private JdbcTemplate jdbc;
 
     @BeforeEach
-    void connect_to_isolated_database() {
+    void connect_to_isolated_database(SharedMySqlExtension.Database database) {
+        mysql = database;
         jdbc = new JdbcTemplate(new DriverManagerDataSource(
                 mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword()));
         assertThat(jdbc.queryForObject("select version()", String.class)).startsWith("8.4.11");

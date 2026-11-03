@@ -5,7 +5,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 
-import com.stopbell.support.PilotMySqlExtension;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusMetadataSyncState;
 import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
@@ -20,7 +20,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -28,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 class ReadinessIntegrationTest {
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "readiness");
+        SharedMySqlExtension.database(registry, "readiness");
     }
     @Autowired MockMvc mvc;
     @Autowired BusMetadataSyncStateRepository metadata;

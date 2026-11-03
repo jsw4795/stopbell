@@ -16,12 +16,12 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
-import com.stopbell.support.PilotMySqlExtension;
 import com.stopbell.alarm.entity.AdjacentStopSnapshot;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.repository.AlarmRepository;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.client.SeoulBusVehicleDetailClient;
 import com.stopbell.transit.client.SeoulBusVehicleLocationClient;
 import com.stopbell.transit.client.TagoVehicleLocationClient;
@@ -55,7 +55,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Verifies the Phase 5 monitoring path with real DB, mapping, evaluation, and lifecycle components. */
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -66,7 +66,7 @@ class TransitMonitoringIntegrationTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "transit_monitoring");
+        SharedMySqlExtension.database(registry, "transit_monitoring");
     }
 
     @Autowired

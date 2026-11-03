@@ -3,7 +3,7 @@ package com.stopbell.boarding.entity;
 import static com.stopbell.boarding.BoardingSessionFixtures.*;
 import static org.assertj.core.api.Assertions.*;
 
-import com.stopbell.support.PilotMySqlExtension;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
 import jakarta.persistence.EntityManager;
@@ -22,7 +22,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -30,7 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 class BoardingSessionPersistenceIntegrationTest {
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "boarding_pilot");
+        SharedMySqlExtension.database(registry, "boarding_pilot");
     }
 
     @Autowired private EntityManager em;

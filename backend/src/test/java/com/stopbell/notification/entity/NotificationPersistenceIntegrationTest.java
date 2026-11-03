@@ -18,7 +18,7 @@ import com.stopbell.boarding.entity.BoardingSession;
 import com.stopbell.boarding.entity.BoardingStateReason;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import com.stopbell.notification.repository.NotificationEventRepository;
-import com.stopbell.support.PilotMySqlExtension;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitEvent;
 import com.stopbell.transit.domain.TransitEventType;
 import com.stopbell.transit.domain.TransitProvider;
@@ -43,7 +43,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -55,7 +55,7 @@ class NotificationPersistenceIntegrationTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "notification_pilot");
+        SharedMySqlExtension.database(registry, "notification_pilot");
     }
 
     @Autowired

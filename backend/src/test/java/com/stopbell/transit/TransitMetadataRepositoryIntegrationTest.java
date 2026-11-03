@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.math.BigDecimal;
 import java.util.List;
 
-import com.stopbell.support.PilotMySqlExtension;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
@@ -33,7 +33,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -42,7 +42,7 @@ class TransitMetadataRepositoryIntegrationTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "transit_metadata_pilot");
+        SharedMySqlExtension.database(registry, "transit_metadata_pilot");
     }
 
     @Autowired

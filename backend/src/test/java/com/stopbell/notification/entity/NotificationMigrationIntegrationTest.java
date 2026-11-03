@@ -3,22 +3,26 @@ package com.stopbell.notification.entity;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.stopbell.support.SharedMySqlExtension;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.mysql.MySQLContainer;
 
-@Testcontainers
+@ExtendWith(SharedMySqlExtension.class)
 class NotificationMigrationIntegrationTest {
 
-    @Container
-    static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    private SharedMySqlExtension.Database mysql;
+
+    @BeforeEach
+    void connect_to_isolated_database(SharedMySqlExtension.Database database) {
+        mysql = database;
+    }
 
     @Test
     @DisplayName("V14는 기존 FOLLOW_UP이 있으면 DDL 전에 중단하고 비어 있지 않은 History는 삭제 후에도 보존한다")

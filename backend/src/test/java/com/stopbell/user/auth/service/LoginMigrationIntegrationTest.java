@@ -7,7 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 
-import com.stopbell.support.PilotMySqlExtension;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.user.auth.exception.InvalidRefreshTokenException;
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.identity.GoogleIdentityVerifier;
@@ -26,7 +26,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -34,7 +34,7 @@ class LoginMigrationIntegrationTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "login_migration");
+        SharedMySqlExtension.database(registry, "login_migration");
     }
 
     @Autowired private LoginService loginService;

@@ -7,20 +7,24 @@ import java.util.List;
 import java.util.UUID;
 
 import com.stopbell.boarding.BoardingSessionFixtures;
+import com.stopbell.support.SharedMySqlExtension;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.mysql.MySQLContainer;
 
-@Testcontainers
+@ExtendWith(SharedMySqlExtension.class)
 class NotificationSourceMigrationIntegrationTest {
-    @Container
-    static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    private SharedMySqlExtension.Database mysql;
+
+    @BeforeEach
+    void connect_to_isolated_database(SharedMySqlExtension.Database database) {
+        mysql = database;
+    }
 
     @Test
     @DisplayName("V16부터 V20은 기존 Event·Delivery·Session을 보존하고 사전 알림 기본값과 UNIQUE를 유지한다")

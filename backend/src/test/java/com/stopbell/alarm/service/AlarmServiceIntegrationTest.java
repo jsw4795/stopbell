@@ -15,7 +15,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
-import com.stopbell.support.PilotMySqlExtension;
 import com.stopbell.alarm.dto.AlarmResponse;
 import com.stopbell.alarm.dto.CreateAlarmRequest;
 import com.stopbell.alarm.entity.Alarm;
@@ -25,6 +24,7 @@ import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
@@ -55,7 +55,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -67,7 +67,7 @@ class AlarmServiceIntegrationTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "alarm_service");
+        SharedMySqlExtension.database(registry, "alarm_service");
     }
 
     @Autowired

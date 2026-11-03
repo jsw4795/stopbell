@@ -9,22 +9,26 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import com.stopbell.support.SharedMySqlExtension;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.mysql.MySQLContainer;
 
-@Testcontainers
+@ExtendWith(SharedMySqlExtension.class)
 class AlarmMigrationIntegrationTest {
 
-    @Container
-    static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    private SharedMySqlExtension.Database mysql;
+
+    @BeforeEach
+    void connect_to_isolated_database(SharedMySqlExtension.Database database) {
+        mysql = database;
+    }
 
     @Test
     @DisplayName("V6과 V7 Migration은 기존 상태를 보존하고 Bus Target CHECK를 강제한다")

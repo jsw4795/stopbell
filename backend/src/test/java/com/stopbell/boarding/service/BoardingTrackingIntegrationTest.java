@@ -21,6 +21,7 @@ import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.service.*;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.client.*;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.dto.seoul.*;
@@ -38,34 +39,29 @@ import org.springframework.data.domain.PageRequest;
 import org.junit.jupiter.params.provider.*;
 import com.stopbell.user.repository.UserRepository;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.*;
-import org.testcontainers.junit.jupiter.*;
-import org.testcontainers.mysql.MySQLContainer;
 
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class BoardingTrackingIntegrationTest {
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        SharedMySqlExtension.database(registry, "boarding_tracking");
     }
     @Autowired private jakarta.persistence.EntityManager entityManager;
     @Autowired private BoardingNotificationService notifications;

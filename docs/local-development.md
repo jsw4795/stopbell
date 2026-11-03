@@ -228,9 +228,13 @@ SHOW CREATE TABLE notification_history;
 
 Alarm 상태 전이 같은 순수 Domain Business Rule은 Spring Context, Database, Docker 없이 JUnit Unit Test로 검증한다.
 
-JPA Entity Mapping과 Repository 동작은 H2 또는 Local Development MySQL이 아닌 MySQL Testcontainers 기반 Integration Test로 검증한다. Testcontainer는 MySQL `8.4.11` image를 사용하고, 일반적으로 Spring Boot의 `@ServiceConnection`으로 Test DataSource에 연결한다. 공유 파일럿의 `BoardingSessionPersistenceIntegrationTest`, `DevicePersistenceIntegrationTest`, `NotificationPersistenceIntegrationTest`, `TransitMetadataRepositoryIntegrationTest`, `BusRouteSearchIntegrationTest`, `BusRouteStopIntegrationTest`는 한 테스트 실행에서 MySQL 서버를 공유하되 클래스별 별도 DB와 동적 DataSource 설정을 사용하며, 각 Spring Context를 닫은 후 서버를 종료한다.
+JPA Entity Mapping과 Repository 동작은 H2 또는 Local Development MySQL이 아닌 MySQL Testcontainers 기반 Integration Test로 검증한다. 기본 MySQL `8.4.11` 서버는 `SharedMySqlExtension`이 JUnit 실행의 root store에서 한 번 시작하고 관리한다. Spring 통합 테스트는 `@ExtendWith(SharedMySqlExtension.class)`와 클래스별 `@DynamicPropertySource`로 독립 DB의 DataSource를 연결한다. 각 클래스의 `@DirtiesContext(AFTER_CLASS)`가 Spring Context와 HikariCP를 먼저 닫으며, root store는 모든 사용자가 끝난 뒤 잔여 테스트 연결이 0개인지 확인하고 DB와 서버를 정리한다. 일부 클래스만 선택해도 같은 생명주기를 사용한다.
 
-Test Schema는 Hibernate가 자동 생성하지 않는다. 기본 `ddl-auto: none` 또는 개별 통합 테스트의 `validate`를 사용하며, 빈 MySQL Testcontainer에 Flyway Migration을 적용한다. Integration Test 실행에는 Docker Runtime이 필요하다. Backend 테스트는 `backend`에서 `./gradlew test`로 실행하며 실제 개발 DB를 테스트 대상으로 사용하지 않는다.
+Migration·시작 실패 테스트는 `@BeforeEach`에서 `SharedMySqlExtension.Database`를 주입받아 호출마다 새 DB를 사용한다. JUnit method store가 호출 종료 시 DB와 권한을 제거하므로 parameterized invocation의 실패 DDL·Flyway 이력도 격리된다. 공통 서버는 실패 주입용 트리거 생성을 위해 `--log-bin-trust-function-creators=1`을 시작 시 고정하며, 테스트가 전역 설정을 변경하지 않는다. SQL mode·timezone 변경은 기존 session 범위를 유지한다. 자식 JVM 재시작 검증도 해당 클래스의 DB 접속 정보를 그대로 전달한다.
+
+`BackupRestoreIntegrationTest`는 공통 서버의 독립 DB에서 실제 `mysqldump`를 실행하고, 빈 별도 MySQL `8.4.11` 서버에서 실제 `mysql` 클라이언트로 복원한다. 별도 서버로의 백업 이식성 검증을 위해 복원 대상 컨테이너 1개만 예외로 유지하며, 전체 테스트의 MySQL 시작은 기본 서버 1회와 복원 대상 1회다.
+
+Test Schema는 Hibernate가 자동 생성하지 않는다. 기본 `ddl-auto: none` 또는 개별 통합 테스트의 `validate`를 사용하며, Testcontainer의 빈 격리 DB에 Flyway Migration을 적용한다. Integration Test 실행에는 Docker Runtime이 필요하다. Backend 테스트는 `backend`에서 `./gradlew test`로 실행하며 실제 개발 DB를 테스트 대상으로 사용하지 않는다.
 
 ------------------------------------------------------------------------
 

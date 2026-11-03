@@ -2,19 +2,23 @@ package com.stopbell.notification.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.stopbell.support.SharedMySqlExtension;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.mysql.MySQLContainer;
 
-@Testcontainers
+@ExtendWith(SharedMySqlExtension.class)
 class DetachedDeliveryMigrationIntegrationTest {
-    @Container
-    static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    private SharedMySqlExtension.Database mysql;
+
+    @BeforeEach
+    void connect_to_isolated_database(SharedMySqlExtension.Database database) {
+        mysql = database;
+    }
 
     @Test
     @DisplayName("V23에서 V24로 갱신하면 Device 참조는 nullable이 되며 기존 FK와 UNIQUE는 보존된다")

@@ -6,26 +6,35 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 
+import com.stopbell.support.SharedMySqlExtension;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
+@ExtendWith(SharedMySqlExtension.class)
 @Testcontainers
 class BackupRestoreIntegrationTest {
-    @Container static final MySQLContainer source = new MySQLContainer("mysql:8.4.11");
+    private SharedMySqlExtension.Database source;
     @Container static final MySQLContainer destination = new MySQLContainer("mysql:8.4.11");
+
+    @BeforeEach
+    void connect_to_isolated_source(SharedMySqlExtension.Database database) {
+        source = database;
+    }
 
     @Test
     @DisplayName("격리 DB의 백업을 별도 DB에 복원하면 스키마와 알림 데이터가 보존된다")
     void restores_schema_and_notification_data() throws Exception {
-        Flyway sourceFlyway = flyway(source);
+        Flyway sourceFlyway = Flyway.configure().dataSource(source.getJdbcUrl(), source.getUsername(), source.getPassword()).load();
         sourceFlyway.migrate();
-        JdbcTemplate original = jdbc(source);
+        JdbcTemplate original = new JdbcTemplate(new DriverManagerDataSource(source.getJdbcUrl(), source.getUsername(), source.getPassword()));
         LocalDateTime now = LocalDateTime.of(2026, 1, 1, 0, 0);
         original.update("insert into users (auth_provider, provider_user_id, created_at, updated_at) values ('GOOGLE', 'synthetic', ?, ?)", now, now);
         original.update("insert into users (auth_provider, provider_user_id, created_at, updated_at) values ('APPLE', 'synthetic-apple', ?, ?)", now, now);
@@ -35,7 +44,7 @@ class BackupRestoreIntegrationTest {
         original.update("insert into notification_events (source_type, alarm_id, user_id, activation_generation, tracking_cycle_id, event_type, observed_at, event_detected_at, created_at) values ('ALARM', 1, 1, 0, '12345678-1234-4123-8123-123456789abc', 'ONE_STOP_BEFORE', ?, ?, ?)", now, now, now);
         original.update("insert into notification_deliveries (notification_event_id, device_id, recipient_ownership_generation, status, next_attempt_at, expires_at, created_at, updated_at) values (1, 1, 0, 'PENDING', ?, ?, ?, ?)", now, now.plusMinutes(1), now, now);
 
-        var dump = source.execInContainer("sh", "-c", "MYSQL_PWD=\"$MYSQL_PASSWORD\" mysqldump -u\"$MYSQL_USER\" --single-transaction --no-tablespaces \"$MYSQL_DATABASE\"");
+        var dump = source.dump();
         assertThat(dump.getExitCode()).isZero();
         destination.copyFileToContainer(org.testcontainers.images.builder.Transferable.of(dump.getStdout()), "/tmp/stopbell-test.sql");
         var restore = destination.execInContainer("sh", "-c", "MYSQL_PWD=\"$MYSQL_PASSWORD\" mysql -u\"$MYSQL_USER\" \"$MYSQL_DATABASE\" < /tmp/stopbell-test.sql");

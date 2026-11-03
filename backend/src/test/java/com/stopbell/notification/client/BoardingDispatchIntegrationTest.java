@@ -21,40 +21,36 @@ import com.stopbell.boarding.service.*;
 import com.stopbell.notification.entity.*;
 import com.stopbell.notification.repository.*;
 import com.stopbell.notification.service.*;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.*;
 import com.stopbell.user.entity.*;
 import com.sun.net.httpserver.HttpServer;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.*;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.*;
-import org.testcontainers.junit.jupiter.*;
-import org.testcontainers.mysql.MySQLContainer;
 
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "notification.dispatch.enabled=false",
         "notification.fcm.enabled=false"})
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class BoardingDispatchIntegrationTest {
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        SharedMySqlExtension.database(registry, "boarding_dispatch");
     }
     @Autowired private EntityManager entityManager;
     @Autowired private JdbcTemplate jdbc;

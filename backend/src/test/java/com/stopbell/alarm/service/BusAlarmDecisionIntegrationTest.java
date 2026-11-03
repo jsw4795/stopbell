@@ -32,6 +32,7 @@ import com.stopbell.notification.service.NotificationDecisionTtlPolicy;
 import com.stopbell.notification.repository.DeviceRepository;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import com.stopbell.notification.repository.NotificationEventRepository;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitEvent;
 import com.stopbell.transit.domain.TransitEventType;
 import com.stopbell.transit.domain.TransitProvider;
@@ -42,22 +43,22 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.mysql.MySQLContainer;
 
 /** Real MySQL transaction/constraint tests; no FCM or Transit HTTP I/O. */
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -65,18 +66,12 @@ class BusAlarmDecisionIntegrationTest {
     private static final Instant NOW = Instant.parse("2026-10-12T00:00:00.123456Z");
     private static final LocalDateTime UTC = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
     private static final UUID CYCLE = UUID.fromString("a1234567-1234-4123-8123-123456789abc");
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11")
-                    .withCommand("--log-bin-trust-function-creators=1");
-        }
-    }
+    private static SharedMySqlExtension.Database mysql;
 
-    @Autowired
-    private MySQLContainer mysql;
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        mysql = SharedMySqlExtension.database(registry, "bus_alarm_decision");
+    }
 
     @Autowired private BusAlarmLifecycleService decisions;
     @Autowired private BusAlarmEvaluator evaluator;

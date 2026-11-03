@@ -20,6 +20,7 @@ import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.BusAlarmTarget;
 import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.repository.AlarmRepository;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.dto.TokenResponse;
@@ -30,22 +31,22 @@ import com.stopbell.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.UncategorizedSQLException;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.mysql.MySQLContainer;
 
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -54,17 +55,12 @@ class RepositoryIntegrationTest {
 
     private static final UUID TRACKING_CYCLE_ID = UUID.fromString("a1234567-1234-4123-8123-123456789abc");
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
-    }
+    private static SharedMySqlExtension.Database mysql;
 
-    @Autowired
-    private MySQLContainer mysql;
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        mysql = SharedMySqlExtension.database(registry, "repository");
+    }
 
     @Autowired
     private UserRepository userRepository;

@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import com.stopbell.notification.entity.Device;
 import com.stopbell.notification.entity.DevicePlatform;
 import com.stopbell.notification.repository.DeviceRepository;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.user.auth.service.JwtTokenService;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
@@ -35,25 +36,24 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.mysql.MySQLContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -68,17 +68,12 @@ class DeviceApiIntegrationTest {
     private static final LocalDateTime OLD_TIME = LocalDateTime.of(2026, 1, 1, 0, 0);
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
-    }
+    private static SharedMySqlExtension.Database mysql;
 
-    @Autowired
-    private MySQLContainer mysql;
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        mysql = SharedMySqlExtension.database(registry, "device_api");
+    }
 
     @Autowired
     private MockMvc mvc;

@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusMetadataSyncState;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
@@ -24,9 +25,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.core.io.ByteArrayResource;
@@ -35,8 +33,10 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
-import org.testcontainers.mysql.MySQLContainer;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {
         "transit.monitoring.enabled=false",
         "notification.dispatch.enabled=false",
@@ -46,14 +46,9 @@ import org.testcontainers.mysql.MySQLContainer;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class SeoulCsvMetadataSyncIntegrationTest {
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11")
-                    .withCommand("--log-bin-trust-function-creators=1");
-        }
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        SharedMySqlExtension.database(registry, "seoul_csv_metadata_sync");
     }
 
     private static final Instant PREVIOUS_COMPLETION = Instant.parse("2026-09-01T00:00:00Z");

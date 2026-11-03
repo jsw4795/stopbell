@@ -30,7 +30,7 @@ import java.util.HexFormat;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.stopbell.support.PilotMySqlExtension;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.RefreshToken;
 import com.stopbell.user.entity.User;
@@ -62,7 +62,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -75,7 +75,7 @@ class AuthControllerIntegrationTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "auth_controller");
+        SharedMySqlExtension.database(registry, "auth_controller");
     }
 
     @Autowired

@@ -16,7 +16,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
-import com.stopbell.support.PilotMySqlExtension;
 import com.stopbell.alarm.entity.AdjacentStopSnapshot;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.BusAlarmTarget;
@@ -24,6 +23,7 @@ import com.stopbell.alarm.entity.TransitType;
 import com.stopbell.alarm.service.BusAlarmEvaluationState;
 import com.stopbell.alarm.service.BusAlarmEvaluator;
 import com.stopbell.alarm.service.BusAlarmLifecycleService;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitEvent;
 import com.stopbell.transit.domain.TransitEventType;
 import com.stopbell.transit.domain.TransitProvider;
@@ -59,7 +59,7 @@ import org.springframework.transaction.annotation.Transactional;
  * Never changes TimeZone.setDefault(). Only the callback thread's Clock factories are fixed;
  * LocalDateTime.now(), JPA callbacks, Hibernate, Connector/J and MySQL remain real.
  */
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = "spring.jpa.hibernate.ddl-auto=validate")
 @ActiveProfiles("test")
@@ -72,7 +72,7 @@ class UtcTimestampCharacterizationIntegrationTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "utc_time_test");
+        SharedMySqlExtension.database(registry, "utc_time_test");
     }
 
     @Autowired private EntityManager em;

@@ -21,6 +21,7 @@ import com.stopbell.notification.entity.*;
 import com.stopbell.notification.repository.DeviceRepository;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import com.stopbell.notification.service.*;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitEvent;
 import com.stopbell.transit.domain.TransitEventType;
 import com.stopbell.transit.domain.TransitProvider;
@@ -30,24 +31,24 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.mysql.MySQLContainer;
 
 /** Existing isolated MySQL/Flyway test setup; FCM is a mock using the real payload builder only. */
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "notification.dispatch.enabled=false",
         "notification.fcm.enabled=false", "transit.monitoring.enabled=false"})
 @ActiveProfiles("test")
@@ -56,13 +57,9 @@ class PassedNotificationDispatchIntegrationTest {
     private static final Instant NOW = Instant.parse("2026-10-30T00:00:00.123456Z");
     private static final LocalDateTime UTC = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        SharedMySqlExtension.database(registry, "passed_notification_dispatch");
     }
 
     @Autowired private EntityManager entityManager;

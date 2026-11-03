@@ -7,8 +7,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.stopbell.support.PilotMySqlExtension;
 import com.stopbell.common.error.ErrorCode;
+import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.client.SeoulBusVehicleDetailClient;
 import com.stopbell.transit.client.SeoulBusVehicleLocationClient;
 import com.stopbell.transit.client.TagoVehicleLocationClient;
@@ -42,7 +42,7 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.databind.json.JsonMapper;
 
-@ExtendWith(PilotMySqlExtension.class)
+@ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -52,7 +52,7 @@ class BoardingCandidateApiIntegrationTest {
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
-        PilotMySqlExtension.database(registry, "boarding_candidate");
+        SharedMySqlExtension.database(registry, "boarding_candidate");
     }
 
     @Autowired private MockMvc mvc;

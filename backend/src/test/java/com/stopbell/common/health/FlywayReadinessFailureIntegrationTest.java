@@ -5,16 +5,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.Map;
 
 import com.stopbell.StopBellApplication;
+import com.stopbell.support.SharedMySqlExtension;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.mysql.MySQLContainer;
 
-@Testcontainers
+@ExtendWith(SharedMySqlExtension.class)
 class FlywayReadinessFailureIntegrationTest {
-    @Container static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    private SharedMySqlExtension.Database mysql;
+
+    @BeforeEach
+    void connect_to_isolated_database(SharedMySqlExtension.Database database) {
+        mysql = database;
+    }
 
     @Test
     void failed_migration_prevents_application_startup() {
