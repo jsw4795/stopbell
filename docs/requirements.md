@@ -165,6 +165,10 @@ Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고
 
 인증 전략의 근거와 제약은 `adr/ADR-005-authentication-and-user-identity-strategy.md`를 따른다.
 
+### 회원 탈퇴 (TASK-815 Backend)
+
+인증된 사용자는 자신의 계정 삭제를 Backend에 요청할 수 있다. Apple 계정은 저장된 토큰 철회를 시도하며 완료·처리 중·수동 Apple 연결 해제 필요를 구분한다. 삭제 도중 신규 인증/사용자 데이터 생성을 차단하고 외부 장애와 DB 실패·재시작 후 삭제를 복구한다. 기존 사용자 소유 데이터 삭제 범위와 타 사용자 알림 관계 보존 정책을 유지한다. 공개 응답·재시도·Token 무효화는 [API](api.md#7-회원-탈퇴-task-815-backend)를 따른다. Flutter 탈퇴 UI·실제 Apple/출시 검증은 후속 작업이며 TASK-815는 미완료다.
+
 ## 5. 비기능 요구사항
 
 ### NFR-001 신뢰성

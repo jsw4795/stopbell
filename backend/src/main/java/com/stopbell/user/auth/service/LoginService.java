@@ -94,6 +94,7 @@ public class LoginService {
                 .filter(existing -> existing.getAuthProvider() == provider
                         && existing.getProviderUserId().equals(providerUserId))
                 .orElseThrow(() -> new IllegalStateException("User identity is unavailable"));
+        userRepository.requireActive(locked.getId());
         if (storeCredential != null) {
             storeCredential.accept(locked);
         }

@@ -44,6 +44,8 @@ class BackupRestoreIntegrationTest {
         original.update("insert into notification_events (source_type, alarm_id, user_id, activation_generation, tracking_cycle_id, event_type, observed_at, event_detected_at, created_at) values ('ALARM', 1, 1, 0, '12345678-1234-4123-8123-123456789abc', 'ONE_STOP_BEFORE', ?, ?, ?)", now, now, now);
         original.update("insert into notification_deliveries (notification_event_id, device_id, recipient_ownership_generation, status, next_attempt_at, expires_at, created_at, updated_at) values (1, 1, 0, 'PENDING', ?, ?, ?, ?)", now, now.plusMinutes(1), now, now);
 
+        original.update("insert into account_deletions (user_id,state,requested_at,next_attempt_at) values (2,'PENDING',?,?)", now, now.plusMinutes(1));
+
         var dump = source.dump();
         assertThat(dump.getExitCode()).isZero();
         destination.copyFileToContainer(org.testcontainers.images.builder.Transferable.of(dump.getStdout()), "/tmp/stopbell-test.sql");
@@ -52,9 +54,9 @@ class BackupRestoreIntegrationTest {
         Flyway restoredFlyway = flyway(destination);
         restoredFlyway.validate();
         assertThat(restoredFlyway.info().pending()).isEmpty();
-        assertThat(restoredFlyway.info().current().getVersion().getVersion()).isEqualTo("24");
+        assertThat(restoredFlyway.info().current().getVersion().getVersion()).isEqualTo("25");
         JdbcTemplate restored = jdbc(destination);
-        for (String table : List.of("users", "apple_credentials", "alarms", "devices", "notification_events", "notification_deliveries", "flyway_schema_history")) {
+        for (String table : List.of("users", "apple_credentials", "account_deletions", "alarms", "devices", "notification_events", "notification_deliveries", "flyway_schema_history")) {
             List<Map<String, Object>> expected = original.queryForList("select * from " + table + " order by 1");
             assertThat(restored.queryForList("select * from " + table + " order by 1")).as(table).isEqualTo(expected);
         }

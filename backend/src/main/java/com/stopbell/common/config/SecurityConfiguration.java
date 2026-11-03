@@ -1,6 +1,9 @@
 package com.stopbell.common.config;
 
 import com.stopbell.common.error.SecurityErrorHandler;
+import com.stopbell.user.repository.UserRepository;
+import org.springframework.security.authorization.AuthorizationDecision;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import jakarta.servlet.DispatcherType;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
@@ -23,7 +26,8 @@ public class SecurityConfiguration {
     }
 
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, SecurityErrorHandler errors) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, SecurityErrorHandler errors,
+            UserRepository users) throws Exception {
         return http
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -38,7 +42,13 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/auth/apple", "/auth/apple/challenge").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/logout").permitAll()
-                        .anyRequest().authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/users/me").authenticated()
+                        .anyRequest().access((authentication, context) -> {
+                            var principal = authentication.get();
+                            boolean active = principal instanceof JwtAuthenticationToken token
+                                    && users.deletionExists(Long.parseLong(token.getToken().getSubject())) == 0;
+                            return new AuthorizationDecision(active);
+                        })
                 )
                 .oauth2ResourceServer(oauth2 -> oauth2.jwt(Customizer.withDefaults())
                         .authenticationEntryPoint(errors).accessDeniedHandler(errors))

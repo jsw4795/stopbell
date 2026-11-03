@@ -46,7 +46,7 @@ class DetachedDeliveryMigrationIntegrationTest {
                 values (1, 1, 1, 0, 'PENDING', 0, '2026-10-01', '2026-10-02', '2026-10-01', '2026-10-01')
                 """);
         var before = jdbc.queryForList("select * from notification_deliveries");
-        assertThat(Flyway.configure().dataSource(dataSource).load().migrate().migrationsExecuted).isOne();
+        assertThat(Flyway.configure().dataSource(dataSource).target("24").load().migrate().migrationsExecuted).isOne();
         assertThat(jdbc.queryForList("select * from notification_deliveries")).isEqualTo(before);
         assertThat(nullable(jdbc)).isEqualTo("YES");
         assertThat(jdbc.queryForObject("""

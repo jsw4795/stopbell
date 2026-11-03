@@ -24,6 +24,11 @@ public class SchedulingConfiguration {
         return scheduler("alarm-creation-cleanup-");
     }
 
+    @Bean
+    ThreadPoolTaskScheduler accountDeletionScheduler() {
+        return scheduler("account-deletion-");
+    }
+
     private ThreadPoolTaskScheduler scheduler(String threadNamePrefix) {
         var scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(1);

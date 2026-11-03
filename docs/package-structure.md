@@ -42,6 +42,8 @@ backend/
     │   │   ├── service/
     │   │   ├── identity/
     │   │   └── exception/
+    │   ├── controller/
+    │   ├── service/
     │   ├── repository/
     │   └── entity/
     │
@@ -101,11 +103,13 @@ backend/
 
 사용자 식별과 인증 책임을 둔다.
 
+- `controller`: 인증된 본인 회원 탈퇴 API
+- `service`: 회원 탈퇴 조율·내부 데이터 삭제·영속 재시도
 - `repository`: User·RefreshToken의 JPA Repository
 - `entity`: User·AuthProvider·RefreshToken
-- `auth`: Authentication API와 Google Identity 검증, StopBell Token 발급 책임
+- `auth`: Authentication API와 Social Identity 검증, StopBell Token 발급 책임
 
-`user`는 Google Social Identity를 가진 User와 RefreshToken Authentication Session을 함께 소유한다. Authentication API와 Google Token 검증, Refresh Token 발급·회전·무효화도 이 Domain의 책임으로 둔다.
+`user`는 Google·Apple Social Identity를 가진 User와 RefreshToken Authentication Session을 함께 소유한다. Authentication API와 Social Token 검증, Refresh Token 발급·회전·무효화도 이 Domain의 책임으로 둔다.
 
 ### user.auth
 
@@ -117,6 +121,7 @@ Authentication 기능은 `user.auth` 하위 Feature Package로 구성한다.
 - `service`: Login use case와 JWT Token application logic
 - `identity`: 외부 Social Provider에서 검증된 Identity 획득
 - `exception`: Authentication use case와 Social Identity 검증 예외
+- `apple`: Apple challenge·Identity/code 검증·Client Secret·암호화 credential·Token 철회 경계
 
 `user.auth`는 User Domain을 소유하지 않는다. `User`, `AuthProvider`, `RefreshToken`은 `user.entity`에, 해당 JPA Repository는 `user.repository`에 유지한다.
 

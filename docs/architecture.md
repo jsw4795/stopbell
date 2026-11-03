@@ -405,13 +405,13 @@ TASK-709는 `DurableNotificationAttemptHandler`로 아래 계약을 구현했다
 
 Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Event write lock을 나중에 추가해 TASK-708의 Alarm → Event → Device와 반대 순서를 만들지 않는다. Event는 불변 owner/evidence source로 읽으며 TASK-707의 dispatch 종료/삭제는 Delivery lock과 조율하고 일관된 lock 순서를 검증해야 한다. 신규 fan-out의 아직 commit되지 않은 Delivery는 worker에 보이지 않는다. Device 등록·이전·disable은 인증 User를 먼저 잠그고 Device를 잠근다. 이 변경은 계정 삭제와 신규 소유권 부여를 직렬화한다.
 
-### 회원 데이터 삭제 내부 경계 (TASK-815-B 진행 중)
+### 회원 데이터 삭제 내부 경계 (TASK-815 Backend)
 
-공개 API 없이 내부 삭제 Service만 제공한다. 삭제는 READ COMMITTED transaction에서 User, 해당 Alarm·BoardingSession, 관련 Delivery, 현재 소유 Device 순서로 잠근다. Delivery를 전부 잠근 후 Device를 ID 순서로 잠가 Worker의 Delivery → Device 순서를 지킨다. 다른 User Event에 연결된 Delivery는 현재 Device 소유권을 재확인하고 V24 방식으로 PENDING 종료와 Device 참조 해제를 수행한다. Event의 원래 owner와 사용자별 삭제 범위는 유지한다. DB 오류·deadlock은 삭제 전체를 롤백하고 성공으로 처리하지 않는다. MySQL FK·인덱스 잠금과 기존 Alarm/Session 선행 Event 저장 경로에 의한 deadlock 가능성은 완전히 제거했다고 보장하지 않으며, 자동 재시도는 제공하지 않는다.
+공개 탈퇴 흐름은 기존 내부 삭제 Service를 재사용한다. 삭제는 READ COMMITTED transaction에서 User, 해당 Alarm·BoardingSession, 관련 Delivery, 현재 소유 Device 순서로 잠근다. Delivery를 전부 잠근 후 Device를 ID 순서로 잠가 Worker의 Delivery → Device 순서를 지킨다. 다른 User Event에 연결된 Delivery는 현재 Device 소유권을 재확인하고 V24 방식으로 PENDING 종료와 Device 참조 해제를 수행한다. Event의 원래 owner와 사용자별 삭제 범위는 유지한다. DB 오류·deadlock은 삭제 전체를 롤백하고 성공으로 처리하지 않는다. MySQL FK·인덱스 잠금과 기존 Alarm/Session 선행 Event 저장 경로에 의한 deadlock 가능성은 완전히 제거했다고 보장하지 않으며, 내부 삭제 Service 자체는 자동 재시도하지 않으며 공개 탈퇴의 영속 복구 작업이 실패 요청을 재개한다.
 
 Boarding Session lock을 얻으면 해당 revision의 process-local 전송 gate도 닫아 늦은 기존 검증 결과가 다시 열지 못하게 한다. DB rollback 시에도 gate는 보수적으로 닫힌 채 남을 수 있으며 이후 정상 진행 검증이 필요하다.
 
-JWT 서명·claim 검증 후 User 존재를 확인한다. DB 오류는 인증 실패로 변환하지 않는다. 로그인과 Refresh rotation은 User lock 아래에서 token을 발급하며 삭제된 User의 기존 토큰을 거부한다. Apple 계정과 Apple credential이 남은 계정은 철회 경로가 완성될 때까지 내부 삭제를 거부한다. 외부 Apple 호출은 DB transaction에 넣지 않는다. 철회와 DB commit 사이의 실패·재시도 및 최종 credential 제거 계약은 공개 탈퇴 API 전에 별도로 구현해야 한다. 이미 준비된 Notification의 외부 호출 시작·접수는 삭제로 취소할 수 없다.
+JWT 서명·claim 검증 후 User 존재를 확인한다. DB 오류는 인증 실패로 변환하지 않는다. 로그인과 Refresh rotation은 User lock 아래에서 token을 발급하며 삭제된 User의 기존 토큰을 거부한다. Apple 계정과 Apple credential이 남은 계정은 영속 철회 확인 또는 명시적 수동 해제 필요 상태가 있어야 내부 삭제를 허용한다. 외부 Apple 호출과 DB commit 사이의 복구는 [회원 탈퇴와 Apple 철회 복구](#회원-탈퇴와-apple-철회-복구-task-815-backend)를 따른다. 이미 준비된 Notification의 외부 호출 시작·접수는 삭제로 취소할 수 없다.
 
 단일 worker는 진행 중 request와 별도 expiry sweep을 겹치게 하지 않는다. 후보 조회가 exclusion/lease는 아니므로 multiple worker 안전성을 보장하지 않는다. 전송 직전 검증 이후 registration 변경 경쟁, accepted 뒤 result commit 전 crash의 duplicate, 내부 retry의 wire count와 외부 접수 복원 한계는 [ADR crash/restart 계약](adr/ADR-010-notification-device-and-durable-delivery.md#crashrestart와-safety-경계)을 따른다. 다음 cycle/restart도 terminal을 PENDING으로 reset하거나 과거 recipient를 확장하지 않는다.
 
@@ -672,3 +672,30 @@ Apple 인증은 명시적 활성화 시 공개 Backend API와 Flutter iOS 로그
 기반은 기본 비활성화다. `apple.authentication.enabled=true`를 지정할 때 외부 설정으로 `client-id`, `team-id`, `key-id`, PKCS#8 `private-key-pem`, `credential-key-id`, `credential-keys` 맵을 주입한다. 비밀은 저장소와 로그에 넣지 않는다. `credential-keys`의 값은 Base64로 인코딩한 32바이트 독립 AES 키다. AES-256-GCM은 무작위 nonce와 User ID를 인증된 추가 데이터로 사용하고 key ID를 암호문에 포함한다. 키 교체 시 신규 key ID를 활성화하고 이전 키를 읽기 전용으로 유지하면서 별도 이관으로 재암호화한 뒤 복구·백업을 확인하고 이전 키를 제거한다. 키 유실 시 해당 credential은 복구할 수 없다. Apple refresh token은 암호화하여 저장하며 키 주입과 보관은 운영 환경의 책임이다.
 
 검증과 코드 교환 뒤 별도 transaction에서 Apple User를 조회·생성하고 User write lock 아래 credential을 교체한 뒤 StopBell Token Pair를 발급한다. User, credential과 StopBell refresh token은 함께 commit 또는 rollback한다. 동일 Identity 생성 충돌은 기존 로그인처럼 rollback 뒤 새 transaction에서 재조회한다. Apple Developer capability·실기기 검증은 미완료다. 운영 활성화 전 nonce 저장·속도 제한, 외부 장애·timeout, secret 관리와 코드 교환 응답 유실을 포함해 다시 검증한다. TASK-815는 미완료다.
+
+
+## 회원 탈퇴와 Apple 철회 복구 (TASK-815 Backend)
+
+외부 HTTP와 MySQL을 원자적으로 commit할 수 없으므로 `AccountWithdrawalService`는 durable intent → 외부 철회 → durable outcome → 기존 `AccountDeletionService` 순서로 조율한다. 각 DB 단계는 독립 transaction이며 HTTP 동안 DB transaction/행 잠금을 유지하지 않는다. 바깥 transaction이 있는 호출도 거부한다. 별도 큐·분산 transaction 인프라는 도입하지 않는다.
+
+| 단계/장애 | 영속 상태 | 복구 |
+| --- | --- | --- |
+| 시작 전 | 진행 행 없음 | User 잠금 아래 최신 credential과 인증 발급 순서를 직렬화 |
+| 시작 commit | Apple `PENDING`, 일반 계정 `NOT_REQUIRED` | User → Alarm → BoardingSession → Delivery 순서로 감시 비활성화·열린 탑승 취소·소유 Event의 PENDING 발송 종료와 요청 행을 함께 저장 |
+| HTTP timeout/연결 실패/5xx/비정상 응답 | `PENDING`, 원래 암호화 credential 보존 | 성공·실패를 단정하지 않고 같은 Refresh Token으로 재시도 |
+| Apple 400 | `PENDING`, 고정 error 분류 저장 | 설정 오류와 기타 거절을 구분하고 복구 후 재시도, 400을 성공으로 간주하지 않음 |
+| Apple 200 확인 | `REVOKED` | 로컬 삭제 실패 시 재철회 없이 기존 삭제 transaction 재실행 |
+| 토큰 누락·복호화 불가 | `MANUAL_REQUIRED` | 로컬 삭제 수행, 자동 철회 성공을 주장하지 않고 Client 수동 해제 안내 |
+| HTTP 성공 후 결과 저장 전 crash/commit 불확실 | `PENDING` 또는 `REVOKED` | DB 상태를 재조회하며 PENDING이면 동일 Token 재철회. 이미 무효한 Token도 Apple의 200 계약으로 복구 |
+| 최종 삭제 실패/crash | 이전 state와 credential·사용자 데이터 보존 | 원자적 삭제 rollback, 후속 요청/복구 작업에서 같은 단계 재개 |
+| 최종 삭제 commit | User·credential·진행 행 제거 | JWT User 존재 검사와 Refresh Token 제거로 기존 인증 무효화 |
+
+진행 행은 User 잠금 아래 생성·전이한다. 동시 재시도가 같은 고정 Token으로 HTTP를 반복할 수 있으나, 확정 상태를 PENDING으로 되돌리지 않으며 로컬 삭제는 기존 User 잠금으로 직렬화한다. 같은 User의 로그인·Refresh 회전·Alarm/Device/Boarding 생성 및 mutation도 User 잠금 뒤 진행 행을 `FOR UPDATE` current read로 검사한다. 로그인 초기 snapshot에 User가 캐시됐거나 REPEATABLE READ snapshot이 이미 생성됐어도 오래된 상태로 인증을 발급하지 않는다. 일반 보호 API는 Security에서 진행 User를 차단하고 DELETE만 유효한 기존 Access Token으로 재시도할 수 있다. 외부 Social code 교환 자체는 DB 잠금 전에 일어날 수 있지만 삭제 중인 User에 credential/StopBell Token을 저장·발급하지 않는다. 삭제 commit 이후 별도의 새 Social 인증은 신규 계정 등록이며 기존 계정 복원은 아니다.
+
+시작 transaction은 source 잠금 아래 Alarm을 비활성화하고 열린 Session을 취소하므로 stale polling 결과는 더 이상 새 Event를 만들지 않는다. Session runtime 중단은 시작 commit 후 반영한다. 기존 삭제의 source → 전체 Delivery → Device 잠금 순서, 타 사용자 Event 보존·Device 참조 해제 정책을 유지한다. 이미 시작한 외부 FCM 전송의 취소는 기존과 같이 보장하지 않는다.
+
+`AppleTokenRevocation`은 기존 `AppleClientSecret`/설정을 공유해 고정 Apple `/auth/revoke` 주소에 refresh_token form을 POST한다. 연결 2초, 응답 읽기 5초, 본문 전체 읽기 deadline 5초, 최대 64 KiB 및 redirect 미추적을 적용한다. 제한 안에서 응답을 수신한 HTTP 200이 철회 확인이며 이미 무효화된 Token의 200도 성공이다. 원문 Token·secret·암호화 키·외부 오류 본문은 로그/응답에 포함하지 않는다. 암호화 키/토큰 자체가 없어 사용할 수 없을 때의 수동 경로는 [Apple TN3194](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple)를 따른다. 토큰은 있지만 Apple Bean이 비활성화된 경우에는 설정 오류로 보존하며 임의로 철회를 생략하지 않는다.
+
+`AccountDeletionRecovery`는 독립 단일 scheduler에서 1분마다 기한이 된 최대 10개 요청을 순차 재개한다. `next_attempt_at,user_id`로 정렬하고 처리 전에 다음 기한을 저장하여 지속 실패 요청의 starvation을 피한다. User Access Token 만료·Client 종료·Backend 재시작 후에도 복구하며 분산 lease는 없다. 현재 단일 Backend 전제에서 동작하고, 중복 실행의 정합성은 동일 Token 재철회와 DB 전이/삭제 잠금으로 보호한다. `account.deletion.recovery-enabled` 기본값 true이며 테스트 격리 시 false로 지정할 수 있다. 끄면 요청 재시도 외의 자동 복구가 중단된다. pending 개수·최장 requested_at·last_error를 운영에서 감시하고, 인증 설정/Apple 장애/DB 장애가 지속되면 해당 원인을 복구해야 한다. 임의의 요청 만료나 자동 강제 삭제 정책은 추가하지 않는다.
+
+HTTP 계약과 Flutter 후속 주의사항은 [API](api.md#7-회원-탈퇴-task-815-backend), 진행 테이블은 [Database](database.md#account_deletions)를 따른다. Apple server-to-server 상태 변경 알림, 일일 토큰 유효성 관리, 실제 Apple 인증/철회와 운영 secret·키 복구 검증 및 Flutter 탈퇴 UI는 후속 범위다. 실제 법적 보존·백업 정책은 새로 확정하지 않는다.

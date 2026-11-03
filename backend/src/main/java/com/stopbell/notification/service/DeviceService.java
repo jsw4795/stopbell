@@ -84,6 +84,7 @@ public class DeviceService {
     ) {
         User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHENTICATED));
+        userRepository.requireActive(userId);
         // Do not lock a missing UUID range: competing first inserts use the UNIQUE boundary.
         // The existence query loads no Entity; existing state is loaded only by the locking read.
         Optional<Device> existing = conflictingConstraint != null
@@ -148,6 +149,7 @@ public class DeviceService {
         return writeTransaction.execute(status -> {
             userRepository.findByIdForUpdate(userId)
                     .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHENTICATED));
+            userRepository.requireActive(userId);
             Device device = deviceRepository.findByInstallationIdForUpdate(request.installationId())
                     .orElseThrow(() -> new ApiException(ErrorCode.DEVICE_NOT_FOUND));
             InstallationCredential.verify(device.getInstallationCredentialHash(), credentialHash);

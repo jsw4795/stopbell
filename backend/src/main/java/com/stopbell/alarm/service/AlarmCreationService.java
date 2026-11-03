@@ -61,6 +61,7 @@ public class AlarmCreationService {
                 // Serialize same-user starts before metadata validation; UNIQUE remains the final boundary.
                 var user = users.findByIdForUpdate(userId)
                         .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+                users.requireActive(userId);
                 var existing = requests.findForUpdate(userId, request.clientRequestId());
                 if (existing.isPresent()) {
                     return resolve(userId, existing.get(), fingerprint);

@@ -71,6 +71,7 @@ public class RefreshTokenService {
 
         User user = users.findByIdForUpdate(storedRefreshToken.getUser().getId())
                 .orElseThrow(InvalidRefreshTokenException::new);
+        users.requireActive(user.getId());
         if (refreshTokenRepository.deleteByTokenHash(tokenHash) != 1) {
             throw new InvalidRefreshTokenException();
         }

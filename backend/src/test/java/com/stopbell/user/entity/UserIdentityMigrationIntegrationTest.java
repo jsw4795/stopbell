@@ -53,7 +53,7 @@ class UserIdentityMigrationIntegrationTest {
     @Test
     @DisplayName("Fresh DB의 전체 Migration은 Identity NOT NULL과 Provider별 복합 UNIQUE를 유지한다")
     void migrate_fresh_database() {
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(24);
+        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(25);
         assertIdentitySchema();
         insertIdentity("GOOGLE", "same-sub");
         insertIdentity("APPLE", "same-sub");
@@ -83,7 +83,35 @@ class UserIdentityMigrationIntegrationTest {
                 .hasRootCauseInstanceOf(SQLException.class);
         assertThatThrownBy(() -> jdbc.update("insert into apple_credentials (user_id, encrypted_refresh_token) values (?, 'v1.fixture')", Long.MAX_VALUE))
                 .hasRootCauseInstanceOf(SQLException.class);
+        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(2);
+        assertLatestAndNoOp();
+    }
+
+    @Test
+    @DisplayName("V24의 사용자와 Apple credential 및 기존 이력을 보존하며 삭제 진행 FK와 상태 제약을 추가한다")
+    void upgrade_v24_adds_durable_deletion_state() {
+        flyway("24", true).migrate();
+        insertIdentity("APPLE", "preserved-apple");
+        long userId = jdbc.queryForObject("select id from users", Long.class);
+        jdbc.update("insert into apple_credentials (user_id, encrypted_refresh_token) values (?, 'v1.synthetic')", userId);
+        var users = jdbc.queryForList("select * from users");
+        var credentials = jdbc.queryForList("select * from apple_credentials");
+        var history = jdbc.queryForList("select * from flyway_schema_history order by installed_rank");
         assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(jdbc.queryForList("select * from users")).isEqualTo(users);
+        assertThat(jdbc.queryForList("select * from apple_credentials")).isEqualTo(credentials);
+        assertThat(jdbc.queryForList("select * from flyway_schema_history where version <> '25' order by installed_rank")).isEqualTo(history);
+        assertThat(jdbc.queryForList("select * from account_deletions")).isEmpty();
+        jdbc.update("insert into account_deletions (user_id,state,requested_at,next_attempt_at) values (?,'PENDING','2026-11-03','2026-11-03')", userId);
+        assertThatThrownBy(() -> jdbc.update("update account_deletions set state='INVALID' where user_id=?", userId))
+                .hasRootCauseInstanceOf(SQLException.class);
+        assertThatThrownBy(() -> jdbc.update("insert into account_deletions (user_id,state,requested_at,next_attempt_at) values (?,'PENDING','2026-11-03','2026-11-03')", userId))
+                .hasRootCauseInstanceOf(SQLException.class);
+        assertThatThrownBy(() -> jdbc.update("insert into account_deletions (user_id,state,requested_at,next_attempt_at) values (?,'PENDING','2026-11-03','2026-11-03')", Long.MAX_VALUE))
+                .hasRootCauseInstanceOf(SQLException.class);
+        jdbc.update("delete from apple_credentials where user_id=?", userId);
+        jdbc.update("delete from users where id=?", userId);
+        assertThat(jdbc.queryForList("select * from account_deletions")).isEmpty();
         assertLatestAndNoOp();
     }
 
@@ -174,7 +202,7 @@ class UserIdentityMigrationIntegrationTest {
 
     private void assertLatestAndNoOp() {
         Flyway latest = flyway("latest", true);
-        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("24");
+        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("25");
         assertThat(latest.validateWithResult().validationSuccessful).isTrue();
         var history = jdbc.queryForList("select * from flyway_schema_history order by installed_rank");
         assertThat(latest.migrate().migrationsExecuted).isZero();

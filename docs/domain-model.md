@@ -35,7 +35,7 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
 
 -   내부 사용자 식별
 -   Alarm 소유자 기준
--   Google Social Identity 연결 기준
+-   Google·Apple Social Identity 연결 기준
 
 ## Main Attributes
 
@@ -62,6 +62,10 @@ Database에서는 MySQL `BIGINT AUTO_INCREMENT`를 사용한다. JPA 구현 시�
 `authProvider`는 `GOOGLE`, `APPLE`, `KAKAO`, `NAVER` 값을 갖는 `AuthProvider` Enum이며, JPA와 Database에는 문자열로 저장한다. 최초 Provider는 `GOOGLE`이고, Backend는 Google과 Apple의 검증된 `sub`를 `providerUserId`로 사용한다. `authProvider`와 `providerUserId` 조합은 하나의 StopBell User를 유일하게 식별해야 한다.
 
 동일한 실제 사람이 서로 다른 Provider로 로그인하더라도 각각 별도 User로 처리한다. Account Linking과 Account Merge는 현재 범위에 포함하지 않는다.
+
+## 회원 탈퇴 진행 invariant (TASK-815 Backend)
+
+삭제 시작이 commit된 User는 신규 인증 발급/credential 교체와 사용자 데이터 생성을 허용하지 않는다. 로컬 삭제 완료와 Apple 철회 확인은 서로 다른 결과이며, 토큰 누락·복호화 불가로 로컬 삭제만 완료한 경우 수동 Apple 연결 해제 필요를 구분한다. 이 임시 진행 상태는 User Identity를 대체하거나 계정 merge·법적 보존 정책을 정의하지 않는다. 상태 전이와 동시성 경계는 [Architecture](architecture.md#회원-탈퇴와-apple-철회-복구-task-815-backend)가 소유한다.
 
 ## Timestamp Policy
 

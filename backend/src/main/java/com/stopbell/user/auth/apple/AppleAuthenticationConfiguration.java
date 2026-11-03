@@ -23,9 +23,19 @@ public class AppleAuthenticationConfiguration {
     }
 
     @Bean
-    AppleAuthentication appleAuthentication(AppleAuthenticationProperties properties, Clock jwtClock) {
-        var clientSecret = new AppleClientSecret(properties.clientId(), properties.teamId(), properties.keyId(),
+    AppleClientSecret appleClientSecret(AppleAuthenticationProperties properties, Clock jwtClock) {
+        return new AppleClientSecret(properties.clientId(), properties.teamId(), properties.keyId(),
                 properties.privateKeyPem(), jwtClock);
+    }
+
+    @Bean
+    AppleTokenRevocation appleTokenRevocation(AppleAuthenticationProperties properties, AppleClientSecret clientSecret) {
+        return new AppleTokenRevocation(properties.clientId(), clientSecret);
+    }
+
+    @Bean
+    AppleAuthentication appleAuthentication(AppleAuthenticationProperties properties, Clock jwtClock,
+            AppleClientSecret clientSecret) {
         var verifier = new AppleIdentityTokenVerifier(new AppleJwksDecoder(), properties.clientId(), jwtClock);
         return new AppleAuthentication(new AppleNonceStore(jwtClock), verifier,
                 new AppleCodeExchange(properties.clientId(), clientSecret));

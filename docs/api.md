@@ -619,7 +619,7 @@ Google ID Token은 로그인 시 외부 Identity를 확인하기 위해 Backend�
 
 JWT 인증 단계에서 HS256 서명, issuer, timestamp와 필수 `exp`를 검증하고, `sub`가 양의 Long 범위의 정수 문자열인지도 검증한다. `sub` 누락/빈 값/0/음수/문자/소수/선행 0/Long 범위 초과 및 JSON 숫자형 claim은 User ID를 추출하지 않는 Endpoint에서도 인증 성립 전에 401 `UNAUTHENTICATED`로 거부한다. 라이브러리의 숫자→문자열 정규화 전 원래 claim 타입도 확인하며 기존 Clock과 Token 발급 계약 및 User ID 추출의 방어적 검증은 유지한다.
 
-검증된 subject의 User가 없으면 Access Token을 거부한다. User 조회 DB 장애는 유효하지 않은 Token으로 분류하지 않는다. 현재 공개 회원 탈퇴 API는 없다.
+검증된 subject의 User가 없으면 Access Token을 거부한다. User 조회 DB 장애는 유효하지 않은 Token으로 분류하지 않는다. 회원 탈퇴는 아래 `DELETE /api/v1/users/me` 계약을 따른다.
 
 ### Google 로그인
 
@@ -709,3 +709,29 @@ Flutter logout은 같은 Auth Session 안에서 refresh와 직렬화하며 local
 Phase 7 Flutter logout은 이 기존 lifecycle/hook을 사용해 현재 Device unsubscribe/disable을 시도한 뒤 Auth logout과 local session 종료를 수행한다. Device 처리는 별도 authenticated API를 사용하며 이 request body에 Device field를 추가하지 않는다. Offline logout에서는 Backend Device disable을 즉시 보장할 수 없으므로 local session 종료를 영구 차단하지 않는다. Device 순서와 offline 한계는 [TASK-702 계약](#기기-등록해제-계약-task-702)을 따른다. Flutter는 TASK-704에서 기존 `beforeLogout` hook으로 bounded disable을 연결했다.
 
 Alarm을 포함한 사용자 소유 Application API는 Client Request Body 또는 Query Parameter의 `userId`를 받지 않는다. Spring Security가 검증한 Access Token의 Principal에서 StopBell User를 식별한다.
+
+
+## 7. 회원 탈퇴 (TASK-815 Backend)
+
+```http
+DELETE /api/v1/users/me
+Authorization: Bearer <유효한 StopBell Access Token>
+```
+
+Body·userId·Provider Token을 받지 않으며 인증된 Principal의 User만 삭제한다. 본문에 임의 userId를 보내도 삭제 대상에 영향을 주지 않는다. Google 등 일반 계정은 기존 내부 삭제 서비스, Apple은 저장된 credential 철회 절차와 연결한다. 다음 표의 완료 응답은 로컬 삭제 transaction의 commit이 확인된 뒤에만 반환한다. 응답은 `Cache-Control: no-store`다.
+
+| HTTP | 응답 | 의미와 Client 동작 |
+| --- | --- | --- |
+| 204 | 빈 본문 | 로컬 삭제 완료. 일반 계정 또는 철회 확인 후 삭제 경로에서 반환. 인증 통과 후 동시 요청이 먼저 삭제한 경우에도 반환할 수 있어 이 상태만으로 Apple 철회를 별도 증명하지 않음. 로컬 Token Pair·관련 사용자 캐시 제거 |
+| 200 | `{"status":"DELETED","appleRevocation":"MANUAL_REVOCATION_REQUIRED"}` | 로컬 삭제 완료. Apple 토큰 누락·복호화 불가로 자동 철회는 수행하지 못함. Token Pair 제거와 함께 Apple 설정의 Sign in with Apple에서 StopBell 연결 수동 해제 안내 |
+| 202 | `{"status":"PENDING","appleRevocation":"UNCONFIRMED"}`, `Retry-After: 60` | 철회 결과 불확실. 삭제 완료로 표시하지 않고 유효한 기존 Access Token으로 동일 DELETE 재시도 가능 |
+| 503 | `ACCOUNT_DELETION_CONFIGURATION_ERROR` | Apple 설정·Client Secret 생성/인증 오류 또는 기능 비활성화. 삭제 진행 상태·credential 보존, 운영 설정 복구 필요 |
+| 502 | `ACCOUNT_DELETION_REJECTED` | Apple 400의 기타 거절. 철회 성공으로 취급하지 않으며 삭제 진행 상태·credential 보존 |
+| 500 | `INTERNAL_SERVER_ERROR` | DB/transaction 실패 등. 삭제 요청 또는 철회 성공이 이미 commit됐을 수 있으므로 결과 불확실, 동일 DELETE 재시도 가능 |
+| 401 | `UNAUTHENTICATED` | Token 누락/무효/만료 또는 User가 이미 삭제됨. 이 응답 하나로 삭제 완료와 Token 만료를 구분할 수 없음 |
+
+삭제 시작을 영속화한 뒤에는 일반 보호 API는 403 `ACCESS_DENIED`, 해당 User 로그인·Refresh는 409 `ACCOUNT_DELETION_IN_PROGRESS`다. 이미 인증을 통과해 실행 중인 mutation도 User 잠금 아래 삭제 상태를 확인하여 거부한다. 삭제 전 발급된 Access Token은 삭제 재시도에만 사용할 수 있고, 삭제 commit 뒤에는 모든 Access Token이 401이며 모든 Refresh Token도 삭제된다. Logout은 기존 계약대로 제시된 StopBell Refresh Token만 무효화한다. 공개 로그인 경로는 유지하되 삭제 중인 기존 User의 신규 credential 저장과 Token 발급은 금지한다. 삭제 완료 이후 새 Social 인증으로 등록하면 별도 신규 User이며 예전 데이터·Token은 복원하지 않는다.
+
+중복·동시 DELETE는 안전하며 인증 통과 후 다른 요청이 먼저 삭제했으면 204가 될 수 있다. 삭제 이후 새 요청은 기존 Token으로 401이다. 클라이언트 timeout/응답 유실도 결과 불확실이며 서버 취소를 의미하지 않는다. DB 복구 작업은 Access Token 수명과 무관하게 이어지므로 202 뒤 로그아웃·앱 종료로 서버 재시도가 중단되지 않는다. 상태 조회용 공개 receipt·완료 알림은 제공하지 않으며, 401을 완료 증거로 표시하지 않는다. Apple 사용자는 응답 유실 시 수동 연결 해제 안내를 다시 확인할 수 있어야 한다.
+
+Flutter 후속 구현은 탈퇴 요청 전 확인·동시 로그인/Refresh/사용자 mutation 중단, 기존 AuthSession generation/late response 차단을 적용한다. 삭제 전 Device disable이나 Logout 때문에 유효한 Access Token과 결과 복구 경로를 먼저 지우지 않는다. 202·502·503·500·timeout은 완료 화면으로 전환하지 않으며 409를 받으면 일반 기능 대신 삭제 진행 안내로 이동한다. 200/204 확인 뒤 Secure Storage·메모리 Pair 및 사용자 로컬 데이터를 제거하고, 늦은 Refresh가 Pair를 되살리지 못하게 한다. 구체적인 Flutter UI는 이번 범위 밖이다.

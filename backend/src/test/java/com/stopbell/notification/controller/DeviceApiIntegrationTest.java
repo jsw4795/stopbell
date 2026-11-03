@@ -141,7 +141,7 @@ class DeviceApiIntegrationTest {
         assertThat(stored.getUpdatedAt()).isEqualTo(stored.getCreatedAt());
         assertThat(jdbc.queryForObject(
                 "select max(cast(version as unsigned)) from flyway_schema_history where success = true", Integer.class
-        )).isEqualTo(24);
+        )).isEqualTo(25);
     }
 
     @Test

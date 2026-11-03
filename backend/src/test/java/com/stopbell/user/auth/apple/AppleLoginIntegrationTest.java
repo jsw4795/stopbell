@@ -69,6 +69,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {
         "apple.authentication.enabled=true",
+        "apple.authentication.client-id=app",
+        "apple.authentication.team-id=team",
+        "apple.authentication.key-id=key",
         "apple.authentication.credential-key-id=test",
         "apple.authentication.credential-keys.test=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 })
@@ -79,6 +82,13 @@ class AppleLoginIntegrationTest {
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) {
         SharedMySqlExtension.database(registry, "apple_login");
+        registry.add("apple.authentication.private-key-pem", () -> {
+            try {
+                var generator = KeyPairGenerator.getInstance("EC");
+                generator.initialize(new ECGenParameterSpec("secp256r1"));
+                return Base64.getEncoder().encodeToString(generator.generateKeyPair().getPrivate().getEncoded());
+            } catch (Exception failure) { throw new IllegalStateException(failure); }
+        });
     }
     @Autowired MockMvc mvc;
     @Autowired LoginService login;
@@ -88,6 +98,7 @@ class AppleLoginIntegrationTest {
     @Autowired JwtTokenService jwt;
     @Autowired JdbcTemplate jdbc;
     @MockitoBean AppleAuthentication authentication;
+    @MockitoBean AppleTokenRevocation revocation;
     @MockitoBean GoogleIdentityVerifier google;
     @MockitoSpyBean RefreshTokenService refresh;
 

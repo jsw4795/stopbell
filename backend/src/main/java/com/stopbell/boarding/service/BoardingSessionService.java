@@ -114,6 +114,7 @@ public class BoardingSessionService {
         return transaction.execute(status -> {
             var user = users.findByIdForUpdate(userId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+            users.requireActive(userId);
             var duplicate = sessions.findRequestForUpdate(userId, request.clientRequestId());
             if (duplicate.isPresent()) {
                 var session = duplicate.orElseThrow();
@@ -243,6 +244,7 @@ public class BoardingSessionService {
         BoardingTrackingSnapshot committed;
         try {
             committed = transaction.execute(status -> {
+                authenticated(userId);
                 var session = owned(userId, id);
                 expire(session);
                 response(session);
@@ -345,9 +347,10 @@ public class BoardingSessionService {
     }
 
     private void authenticated(Long userId) {
-        if (userId == null || !users.existsById(userId)) {
+        if (userId == null || users.findByIdForUpdate(userId).isEmpty()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found");
         }
+        users.requireActive(userId);
     }
 
     private static void validId(Long id) {

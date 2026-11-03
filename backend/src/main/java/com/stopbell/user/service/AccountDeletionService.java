@@ -38,7 +38,10 @@ public class AccountDeletionService {
         if (user == null) return false;
         if (user.getAuthProvider() == AuthProvider.APPLE || jdbc.queryForObject(
                 "select count(*) from apple_credentials where user_id=?", Integer.class, userId) != 0) {
-            throw new IllegalStateException("Apple revocation is not available");
+            var states = jdbc.queryForList("select state from account_deletions where user_id=? for update", String.class, userId);
+            if (states.isEmpty() || !(states.getFirst().equals("REVOKED") || states.getFirst().equals("MANUAL_REQUIRED"))) {
+                throw new IllegalStateException("Apple revocation or explicit manual fallback is required");
+            }
         }
 
         // Stop source decisions before collecting their durable Events and Deliveries.
@@ -86,6 +89,7 @@ public class AccountDeletionService {
         jdbc.update("delete from alarms where user_id=?", userId);
         jdbc.update("delete from devices where user_id=?", userId);
         jdbc.update("delete from refresh_tokens where user_id=?", userId);
+        jdbc.update("delete from apple_credentials where user_id=?", userId);
         jdbc.update("delete from users where id=?", userId);
         return true;
     }

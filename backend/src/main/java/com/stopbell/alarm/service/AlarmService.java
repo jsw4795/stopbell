@@ -55,6 +55,7 @@ public class AlarmService {
 
         User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+        userRepository.requireActive(userId);
         BusRouteStopOccurrence targetOccurrence = occurrenceRepository.findById(request.targetStopOccurrenceId())
                 .orElseThrow(() -> new ApiException(ErrorCode.TARGET_STOP_OCCURRENCE_NOT_FOUND));
 
@@ -116,6 +117,9 @@ public class AlarmService {
 
     @Transactional
     public AlarmResponse activate(Long userId, Long alarmId) {
+        userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHENTICATED));
+        userRepository.requireActive(userId);
         Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         alarm.activate();
@@ -124,6 +128,9 @@ public class AlarmService {
 
     @Transactional
     public AlarmResponse deactivate(Long userId, Long alarmId) {
+        userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHENTICATED));
+        userRepository.requireActive(userId);
         Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         alarm.deactivate();
@@ -132,6 +139,9 @@ public class AlarmService {
 
     @Transactional
     public void delete(Long userId, Long alarmId) {
+        userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHENTICATED));
+        userRepository.requireActive(userId);
         Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         var pendingDeliveries = deliveryRepository.findPendingByAlarmIdForUpdate(alarmId);
