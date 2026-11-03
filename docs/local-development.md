@@ -228,7 +228,7 @@ SHOW CREATE TABLE notification_history;
 
 Alarm 상태 전이 같은 순수 Domain Business Rule은 Spring Context, Database, Docker 없이 JUnit Unit Test로 검증한다.
 
-JPA Entity Mapping과 Repository 동작은 H2 또는 Local Development MySQL이 아닌 MySQL Testcontainers 기반 Integration Test로 검증한다. Testcontainer는 MySQL `8.4.11` image를 사용하고, 일반적으로 Spring Boot의 `@ServiceConnection`으로 Test DataSource에 연결한다. 공유 파일럿인 `BoardingSessionPersistenceIntegrationTest`와 `DevicePersistenceIntegrationTest`는 한 테스트 실행에서 MySQL 서버를 공유하되 클래스별 별도 DB와 동적 DataSource 설정을 사용하며, 각 Spring Context를 닫은 후 서버를 종료한다.
+JPA Entity Mapping과 Repository 동작은 H2 또는 Local Development MySQL이 아닌 MySQL Testcontainers 기반 Integration Test로 검증한다. Testcontainer는 MySQL `8.4.11` image를 사용하고, 일반적으로 Spring Boot의 `@ServiceConnection`으로 Test DataSource에 연결한다. 공유 파일럿의 `BoardingSessionPersistenceIntegrationTest`, `DevicePersistenceIntegrationTest`, `NotificationPersistenceIntegrationTest`, `TransitMetadataRepositoryIntegrationTest`, `BusRouteSearchIntegrationTest`, `BusRouteStopIntegrationTest`는 한 테스트 실행에서 MySQL 서버를 공유하되 클래스별 별도 DB와 동적 DataSource 설정을 사용하며, 각 Spring Context를 닫은 후 서버를 종료한다.
 
 Test Schema는 Hibernate가 자동 생성하지 않는다. 기본 `ddl-auto: none` 또는 개별 통합 테스트의 `validate`를 사용하며, 빈 MySQL Testcontainer에 Flyway Migration을 적용한다. Integration Test 실행에는 Docker Runtime이 필요하다. Backend 테스트는 `backend`에서 `./gradlew test`로 실행하며 실제 개발 DB를 테스트 대상으로 사용하지 않는다.
 
