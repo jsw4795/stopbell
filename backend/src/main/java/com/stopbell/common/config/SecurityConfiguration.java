@@ -42,6 +42,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/auth/apple", "/auth/apple/challenge").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/refresh").permitAll()
                         .requestMatchers(HttpMethod.POST, "/auth/logout").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/account-deletion/status").permitAll()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/users/me").authenticated()
                         .anyRequest().access((authentication, context) -> {
                             var principal = authentication.get();

@@ -124,6 +124,122 @@ class AccountWithdrawalIntegrationTest {
     }
 
     @Test
+    @DisplayName("Receipt로 사용자 삭제 이후에도 개인정보 없이 완료를 조회한다")
+    void receipt_survives_account_deletion() throws Exception {
+        var owner = user(AuthProvider.GOOGLE);
+        String access = tokens.createAccessToken(owner.getId());
+        String receipt = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        mvc.perform(delete("/api/v1/users/me").header("Authorization", "Bearer " + access)
+                .header("X-Account-Deletion-Receipt", receipt)).andExpect(status().isNoContent());
+        assertThat(users.existsById(owner.getId())).isFalse();
+        mvc.perform(post("/api/v1/account-deletion/status").header("X-Account-Deletion-Receipt", receipt))
+                .andExpect(status().isOk()).andExpect(content().json("{\"status\":\"DELETED\"}"));
+        assertThat(jdbc.queryForObject("select count(*) from account_deletion_receipts where receipt_hash=?", Integer.class, receipt)).isZero();
+    }
+
+    private String newReceipt() {
+        byte[] bytes = new byte[32];
+        new java.security.SecureRandom().nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private void assertReceipt(String receipt, String state) throws Exception {
+        mvc.perform(post("/api/v1/account-deletion/status").header("X-Account-Deletion-Receipt", receipt))
+                .andExpect(status().isOk()).andExpect(jsonPath("status").value(state))
+                .andExpect(header().string("Cache-Control", "no-store"));
+    }
+
+    @Test
+    @DisplayName("삭제 실패는 receipt 완료 기록도 롤백하고 복구 작업이 완료를 기록한다")
+    void receipt_completion_rolls_back_and_recovers() throws Exception {
+        var owner = apple();
+        String receipt = newReceipt();
+        jdbc.execute("create trigger reject_receipt_delete before delete on users for each row signal sqlstate '45000' set message_text='fixture'");
+        try {
+            mvc.perform(delete("/api/v1/users/me").header("Authorization", "Bearer " + tokens.createAccessToken(owner.getId()))
+                    .header("X-Account-Deletion-Receipt", receipt)).andExpect(status().isInternalServerError());
+            assertThat(users.existsById(owner.getId())).isTrue();
+            assertReceipt(receipt, "PENDING");
+        } finally { jdbc.execute("drop trigger reject_receipt_delete"); }
+        jdbc.update("update account_deletions set next_attempt_at=? where user_id=?", LocalDateTime.of(2000, 1, 1, 0, 0), owner.getId());
+        new AccountDeletionRecovery(jdbc, withdrawal, jwtClock, true).recover();
+        assertThat(users.existsById(owner.getId())).isFalse();
+        assertReceipt(receipt, "DELETED");
+        verify(revocation, times(1)).revoke("synthetic-refresh");
+    }
+
+    @Test
+    @DisplayName("수동 철회 상태는 계정 삭제 뒤에도 receipt로 조회하고 30일 뒤 정리한다")
+    void receipt_manual_result_and_expiration() throws Exception {
+        var owner = user(AuthProvider.APPLE);
+        String receipt = newReceipt();
+        mvc.perform(delete("/api/v1/users/me").header("Authorization", "Bearer " + tokens.createAccessToken(owner.getId()))
+                .header("X-Account-Deletion-Receipt", receipt)).andExpect(status().isOk());
+        assertReceipt(receipt, "MANUAL_REQUIRED");
+        String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(receipt.getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
+        jdbc.update("update account_deletion_receipts set completed_at=? where receipt_hash=?", LocalDateTime.ofInstant(jwtClock.instant(), ZoneOffset.UTC).minusDays(31), hash);
+        assertReceipt(receipt, "UNKNOWN");
+        new AccountDeletionRecovery(jdbc, withdrawal, jwtClock, false).recover();
+        assertReceipt(receipt, "UNKNOWN");
+        assertThat(jdbc.queryForObject("select count(*) from account_deletion_receipts where receipt_hash=?", Integer.class, hash)).isZero();
+    }
+
+    @Test
+    @DisplayName("누락 또는 형식 오류 receipt는 거부하고 모르는 receipt는 미확정이다")
+    void invalid_or_unknown_receipt_is_not_completion() throws Exception {
+        mvc.perform(post("/api/v1/account-deletion/status")).andExpect(status().isBadRequest());
+        mvc.perform(post("/api/v1/account-deletion/status").header("X-Account-Deletion-Receipt", "invalid"))
+                .andExpect(status().isBadRequest());
+        assertReceipt(newReceipt(), "UNKNOWN");
+    }
+
+    @Test
+    @DisplayName("진행 중 receipt는 중복 요청과 만료 정리 및 재시작 복구를 견딘다")
+    void pending_receipt_survives_duplicate_and_recovery() throws Exception {
+        var owner = apple();
+        String receipt = newReceipt();
+        String access = tokens.createAccessToken(owner.getId());
+        when(revocation.revoke(anyString())).thenReturn(AppleTokenRevocation.Outcome.UNCERTAIN);
+        for (int i = 0; i < 2; i++) {
+            mvc.perform(delete("/api/v1/users/me").header("Authorization", "Bearer " + access)
+                    .header("X-Account-Deletion-Receipt", receipt)).andExpect(status().isAccepted());
+        }
+        new AccountDeletionRecovery(jdbc, withdrawal, jwtClock, false).recover();
+        assertReceipt(receipt, "PENDING");
+        when(revocation.revoke(anyString())).thenReturn(AppleTokenRevocation.Outcome.REVOKED);
+        jdbc.update("update account_deletions set next_attempt_at=? where user_id=?", LocalDateTime.of(2000, 1, 1, 0, 0), owner.getId());
+        new AccountDeletionRecovery(jdbc, withdrawal, jwtClock, true).recover();
+        assertReceipt(receipt, "DELETED");
+    }
+
+    @Test
+    @DisplayName("동일 receipt의 동시 탈퇴 요청은 완료 결과를 하나로 보존한다")
+    void concurrent_requests_share_receipt() throws Exception {
+        var owner = apple();
+        String receipt = newReceipt();
+        String hash = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                .digest(receipt.getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
+        var entered = new CountDownLatch(2);
+        var release = new CountDownLatch(1);
+        when(revocation.revoke(anyString())).thenAnswer(invocation -> {
+            entered.countDown();
+            if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("fixture timeout");
+            return AppleTokenRevocation.Outcome.REVOKED;
+        });
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> withdrawal.withdraw(owner.getId(), hash));
+            var second = executor.submit(() -> withdrawal.withdraw(owner.getId(), hash));
+            try { assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue(); }
+            finally { release.countDown(); }
+            assertThat(first.get(5, TimeUnit.SECONDS)).isEqualTo(AccountWithdrawalService.Result.DELETED);
+            assertThat(second.get(5, TimeUnit.SECONDS)).isEqualTo(AccountWithdrawalService.Result.DELETED);
+        }
+        assertReceipt(receipt, "DELETED");
+        assertThat(jdbc.queryForObject("select count(*) from account_deletion_receipts where receipt_hash=?", Integer.class, hash)).isOne();
+    }
+
+    @Test
     @DisplayName("Google 계정을 Principal 기준으로 삭제하며 다른 사용자와 기존 Token 무효화를 검증한다")
     void delete_google_account_and_reject_old_tokens() throws Exception {
         var owner = user(AuthProvider.GOOGLE);

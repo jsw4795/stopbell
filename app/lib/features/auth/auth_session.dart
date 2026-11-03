@@ -51,6 +51,8 @@ class AuthSession extends ChangeNotifier {
   bool _loginInFlight = false;
   bool _disposed = false;
   bool _loggingOut = false;
+  bool _deletionPreparing = false;
+  bool _deletionMode = false;
   String? _rotatedRefreshTokenForLogout;
   bool _refreshRejectedForLogout = false;
   int _generation = 0;
@@ -80,14 +82,76 @@ class AuthSession extends ChangeNotifier {
 
   AuthState get state => _state;
   TokenPair? get currentPair => _pair;
-  String? get accessToken => _loggingOut ? null : _pair?.accessToken;
+  String? get accessToken => _loggingOut || _deletionPreparing || _deletionMode
+      ? null
+      : _pair?.accessToken;
+  String? get deletionAccessToken => _deletionMode ? _pair?.accessToken : null;
+  bool get isDeletingAccount => _deletionPreparing || _deletionMode;
   int get generation => _generation;
   bool get isLoggingOut => _logoutInFlight != null;
   bool isCurrentGeneration(int generation) =>
       !_disposed &&
       !_loggingOut &&
+      !_deletionPreparing &&
+      !_deletionMode &&
       _state == AuthState.authenticated &&
       _generation == generation;
+
+  bool _rotationCurrent(int generation) =>
+      !_disposed &&
+      !_loggingOut &&
+      !_deletionMode &&
+      _state == AuthState.authenticated &&
+      _generation == generation;
+
+  /// Freeze ordinary requests and drain an already running rotation first.
+  Future<void> beginAccountDeletion() async {
+    if (_deletionMode) return;
+    if (_deletionPreparing ||
+        _loggingOut ||
+        _logoutInFlight != null ||
+        _state != AuthState.authenticated ||
+        _pair == null) {
+      throw const StaleSessionException();
+    }
+    _deletionPreparing = true;
+    notifyListeners();
+    try {
+      final pending = _refreshInFlight;
+      if (pending != null) await pending;
+      if (_disposed || _state != AuthState.authenticated || _pair == null) {
+        throw const StaleSessionException();
+      }
+      _deletionMode = true;
+      _generation++;
+    } finally {
+      _deletionPreparing = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
+  /// Ends only the local session; account deletion already revoked its tokens.
+  Future<void> completeAccountDeletion() async {
+    if (!_deletionMode) throw const StaleSessionException();
+    _generation++;
+    try {
+      await _withStorage(_tokenStorage.delete);
+    } catch (_) {
+      throw const AuthSessionPersistenceException();
+    }
+    _pair = null;
+    _sessionIdentity = null;
+    _deletionMode = false;
+    _setState(AuthState.unauthenticated);
+  }
+
+  void cancelAccountDeletionPreparation() {
+    if (_deletionMode) {
+      _deletionMode = false;
+      _generation++;
+      notifyListeners();
+    }
+  }
 
   Future<void> initialize() => _initialization ??= _restore();
 
@@ -116,6 +180,7 @@ class AuthSession extends ChangeNotifier {
   Future<void> login({Authenticator? authenticator}) async {
     if (_disposed ||
         _loggingOut ||
+        isDeletingAccount ||
         _loginInFlight ||
         _state != AuthState.unauthenticated) {
       throw const UnauthenticatedSessionException();
@@ -155,6 +220,7 @@ class AuthSession extends ChangeNotifier {
   }
 
   Future<void> logout({Future<void> Function()? beforeLogout}) {
+    if (isDeletingAccount) throw const StaleSessionException();
     final pending = _logoutInFlight;
     if (pending != null) return pending;
     if (_state != AuthState.authenticated || _pair == null) {
@@ -235,6 +301,7 @@ class AuthSession extends ChangeNotifier {
     int? generation,
   }) async {
     if (_loggingOut ||
+        isDeletingAccount ||
         (generation != null && !isCurrentGeneration(generation))) {
       throw const StaleSessionException();
     }
@@ -262,7 +329,7 @@ class AuthSession extends ChangeNotifier {
       if (error.statusCode == 401 && _loggingOut) {
         _refreshRejectedForLogout = true;
       }
-      if (error.statusCode == 401 && isCurrentGeneration(generation)) {
+      if (error.statusCode == 401 && _rotationCurrent(generation)) {
         _pair = null;
         _generation++;
         _setState(AuthState.unauthenticated);
@@ -271,14 +338,14 @@ class AuthSession extends ChangeNotifier {
       rethrow;
     }
 
-    if (!isCurrentGeneration(generation)) {
+    if (!_rotationCurrent(generation)) {
       if (_loggingOut) _rotatedRefreshTokenForLogout = rotated.refreshToken;
       throw const StaleSessionException();
     }
 
     try {
       await _withStorage(() async {
-        if (!isCurrentGeneration(generation)) {
+        if (!_rotationCurrent(generation)) {
           throw const StaleSessionException();
         }
         await _tokenStorage.save(
@@ -286,7 +353,7 @@ class AuthSession extends ChangeNotifier {
         );
       });
     } catch (_) {
-      if (!isCurrentGeneration(generation)) {
+      if (!_rotationCurrent(generation)) {
         if (_loggingOut) _rotatedRefreshTokenForLogout = rotated.refreshToken;
         throw const StaleSessionException();
       }
@@ -300,7 +367,7 @@ class AuthSession extends ChangeNotifier {
       }
       throw const AuthSessionPersistenceException();
     }
-    if (!isCurrentGeneration(generation)) {
+    if (!_rotationCurrent(generation)) {
       if (_loggingOut) _rotatedRefreshTokenForLogout = rotated.refreshToken;
       throw const StaleSessionException();
     }

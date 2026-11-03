@@ -53,7 +53,7 @@ class UserIdentityMigrationIntegrationTest {
     @Test
     @DisplayName("Fresh DB의 전체 Migration은 Identity NOT NULL과 Provider별 복합 UNIQUE를 유지한다")
     void migrate_fresh_database() {
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(25);
+        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(26);
         assertIdentitySchema();
         insertIdentity("GOOGLE", "same-sub");
         insertIdentity("APPLE", "same-sub");
@@ -83,7 +83,7 @@ class UserIdentityMigrationIntegrationTest {
                 .hasRootCauseInstanceOf(SQLException.class);
         assertThatThrownBy(() -> jdbc.update("insert into apple_credentials (user_id, encrypted_refresh_token) values (?, 'v1.fixture')", Long.MAX_VALUE))
                 .hasRootCauseInstanceOf(SQLException.class);
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(2);
+        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(3);
         assertLatestAndNoOp();
     }
 
@@ -97,7 +97,7 @@ class UserIdentityMigrationIntegrationTest {
         var users = jdbc.queryForList("select * from users");
         var credentials = jdbc.queryForList("select * from apple_credentials");
         var history = jdbc.queryForList("select * from flyway_schema_history order by installed_rank");
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(flyway("25", true).migrate().migrationsExecuted).isEqualTo(1);
         assertThat(jdbc.queryForList("select * from users")).isEqualTo(users);
         assertThat(jdbc.queryForList("select * from apple_credentials")).isEqualTo(credentials);
         assertThat(jdbc.queryForList("select * from flyway_schema_history where version <> '25' order by installed_rank")).isEqualTo(history);
@@ -112,6 +112,7 @@ class UserIdentityMigrationIntegrationTest {
         jdbc.update("delete from apple_credentials where user_id=?", userId);
         jdbc.update("delete from users where id=?", userId);
         assertThat(jdbc.queryForList("select * from account_deletions")).isEmpty();
+        flyway("latest", true).migrate();
         assertLatestAndNoOp();
     }
 
@@ -202,7 +203,7 @@ class UserIdentityMigrationIntegrationTest {
 
     private void assertLatestAndNoOp() {
         Flyway latest = flyway("latest", true);
-        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("25");
+        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("26");
         assertThat(latest.validateWithResult().validationSuccessful).isTrue();
         var history = jdbc.queryForList("select * from flyway_schema_history order by installed_rank");
         assertThat(latest.migrate().migrationsExecuted).isZero();

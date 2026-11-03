@@ -130,6 +130,7 @@ class NotificationLifecycle extends ChangeNotifier {
   _Identity? get _context {
     if (auth.state != AuthState.authenticated ||
         auth.isLoggingOut ||
+        auth.isDeletingAccount ||
         auth.userIdentity == null ||
         auth.sessionIdentity == null) {
       return null;

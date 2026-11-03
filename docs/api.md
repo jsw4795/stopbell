@@ -716,9 +716,10 @@ Alarm을 포함한 사용자 소유 Application API는 Client Request Body 또�
 ```http
 DELETE /api/v1/users/me
 Authorization: Bearer <유효한 StopBell Access Token>
+X-Account-Deletion-Receipt: <32바이트 무작위값의 padding 없는 Base64URL>
 ```
 
-Body·userId·Provider Token을 받지 않으며 인증된 Principal의 User만 삭제한다. 본문에 임의 userId를 보내도 삭제 대상에 영향을 주지 않는다. Google 등 일반 계정은 기존 내부 삭제 서비스, Apple은 저장된 credential 철회 절차와 연결한다. 다음 표의 완료 응답은 로컬 삭제 transaction의 commit이 확인된 뒤에만 반환한다. 응답은 `Cache-Control: no-store`다.
+Receipt header는 기존 Client 호환을 위해 선택 사항이며 결과 복구가 필요한 Client는 반드시 보낸다. Body·userId·Provider Token을 받지 않으며 인증된 Principal의 User만 삭제한다. 본문에 임의 userId를 보내도 삭제 대상에 영향을 주지 않는다. Google 등 일반 계정은 기존 내부 삭제 서비스, Apple은 저장된 credential 철회 절차와 연결한다. 다음 표의 완료 응답은 로컬 삭제 transaction의 commit이 확인된 뒤에만 반환한다. 응답은 `Cache-Control: no-store`다.
 
 | HTTP | 응답 | 의미와 Client 동작 |
 | --- | --- | --- |
@@ -732,6 +733,8 @@ Body·userId·Provider Token을 받지 않으며 인증된 Principal의 User만 
 
 삭제 시작을 영속화한 뒤에는 일반 보호 API는 403 `ACCESS_DENIED`, 해당 User 로그인·Refresh는 409 `ACCOUNT_DELETION_IN_PROGRESS`다. 이미 인증을 통과해 실행 중인 mutation도 User 잠금 아래 삭제 상태를 확인하여 거부한다. 삭제 전 발급된 Access Token은 삭제 재시도에만 사용할 수 있고, 삭제 commit 뒤에는 모든 Access Token이 401이며 모든 Refresh Token도 삭제된다. Logout은 기존 계약대로 제시된 StopBell Refresh Token만 무효화한다. 공개 로그인 경로는 유지하되 삭제 중인 기존 User의 신규 credential 저장과 Token 발급은 금지한다. 삭제 완료 이후 새 Social 인증으로 등록하면 별도 신규 User이며 예전 데이터·Token은 복원하지 않는다.
 
-중복·동시 DELETE는 안전하며 인증 통과 후 다른 요청이 먼저 삭제했으면 204가 될 수 있다. 삭제 이후 새 요청은 기존 Token으로 401이다. 클라이언트 timeout/응답 유실도 결과 불확실이며 서버 취소를 의미하지 않는다. DB 복구 작업은 Access Token 수명과 무관하게 이어지므로 202 뒤 로그아웃·앱 종료로 서버 재시도가 중단되지 않는다. 상태 조회용 공개 receipt·완료 알림은 제공하지 않으며, 401을 완료 증거로 표시하지 않는다. Apple 사용자는 응답 유실 시 수동 연결 해제 안내를 다시 확인할 수 있어야 한다.
+중복·동시 DELETE는 안전하며 인증 통과 후 다른 요청이 먼저 삭제했으면 204가 될 수 있다. 삭제 이후 새 요청은 기존 Token으로 401이다. 클라이언트 timeout/응답 유실도 결과 불확실이며 서버 취소를 의미하지 않는다. DB 복구 작업은 Access Token 수명과 무관하게 이어지므로 앱 종료 뒤에도 계속된다. 401은 완료 증거가 아니다.
 
-Flutter 후속 구현은 탈퇴 요청 전 확인·동시 로그인/Refresh/사용자 mutation 중단, 기존 AuthSession generation/late response 차단을 적용한다. 삭제 전 Device disable이나 Logout 때문에 유효한 Access Token과 결과 복구 경로를 먼저 지우지 않는다. 202·502·503·500·timeout은 완료 화면으로 전환하지 않으며 409를 받으면 일반 기능 대신 삭제 진행 안내로 이동한다. 200/204 확인 뒤 Secure Storage·메모리 Pair 및 사용자 로컬 데이터를 제거하고, 늦은 Refresh가 Pair를 되살리지 못하게 한다. 구체적인 Flutter UI는 이번 범위 밖이다.
+`POST /api/v1/account-deletion/status`는 인증 대신 같은 `X-Account-Deletion-Receipt` header를 사용하며 body는 없다. 응답은 `Cache-Control: no-store`와 `{"status":"PENDING"|"DELETED"|"MANUAL_REQUIRED"|"UNKNOWN"}`만 제공한다. 비밀값 누락·형식 오류는 400이다. UNKNOWN은 요청이 아직 기록되지 않았거나 기록이 만료된 경우 등을 포함하며 완료 또는 실패를 뜻하지 않는다. Receipt는 URL·로그에 기록하지 않는다. 서버는 SHA-256 hash만 저장하며 완료 기록을 30일간 보존한다. 삭제와 완료 기록은 같은 transaction이며 PENDING은 만료하지 않는다. 비밀 receipt는 조회 권한이므로 노출을 막아야 한다.
+
+Flutter는 최종 확인 후 receipt를 Secure Storage에 저장하고 한 번의 DELETE를 보낸다. 자동 Refresh와 DELETE 재전송은 하지 않는다. 응답 유실·202·401과 재시작 뒤에는 동일 receipt로 수동 상태 확인 및 유효 토큰을 이용한 명시적 재시도를 제공하고 무한 polling은 하지 않는다. 202의 Retry-After 동안 DELETE 재시도를 제한한다. 일반 서비스와 알림 navigation은 격리하며 저장된 토큰은 완료 확인 전 제거하지 않는다. 완료 후 기존 세션의 사용자 생성 요청 및 Token Pair를 정리하고 Logout API는 호출하지 않는다. 200 수동 철회 안내는 기기 정리와 사용자 확인까지 보존한다. 204 뒤 receipt로 Apple 결과를 확인할 수 없으면 Apple 연결 확인 안내를 제공한다.

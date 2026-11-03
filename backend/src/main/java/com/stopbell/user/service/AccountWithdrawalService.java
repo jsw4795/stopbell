@@ -58,11 +58,15 @@ public class AccountWithdrawalService {
     }
 
     public Result withdraw(long userId) {
+        return withdraw(userId, null);
+    }
+
+    public Result withdraw(long userId, String receiptHash) {
         // Explicitly refuse an ambient transaction: suspending it would still retain its DB locks during HTTP.
         if (TransactionSynchronizationManager.isActualTransactionActive()) {
             throw new IllegalStateException("Account withdrawal requires no ambient transaction");
         }
-        String state = transaction.execute(status -> prepare(userId));
+        String state = transaction.execute(status -> prepare(userId, receiptHash));
         if (state == null) return Result.DELETED;
         if (state.equals("PENDING")) {
             AppleTokenRevocation.Outcome outcome = revoke(userId);
@@ -83,9 +87,19 @@ public class AccountWithdrawalService {
         return state.equals("MANUAL_REQUIRED") ? Result.DELETED_MANUAL_APPLE_REVOCATION_REQUIRED : Result.DELETED;
     }
 
-    private String prepare(long userId) {
+    private String prepare(long userId, String receiptHash) {
         var user = users.findByIdForUpdate(userId).orElse(null);
         if (user == null) return null;
+        if (receiptHash != null) {
+            var owners = jdbc.queryForList("select pending_user_id from account_deletion_receipts where receipt_hash=? for update", Long.class, receiptHash);
+            if (!owners.isEmpty()) {
+                if (owners.getFirst() == null || owners.getFirst() != userId) {
+                    throw new ApiException(ErrorCode.INVALID_REQUEST);
+                }
+            } else {
+                jdbc.update("insert into account_deletion_receipts (receipt_hash,pending_user_id,state) values (?,?,'PENDING')", receiptHash, userId);
+            }
+        }
         var existing = jdbc.queryForList("select state from account_deletions where user_id=? for update", String.class, userId);
         if (!existing.isEmpty()) return existing.getFirst();
         boolean apple = user.getAuthProvider() == AuthProvider.APPLE

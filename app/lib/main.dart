@@ -23,6 +23,9 @@ import 'features/auth/apple_auth_service.dart';
 import 'features/auth/auth_session.dart';
 import 'features/auth/google_auth_service.dart';
 import 'features/auth/token_pair_storage.dart';
+import 'features/auth/account_deletion_client.dart';
+import 'features/auth/account_deletion_controller.dart';
+import 'features/alarm/alarm_creation_intent.dart';
 import 'features/transit/bus_route.dart';
 import 'features/transit/bus_route_search_client.dart';
 import 'features/transit/bus_route_stop_client.dart';
@@ -81,6 +84,15 @@ void main() {
       findBoardingCandidates: BoardingCandidateClient(apiClient).find,
       boardingSessionClient: BoardingSessionApiClient(apiClient),
       boardingIntentStorage: const SecureBoardingIntentStorage(),
+      deletion: AccountDeletionController(
+        auth: authSession,
+        client: AccountDeletionClient(
+          apiBaseUrl: Uri.tryParse(config.apiBaseUrl) ?? Uri(),
+        ),
+        storage: const SecureDeletionStorage(),
+        alarms: const SecureAlarmIntentStorage(),
+        boarding: const SecureBoardingIntentStorage(),
+      ),
     ),
   );
 }
@@ -99,6 +111,7 @@ class StopBellApplication extends StatefulWidget {
     this.findBoardingCandidates,
     this.boardingSessionClient,
     this.boardingIntentStorage,
+    this.deletion,
   });
 
   final AuthSession authSession;
@@ -112,6 +125,7 @@ class StopBellApplication extends StatefulWidget {
   final FindBoardingCandidates? findBoardingCandidates;
   final BoardingSessionClient? boardingSessionClient;
   final BoardingIntentStorage? boardingIntentStorage;
+  final AccountDeletionController? deletion;
 
   @override
   State<StopBellApplication> createState() => _StopBellApplicationState();
@@ -130,6 +144,12 @@ class _StopBellApplicationState extends State<StopBellApplication>
     try {
       await widget.push?.storage.initialize();
     } catch (_) {
+      // A deletion receipt may need the existing pair for a safe retry.
+      // Fail closed without erasing it before the receipt has been restored.
+      if (widget.deletion != null) {
+        if (mounted) setState(() => _storageFailed = true);
+        return;
+      }
       // Registration remains fail-closed. Avoid restoring any possibly surviving
       // Keychain login when container/installation bootstrap cannot be trusted.
       try {
@@ -141,11 +161,15 @@ class _StopBellApplicationState extends State<StopBellApplication>
     }
     try {
       await widget.authSession.initialize();
+      await widget.deletion?.initialize();
     } catch (_) {
-      /* Auth handles failure safely. */
+      if (widget.deletion != null) {
+        if (mounted) setState(() => _storageFailed = true);
+        return;
+      }
     }
     if (!mounted) return;
-    _initialized = true;
+    setState(() => _initialized = true);
     _authChanged();
     _prepareFirebase().catchError((Object _) {});
   }
@@ -181,7 +205,9 @@ class _StopBellApplicationState extends State<StopBellApplication>
   }
 
   void _synchronize() {
-    if (_initialized && !widget.authSession.isLoggingOut) {
+    if (_initialized &&
+        !widget.authSession.isLoggingOut &&
+        !widget.authSession.isDeletingAccount) {
       _prepareFirebase()
           .then((_) {
             if (mounted) widget.push?.synchronize();
@@ -196,6 +222,7 @@ class _StopBellApplicationState extends State<StopBellApplication>
     final identity = (auth.generation, auth.userIdentity, auth.sessionIdentity);
     if (_hadAuthenticatedSession &&
         (auth.isLoggingOut ||
+            auth.isDeletingAccount ||
             auth.state != AuthState.authenticated ||
             identity != _visibleIdentity)) {
       _messengerKey.currentState?.clearSnackBars();
@@ -203,10 +230,13 @@ class _StopBellApplicationState extends State<StopBellApplication>
     }
     _visibleIdentity = identity;
     _hadAuthenticatedSession =
-        auth.state == AuthState.authenticated && !auth.isLoggingOut;
+        auth.state == AuthState.authenticated &&
+        !auth.isLoggingOut &&
+        !auth.isDeletingAccount;
     if (_initialized &&
         auth.state == AuthState.authenticated &&
         !auth.isLoggingOut &&
+        !auth.isDeletingAccount &&
         _syncedGeneration != auth.generation) {
       _syncedGeneration = auth.generation;
       _synchronize();
@@ -235,6 +265,7 @@ class _StopBellApplicationState extends State<StopBellApplication>
     widget.authSession.removeListener(_authChanged);
     _idChanges?.cancel();
     widget.notifications?.dispose();
+    widget.deletion?.dispose();
     widget.authSession.dispose();
     super.dispose();
   }
@@ -248,11 +279,11 @@ class _StopBellApplicationState extends State<StopBellApplication>
       home: _storageFailed
           ? const Scaffold(
               body: Center(
-                child: Text(
-                  '설치본 정보를 복구하지 못했습니다. 알림 등록을 중단했습니다. 앱 저장소를 확인해 주세요.',
-                ),
+                child: Text('저장된 정보를 안전하게 복구하지 못했습니다. 앱 저장소를 확인해 주세요.'),
               ),
             )
+          : !_initialized && widget.deletion != null
+          ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : LoginScreen(
               authSession: widget.authSession,
               appleAuthenticator: widget.appleAuthenticator,
@@ -265,6 +296,7 @@ class _StopBellApplicationState extends State<StopBellApplication>
               findBoardingCandidates: widget.findBoardingCandidates,
               boardingSessionClient: widget.boardingSessionClient,
               boardingIntentStorage: widget.boardingIntentStorage,
+              deletion: widget.deletion,
             ),
     );
   }
@@ -284,6 +316,7 @@ class LoginScreen extends StatefulWidget {
     this.findBoardingCandidates,
     this.boardingSessionClient,
     this.boardingIntentStorage,
+    this.deletion,
   });
 
   final AuthSession authSession;
@@ -297,6 +330,7 @@ class LoginScreen extends StatefulWidget {
   final FindBoardingCandidates? findBoardingCandidates;
   final BoardingSessionClient? boardingSessionClient;
   final BoardingIntentStorage? boardingIntentStorage;
+  final AccountDeletionController? deletion;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -305,6 +339,30 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   String? _message;
+
+  Future<void> _confirmDeletion() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('회원 탈퇴'),
+        content: const Text(
+          '계정과 관련 데이터가 삭제되고 기존 알람과 탑승 알림을 이용할 수 없습니다. 삭제된 데이터는 앱에서 복구할 수 없습니다. Apple 계정 연결을 직접 해제해야 할 수 있으며, 탈퇴 처리에 시간이 걸릴 수 있습니다.',
+        ),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('탈퇴 확인'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) await widget.deletion?.start();
+  }
 
   Future<void> _login({Authenticator? authenticator}) async {
     if (_isLoading || widget.authSession.state != AuthState.unauthenticated) {
@@ -360,14 +418,82 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: widget.authSession,
+      listenable: Listenable.merge([
+        widget.authSession,
+        if (widget.deletion != null) widget.deletion!,
+      ]),
       builder: (context, _) {
+        final deletion = widget.deletion;
+        if (widget.authSession.isDeletingAccount &&
+            (deletion == null || !deletion.active)) {
+          return const Scaffold(body: Center(child: Text('회원 탈퇴를 준비하고 있습니다.')));
+        }
+        if (deletion != null && deletion.active) {
+          if (deletion.manualNotice) {
+            return Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('StopBell 계정의 삭제가 완료되었습니다.'),
+                    Text(
+                      deletion.appleUncertain
+                          ? 'Apple 계정과 StopBell의 연결 해제 결과를 확인할 수 없습니다. Apple 계정 설정에서 앱 연결을 확인하고 필요하면 직접 해제해 주세요.'
+                          : 'Apple 계정과 StopBell의 연결은 자동으로 해제하지 못했습니다. Apple 계정 설정에서 앱 연결을 확인하고 필요하면 직접 해제해 주세요.',
+                      textAlign: TextAlign.center,
+                    ),
+                    if (deletion.message != null) Text(deletion.message!),
+                    TextButton(
+                      onPressed: deletion.acknowledgeManual,
+                      child: const Text('확인'),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          return Scaffold(
+            appBar: AppBar(title: const Text('회원 탈퇴')),
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    deletion.message ?? '탈퇴 처리 상태를 확인하고 있습니다.',
+                    textAlign: TextAlign.center,
+                  ),
+                  if (deletion.busy) const CircularProgressIndicator(),
+                  if (deletion.confirmed)
+                    TextButton(
+                      onPressed: deletion.busy ? null : deletion.finishCleanup,
+                      child: const Text('기기 정보 정리 재시도'),
+                    )
+                  else ...[
+                    TextButton(
+                      onPressed: deletion.busy ? null : deletion.check,
+                      child: const Text('처리 상태 확인'),
+                    ),
+                    TextButton(
+                      onPressed: deletion.canRetry ? deletion.retry : null,
+                      child: const Text('탈퇴 요청 재시도'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        }
         if (widget.authSession.state == AuthState.authenticated &&
             !widget.authSession.isLoggingOut) {
           return Scaffold(
             appBar: AppBar(
               title: const Text('StopBell'),
               actions: [
+                if (deletion != null)
+                  TextButton(
+                    onPressed: _isLoading ? null : _confirmDeletion,
+                    child: const Text('회원 탈퇴'),
+                  ),
                 ElevatedButton(
                   onPressed: _isLoading ? null : _logout,
                   child: const Text('로그아웃'),
@@ -397,6 +523,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 if (_isLoading) const Text('로그아웃 중...'),
                 if (_message != null)
                   Text(_message!, textAlign: TextAlign.center),
+                if (deletion?.message != null)
+                  Text(deletion!.message!, textAlign: TextAlign.center),
               ],
             ),
           );
@@ -449,6 +577,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   if (_message != null) ...[
                     const SizedBox(height: 16),
                     Text(_message!, textAlign: TextAlign.center),
+                  ],
+                  if (deletion?.message != null) ...[
+                    const SizedBox(height: 16),
+                    Text(deletion!.message!, textAlign: TextAlign.center),
                   ],
                 ],
               ],

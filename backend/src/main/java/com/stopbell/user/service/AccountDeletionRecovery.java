@@ -30,8 +30,9 @@ public class AccountDeletionRecovery {
 
     @Scheduled(scheduler = "accountDeletionScheduler", initialDelayString = "PT1M", fixedDelayString = "PT1M")
     public void recover() {
-        if (!enabled) return;
         var now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        jdbc.update("delete from account_deletion_receipts where completed_at is not null and completed_at <= ?", now.minusDays(30));
+        if (!enabled) return;
         for (long id : jdbc.queryForList("""
                 select user_id from account_deletions where next_attempt_at <= ?
                 order by next_attempt_at,user_id limit 10

@@ -1,5 +1,8 @@
 package com.stopbell.user.service;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
 
@@ -17,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AccountDeletionService {
     private final UserRepository users;
+    private final Clock clock;
     private final JdbcTemplate jdbc;
     private final NotificationRecipientDetachmentService detachment;
     private final NotificationDeliveryRepository deliveriesRepository;
@@ -24,8 +28,9 @@ public class AccountDeletionService {
 
     public AccountDeletionService(UserRepository users, JdbcTemplate jdbc,
             NotificationRecipientDetachmentService detachment, NotificationDeliveryRepository deliveriesRepository,
-            BoardingTrackingRuntime boardingRuntime) {
+            BoardingTrackingRuntime boardingRuntime, Clock jwtClock) {
         this.users = users;
+        this.clock = jwtClock;
         this.jdbc = jdbc;
         this.detachment = detachment;
         this.deliveriesRepository = deliveriesRepository;
@@ -90,6 +95,12 @@ public class AccountDeletionService {
         jdbc.update("delete from devices where user_id=?", userId);
         jdbc.update("delete from refresh_tokens where user_id=?", userId);
         jdbc.update("delete from apple_credentials where user_id=?", userId);
+        jdbc.update("""
+                update account_deletion_receipts set state=case when exists
+                    (select 1 from account_deletions where user_id=? and state='MANUAL_REQUIRED')
+                    then 'MANUAL_REQUIRED' else 'DELETED' end,
+                    completed_at=?,pending_user_id=null where pending_user_id=?
+                """, userId, LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC), userId);
         jdbc.update("delete from users where id=?", userId);
         return true;
     }

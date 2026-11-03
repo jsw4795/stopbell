@@ -129,6 +129,10 @@ V23은 `user_id BIGINT`를 기본키이자 `users(id)` 외래키로 두고, `enc
 
 V25는 삭제 요청과 외부 철회 결과를 사용자 데이터와 별도로 commit할 수 있도록 진행 행을 추가한다. `user_id BIGINT`는 PK이자 `users(id) ON DELETE CASCADE` FK이며 최종 로컬 삭제와 함께 제거한다. `state VARCHAR(24)`는 CHECK로 `PENDING`, `REVOKED`, `MANUAL_REQUIRED`, `NOT_REQUIRED`만 허용한다. `last_error VARCHAR(32)`에는 고정 분류만 저장하고 외부 본문·예외 원문·Token을 저장하지 않는다. `requested_at`, `next_attempt_at`은 UTC `DATETIME(6) NOT NULL`, 재시도 조회 index는 `(next_attempt_at,user_id)`다. 원래 Apple 암호문은 `apple_credentials`에 유지하며 진행 행에 복사하지 않는다. 상태 전이와 transaction·재시도 의미는 [Architecture](architecture.md#회원-탈퇴와-apple-철회-복구-task-815-backend)가 소유한다.
 
+### account_deletion_receipts
+
+V26은 receipt SHA-256 hash를 PK로 저장한다. 진행 중에는 `pending_user_id`와 `PENDING`을 유지하고, 사용자 삭제 transaction에서 사용자 ID를 null로 지우며 `DELETED` 또는 `MANUAL_REQUIRED`와 UTC `completed_at`을 기록한다. User FK는 없으며 원문 receipt는 저장하지 않는다. 완료 시점부터 30일이 지난 행만 자동 정리하며 진행 행은 삭제하지 않는다. HTTP 계약은 [API](api.md#7-회원-탈퇴-task-815-backend)를 따른다.
+
 ### devices
 
 현재 Schema (`V13__create_devices.sql`):
