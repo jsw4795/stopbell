@@ -34,26 +34,33 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AlarmCreationIntegrationTest {
-    @Container @ServiceConnection
-    static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11")
-            .withCommand("--log-bin-trust-function-creators=1");
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ContainerConfiguration {
+        @Bean
+        @ServiceConnection
+        MySQLContainer mysql() {
+            return new MySQLContainer("mysql:8.4.11")
+                    .withCommand("--log-bin-trust-function-creators=1");
+        }
+    }
     @Autowired MockMvc mvc;
     @Autowired JwtTokenService tokens;
     @Autowired UserRepository users;

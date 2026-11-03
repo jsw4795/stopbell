@@ -12,18 +12,19 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.annotation.Transactional;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 @SpringBootTest
 @ActiveProfiles("test")
-@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional
 class DevicePersistenceIntegrationTest {
 
@@ -31,9 +32,14 @@ class DevicePersistenceIntegrationTest {
     private static final String OTHER_INSTALLATION_ID = "b1234567-1234-4123-8123-123456789abc";
     private static final LocalDateTime REGISTERED_AT = LocalDateTime.of(2026, 10, 9, 0, 0);
 
-    @Container
-    @ServiceConnection
-    static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ContainerConfiguration {
+        @Bean
+        @ServiceConnection
+        MySQLContainer mysql() {
+            return new MySQLContainer("mysql:8.4.11");
+        }
+    }
 
     @Autowired
     private EntityManager entityManager;

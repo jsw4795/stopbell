@@ -52,28 +52,33 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.security.core.Authentication;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import({
+        AuthControllerIntegrationTest.ContainerConfiguration.class,
         AuthControllerIntegrationTest.TestGoogleIdentityVerifierConfiguration.class,
         AuthControllerIntegrationTest.TestProtectedEndpointConfiguration.class
 })
 class AuthControllerIntegrationTest {
 
-    @Container
-    @ServiceConnection
-    static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ContainerConfiguration {
+        @Bean
+        @ServiceConnection
+        MySQLContainer mysql() {
+            return new MySQLContainer("mysql:8.4.11");
+        }
+    }
 
     @Autowired
     private MockMvc mockMvc;

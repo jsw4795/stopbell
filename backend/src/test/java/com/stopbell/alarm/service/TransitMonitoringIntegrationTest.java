@@ -46,25 +46,31 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 /** Verifies the Phase 5 monitoring path with real DB, mapping, evaluation, and lifecycle components. */
 @SpringBootTest
 @ActiveProfiles("test")
-@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class TransitMonitoringIntegrationTest {
 
     private static final Instant NOW = Instant.parse("2026-09-23T00:00:00Z");
     private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
 
-    @Container
-    @ServiceConnection
-    static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ContainerConfiguration {
+        @Bean
+        @ServiceConnection
+        MySQLContainer mysql() {
+            return new MySQLContainer("mysql:8.4.11");
+        }
+    }
 
     @Autowired
     private BusAlarmPollingService pollingService;

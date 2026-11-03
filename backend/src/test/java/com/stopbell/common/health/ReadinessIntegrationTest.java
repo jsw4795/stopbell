@@ -11,20 +11,28 @@ import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class ReadinessIntegrationTest {
-    @Container @ServiceConnection static final MySQLContainer mysql = new MySQLContainer("mysql:8.4.11");
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ContainerConfiguration {
+        @Bean
+        @ServiceConnection
+        MySQLContainer mysql() {
+            return new MySQLContainer("mysql:8.4.11");
+        }
+    }
     @Autowired MockMvc mvc;
     @Autowired BusMetadataSyncStateRepository metadata;
 
