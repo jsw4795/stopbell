@@ -59,14 +59,18 @@ class BoardingCandidateApiIntegrationTest {
     @Autowired private BusStopRepository stops;
     @Autowired private BusRouteStopOccurrenceRepository occurrences;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private com.stopbell.user.repository.UserRepository users;
     @MockitoBean private TagoVehicleLocationClient tago;
     @MockitoBean private SeoulBusVehicleLocationClient seoul;
     @MockitoBean private SeoulBusVehicleDetailClient detail;
     private BusRoute route;
     private BusRouteStopOccurrence target;
+    private Long userId;
 
     @BeforeEach
     void set_up() {
+        userId = users.saveAndFlush(new com.stopbell.user.entity.User(com.stopbell.user.entity.AuthProvider.GOOGLE,
+                java.util.UUID.randomUUID().toString())).getId();
         occurrences.deleteAll();
         routes.deleteAll();
         stops.deleteAll();
@@ -152,7 +156,7 @@ class BoardingCandidateApiIntegrationTest {
         when(seoul.fetchVehicleLocations(any())).thenThrow(TransitProviderClientException.http(
                 TransitProvider.SEOUL_BUS, "getBusPosByRtidList", 401,
                 new RuntimeException("serviceKey=upstream-key-secret upstream-body-secret")));
-        String token = jwt.createAccessToken(7L);
+        String token = jwt.createAccessToken(userId);
 
         mvc.perform(request().header("Authorization", "Bearer " + token))
                 .andExpect(status().isServiceUnavailable())
@@ -217,7 +221,7 @@ class BoardingCandidateApiIntegrationTest {
     }
 
     private MockHttpServletRequestBuilder auth(MockHttpServletRequestBuilder request) {
-        return request.header("Authorization", "Bearer " + jwt.createAccessToken(7L));
+        return request.header("Authorization", "Bearer " + jwt.createAccessToken(userId));
     }
 
     private ResultMatcher apiError(ErrorCode code) {

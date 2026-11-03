@@ -88,6 +88,27 @@ class SecurityConfigurationIntegrationTest {
     @Autowired
     private SecretKey jwtSecretKey;
 
+    @Autowired private UserRepository users;
+    @Autowired private org.springframework.security.oauth2.jwt.JwtDecoder decoder;
+
+    @Test
+    @DisplayName("삭제된 User의 토큰은 거부하고 DB 장애는 잘못된 토큰으로 분류하지 않는다")
+    void deleted_user_and_database_failure_are_distinct() {
+        String token = jwtTokenService.createAccessToken(42L);
+        try {
+            org.mockito.Mockito.when(users.existsById(42L)).thenReturn(false);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> decoder.decode(token))
+                    .isInstanceOf(org.springframework.security.oauth2.jwt.BadJwtException.class);
+            org.mockito.Mockito.when(users.existsById(42L)).thenThrow(
+                    new org.springframework.dao.DataAccessResourceFailureException("synthetic DB failure"));
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> decoder.decode(token))
+                    .isInstanceOf(org.springframework.dao.DataAccessResourceFailureException.class);
+        } finally {
+            org.mockito.Mockito.reset(users);
+            org.mockito.Mockito.when(users.existsById(org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
+        }
+    }
+
     @Test
     @DisplayName("유효한 Access Token 요청은 JWT subject를 Authentication name으로 전달한다")
     void authenticate_valid_access_token() throws Exception {
@@ -276,7 +297,9 @@ class SecurityConfigurationIntegrationTest {
 
         @Bean
         UserRepository userRepository() {
-            return mock(UserRepository.class);
+            UserRepository users = mock(UserRepository.class);
+            org.mockito.Mockito.when(users.existsById(org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
+            return users;
         }
 
         @Bean

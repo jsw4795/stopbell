@@ -372,7 +372,8 @@ class UtcTimestampCharacterizationIntegrationTest {
     private record AuditSample(User user, Alarm alarm, RefreshToken token) { }
 
     private RefreshTokenService refreshService(Instant instant) {
-        return new RefreshTokenService(tokens, mock(JwtTokenService.class), Clock.fixed(instant, ZoneId.systemDefault()));
+        return new RefreshTokenService(tokens, mock(JwtTokenService.class), Clock.fixed(instant, ZoneId.systemDefault()),
+                mock(com.stopbell.user.repository.UserRepository.class));
     }
 
     private void atFixedTime(Instant instant, Runnable work) {

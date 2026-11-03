@@ -15,7 +15,7 @@
 ## 출시 차단 및 사용자 결정
 
 1. Sign in with Apple의 App ID capability·provisioning profile과 Backend secret 및 feature gate를 준비하고 실제 기기·출시 설정과 [Apple Guideline 4.8](https://developer.apple.com/app-store/review/guidelines/) 준수를 검증한다.
-2. 앱에서 계정 삭제를 시작하는 기능은 없다. [Apple 계정 삭제 지침](https://developer.apple.com/help/app-review/guideline-reference/5-1-1-account-deletion/)을 충족하도록 계정과 관련 데이터 삭제 및 Apple token revocation을 구현·검증하고 실제 법적 보존 의무와 백업 경계를 확인해야 한다.
+2. 앱에서 계정 삭제를 시작하는 기능과 공개 API는 없다. 내부 삭제 경로는 Apple 철회가 완료되기 전 Apple 계정을 거부한다. [Apple 계정 삭제 지침](https://developer.apple.com/help/app-review/guideline-reference/5-1-1-account-deletion/)을 충족하도록 Apple token revocation과 공개 흐름을 구현·검증하고 실제 법적 보존 의무와 백업 경계를 확인해야 한다.
 3. 실제 수집·전송·보존 데이터와 Firebase/Google 및 기타 SDK를 조사해 개인정보 처리방침과 App Store privacy disclosure를 작성한다. [Apple privacy 안내](https://developer.apple.com/app-store/user-privacy-and-data-use/)와 [SDK privacy manifest/signature 요구](https://developer.apple.com/support/third-party-SDK-requirements/)를 기준으로 최종 archive의 privacy report 및 의존 SDK를 확인한다. 이 문서는 disclosure를 대신하지 않는다.
 4. Apple Developer 계정의 Bundle ID, signing, distribution profile, Push capability, APNs credential 및 Firebase/Google OAuth 설정을 사용자가 확인한다. 실제 credential을 저장소·로그에 넣지 않는다. 알림 권한 거부와 설명, 로그인, 재설치·업데이트, foreground/background/terminated 수신 및 tap을 실제 iPhone에서 검증한다.
 5. 제출 시점의 [Apple SDK 요구사항](https://developer.apple.com/news/upcoming-requirements/?id=04282026a)을 확인한다. 2026-04-28 이후 업로드는 Xcode 26 이상과 iOS 26 이상 SDK가 필요하며, [Apple 제출 안내](https://developer.apple.com/app-store/submitting/)는 2027년 4월부터 iOS 27 SDK 및 iOS 15 이상 target을 예고한다. 출시 메타데이터, 연령 등급, 심사 계정, Privacy Policy URL, archive 서명·업로드와 심사를 사용자가 완료해야 한다.

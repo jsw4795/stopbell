@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.BusAlarmTarget;
+import com.stopbell.alarm.entity.AdjacentStopSnapshot;
 import com.stopbell.alarm.service.AlarmService;
 import com.stopbell.notification.client.FcmProviderClient;
 import com.stopbell.notification.client.NotificationSendResult;
@@ -28,6 +29,12 @@ import com.stopbell.transit.domain.TransitEventType;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
+import com.stopbell.user.service.AccountDeletionService;
+import com.stopbell.user.auth.service.JwtTokenService;
+import com.stopbell.user.auth.service.RefreshTokenService;
+import com.stopbell.user.auth.exception.InvalidRefreshTokenException;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtException;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -68,6 +75,10 @@ class NotificationAttemptIntegrationTest {
     @Autowired private PlatformTransactionManager manager;
     @Autowired private AlarmService alarms;
     @Autowired private NotificationRecipientDetachmentService detachment;
+    @Autowired private AccountDeletionService deletion;
+    @Autowired private JwtTokenService jwt;
+    @Autowired private JwtDecoder decoder;
+    @Autowired private RefreshTokenService refresh;
 
     private final Clock clock = mock(Clock.class);
     private AtomicReference<Instant> time;
@@ -91,6 +102,148 @@ class NotificationAttemptIntegrationTest {
         provider = mock(FcmProviderClient.class);
         when(provider.send(any())).thenAnswer(call -> result(NotificationProviderResult.ACCEPTED));
         worker = worker(attempts);
+    }
+
+    @Test
+    @DisplayName("다른 사용자에게 이전된 Device는 이전 소유자의 계정 삭제에서 보존된다")
+    void account_deletion_preserves_transferred_device() {
+        Fixture owner = fixture();
+        changeRegistration(owner, RegistrationChange.OWNER);
+        Long currentOwner = jdbc.queryForObject("select user_id from devices where id=?", Long.class, owner.deviceId());
+        assertThat(deletion.delete(owner.userId())).isTrue();
+        assertThat(jdbc.queryForObject("select user_id from devices where id=?", Long.class, owner.deviceId()))
+                .isEqualTo(currentOwner).isNotEqualTo(owner.userId());
+        assertThat(jdbc.queryForObject("select count(*) from notification_events where id=?", Integer.class,
+                owner.eventId())).isZero();
+    }
+
+    @Test
+    @DisplayName("ACTIVE와 FOLLOW_UP Alarm은 회원 삭제에서 모두 정리된다")
+    void account_deletion_removes_active_and_follow_up_alarms() {
+        Fixture owner = fixture();
+        Long followUp = tx().execute(status -> {
+            Alarm active = entityManager.find(Alarm.class, owner.alarmId());
+            active.activate();
+            User user = entityManager.find(User.class, owner.userId());
+            Alarm next = new Alarm(user, new BusAlarmTarget(TransitProvider.SEOUL_BUS, "route", "stop", 3,
+                    "143", "목적지", null, null, null, null, new AdjacentStopSnapshot("next", 4)));
+            entityManager.persist(next);
+            next.activate();
+            next.startFollowUp("vehicle", UUID.randomUUID(), NOW, NOW.plusMinutes(5));
+            entityManager.flush();
+            return next.getId();
+        });
+        assertThat(deletion.delete(owner.userId())).isTrue();
+        assertThat(jdbc.queryForObject("select count(*) from alarms where id in (?,?)", Integer.class,
+                owner.alarmId(), followUp)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from bus_alarm_targets where alarm_id in (?,?)", Integer.class,
+                owner.alarmId(), followUp)).isZero();
+    }
+
+    @Test
+    @DisplayName("Refresh rotation이 User 잠금을 기다리는 동안 삭제가 커밋되면 이전 토큰을 거부한다")
+    void refresh_waiting_for_deletion_is_rejected() throws Exception {
+        Fixture owner = fixture();
+        String token = tx().execute(status -> refresh.issue(entityManager.find(User.class, owner.userId())));
+        var entered = new CountDownLatch(1);
+        try (var executor = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var future = new AtomicReference<java.util.concurrent.Future<?>>();
+            tx().executeWithoutResult(status -> {
+                entityManager.createQuery("select u from User u where u.id=:id", User.class)
+                        .setParameter("id", owner.userId())
+                        .setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE).getSingleResult();
+                future.set(executor.submit(() -> { entered.countDown(); return refresh.refresh(token); }));
+                await(entered);
+                assertThatThrownBy(() -> future.get().get(300, TimeUnit.MILLISECONDS))
+                        .isInstanceOf(java.util.concurrent.TimeoutException.class);
+                assertThat(deletion.delete(owner.userId())).isTrue();
+            });
+            assertThatThrownBy(() -> future.get().get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(InvalidRefreshTokenException.class);
+        }
+    }
+
+    @Test
+    @DisplayName("삭제 트랜잭션의 실패는 User와 Alarm 및 Delivery를 모두 롤백한다")
+    void account_deletion_rolls_back() {
+        Fixture owner = fixture();
+        assertThatThrownBy(() -> tx().executeWithoutResult(status -> {
+            assertThat(deletion.delete(owner.userId())).isTrue();
+            jdbc.update("insert into refresh_tokens (user_id, token_hash, expires_at, created_at) values (?, ?, ?, ?)",
+                    Long.MAX_VALUE, "a".repeat(64), NOW.plusDays(1), NOW);
+        })).isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(jdbc.queryForObject("select count(*) from users where id=?", Integer.class, owner.userId())).isOne();
+        assertThat(jdbc.queryForObject("select count(*) from alarms where id=?", Integer.class, owner.alarmId())).isOne();
+        assertThat(row(owner.deliveryId()).getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+        assertThat(jdbc.queryForObject("select device_id from notification_deliveries where id=?", Long.class,
+                owner.deliveryId())).isEqualTo(owner.deviceId());
+    }
+
+    @Test
+    @DisplayName("Legacy History는 현재 소유 Alarm에 연결된 행만 삭제하고 확인할 수 없는 행을 보존한다")
+    void account_deletion_preserves_unattributed_legacy_history() {
+        Fixture owner = fixture();
+        Fixture other = fixture();
+        jdbc.execute("create table notification_history (id bigint primary key, alarm_id bigint not null)");
+        try {
+            jdbc.update("insert into notification_history (id, alarm_id) values (1, ?), (2, ?), (3, ?)",
+                    owner.alarmId(), other.alarmId(), Long.MAX_VALUE);
+            assertThat(deletion.delete(owner.userId())).isTrue();
+            assertThat(jdbc.queryForList("select id from notification_history order by id", Long.class))
+                    .containsExactly(2L, 3L);
+        } finally {
+            jdbc.execute("drop table notification_history");
+        }
+    }
+
+    @Test
+    @DisplayName("회원 삭제는 현재 소유 Device를 정리하고 다른 사용자 Event와 Delivery를 보존하며 기존 토큰을 거부한다")
+    void account_deletion_preserves_other_event_and_invalidates_tokens() {
+        Fixture other = fixture();
+        Fixture owner = fixture();
+        NotificationAttemptSnapshot started = attempts.beginAttempt(other.deliveryId()).orElseThrow();
+        tx().executeWithoutResult(status -> devices.findByIdForUpdate(other.deviceId()).orElseThrow()
+                .transferOwnership(entityManager.find(User.class, owner.userId()), "transfer-target", 1, NOW));
+        String access = jwt.createAccessToken(owner.userId());
+        String otherAccess = jwt.createAccessToken(other.userId());
+        String token = tx().execute(status -> refresh.issue(entityManager.find(User.class, owner.userId())));
+        jdbc.update("""
+                insert into alarm_creation_requests (user_id, client_request_id, request_fingerprint, alarm_id, created_at, expires_at)
+                values (?, ?, ?, ?, ?, ?)
+                """, owner.userId(), UUID.randomUUID().toString(), new byte[32], owner.alarmId(), NOW, NOW.plusHours(1));
+        assertThat(deletion.delete(owner.userId())).isTrue();
+        assertThat(deletion.delete(owner.userId())).isFalse();
+        assertThatThrownBy(() -> decoder.decode(access)).isInstanceOf(JwtException.class);
+        assertThat(decoder.decode(otherAccess).getSubject()).isEqualTo(Long.toString(other.userId()));
+        assertThatThrownBy(() -> refresh.refresh(token)).isInstanceOf(InvalidRefreshTokenException.class);
+        attempts.completeAttempt(started, result(NotificationProviderResult.ACCEPTED));
+        assertThat(row(other.deliveryId()).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+        assertThat(row(other.deliveryId()).getDevice()).isNull();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events where id=?", Integer.class,
+                other.eventId())).isOne();
+        assertThat(jdbc.queryForObject("select count(*) from alarms where id=?", Integer.class,
+                other.alarmId())).isOne();
+        assertThat(jdbc.queryForObject("select count(*) from devices where id=?", Integer.class,
+                other.deviceId())).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events where user_id=?", Integer.class,
+                owner.userId())).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from alarm_creation_requests where user_id=?", Integer.class,
+                owner.userId())).isZero();
+    }
+
+    @Test
+    @DisplayName("Apple 철회가 구현되기 전 내부 삭제는 계정과 credential을 보존한다")
+    void apple_deletion_is_blocked() {
+        Long id = tx().execute(status -> {
+            User user = new User(AuthProvider.APPLE, UUID.randomUUID().toString());
+            entityManager.persist(user);
+            entityManager.flush();
+            return user.getId();
+        });
+        jdbc.update("insert into apple_credentials (user_id, encrypted_refresh_token) values (?, 'synthetic')", id);
+        assertThatThrownBy(() -> deletion.delete(id)).isInstanceOf(IllegalStateException.class);
+        assertThat(jdbc.queryForObject("select count(*) from apple_credentials where user_id=?", Integer.class, id)).isOne();
+        assertThat(jdbc.queryForObject("select count(*) from users where id=?", Integer.class, id)).isOne();
     }
 
     @Test

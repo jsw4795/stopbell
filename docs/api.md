@@ -619,6 +619,8 @@ Google ID Token은 로그인 시 외부 Identity를 확인하기 위해 Backend�
 
 JWT 인증 단계에서 HS256 서명, issuer, timestamp와 필수 `exp`를 검증하고, `sub`가 양의 Long 범위의 정수 문자열인지도 검증한다. `sub` 누락/빈 값/0/음수/문자/소수/선행 0/Long 범위 초과 및 JSON 숫자형 claim은 User ID를 추출하지 않는 Endpoint에서도 인증 성립 전에 401 `UNAUTHENTICATED`로 거부한다. 라이브러리의 숫자→문자열 정규화 전 원래 claim 타입도 확인하며 기존 Clock과 Token 발급 계약 및 User ID 추출의 방어적 검증은 유지한다.
 
+검증된 subject의 User가 없으면 Access Token을 거부한다. User 조회 DB 장애는 유효하지 않은 Token으로 분류하지 않는다. 현재 공개 회원 탈퇴 API는 없다.
+
 ### Google 로그인
 
 ```http

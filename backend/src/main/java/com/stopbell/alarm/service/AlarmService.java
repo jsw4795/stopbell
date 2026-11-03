@@ -53,7 +53,7 @@ public class AlarmService {
             throw new ApiException(ErrorCode.INVALID_REQUEST);
         }
 
-        User user = userRepository.findById(userId)
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
         BusRouteStopOccurrence targetOccurrence = occurrenceRepository.findById(request.targetStopOccurrenceId())
                 .orElseThrow(() -> new ApiException(ErrorCode.TARGET_STOP_OCCURRENCE_NOT_FOUND));

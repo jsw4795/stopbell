@@ -88,18 +88,18 @@ public class LoginService {
     }
 
     private TokenResponse issueTokens(User user, Consumer<User> storeCredential) {
+        String providerUserId = user.getProviderUserId();
+        AuthProvider provider = user.getAuthProvider();
+        User locked = userRepository.findByIdForUpdate(user.getId())
+                .filter(existing -> existing.getAuthProvider() == provider
+                        && existing.getProviderUserId().equals(providerUserId))
+                .orElseThrow(() -> new IllegalStateException("User identity is unavailable"));
         if (storeCredential != null) {
-            String providerUserId = user.getProviderUserId();
-            User locked = userRepository.findByIdForUpdate(user.getId())
-                    .filter(existing -> existing.getAuthProvider() == AuthProvider.APPLE
-                            && existing.getProviderUserId().equals(providerUserId))
-                    .orElseThrow(() -> new IllegalStateException("Apple identity is unavailable"));
             storeCredential.accept(locked);
-            user = locked;
         }
         return new TokenResponse(
-                jwtTokenService.createAccessToken(user.getId()),
-                refreshTokenService.issue(user)
+                jwtTokenService.createAccessToken(locked.getId()),
+                refreshTokenService.issue(locked)
         );
     }
 

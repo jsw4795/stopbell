@@ -71,6 +71,7 @@ class BoardingTrackingIntegrationTest {
     @Autowired private BoardingProgressEvaluator evaluator;
     @Autowired private BoardingSessionService api;
     @Autowired private BoardingSessionRepository sessions;
+    @Autowired private com.stopbell.user.service.AccountDeletionService deletion;
     @Autowired private UserRepository users;
     @Autowired private BusRouteRepository routes;
     @Autowired private BusStopRepository stops;
@@ -131,6 +132,62 @@ class BoardingTrackingIntegrationTest {
                 "vehicle-id", NUMBER, "7000", "목적지", snapshot, checkpoint, UTC_NOW, UTC_NOW.plus(Duration.ofHours(4))));
         runtime.admitCreated(saved.getId());
         return saved;
+    }
+
+    @Test
+    @DisplayName("삭제가 Session을 잠근 동안 시작된 평가는 삭제 커밋 뒤 결과를 적용하지 않는다")
+    void deletion_blocks_concurrent_tracking_result() throws Exception {
+        var expected = store.findOpen().getFirst();
+        var candidate = decision(expected, 1);
+        var entered = new CountDownLatch(1);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var future = new java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<BoardingTrackingStore.Applied>>();
+            new TransactionTemplate(manager).executeWithoutResult(status -> {
+                assertThat(deletion.delete(session.getUser().getId())).isTrue();
+                future.set(executor.submit(() -> { entered.countDown(); return store.apply(expected, candidate); }));
+                try {
+                    assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                    assertThatThrownBy(() -> future.get().get(300, TimeUnit.MILLISECONDS))
+                            .isInstanceOf(TimeoutException.class);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+            });
+            assertThat(future.get().get(5, TimeUnit.SECONDS).accepted()).isFalse();
+        }
+        assertThat(jdbc.queryForObject("select count(*) from notification_events where user_id=?", Long.class,
+                session.getUser().getId())).isZero();
+    }
+
+    @Test
+    @DisplayName("탑승 중 회원 삭제 후 늦은 평가는 Event를 재생성하지 않고 다른 User 세션을 보존한다")
+    void deletion_rejects_late_tracking_result() {
+        var expected = store.findOpen().getFirst();
+        var candidate = decision(expected, 1);
+        var other = create();
+        runtime.verified(expected);
+        assertThat(runtime.isReady(expected, utc())).isTrue();
+        assertThat(deletion.delete(session.getUser().getId())).isTrue();
+        assertThat(runtime.isReady(expected, utc())).isFalse();
+        runtime.verified(expected);
+        assertThat(runtime.isReady(expected, utc())).isFalse();
+        assertThat(store.apply(expected, candidate).accepted()).isFalse();
+        assertThat(sessions.findById(session.getId())).isEmpty();
+        assertThat(sessions.findById(other.getId())).isPresent();
+        assertThat(jdbc.queryForObject("select count(*) from notification_events where user_id=?", Long.class,
+                session.getUser().getId())).isZero();
+    }
+
+    @Test
+    @DisplayName("일시 중단된 탑승 세션도 회원 삭제와 함께 정리된다")
+    void deletion_removes_suspended_session() {
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, BoardingTrackingDecision.held(BoardingStateReason.VEHICLE_MISSING));
+        assertThat(sessions.findById(session.getId()).orElseThrow().getStatus())
+                .isEqualTo(BoardingSessionStatus.SUSPENDED);
+        assertThat(deletion.delete(session.getUser().getId())).isTrue();
+        assertThat(sessions.findById(session.getId())).isEmpty();
     }
 
     @Test

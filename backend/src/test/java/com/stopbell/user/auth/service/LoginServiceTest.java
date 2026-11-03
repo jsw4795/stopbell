@@ -56,6 +56,7 @@ class LoginServiceTest {
     @BeforeEach
     void set_up() {
         when(manager.getTransaction(any())).thenReturn(first, recovery);
+        when(users.findByIdForUpdate(user.getId())).thenReturn(Optional.of(user));
         login = new LoginService(users, jwt, refresh, manager);
     }
 

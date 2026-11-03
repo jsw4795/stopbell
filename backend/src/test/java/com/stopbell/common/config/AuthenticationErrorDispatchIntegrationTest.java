@@ -44,6 +44,22 @@ class AuthenticationErrorDispatchIntegrationTest {
     @Autowired
     private JwtTokenService jwtTokens;
 
+    @Autowired private com.stopbell.user.repository.UserRepository users;
+
+    @Test
+    @DisplayName("JWT User 조회 DB 장애는 실제 HTTP에서 잘못된 토큰이 아니라 서버 오류로 처리한다")
+    void preserve_database_failure_during_authentication() throws Exception {
+        try {
+            when(users.existsById(42L)).thenThrow(new org.springframework.dao.DataAccessResourceFailureException("private-db-marker"));
+            HttpResponse<String> response = get("/api/v1/unknown-fixture", jwtTokens.createAccessToken(42L));
+            assertThat(response.statusCode()).isEqualTo(500);
+            assertThat(response.body()).doesNotContain("private-db-marker");
+        } finally {
+            org.mockito.Mockito.reset(users);
+            when(users.existsById(org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {404, 500})
     @DisplayName("공개 Auth 요청의 ERROR dispatch는 원래 404와 500을 인증 401로 바꾸지 않는다")

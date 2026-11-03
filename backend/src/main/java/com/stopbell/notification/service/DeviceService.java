@@ -19,12 +19,10 @@ import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DataRetrievalFailureException;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
-import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class DeviceService {
@@ -84,7 +82,8 @@ public class DeviceService {
     private RegistrationResult registerInTransaction(
             Long userId, String credentialHash, RegisterDeviceRequest request, String conflictingConstraint
     ) {
-        User user = authenticatedUser(userId);
+        User user = userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHENTICATED));
         // Do not lock a missing UUID range: competing first inserts use the UNIQUE boundary.
         // The existence query loads no Entity; existing state is loaded only by the locking read.
         Optional<Device> existing = conflictingConstraint != null
@@ -147,7 +146,8 @@ public class DeviceService {
         }
         String credentialHash = InstallationCredential.hash(credential);
         return writeTransaction.execute(status -> {
-            authenticatedUser(userId);
+            userRepository.findByIdForUpdate(userId)
+                    .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHENTICATED));
             Device device = deviceRepository.findByInstallationIdForUpdate(request.installationId())
                     .orElseThrow(() -> new ApiException(ErrorCode.DEVICE_NOT_FOUND));
             InstallationCredential.verify(device.getInstallationCredentialHash(), credentialHash);
@@ -187,7 +187,7 @@ public class DeviceService {
 
     private User authenticatedUser(Long userId) {
         return userRepository.findById(userId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+                .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHENTICATED));
     }
 
     private LocalDateTime utcNow() {

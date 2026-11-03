@@ -10,6 +10,7 @@ import javax.crypto.spec.SecretKeySpec;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.SignedJWT;
+import com.stopbell.user.repository.UserRepository;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,6 +20,7 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.BadJwtException;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtIssuerValidator;
 import org.springframework.security.oauth2.jwt.JwtTimestampValidator;
@@ -47,7 +49,7 @@ public class JwtConfiguration {
     }
 
     @Bean
-    JwtDecoder jwtDecoder(SecretKey jwtSecretKey, JwtProperties jwtProperties, Clock jwtClock) {
+    JwtDecoder jwtDecoder(SecretKey jwtSecretKey, JwtProperties jwtProperties, Clock jwtClock, UserRepository users) {
         NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder.withSecretKey(jwtSecretKey)
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();
@@ -59,7 +61,13 @@ public class JwtConfiguration {
                 new JwtIssuerValidator(jwtProperties.issuer()),
                 this::validateSubject
         ));
-        return jwtDecoder;
+        return token -> {
+            Jwt jwt = jwtDecoder.decode(token);
+            if (!users.existsById(Long.parseLong(jwt.getSubject()))) {
+                throw new BadJwtException("User is unavailable");
+            }
+            return jwt;
+        };
     }
 
     private OAuth2TokenValidatorResult validateSubject(Jwt jwt) {

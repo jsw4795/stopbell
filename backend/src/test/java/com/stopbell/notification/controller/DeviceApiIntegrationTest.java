@@ -83,6 +83,35 @@ class DeviceApiIntegrationTest {
     private JdbcTemplate jdbc;
     @Autowired
     private PlatformTransactionManager transactionManager;
+    @Autowired private com.stopbell.user.service.AccountDeletionService deletionService;
+
+    @Test
+    @DisplayName("삭제와 경합한 Device 소유권 이전은 기존 소유자의 설치본을 변경하지 않는다")
+    void transfer_to_deleted_user_is_rejected() throws Exception {
+        User original = user();
+        User targetOwner = user();
+        String installation = installation();
+        String target = target();
+        register(original, CREDENTIAL, payload(installation, "IOS", target, 1, 0, false), 201);
+        Snapshot before = snapshot(installation);
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            var future = new java.util.concurrent.atomic.AtomicReference<Future<MvcResult>>();
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                users.findByIdForUpdate(targetOwner.getId()).orElseThrow();
+                future.set(executor.submit(() -> registerResult(targetOwner, CREDENTIAL,
+                        payload(installation, "IOS", target, 2, 0, true))));
+                try {
+                    waitForDatabaseWaiters(1);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+                assertThat(deletionService.delete(targetOwner.getId())).isTrue();
+            });
+            assertThat(future.get().get(10, TimeUnit.SECONDS).getResponse().getStatus()).isEqualTo(401);
+        }
+        assertThat(snapshot(installation)).isEqualTo(before);
+    }
 
     @Test
     @DisplayName("최초 등록은 201과 정규화한 최소 응답을 반환하고 자격증명 hash 및 UTC 시각만 저장한다")
@@ -509,8 +538,8 @@ class DeviceApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("알려지지 않은 DB 무결성 오류는 target conflict로 위장하지 않고 원문 로그와 오류 상세 없이 500을 반환한다")
-    void report_unclassified_database_failure_safely(CapturedOutput output) throws Exception {
+    @DisplayName("삭제 중인 User의 Device 등록은 삭제 커밋 후 인증 실패로 처리한다")
+    void reject_registration_for_deleted_user(CapturedOutput output) throws Exception {
         User owner = user();
         String installation = installation();
         String target = target();
@@ -535,19 +564,38 @@ class DeviceApiIntegrationTest {
             }
             deletion.get(10, TimeUnit.SECONDS);
             MvcResult response = registration.get(10, TimeUnit.SECONDS);
-            assertThat(response.getResponse().getStatus()).isEqualTo(500);
+            assertThat(response.getResponse().getStatus()).isEqualTo(401);
             assertThat(response.getResponse().getContentType()).isEqualTo("application/json");
             JsonNode error = JSON.readTree(response.getResponse().getContentAsString());
             assertThat(error.propertyNames()).containsExactlyInAnyOrder("code", "message");
-            assertThat(error.get("code").asString()).isEqualTo("INTERNAL_SERVER_ERROR");
-            assertThat(error.get("message").asString()).isEqualTo("An internal server error occurred.");
+            assertThat(error.get("code").asString()).isEqualTo("UNAUTHENTICATED");
+            assertThat(error.get("message").asString()).isEqualTo("Authentication is required or invalid.");
             assertThat(response.getResponse().getContentAsString())
                     .doesNotContain(installation, target, CREDENTIAL, hash(CREDENTIAL), "fk_devices_user_id",
                             "SQLState", "SQLSTATE", "Hibernate", "stackTrace", "DataIntegrityViolationException");
         }
         assertThat(devices.findByInstallationId(installation)).isEmpty();
-        assertThat(output.getAll()).contains("Device persistence failed: DataIntegrityViolationException")
-                .doesNotContain(installation, target, CREDENTIAL, hash(CREDENTIAL), "fk_devices_user_id");
+        assertThat(output.getAll()).doesNotContain(installation, target, CREDENTIAL, hash(CREDENTIAL), "fk_devices_user_id");
+    }
+
+    @Test
+    @DisplayName("알려지지 않은 DB 무결성 오류는 target conflict로 위장하지 않고 500을 반환한다")
+    void report_unclassified_database_failure_safely(CapturedOutput output) throws Exception {
+        User owner = user();
+        String installation = installation();
+        String target = target();
+        jdbc.execute("alter table devices add constraint ck_test_device_integrity check (registration_revision <> 988720349)");
+        try {
+            MvcResult response = registerResult(owner, CREDENTIAL, payload(installation, "IOS", target, 988720349, 0, false));
+            assertThat(response.getResponse().getStatus()).isEqualTo(500);
+            assertThat(JSON.readTree(response.getResponse().getContentAsString()).get("code").asString())
+                    .isEqualTo("INTERNAL_SERVER_ERROR");
+            assertThat(response.getResponse().getContentAsString()).doesNotContain("ck_test_device_integrity", target);
+            assertThat(output.getAll()).contains("Device persistence failed: DataIntegrityViolationException")
+                    .doesNotContain(installation, target, CREDENTIAL, hash(CREDENTIAL));
+        } finally {
+            jdbc.execute("alter table devices drop check ck_test_device_integrity");
+        }
     }
 
     private JsonNode register(User user, String credential, Map<String, Object> payload, int expectedStatus) throws Exception {

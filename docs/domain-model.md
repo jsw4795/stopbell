@@ -749,7 +749,7 @@ TASK-707의 NotificationDelivery 생성자는 전달받은 expiresAt/createdAt�
 
 TASK-709의 `beginAttempt`는 PENDING/due/fresh row의 count/start/revision과 recovery 예약을 기록하고 이전 result/code를 지운다. `markAccepted`는 기한 이후 도착한 접수 응답도 terminal ACCEPTED로 기록한다. `recordFailure`와 `scheduleRetry`는 실제 결과 및 기한 이하 예약을 보존하고 `markFailed`/`expire`는 terminal 예약을 제거한다. local 종료는 이전 실제 result를 보존하며 가짜 result를 만들지 않는다. 모든 operational 시각은 UTC microsecond 값이다. Terminal row는 Service current-read gate로 제외하고 Entity도 attempt/결과/retry mutation을 거부한다.
 
-Alarm hard delete는 NotificationEvent/Delivery와 원본 alarmId/owner를 보존하고 PENDING만 명시적으로 종료한다. ACCEPTED/FAILED/EXPIRED는 보존한다. 진행/접수 중 FCM 회수는 보장하지 않는다. Event의 User, Delivery의 Event/Device는 non-cascade FK이며 참조 중 hard delete를 제한한다. 계정 삭제 정책/기능은 후속 release readiness에 남긴다. 기존 NotificationHistory 코드는 제거했고 legacy 데이터의 조건부 보존은 [database.md](database.md#notification_history-legacy-보존-정책)가 소유한다. Phase 8 Analytics와 operational delivery data는 별도 책임으로 유지한다.
+Alarm hard delete는 NotificationEvent/Delivery와 원본 alarmId/owner를 보존하고 PENDING만 명시적으로 종료한다. ACCEPTED/FAILED/EXPIRED는 보존한다. 진행/접수 중 FCM 회수는 보장하지 않는다. Event의 User, Delivery의 Event/Device는 non-cascade FK이며 참조 중 hard delete를 제한한다. 내부 회원 삭제는 소유 Event와 Delivery를 정리하고 다른 User의 Event·Delivery는 보존한다. 공개 탈퇴와 Apple 철회는 후속 작업이다. 기존 NotificationHistory 코드는 제거했고 legacy 데이터의 조건부 보존은 [database.md](database.md#notification_history-legacy-보존-정책)가 소유한다. Phase 8 Analytics와 operational delivery data는 별도 책임으로 유지한다.
 
 ------------------------------------------------------------------------
 

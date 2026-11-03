@@ -15,6 +15,7 @@ import com.stopbell.user.auth.exception.InvalidRefreshTokenException;
 import com.stopbell.user.entity.RefreshToken;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.RefreshTokenRepository;
+import com.stopbell.user.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,16 +28,19 @@ public class RefreshTokenService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final JwtTokenService jwtTokenService;
     private final Clock clock;
+    private final UserRepository users;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public RefreshTokenService(
             RefreshTokenRepository refreshTokenRepository,
             JwtTokenService jwtTokenService,
-            Clock jwtClock
+            Clock jwtClock,
+            UserRepository users
     ) {
         this.refreshTokenRepository = refreshTokenRepository;
         this.jwtTokenService = jwtTokenService;
         this.clock = jwtClock;
+        this.users = users;
     }
 
     public String issue(User user) {
@@ -65,8 +69,9 @@ public class RefreshTokenService {
             throw new InvalidRefreshTokenException();
         }
 
-        User user = storedRefreshToken.getUser();
-        if (user == null || refreshTokenRepository.deleteByTokenHash(tokenHash) != 1) {
+        User user = users.findByIdForUpdate(storedRefreshToken.getUser().getId())
+                .orElseThrow(InvalidRefreshTokenException::new);
+        if (refreshTokenRepository.deleteByTokenHash(tokenHash) != 1) {
             throw new InvalidRefreshTokenException();
         }
 

@@ -53,6 +53,7 @@ class BusRouteStopIntegrationTest {
 
     @Autowired
     private JwtTokenService jwtTokenService;
+    @Autowired private com.stopbell.user.repository.UserRepository users;
 
     @Autowired
     private MockMvc mockMvc;
@@ -170,6 +171,8 @@ class BusRouteStopIntegrationTest {
     }
 
     private String authorization() {
-        return "Bearer " + jwtTokenService.createAccessToken(1L);
+        var user = users.saveAndFlush(new com.stopbell.user.entity.User(com.stopbell.user.entity.AuthProvider.GOOGLE,
+                java.util.UUID.randomUUID().toString()));
+        return "Bearer " + jwtTokenService.createAccessToken(user.getId());
     }
 }

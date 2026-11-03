@@ -19,6 +19,7 @@ import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.RefreshToken;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.RefreshTokenRepository;
+import com.stopbell.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,7 +36,7 @@ class RefreshTokenServiceTest {
         RefreshTokenService refreshTokenService = new RefreshTokenService(
                 refreshTokenRepository,
                 mock(JwtTokenService.class),
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC), mock(UserRepository.class)
         );
         User user = new User(AuthProvider.GOOGLE, "refresh-token-service-user");
 
@@ -63,7 +64,7 @@ class RefreshTokenServiceTest {
         RefreshTokenService refreshTokenService = new RefreshTokenService(
                 refreshTokenRepository,
                 mock(JwtTokenService.class),
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC), mock(UserRepository.class)
         );
         User user = new User(AuthProvider.GOOGLE, "multiple-refresh-token-service-user");
 
@@ -80,7 +81,7 @@ class RefreshTokenServiceTest {
         RefreshTokenService refreshTokenService = new RefreshTokenService(
                 refreshTokenRepository,
                 mock(JwtTokenService.class),
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC), mock(UserRepository.class)
         );
         String plaintextToken = "refresh-token-for-logout";
 
@@ -96,7 +97,7 @@ class RefreshTokenServiceTest {
         RefreshTokenService refreshTokenService = new RefreshTokenService(
                 refreshTokenRepository,
                 mock(JwtTokenService.class),
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC), mock(UserRepository.class)
         );
 
         refreshTokenService.invalidate(null);

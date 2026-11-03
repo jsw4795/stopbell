@@ -71,9 +71,38 @@ class LoginServiceConcurrencyIntegrationTest {
     @Autowired private EntityManagerFactory entityManagerFactory;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbc;
+    @Autowired private com.stopbell.user.service.AccountDeletionService deletion;
     @MockitoSpyBean private RefreshTokenService tokenService;
     @MockitoSpyBean private UserRepository users;
     @MockitoBean private GoogleIdentityVerifier googleIdentityVerifier;
+
+    @Test
+    @DisplayName("기존 User 재로그인이 삭제를 기다리면 이전 User의 세션을 발급하지 않는다")
+    void login_waiting_for_deletion_does_not_restore_user() throws Exception {
+        var identity = new ExternalIdentity(AuthProvider.GOOGLE, "synthetic-deletion-race");
+        User original = users.saveAndFlush(new User(AuthProvider.GOOGLE, identity.providerUserId()));
+        var started = new CountDownLatch(1);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var future = new AtomicReference<java.util.concurrent.Future<TokenResponse>>();
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                users.findByIdForUpdate(original.getId()).orElseThrow();
+                future.set(executor.submit(() -> { started.countDown(); return loginService.login(identity); }));
+                try {
+                    assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+                    assertThatThrownBy(() -> future.get().get(300, TimeUnit.MILLISECONDS))
+                            .isInstanceOf(java.util.concurrent.TimeoutException.class);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+                assertThat(deletion.delete(original.getId())).isTrue();
+            });
+            assertThatThrownBy(() -> future.get().get(5, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(IllegalStateException.class);
+        }
+        assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class,
+                original.getId())).isZero();
+    }
 
     @Test
     @DisplayName("동일 신규 Identity의 실제 INSERT 경쟁을 rollback 뒤 새 Transaction에서 복구하고 두 Session을 저장한다")

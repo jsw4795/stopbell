@@ -403,7 +403,15 @@ TASK-709는 `DurableNotificationAttemptHandler`로 아래 계약을 구현했다
 
 개발 후보 설정·안전 상한은 [ADR-010 구현 설정](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-구현-설정과-검증-2026-10-13)을 따른다. Type별 TTL은 기존 `NotificationDecisionTtlPolicy`의 60초를 유지하며 Handler는 원래 expiresAt을 재계산/연장하지 않는다. 일반/ambiguous 최소 10초, quota 최소 60초와 normalized minimumRetryDelay를 존중하므로 기한 내 retry가 불가능하면 PENDING + nextAttemptAt=expiresAt으로 기다렸다 실제 만료 때 EXPIRED로 종료한다.
 
-Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Event write lock을 나중에 추가해 TASK-708의 Alarm → Event → Device와 반대 순서를 만들지 않는다. Event는 불변 owner/evidence source로 읽으며 TASK-707의 dispatch 종료/삭제는 Delivery lock과 조율하고 일관된 lock 순서를 검증해야 한다. 신규 fan-out의 아직 commit되지 않은 Delivery는 worker에 보이지 않는다. Device mutation은 Device lock만 사용한다. 삭제 transaction/FK는 위 TASK-707 계약을 따르며 범용 cancellation system은 추가하지 않는다.
+Worker transaction의 lock 순서는 Delivery → Device다. worker가 Alarm/Event write lock을 나중에 추가해 TASK-708의 Alarm → Event → Device와 반대 순서를 만들지 않는다. Event는 불변 owner/evidence source로 읽으며 TASK-707의 dispatch 종료/삭제는 Delivery lock과 조율하고 일관된 lock 순서를 검증해야 한다. 신규 fan-out의 아직 commit되지 않은 Delivery는 worker에 보이지 않는다. Device 등록·이전·disable은 인증 User를 먼저 잠그고 Device를 잠근다. 이 변경은 계정 삭제와 신규 소유권 부여를 직렬화한다.
+
+### 회원 데이터 삭제 내부 경계 (TASK-815-B 진행 중)
+
+공개 API 없이 내부 삭제 Service만 제공한다. 삭제는 READ COMMITTED transaction에서 User, 해당 Alarm·BoardingSession, 관련 Delivery, 현재 소유 Device 순서로 잠근다. Delivery를 전부 잠근 후 Device를 ID 순서로 잠가 Worker의 Delivery → Device 순서를 지킨다. 다른 User Event에 연결된 Delivery는 현재 Device 소유권을 재확인하고 V24 방식으로 PENDING 종료와 Device 참조 해제를 수행한다. Event의 원래 owner와 사용자별 삭제 범위는 유지한다. DB 오류·deadlock은 삭제 전체를 롤백하고 성공으로 처리하지 않는다. MySQL FK·인덱스 잠금과 기존 Alarm/Session 선행 Event 저장 경로에 의한 deadlock 가능성은 완전히 제거했다고 보장하지 않으며, 자동 재시도는 제공하지 않는다.
+
+Boarding Session lock을 얻으면 해당 revision의 process-local 전송 gate도 닫아 늦은 기존 검증 결과가 다시 열지 못하게 한다. DB rollback 시에도 gate는 보수적으로 닫힌 채 남을 수 있으며 이후 정상 진행 검증이 필요하다.
+
+JWT 서명·claim 검증 후 User 존재를 확인한다. DB 오류는 인증 실패로 변환하지 않는다. 로그인과 Refresh rotation은 User lock 아래에서 token을 발급하며 삭제된 User의 기존 토큰을 거부한다. Apple 계정과 Apple credential이 남은 계정은 철회 경로가 완성될 때까지 내부 삭제를 거부한다. 외부 Apple 호출은 DB transaction에 넣지 않는다. 철회와 DB commit 사이의 실패·재시도 및 최종 credential 제거 계약은 공개 탈퇴 API 전에 별도로 구현해야 한다. 이미 준비된 Notification의 외부 호출 시작·접수는 삭제로 취소할 수 없다.
 
 단일 worker는 진행 중 request와 별도 expiry sweep을 겹치게 하지 않는다. 후보 조회가 exclusion/lease는 아니므로 multiple worker 안전성을 보장하지 않는다. 전송 직전 검증 이후 registration 변경 경쟁, accepted 뒤 result commit 전 crash의 duplicate, 내부 retry의 wire count와 외부 접수 복원 한계는 [ADR crash/restart 계약](adr/ADR-010-notification-device-and-durable-delivery.md#crashrestart와-safety-경계)을 따른다. 다음 cycle/restart도 terminal을 PENDING으로 reset하거나 과거 recipient를 확장하지 않는다.
 

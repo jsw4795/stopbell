@@ -255,7 +255,7 @@ Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, 
 
 V3/V9의 구형 table과 미사용 NotificationHistory/NotificationStatus/Repository 코드는 Event/Delivery로 대체한다. V14 적용 시 table이 비어 있으면 DROP한다. row가 있으면 table과 모든 column/row를 보존하고 `fk_notification_history_alarm_id`만 제거하여 이후 Alarm hard delete가 legacy 기록을 cascade 삭제하거나 삭제를 차단하지 않게 한다. 원본 non-null alarm_id는 유지한다. 없는 generation/cycle/device를 생성하거나 자동 변환하지 않는다. 별도 compatibility layer와 보존기간 정책은 추가하지 않는다.
 
-회원 데이터 삭제 시 현재 소유 Alarm에 연결된 legacy 행은 삭제하고, 이미 삭제된 Alarm에 연결되어 소유자를 확인할 수 없는 행과 다른 사용자의 행은 보존하기로 결정했다. 회원 데이터 삭제 기능 자체는 아직 구현되지 않았다.
+내부 회원 데이터 삭제는 현재 소유 Alarm에 연결된 legacy 행만 삭제하고, 이미 삭제된 Alarm에 연결되어 소유자를 확인할 수 없는 행과 다른 사용자의 행은 보존한다. 테이블 자체가 없을 수 있으며 공개 회원 탈퇴 API는 아직 없다.
 
 Migration 전에 monitoring과 구형 History writer를 중단하고 FOLLOW_UP/History count를 확인한다. V14의 첫 temporary guard CHECK는 FOLLOW_UP row가 있으면 persistent DDL 전에 실패한다. 정상 완료/기존 timeout으로 FOLLOW_UP이 없어질 때까지 기다리고 다시 확인한다. MySQL DDL은 transactional rollback을 보장하지 않으므로 다른 DDL 실패의 운영 복구는 원인·실제 Schema 확인 후 수행하며 개발 DB reset이나 무조건 Flyway repair를 하지 않는다. V1~V13은 변경하지 않는다.
 
@@ -312,7 +312,7 @@ device_id BIGINT NULL
 CONSTRAINT uk_notification_deliveries_event_device UNIQUE (notification_event_id, device_id)
 ```
 
-Event 참조는 불변이다. V24는 향후 회원 삭제 시 다른 사용자의 Delivery를 보존할 수 있도록 Device 참조를 nullable로 변경한다. 생성 시 Device는 필수이며 참조가 해제된 Delivery는 수신자를 다시 선정하거나 전송하지 않는다. NULL에는 MySQL UNIQUE의 중복 제한이 적용되지 않는다. `fk_notification_deliveries_event_id`와 `fk_notification_deliveries_device_id`는 각각 Event/Device PK에 연결하며 cascade delete 없이 남아 있는 참조의 hard delete를 제한한다. 회원/Device hard delete 기능은 아직 추가하지 않았다. UNIQUE의 left prefix는 Event별 Delivery 조회와 Event FK index를 지원한다. `idx_notification_deliveries_device_id (device_id)`는 Device FK용으로 필요하며 별도 event_id index는 중복 생성하지 않는다. Worker index는 아래 TASK-709 계약을 따른다.
+Event 참조는 불변이다. V24는 회원 삭제 시 다른 사용자의 Delivery를 보존할 수 있도록 Device 참조를 nullable로 변경한다. 생성 시 Device는 필수이며 참조가 해제된 Delivery는 수신자를 다시 선정하거나 전송하지 않는다. NULL에는 MySQL UNIQUE의 중복 제한이 적용되지 않는다. `fk_notification_deliveries_event_id`와 `fk_notification_deliveries_device_id`는 각각 Event/Device PK에 연결하며 cascade delete 없이 남아 있는 참조의 hard delete를 제한한다. 내부 회원 삭제는 해당 참조를 먼저 정리하며 공개 API는 없다. UNIQUE의 left prefix는 Event별 Delivery 조회와 Event FK index를 지원한다. `idx_notification_deliveries_device_id (device_id)`는 Device FK용으로 필요하며 별도 event_id index는 중복 생성하지 않는다. Worker index는 아래 TASK-709 계약을 따른다.
 
 내부 참조 해제는 호출자의 transaction에서 Delivery → Device 순서로 잠그고 Device의 현재 owner가 요청된 owner와 일치할 때만 실행한다. PENDING은 같은 transaction에서 FAILED로 종료하고 Device를 NULL로 변경하며, 이미 종료된 상태와 결과는 보존한다. 늦은 Provider 결과는 종료된 Delivery에 적용되지 않는다. 이미 시작한 외부 전송의 취소는 보장하지 않는다. 이 내부 연산은 Device나 User를 삭제하지 않으며 회원 탈퇴 API가 아니다.
 
