@@ -9,7 +9,7 @@
 - `API_BASE_URL`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_SERVER_CLIENT_ID`는 빌드 시 `--dart-define`으로 주입한다. Release는 인증 복원 전에 설정을 검증하며 HTTPS가 아니면 시작을 중단한다. 값은 앱 바이너리에서 추출 가능하므로 secret을 넣지 않는다. 실제 운영 HTTPS 주소와 인증서, 외부 접근성은 별도 검증한다.
 - Google 로그인과 로그아웃·secure storage 기반 세션 복원, 설치본 정보 및 notification lifecycle이 구현되어 있다. 로그아웃은 계정 삭제가 아니다. 실제 앱 종료·재실행, 기존 설치본·Keychain, 기기 변경, Push 수신 및 tap은 출시 빌드에서 재검증해야 한다.
 - Apple 로그인 Backend API와 Flutter 연동은 기본 비활성화 상태로 구현했다. iOS에서 `--dart-define=APPLE_LOGIN_ENABLED=true`일 때 버튼이 보인다. 빌드 설정과 Backend의 `apple.authentication.enabled` 및 실제 설정을 일치시킨 뒤 활성화한다. 서버 nonce 저장 범위와 설정·키 교체, 운영 조건은 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다. 실제 Apple 인증과 실기기 검증, 회원 탈퇴와 Apple token revocation은 미수행이다.
-- TASK-815-A Flutter 연동은 `sign_in_with_apple` 8.2.0과 Mock 인증·공통 세션·Device/Boarding 집중 테스트, entitlement 정적 검사 및 서명 없는 iOS Release 빌드로 검증했다. 이는 실제 Apple Developer 설정이나 실기기 인증 검증을 대신하지 않는다.
+- TASK-815-A Flutter 연동은 `sign_in_with_apple` 8.2.0과 Mock 인증·공통 세션·Device/Boarding 집중 테스트, Flutter 전체 테스트 676개, entitlement 정적 검사 및 서명 없는 iOS Release 빌드로 검증했다. 이는 실제 Apple Developer 설정이나 실기기 인증 검증을 대신하지 않는다.
 - 개발용 Firebase smoke는 별도 entrypoint이고 Debug 보호가 있다. 일반 entrypoint의 push 진단 출력은 `kDebugMode`로 제한된다. Release 설정에 개발 API 주소를 넣지 않는다.
 
 ## 출시 차단 및 사용자 결정

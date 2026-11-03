@@ -27,8 +27,19 @@ class AuthSession extends ChangeNotifier {
 
   Future<T> _withStorage<T>(Future<T> Function() operation) {
     final queue = _storageQueues[_tokenStorage] ??= _StorageQueue();
-    final work = queue.tail.then((_) => operation());
-    queue.tail = work.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    final work = queue.busy
+        ? queue.tail.then((_) => operation())
+        : Future<T>.sync(operation);
+    final ticket = ++queue.ticket;
+    queue.busy = true;
+    void release() {
+      if (queue.ticket == ticket) queue.busy = false;
+    }
+
+    queue.tail = work.then<void>(
+      (_) => release(),
+      onError: (Object _, StackTrace _) => release(),
+    );
     return work;
   }
 
@@ -306,6 +317,8 @@ class AuthSession extends ChangeNotifier {
 
 class _StorageQueue {
   Future<void> tail = Future<void>.value();
+  bool busy = false;
+  int ticket = 0;
 }
 
 class UnauthenticatedSessionException implements Exception {
