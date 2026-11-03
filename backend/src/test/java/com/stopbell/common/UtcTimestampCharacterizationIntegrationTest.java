@@ -34,6 +34,7 @@ import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.RefreshToken;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.RefreshTokenRepository;
+import com.stopbell.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import org.hibernate.Session;
 import org.junit.jupiter.api.DisplayName;
@@ -73,6 +74,7 @@ class UtcTimestampCharacterizationIntegrationTest {
 
     @Autowired private EntityManager em;
     @Autowired private RefreshTokenRepository tokens;
+    @Autowired private UserRepository users;
     @Autowired private BusAlarmEvaluator evaluator;
 
     @Test
@@ -373,7 +375,7 @@ class UtcTimestampCharacterizationIntegrationTest {
 
     private RefreshTokenService refreshService(Instant instant) {
         return new RefreshTokenService(tokens, mock(JwtTokenService.class), Clock.fixed(instant, ZoneId.systemDefault()),
-                mock(com.stopbell.user.repository.UserRepository.class));
+                users);
     }
 
     private void atFixedTime(Instant instant, Runnable work) {
