@@ -16,6 +16,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
+import com.stopbell.support.PilotMySqlExtension;
 import com.stopbell.alarm.entity.AdjacentStopSnapshot;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.BusAlarmTarget;
@@ -42,16 +43,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
-import org.testcontainers.mysql.MySQLContainer;
 
 /**
  * TASK-814 UTC regression contract, replacing the AUD-12 host-local characterization expectations.
@@ -59,6 +59,7 @@ import org.testcontainers.mysql.MySQLContainer;
  * Never changes TimeZone.setDefault(). Only the callback thread's Clock factories are fixed;
  * LocalDateTime.now(), JPA callbacks, Hibernate, Connector/J and MySQL remain real.
  */
+@ExtendWith(PilotMySqlExtension.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = "spring.jpa.hibernate.ddl-auto=validate")
 @ActiveProfiles("test")
@@ -69,13 +70,9 @@ class UtcTimestampCharacterizationIntegrationTest {
     private static final Instant NOW = Instant.parse("2026-10-30T00:00:00Z");
     private static final LocalDateTime UTC = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        PilotMySqlExtension.database(registry, "utc_time_test");
     }
 
     @Autowired private EntityManager em;

@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 
+import com.stopbell.support.PilotMySqlExtension;
 import com.stopbell.user.auth.exception.InvalidRefreshTokenException;
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.identity.GoogleIdentityVerifier;
@@ -15,29 +16,25 @@ import com.stopbell.user.repository.UserRepository;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.testcontainers.mysql.MySQLContainer;
 
+@ExtendWith(PilotMySqlExtension.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class LoginMigrationIntegrationTest {
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        PilotMySqlExtension.database(registry, "login_migration");
     }
 
     @Autowired private LoginService loginService;

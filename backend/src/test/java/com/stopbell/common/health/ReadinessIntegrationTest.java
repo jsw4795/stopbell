@@ -5,33 +5,30 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.Instant;
 
+import com.stopbell.support.PilotMySqlExtension;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusMetadataSyncState;
 import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.mysql.MySQLContainer;
 
+@ExtendWith(PilotMySqlExtension.class)
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class ReadinessIntegrationTest {
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        PilotMySqlExtension.database(registry, "readiness");
     }
     @Autowired MockMvc mvc;
     @Autowired BusMetadataSyncStateRepository metadata;

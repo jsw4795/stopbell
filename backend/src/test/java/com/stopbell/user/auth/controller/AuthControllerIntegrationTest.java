@@ -30,6 +30,7 @@ import java.util.HexFormat;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.stopbell.support.PilotMySqlExtension;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.RefreshToken;
 import com.stopbell.user.entity.User;
@@ -43,10 +44,10 @@ import com.stopbell.user.repository.RefreshTokenRepository;
 import com.stopbell.user.repository.UserRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -54,30 +55,27 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.security.core.Authentication;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.testcontainers.mysql.MySQLContainer;
 
+@ExtendWith(PilotMySqlExtension.class)
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Import({
-        AuthControllerIntegrationTest.ContainerConfiguration.class,
         AuthControllerIntegrationTest.TestGoogleIdentityVerifierConfiguration.class,
         AuthControllerIntegrationTest.TestProtectedEndpointConfiguration.class
 })
 class AuthControllerIntegrationTest {
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        PilotMySqlExtension.database(registry, "auth_controller");
     }
 
     @Autowired

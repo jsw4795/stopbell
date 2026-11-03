@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.stopbell.support.PilotMySqlExtension;
 import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.client.SeoulBusVehicleDetailClient;
 import com.stopbell.transit.client.SeoulBusVehicleLocationClient;
@@ -26,23 +27,22 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.context.annotation.Bean;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultMatcher;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
-import org.testcontainers.mysql.MySQLContainer;
 import tools.jackson.databind.json.JsonMapper;
 
+@ExtendWith(PilotMySqlExtension.class)
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -50,13 +50,9 @@ import tools.jackson.databind.json.JsonMapper;
 class BoardingCandidateApiIntegrationTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
-    @TestConfiguration(proxyBeanMethods = false)
-    static class ContainerConfiguration {
-        @Bean
-        @ServiceConnection
-        MySQLContainer mysql() {
-            return new MySQLContainer("mysql:8.4.11");
-        }
+    @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) {
+        PilotMySqlExtension.database(registry, "boarding_candidate");
     }
 
     @Autowired private MockMvc mvc;

@@ -34,7 +34,9 @@ public class PilotMySqlExtension implements BeforeAllCallback {
                 try (var connection = DriverManager.getConnection(mysql.getJdbcUrl() + "?allowPublicKeyRetrieval=true&useSSL=false", "root", mysql.getPassword());
                         var statement = connection.createStatement()) {
                     for (String database : new String[] {"boarding_pilot", "device_pilot", "notification_pilot",
-                            "transit_metadata_pilot", "route_search_pilot", "route_stop_pilot"}) {
+                            "transit_metadata_pilot", "route_search_pilot", "route_stop_pilot",
+                            "alarm_service", "transit_monitoring", "utc_time_test", "readiness", "metadata_sync",
+                            "boarding_candidate", "login_migration", "auth_controller"}) {
                         statement.execute("CREATE DATABASE " + database);
                         statement.execute("GRANT ALL ON " + database + ".* TO '" + mysql.getUsername() + "'@'%'");
                     }
