@@ -89,7 +89,9 @@ void main() {
         client: AccountDeletionClient(
           apiBaseUrl: Uri.tryParse(config.apiBaseUrl) ?? Uri(),
         ),
-        storage: const SecureDeletionStorage(),
+        storage: SecureDeletionStorage(
+          origin: Uri.parse(config.apiBaseUrl).origin,
+        ),
         alarms: const SecureAlarmIntentStorage(),
         boarding: const SecureBoardingIntentStorage(),
       ),
@@ -207,7 +209,8 @@ class _StopBellApplicationState extends State<StopBellApplication>
   void _synchronize() {
     if (_initialized &&
         !widget.authSession.isLoggingOut &&
-        !widget.authSession.isDeletingAccount) {
+        !widget.authSession.isDeletingAccount &&
+        !(widget.deletion?.loading ?? false)) {
       _prepareFirebase()
           .then((_) {
             if (mounted) widget.push?.synchronize();
@@ -237,6 +240,7 @@ class _StopBellApplicationState extends State<StopBellApplication>
         auth.state == AuthState.authenticated &&
         !auth.isLoggingOut &&
         !auth.isDeletingAccount &&
+        !(widget.deletion?.loading ?? false) &&
         _syncedGeneration != auth.generation) {
       _syncedGeneration = auth.generation;
       _synchronize();
@@ -256,6 +260,7 @@ class _StopBellApplicationState extends State<StopBellApplication>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.authSession.addListener(_authChanged);
+    widget.deletion?.addListener(_authChanged);
     _initialize();
   }
 
@@ -263,6 +268,7 @@ class _StopBellApplicationState extends State<StopBellApplication>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.authSession.removeListener(_authChanged);
+    widget.deletion?.removeListener(_authChanged);
     _idChanges?.cancel();
     widget.notifications?.dispose();
     widget.deletion?.dispose();
@@ -424,6 +430,13 @@ class _LoginScreenState extends State<LoginScreen> {
       ]),
       builder: (context, _) {
         final deletion = widget.deletion;
+        if (deletion != null &&
+            deletion.loading &&
+            widget.authSession.state == AuthState.authenticated) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
         if (widget.authSession.isDeletingAccount &&
             (deletion == null || !deletion.active)) {
           return const Scaffold(body: Center(child: Text('회원 탈퇴를 준비하고 있습니다.')));
