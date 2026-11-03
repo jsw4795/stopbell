@@ -28,7 +28,7 @@ public class NotificationDelivery {
     private NotificationEvent notificationEvent;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "device_id", nullable = false, updatable = false)
+    @JoinColumn(name = "device_id")
     private Device device;
 
     @Column(name = "recipient_ownership_generation", nullable = false, updatable = false)
@@ -114,6 +114,15 @@ public class NotificationDelivery {
         nextAttemptAt = null;
         lastFailureCode = "DISPATCH_NOT_ALLOWED";
         updatedAt = terminatedAt.truncatedTo(ChronoUnit.MICROS);
+    }
+
+    /** Caller holds Delivery then Device locks and has checked the Device's current owner. */
+    public void detachDevice(LocalDateTime detachedAt) {
+        if (device == null) {
+            return;
+        }
+        terminateDispatch(detachedAt);
+        device = null;
     }
 
     public void beginAttempt(long revision, LocalDateTime startedAt, LocalDateTime recoveryAt) {

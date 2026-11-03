@@ -255,6 +255,8 @@ Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, 
 
 V3/V9의 구형 table과 미사용 NotificationHistory/NotificationStatus/Repository 코드는 Event/Delivery로 대체한다. V14 적용 시 table이 비어 있으면 DROP한다. row가 있으면 table과 모든 column/row를 보존하고 `fk_notification_history_alarm_id`만 제거하여 이후 Alarm hard delete가 legacy 기록을 cascade 삭제하거나 삭제를 차단하지 않게 한다. 원본 non-null alarm_id는 유지한다. 없는 generation/cycle/device를 생성하거나 자동 변환하지 않는다. 별도 compatibility layer와 보존기간 정책은 추가하지 않는다.
 
+회원 데이터 삭제 시 현재 소유 Alarm에 연결된 legacy 행은 삭제하고, 이미 삭제된 Alarm에 연결되어 소유자를 확인할 수 없는 행과 다른 사용자의 행은 보존하기로 결정했다. 회원 데이터 삭제 기능 자체는 아직 구현되지 않았다.
+
 Migration 전에 monitoring과 구형 History writer를 중단하고 FOLLOW_UP/History count를 확인한다. V14의 첫 temporary guard CHECK는 FOLLOW_UP row가 있으면 persistent DDL 전에 실패한다. 정상 완료/기존 timeout으로 FOLLOW_UP이 없어질 때까지 기다리고 다시 확인한다. MySQL DDL은 transactional rollback을 보장하지 않으므로 다른 DDL 실패의 운영 복구는 원인·실제 Schema 확인 후 수행하며 개발 DB reset이나 무조건 Flyway repair를 하지 않는다. V1~V13은 변경하지 않는다.
 
 ### Phase 7 Notification persistence contract
@@ -306,13 +308,15 @@ V14는 PASSED의 최신 위치 안내에 필요한 TransitEvent의 실제 option
 ```text
 id BIGINT AUTO_INCREMENT PRIMARY KEY
 notification_event_id BIGINT NOT NULL
-device_id BIGINT NOT NULL
+device_id BIGINT NULL
 CONSTRAINT uk_notification_deliveries_event_device UNIQUE (notification_event_id, device_id)
 ```
 
-두 참조는 생성 후 불변이며 JPA는 non-null/updatable=false 관계로 매핑한다. `fk_notification_deliveries_event_id`와 `fk_notification_deliveries_device_id`는 각각 Event/Device PK에 연결하며 cascade delete 없이 참조 중 Event/Device hard delete를 제한한다. 계정/Device hard delete 기능은 이번에 추가하지 않는다. UNIQUE의 left prefix는 Event별 Delivery 조회와 Event FK index를 지원한다. `idx_notification_deliveries_device_id (device_id)`는 Device FK용으로 필요하며 별도 event_id index는 중복 생성하지 않는다. Worker index는 아래 TASK-709 계약을 따른다.
+Event 참조는 불변이다. V24는 향후 회원 삭제 시 다른 사용자의 Delivery를 보존할 수 있도록 Device 참조를 nullable로 변경한다. 생성 시 Device는 필수이며 참조가 해제된 Delivery는 수신자를 다시 선정하거나 전송하지 않는다. NULL에는 MySQL UNIQUE의 중복 제한이 적용되지 않는다. `fk_notification_deliveries_event_id`와 `fk_notification_deliveries_device_id`는 각각 Event/Device PK에 연결하며 cascade delete 없이 남아 있는 참조의 hard delete를 제한한다. 회원/Device hard delete 기능은 아직 추가하지 않았다. UNIQUE의 left prefix는 Event별 Delivery 조회와 Event FK index를 지원한다. `idx_notification_deliveries_device_id (device_id)`는 Device FK용으로 필요하며 별도 event_id index는 중복 생성하지 않는다. Worker index는 아래 TASK-709 계약을 따른다.
 
-한 Event에는 0..N Device별 Delivery가 있을 수 있으며 Delivery retry는 같은 row의 operational state를 갱신한다. 중복 Event 재제출은 Delivery를 추가하거나 갱신하지 않는다. MySQL UNIQUE는 nullable column의 여러 NULL을 허용하므로 두 UNIQUE의 핵심 column은 모두 NOT NULL이다. [MySQL 8.4 UNIQUE 계약](https://dev.mysql.com/doc/refman/8.4/en/create-index.html)을 따른다.
+내부 참조 해제는 호출자의 transaction에서 Delivery → Device 순서로 잠그고 Device의 현재 owner가 요청된 owner와 일치할 때만 실행한다. PENDING은 같은 transaction에서 FAILED로 종료하고 Device를 NULL로 변경하며, 이미 종료된 상태와 결과는 보존한다. 늦은 Provider 결과는 종료된 Delivery에 적용되지 않는다. 이미 시작한 외부 전송의 취소는 보장하지 않는다. 이 내부 연산은 Device나 User를 삭제하지 않으며 회원 탈퇴 API가 아니다.
+
+한 Event에는 0..N Device별 Delivery가 있을 수 있으며 Delivery retry는 같은 row의 operational state를 갱신한다. 중복 Event 재제출은 Delivery를 추가하거나 갱신하지 않는다. Device가 있는 조합은 UNIQUE로 보호되지만 MySQL은 같은 Event에 Device가 NULL인 행 여러 개를 허용한다. [MySQL 8.4 UNIQUE 계약](https://dev.mysql.com/doc/refman/8.4/en/create-index.html)을 따른다.
 
 TASK-707에서 초기 NotificationHistory를 전환할 때 없는 generation/cycle/device를 만들어 legacy row를 새 logical Event로 승격하지 않는다. V14의 조건부 legacy 보존 정책을 따르며 V3/V9 파일은 수정하지 않았다.
 

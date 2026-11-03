@@ -38,7 +38,8 @@ public class NotificationRecipientPreflight {
                 && (validatedSession == null || !event.getBoardingSessionId().equals(validatedSession.id()))) {
             throw new IllegalStateException("Session preflight requires validated Session-first locks");
         }
-        Device device = devices.findByIdForUpdate(delivery.getDevice().getId()).orElse(null);
+        Device device = delivery.getDevice() == null ? null
+                : devices.findByIdForUpdate(delivery.getDevice().getId()).orElse(null);
         if (device == null) {
             return rejected(Rejection.DEVICE_MISSING);
         }

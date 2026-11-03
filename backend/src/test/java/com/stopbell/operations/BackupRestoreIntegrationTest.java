@@ -43,7 +43,7 @@ class BackupRestoreIntegrationTest {
         Flyway restoredFlyway = flyway(destination);
         restoredFlyway.validate();
         assertThat(restoredFlyway.info().pending()).isEmpty();
-        assertThat(restoredFlyway.info().current().getVersion().getVersion()).isEqualTo("23");
+        assertThat(restoredFlyway.info().current().getVersion().getVersion()).isEqualTo("24");
         JdbcTemplate restored = jdbc(destination);
         for (String table : List.of("users", "apple_credentials", "alarms", "devices", "notification_events", "notification_deliveries", "flyway_schema_history")) {
             List<Map<String, Object>> expected = original.queryForList("select * from " + table + " order by 1");

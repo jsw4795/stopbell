@@ -67,6 +67,7 @@ class NotificationAttemptIntegrationTest {
     @Autowired private DeviceRepository devices;
     @Autowired private PlatformTransactionManager manager;
     @Autowired private AlarmService alarms;
+    @Autowired private NotificationRecipientDetachmentService detachment;
 
     private final Clock clock = mock(Clock.class);
     private AtomicReference<Instant> time;
@@ -90,6 +91,101 @@ class NotificationAttemptIntegrationTest {
         provider = mock(FcmProviderClient.class);
         when(provider.send(any())).thenAnswer(call -> result(NotificationProviderResult.ACCEPTED));
         worker = worker(attempts);
+    }
+
+    @Test
+    @DisplayName("신규 Delivery는 Device가 필수이고 DB는 유효하지 않은 Device 참조를 거부하며 NULL 중복은 허용한다")
+    void device_constraint_and_null_uniqueness() {
+        Fixture fixture = fixture();
+        tx().executeWithoutResult(status -> {
+            var event = entityManager.find(NotificationEvent.class, fixture.eventId());
+            assertThatThrownBy(() -> new NotificationDelivery(event, null, 0, NOW.plusSeconds(60), NOW))
+                    .isInstanceOf(IllegalArgumentException.class);
+        });
+        assertThatThrownBy(() -> jdbc.update("update notification_deliveries set device_id=? where id=?",
+                Long.MAX_VALUE, fixture.deliveryId())).isInstanceOf(DataAccessException.class);
+        jdbc.update("update notification_deliveries set device_id=null where id=?", fixture.deliveryId());
+        jdbc.update("""
+                insert into notification_deliveries (notification_event_id, device_id, recipient_ownership_generation,
+                    status, attempt_count, next_attempt_at, expires_at, created_at, updated_at)
+                select notification_event_id, null, recipient_ownership_generation, status, attempt_count,
+                    next_attempt_at, expires_at, created_at, updated_at from notification_deliveries where id=?
+                """, fixture.deliveryId());
+        assertThat(jdbc.queryForObject("select count(*) from notification_deliveries where notification_event_id=? and device_id is null",
+                Integer.class, fixture.eventId())).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("현재 Device 소유자만 Delivery를 해제하며 늦은 Provider 결과는 종료 상태를 되살리지 못한다")
+    void detach_stops_pending_and_ignores_late_result() {
+        Fixture fixture = fixture();
+        NotificationAttemptSnapshot started = attempts.beginAttempt(fixture.deliveryId()).orElseThrow();
+        changeRegistration(fixture, RegistrationChange.OWNER);
+        Long owner = jdbc.queryForObject("select user_id from devices where id=?", Long.class, fixture.deviceId());
+        var eventBefore = jdbc.queryForMap("select * from notification_events where id=?", fixture.eventId());
+        var alarmBefore = jdbc.queryForMap("select * from alarms where id=?", fixture.alarmId());
+
+        assertThat(Boolean.TRUE.equals(tx().execute(status -> detachment.detach(fixture.deliveryId(), fixture.userId())))).isFalse();
+        assertThat(Boolean.TRUE.equals(tx().execute(status -> detachment.detach(fixture.deliveryId(), owner)))).isTrue();
+        attempts.completeAttempt(started, result(NotificationProviderResult.ACCEPTED));
+        assertThat(attempts.beginAttempt(fixture.deliveryId())).isEmpty();
+        assertThat(row(fixture.deliveryId()).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+        assertThat(row(fixture.deliveryId()).getDevice()).isNull();
+        assertThat(row(fixture.deliveryId()).getLastProviderResult()).isNull();
+        assertThat(jdbc.queryForMap("select * from notification_events where id=?", fixture.eventId())).isEqualTo(eventBefore);
+        assertThat(jdbc.queryForMap("select * from alarms where id=?", fixture.alarmId())).isEqualTo(alarmBefore);
+        assertThat(jdbc.update("delete from devices where id=?", fixture.deviceId())).isOne();
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = NotificationDeliveryStatus.class, names = {"ACCEPTED", "FAILED", "EXPIRED"})
+    @DisplayName("참조 해제는 이미 종료된 Delivery의 상태와 전송 결과를 보존한다")
+    void detach_preserves_terminal_delivery(NotificationDeliveryStatus terminal) {
+        Fixture fixture = fixture();
+        NotificationAttemptSnapshot started = attempts.beginAttempt(fixture.deliveryId()).orElseThrow();
+        if (terminal == NotificationDeliveryStatus.EXPIRED) {
+            advance(60);
+            attempts.expireDuePending(fixture.deliveryId());
+        } else {
+            attempts.completeAttempt(started, result(terminal == NotificationDeliveryStatus.ACCEPTED
+                    ? NotificationProviderResult.ACCEPTED : NotificationProviderResult.PERMANENT_REQUEST));
+        }
+        var before = jdbc.queryForMap("select * from notification_deliveries where id=?", fixture.deliveryId());
+        assertThat(Boolean.TRUE.equals(tx().execute(status -> detachment.detach(fixture.deliveryId(), fixture.userId())))).isTrue();
+        var after = jdbc.queryForMap("select * from notification_deliveries where id=?", fixture.deliveryId());
+        assertThat(after.remove("device_id")).isNull();
+        before.remove("device_id");
+        assertThat(after).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("참조 해제 트랜잭션이 롤백되면 PENDING 상태와 Device 참조가 모두 복원된다")
+    void detach_rolls_back_atomically() {
+        Fixture fixture = fixture();
+        tx().executeWithoutResult(status -> {
+            assertThat(detachment.detach(fixture.deliveryId(), fixture.userId())).isTrue();
+            deliveries.flush();
+            status.setRollbackOnly();
+        });
+        assertThat(row(fixture.deliveryId()).getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING);
+        assertThat(jdbc.queryForObject("select device_id from notification_deliveries where id=?", Long.class,
+                fixture.deliveryId())).isEqualTo(fixture.deviceId());
+    }
+
+    @Test
+    @DisplayName("Device 참조가 해제된 Delivery는 재전송하지 않고 종료한다")
+    void detached_recipient_is_not_dispatched() {
+        Fixture fixture = fixture();
+        jdbc.update("update notification_deliveries set device_id=null where id=?", fixture.deliveryId());
+        jdbc.update("delete from devices where id=?", fixture.deviceId());
+
+        worker.dispatchPending();
+
+        verifyNoInteractions(provider);
+        assertThat(row(fixture.deliveryId()).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+        assertThat(row(fixture.deliveryId()).getLastFailureCode()).isEqualTo("DISPATCH_NOT_ALLOWED");
+        assertThat(jdbc.queryForObject("select count(*) from notification_events where id=?", Integer.class,
+                fixture.eventId())).isOne();
     }
 
     @Test

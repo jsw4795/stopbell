@@ -76,7 +76,7 @@ public class DurableNotificationAttemptHandler implements NotificationAttemptHan
             delivery.expire(now);
             recordAfterCommit(OperationalMetrics.DeliveryTransition.EXPIRED);
         } else {
-            // DEVICE_MISSING is impossible under the FK; use the existing dispatch local allowlist.
+            // A deleted recipient can leave a retained Delivery without its Device.
             String code = reason == NotificationRecipientPreflight.Rejection.DEVICE_MISSING
                     ? "DISPATCH_NOT_ALLOWED" : "RECIPIENT_" + reason.name();
             delivery.markFailed(code, now);
