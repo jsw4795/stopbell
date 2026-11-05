@@ -1000,3 +1000,38 @@ Flutter: [boarding_confirmation_view.dart](../../app/lib/features/boarding/board
 ### 잔여 실측
 
 N51 및 다른 노선의 실제 무정차 stOrd 갱신, 조회 사이 1개 이상 통과·회차/반복 occurrence의 운행 문맥, API 지연에 따른 목적지 이전 판단·알림 지연, 실제 iPhone background/terminated 수신·tap·기기 표시·목적지 별도 Push 없음은 후속 승인된 Provider 실측과 iPhone E2E로 확인해야 한다. 현재는 이를 검증 완료로 주장하지 않는다. 기존 개발 DB 적용·실제 Provider/FCM·Backend/터널 상시 실행·Git add/commit/push/브랜치 변경은 수행하지 않는다. TASK-908은 실제 iPhone E2E 성공 전까지 `[ ]`를 유지한다.
+
+
+## 29. 실제 iPhone 서울 143번 알림 검증 (2026-11-05)
+
+사용자가 실제 Transit Provider 데이터와 실제 iPhone Push를 다음 환경에서 확인했다. Flutter Profile 모드, 실제 iPhone, Google 로그인, Spring Boot Local Backend, Docker MySQL, Cloudflare Quick Tunnel을 사용했고 Transit Monitoring·Notification Dispatch·Firebase FCM을 활성화했다. Cloudflare 연결은 HTTP/2를 강제했다. 실제 터널 URL, 인증 토큰, FCM 식별자와 개인정보는 기록하지 않는다.
+
+```sh
+cloudflared tunnel --protocol http2 --url http://127.0.0.1:8080
+```
+
+### 첫 번째 테스트: 목적지 2정거장 전
+
+`SEOUL_BUS` 서울 143번, 선택 차량 서울74사3099, 목적지 정릉우체국앞, 2정거장 전 알림으로 테스트했다. 사용자는 노선 검색, 실시간 차량 후보 조회와 선택, 탑승 세션 생성, `TRACKING` 진입과 `READY` 상태를 확인했다. 목적지 2정거장 전 실제 iPhone Push를 수신했고 준비 알림 이후에도 `TRACKING`이 유지되었으며 목적지 도달 후 세션이 종료된 것을 확인했다.
+
+2정거장 전 준비 알림 발송은 세션 종료 조건이 아니다. 세션은 목적지 도달 또는 통과가 검증되면 종료된다. 이 테스트에서는 목적지 도달 후 종료를 확인했으며 정확한 최종 응답 상태를 별도로 확인했다고 주장하지 않는다.
+
+### 두 번째 테스트: 목적지 1정거장 전과 앱 강제 종료
+
+`SEOUL_BUS` 서울 143번에서 새 세션을 생성하고 1정거장 전 알림을 설정했다. 사용자가 iPhone 앱 전환 화면에서 StopBell을 강제 종료한 뒤 앱이 종료된 상태에서 목적지 1정거장 전 Push를 수신했다. 알림을 터치하자 StopBell이 실행되어 해당 세션 상세로 이동했고 상세에서 상태를 새로고침할 수 있었다.
+
+알림으로 진입한 상세에는 새로고침 후에도 '추적 취소' 버튼이 표시되지 않았다. 화면을 나간 후 '하차 알림 · 차량 후보 찾기' 메뉴로 진입하면 기존 세션의 '추적 취소' 버튼이 표시됐다. 알림 진입은 기존 설계의 읽기 전용 `BoardingNotificationScreen`이다([Architecture](../architecture.md#flutter-세션-알림-수신과-상세-이동-task-907-3단계)). 출시 전 UX 개선 후보로 상세에 '추적 관리하기' 버튼을 제공하고 현재 인증 계정과 정확한 세션 ID를 재검증한 뒤 기존 관리 화면으로 연결하는 방안을 기록한다. 이번 작업에서는 구현하거나 설계를 확정하지 않는다.
+
+목적지 도달 직후 사용자가 '하차 알림 · 차량 후보 찾기' 메뉴에 다시 진입했을 때 차량 검색 화면이 표시되어 활성 세션이 더 이상 조회되지 않음을 확인했다. 이는 **활성 세션 종료의 간접 확인**이다. 종료 원인과 정확한 최종 상태는 확인하지 않았으며 `COMPLETED`로 확정하지 않는다. 첫 번째 테스트의 목적지 도달 후 종료 확인과 구분한다.
+
+### 검증 범위와 잔여 항목
+
+이번 결과는 실제 Provider 데이터와 실제 iPhone Push 수신, 두 번째 테스트의 강제 종료 상태 수신 및 알림 tap 이동에 대한 사용자 확인이다. 사용자가 해당 차량에 직접 탑승해 하차하는 전체 과정은 검증하지 않았다. 다음은 미검증으로 남는다.
+
+- 실제 승객 탑승부터 하차까지의 전체 E2E
+- 여러 노선 및 복잡한 회차 구간
+- Provider 데이터 지연·누락 상황과 실제 기기에서 반복적인 장기 안정성
+- 두 번째 세션의 종료 원인과 정확한 최종 `COMPLETED` 상태
+- 경기버스(TAGO) 하차 알림 지원 및 실기기 검증
+
+남은 검증을 위해 TASK-908과 TASK-710은 `[ ]`를 유지한다.
