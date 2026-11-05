@@ -105,6 +105,12 @@ public class BoardingProgressEvaluator {
                 || (providerTime == null && index == previous.getIndex());
         int gap = traversal.targetIndex() - index;
         if (repeated) {
+            if (session.provider() == TransitProvider.TAGO && observedAt.isAfter(previous.getObservedAt())) {
+                // Receipt confirms continued roster presence, not a new arrival or decision.
+                var receipt = new BoardingCheckpoint(previous.getStopExternalId(), previous.getStopOrder(), previous.getIndex(),
+                        previous.getEvidence(), previous.getDirectionContext(), observedAt, null);
+                return new BoardingTrackingDecision(Outcome.NO_CANDIDATE, receipt, null, gap, observedAt, null, now);
+            }
             if (session.status() == BoardingSessionStatus.SUSPENDED) {
                 return BoardingTrackingDecision.held(session.reason());
             }

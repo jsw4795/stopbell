@@ -34,6 +34,7 @@ import com.stopbell.transit.service.BoardingCandidateReferenceStore.Context;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /** Read-only orchestration. Provider I/O is outside the metadata transaction. */
@@ -47,6 +48,8 @@ public class BoardingCandidateService {
     private final BoardingCandidateReferenceStore references;
     private final Clock clock;
     private final BoardingCandidateDetailExecutor detailExecutor;
+    @Value("${transit.boarding.tago-experiment-enabled:false}")
+    private boolean tagoExperimentEnabled;
 
     public BoardingCandidateService(
             BoardingCandidateMetadataService metadataService, TagoVehicleLocationClient tagoClient,
@@ -77,7 +80,8 @@ public class BoardingCandidateService {
                     route.provider(), exception.operation(), exception.failureKind(), exception.httpStatus());
             throw new ApiException(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE);
         }
-        List<Vehicle> vehicles = roster.vehicles().stream().distinct()
+        List<Vehicle> vehicles = (route.provider() == TransitProvider.TAGO && tagoExperimentEnabled ? roster.vehicles().stream()
+                : roster.vehicles().stream().distinct())
                 .sorted(Comparator.comparing(Vehicle::number, Comparator.nullsLast(Comparator.naturalOrder()))
                         .thenComparing(Vehicle::id, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
@@ -140,7 +144,7 @@ public class BoardingCandidateService {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         if (route.provider() == TransitProvider.TAGO) {
-            throw unsupported(route, "PROVIDER_UNVERIFIED");
+            return revalidateTago(original, route, expectedVehicleNumber);
         }
         Instant validationTime = clock.instant();
         Vehicle originalRoster = original.rosterVehicle();
@@ -231,6 +235,38 @@ public class BoardingCandidateService {
         Vehicle baseline = sameReachedSource ? previous : detail;
         return new VerifiedCandidate(route, baseline, current,
                 reached && current < route.indexOf(route.targetOccurrenceId()));
+    }
+
+    private VerifiedCandidate revalidateTago(BoardingCandidateReferenceStore.Snapshot original,
+            BoardingRouteSnapshot route, String expectedNumber) {
+        if (!tagoExperimentEnabled) {
+            throw unsupported(route, "PROVIDER_UNVERIFIED");
+        }
+        var previous = original.rosterVehicle();
+        Instant now = clock.instant();
+        int previousIndex = progressIndex(route, previous);
+        if (previous.id() == null || !expectedNumber.equals(previous.number()) || previousIndex < 0
+                || timeIssue(previous, now) != null || now.isAfter(original.expiresAt())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        Roster roster;
+        try {
+            roster = fetchRoster(route);
+        } catch (TransitProviderClientException exception) {
+            throw new ApiException(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE);
+        }
+        var matches = roster.vehicles().stream().filter(vehicle -> previous.id().equals(vehicle.id())).toList();
+        if (matches.size() != 1 || identityIssue(matches.getFirst(), conflictingIds(roster.vehicles())) != null) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        var selected = matches.getFirst();
+        int index = progressIndex(route, selected);
+        if (!expectedNumber.equals(selected.number()) || timeIssue(selected, clock.instant()) != null
+                || selected.observedAt().isBefore(previous.observedAt()) || index < previousIndex
+                || index >= route.indexOf(route.targetOccurrenceId())) {
+            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        }
+        return new VerifiedCandidate(route, selected, index, false);
     }
 
     private static ApiException unsupported(BoardingRouteSnapshot route, String reason) {
@@ -331,7 +367,11 @@ public class BoardingCandidateService {
                 gap = route.indexOf(route.boardingOccurrenceId()) - progressIndex;
             }
         }
-        ReasonCode trackingReason = route.provider() == TransitProvider.TAGO ? ReasonCode.TAGO_ALIGHT_UNVERIFIED
+        if (route.provider() == TransitProvider.TAGO && tagoExperimentEnabled && held == null
+                && (progressIndex < 0 || progressIndex >= route.indexOf(route.targetOccurrenceId()))) {
+            held = progressIndex < 0 ? ReasonCode.POSITION_UNAVAILABLE : ReasonCode.TARGET_NOT_AHEAD;
+        }
+        ReasonCode trackingReason = route.provider() == TransitProvider.TAGO && !tagoExperimentEnabled ? ReasonCode.TAGO_ALIGHT_UNVERIFIED
                 : held != null ? held : progress == null ? positionIssue
                 : ReasonCode.REVALIDATION_REQUIRED;
         TrackingSupport support = trackingReason == ReasonCode.REVALIDATION_REQUIRED

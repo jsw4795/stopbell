@@ -265,8 +265,8 @@ class BoardingVehicleTrackerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {false, true})
-    @DisplayName("TAGO nodeid 누락은 정차 위치를 합성하지 않으며 실제 하차 지원은 계속 보류한다")
-    void tago_support_remains_unverified(boolean hasNodeId) {
+    @DisplayName("TAGO는 exact 위치만 진행 입력으로 전달하고 누락된 위치는 보류한다")
+    void tago_requires_exact_position(boolean hasNodeId) {
         var traversal = new BoardingTraversalSnapshot(1, TransitProvider.TAGO, "route-id", "31010", session.traversal().occurrences(),
                 3, BoardingTraversalSnapshot.AlightAvailability.ALLOWED, "controlled-test-evidence");
         var checkpoint = new BoardingCheckpoint("s0", 10, 0, BoardingCheckpoint.Evidence.ID_ORDER, null, UTC_NOW, null);
@@ -274,10 +274,14 @@ class BoardingVehicleTrackerTest {
                 "route-id", "31010", NUMBER, NUMBER, traversal, checkpoint, UTC_NOW.plusHours(4));
         when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(hasNodeId ? "s1" : null));
         var input = tracker.observe(tagoSession, cycle());
-        assertThat(input.observation().meaning()).isEqualTo(Meaning.UNVERIFIED);
-        assertThat(input.observation().orderOnlyVerified()).isFalse();
-        assertThat(input.observation().vehicle().stopId()).isEqualTo(hasNodeId ? "s1" : null);
-        assertThat(input.observation().vehicle().providerDataTime()).isNull();
+        if (hasNodeId) {
+            assertThat(input.observation().meaning()).isEqualTo(Meaning.VERIFIED_REACHED);
+            assertThat(input.observation().orderOnlyVerified()).isFalse();
+            assertThat(input.observation().vehicle().stopId()).isEqualTo("s1");
+            assertThat(input.observation().vehicle().providerDataTime()).isNull();
+        } else {
+            assertThat(input.reason()).isEqualTo(BoardingStateReason.STALE_PROGRESS);
+        }
         verifyNoInteractions(seoul, detail);
     }
 

@@ -51,6 +51,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.ReflectionTestUtils;
+import com.stopbell.transit.dto.tago.*;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.*;
 
@@ -137,6 +139,52 @@ class BoardingTrackingIntegrationTest {
                 "vehicle-id", NUMBER, "7000", "목적지", snapshot, checkpoint, UTC_NOW, UTC_NOW.plus(Duration.ofHours(4))));
         runtime.admitCreated(saved.getId());
         return saved;
+    }
+
+    @Test
+    void tago_polling_persists_progress_and_one_notification_then_completes() {
+        ReflectionTestUtils.setField(polling, "tagoExperimentEnabled", true);
+        try {
+            sessions.deleteAll();
+            runtime.forget(session.getId());
+            var tagoRoute = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "tago-route", "165", "31010"));
+            var visits = new ArrayList<BoardingTraversalSnapshot.Occurrence>();
+            for (int i = 0; i < 5; i++) {
+                var stop = stops.saveAndFlush(new BusStop(TransitProvider.TAGO, "t" + i, "정류장" + i, null, null));
+                var occurrence = occurrences.saveAndFlush(new BusRouteStopOccurrence(tagoRoute, stop, i + 1));
+                visits.add(new BoardingTraversalSnapshot.Occurrence(occurrence.getId(), "t" + i, i + 1));
+            }
+            var user = users.saveAndFlush(new User(AuthProvider.GOOGLE, UUID.randomUUID().toString()));
+            var snapshot = new BoardingTraversalSnapshot(1, TransitProvider.TAGO, "tago-route", "31010", visits,
+                    3, BoardingTraversalSnapshot.AlightAvailability.UNKNOWN, null);
+            var baseline = new BoardingCheckpoint("t0", 1, 0, BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE,
+                    null, UTC_NOW, null);
+            var request = new com.stopbell.boarding.dto.CreateBoardingSessionRequest(UUID.randomUUID().toString(), "ref", NUMBER);
+            var selected = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(), request.fingerprint(),
+                    NUMBER, NUMBER, "165", "목적지", snapshot, baseline, UTC_NOW, UTC_NOW.plusHours(4), 2));
+            runtime.admitCreated(selected.getId());
+            var position = new java.util.concurrent.atomic.AtomicInteger(0);
+            when(tago.fetchVehicleLocations(any())).thenAnswer(invocation -> new TagoVehicleLocationResponse(
+                    new TagoVehicleLocationResponse.Response(new TagoVehicleLocationResponse.Header("00", null),
+                            new TagoVehicleLocationResponse.Body(new TagoVehicleLocationResponse.Items(List.of(
+                                    new TagoVehicleLocationItem(NUMBER, "t" + position.get(), position.get() + 1, null, null))), 1, 1, 1000))));
+            polling.poll(cycle());
+            assertThat(events.count()).isZero();
+            position.set(1);
+            time.set(NOW.plusSeconds(40));
+            polling.poll(cycle());
+            assertThat(events.count()).isEqualTo(1);
+            time.set(NOW.plusSeconds(60));
+            polling.poll(cycle());
+            assertThat(events.count()).isEqualTo(1);
+            position.set(3);
+            time.set(NOW.plusSeconds(80));
+            polling.poll(cycle());
+            assertThat(sessions.findById(selected.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.COMPLETED);
+            assertThat(events.count()).isEqualTo(1);
+        } finally {
+            ReflectionTestUtils.setField(polling, "tagoExperimentEnabled", false);
+        }
     }
 
     @Test

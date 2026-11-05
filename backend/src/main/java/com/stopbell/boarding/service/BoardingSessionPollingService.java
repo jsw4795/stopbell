@@ -10,10 +10,12 @@ import java.util.stream.Collectors;
 import com.stopbell.boarding.domain.BoardingTrackingDecision;
 import com.stopbell.boarding.entity.BoardingStateReason;
 import com.stopbell.transit.client.TransitProviderClientException;
+import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.service.VehiclePollingCycle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -25,6 +27,8 @@ public class BoardingSessionPollingService {
     private final BoardingVehicleTracker tracker;
     private final BoardingProgressEvaluator evaluator;
     private final Clock clock;
+    @Value("${transit.boarding.tago-experiment-enabled:false}")
+    private boolean tagoExperimentEnabled;
 
     public BoardingSessionPollingService(BoardingTrackingStore store, BoardingTrackingMetadata metadata,
             BoardingTrackingRuntime runtime, BoardingVehicleTracker tracker, BoardingProgressEvaluator evaluator,
@@ -47,6 +51,10 @@ public class BoardingSessionPollingService {
             try {
                 if (!now().isBefore(session.expiresAt())) {
                     store.expire(session);
+                    continue;
+                }
+                if (session.provider() == TransitProvider.TAGO && !tagoExperimentEnabled) {
+                    runtime.committed(session.id(), session.revision(), false);
                     continue;
                 }
                 BoardingTrackingDecision decision;

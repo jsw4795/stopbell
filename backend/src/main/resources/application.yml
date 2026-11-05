@@ -38,6 +38,8 @@ notification:
     request-budget: PT15S
 
 transit:
+  boarding:
+    tago-experiment-enabled: ${TAGO_BOARDING_EXPERIMENT_ENABLED:false}
   monitoring:
     enabled: false
     fixed-delay: PT20S

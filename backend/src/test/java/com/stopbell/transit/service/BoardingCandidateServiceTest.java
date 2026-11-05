@@ -27,6 +27,7 @@ import com.stopbell.transit.service.BoardingCandidateReferenceStore.Context;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class BoardingCandidateServiceTest {
     private final BoardingCandidateMetadataService metadata = mock(BoardingCandidateMetadataService.class);
@@ -72,6 +73,18 @@ class BoardingCandidateServiceTest {
         verify(tago).fetchVehicleLocations(argThat(request -> request.externalRouteId().equals("external-route")
                 && request.context().cityCode().equals("31010")));
         verifyNoInteractions(seoul, detailClient);
+    }
+
+    @Test
+    void experiment_exposes_only_unique_matching_positions_before_target() {
+        ReflectionTestUtils.setField(service, "tagoExperimentEnabled", true);
+        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("A", "s1", 10),
+                tago("B", null, 20), tago("C", "s4", 40), tago("D", "s1", 10), tago("D", "s1", 10)));
+        var candidates = find(12L).candidates();
+        assertThat(candidates.stream().filter(c -> "A".equals(c.vehicleNumber())).findFirst().orElseThrow().trackingSupport())
+                .isEqualTo(TrackingSupport.CONDITIONAL);
+        assertThat(candidates.stream().filter(c -> !"A".equals(c.vehicleNumber())))
+                .allMatch(c -> c.trackingSupport() == TrackingSupport.HELD);
     }
 
     @Test

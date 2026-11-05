@@ -135,7 +135,7 @@ TASK-903의 설계에 TASK-908의 현행 정책을 반영한 요구사항이다.
 - 세션 snapshot과 마지막 검증 checkpoint를 보존하고, 새 관측과 조건부 자동 복구한다. 재시작이나 같은 ID만으로 동일 운행을 확정하지 않으며 소실·식별 변경·회차·공백으로 연속성이 불명확하면 보류·재확인한다.
 - 추적 중 준비 알림은 복구 검증 전 전송을 차단한다. V20 이전 세션의 기존 목적지 알림에 한해 불변 완료 근거·원래 기한을 재검증하여 전송한다. 기존 ON/OFF·대기 Event/Delivery는 기존 정책으로 보존한다. 복구 후에도 현재 Session 상태/revision과 Event 기한을 검증한다. 복구 대기 Delivery가 기존 Alarm의 조회 batch를 점유하지 않으며 만료 정리는 gate와 무관하게 수행한다. 메모리 gate는 단일 Backend만 지원한다.
 - 초기 세션 수명·복구 공백·준비 알림 TTL은 각각 PT4H/PT2M/PT30S이며 검증된 정확도 기준이 아닌 조정 가능한 운영값이다. 새 설정으로 기존 저장 기한을 늘리지 않는다. 정확한 설정·만료 실행은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
-- GPS 비의존, TAGO 정확한 하차 시점 지원 보류와 서울 조건부 지원을 유지한다. 기존 Alarm/Notification 계약을 보존하며 TASK-908의 변경 구현과 실제 iPhone 현장 검증을 구분한다. 기존 도착 Alarm의 미정차 개선은 별도 후속 범위다.
+- GPS 비의존과 서울 조건부 지원을 유지한다. TAGO는 기본 OFF 실험 기능에서 정상 응답을 최신 가용 위치로 가정하며 원본 최신성과 동일 운행은 보장하지 않는다. 기존 Alarm/Notification 계약을 보존하며 구현과 실제 iPhone 현장 검증을 구분한다. 기존 도착 Alarm의 미정차 개선은 별도 후속 범위다.
 
 ### V1 Push Notification 계약
 

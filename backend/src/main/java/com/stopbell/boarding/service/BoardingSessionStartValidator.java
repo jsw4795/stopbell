@@ -37,7 +37,7 @@ public class BoardingSessionStartValidator {
                 verified.progressIndex(), verified.baselineVerified() ? BoardingCheckpoint.Evidence.ID_ORDER
                         : BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE, null,
                 LocalDateTime.ofInstant(vehicle.observedAt(), ZoneOffset.UTC),
-                LocalDateTime.ofInstant(vehicle.providerDataTime(), ZoneOffset.UTC));
+                vehicle.providerDataTime() == null ? null : LocalDateTime.ofInstant(vehicle.providerDataTime(), ZoneOffset.UTC));
         // No passenger-access classification is required or inferred from stopFlag.
         var traversal = new BoardingTraversalSnapshot(1, current.provider(), current.externalRouteId(), current.cityCode(),
                 current.traversal().stream().map(item -> new BoardingTraversalSnapshot.Occurrence(

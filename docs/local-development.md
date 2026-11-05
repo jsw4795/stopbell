@@ -1,5 +1,11 @@
 # Local Development
 
+## TAGO 하차 추적 실험
+
+기존 서울 실기기 환경에서 Backend에 `TAGO_BOARDING_EXPERIMENT_ENABLED=true`를 설정하고 재시작한다. 기본값은 `false`이며 Flutter 별도 설정은 없다. 기존과 같이 monitoring, notification dispatch 및 FCM을 활성화하고 Cloudflare Tunnel과 iPhone Profile을 연결한다. 남양주 165번의 목적지와 실제 차량을 선택한 후 최초 위치 확인 중 상태에서 진행을 관찰한다. 2정거장 전과 1정거장 전은 각각 별도 세션으로 확인한다. 사용 후 설정을 제거하거나 `false`로 되돌려 재시작한다.
+
+이 실험은 TAGO 응답이 최신이라는 가정을 사용한다. 원본 생성 시각 및 운행 식별자가 없어 실제 지연·동일 운행을 보장하지 않으며 실기기 성공을 자동 테스트로 대신하지 않는다. 20초 간격으로 한 노선을 하루 종일 조회하면 약 4,320회로 알려진 일일 10,000회 한도의 상당 부분을 사용하며, 다른 조회와 여러 노선도 한도를 공유한다. 같은 주기·노선 응답은 공유되지만 실제 이용량과 기관별 한도를 확인해야 한다.
+
 ## Purpose
 
 이 문서는 StopBell의 Local Development 환경을 가능한 한 일관되게 유지하기 위한 기준을 정의한다.

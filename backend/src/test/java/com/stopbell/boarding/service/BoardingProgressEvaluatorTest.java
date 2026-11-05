@@ -25,6 +25,57 @@ class BoardingProgressEvaluatorTest {
     private final BoardingProgressEvaluator evaluator = new BoardingProgressEvaluator(Duration.ofMinutes(2), Duration.ofSeconds(30));
     static final List<Integer> ORDERS = List.of(10, 20, 40, 80, 100);
 
+    @Test
+    void tago_repeated_receipts_preserve_continuity_without_creating_progress() {
+        var session = tagoSnapshot(0, BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE, UTC_NOW);
+        for (int seconds = 20; seconds <= 180; seconds += 20) {
+            var result = evaluator.evaluate(session, tagoObservation(session, 0, seconds), UTC_NOW.plusSeconds(seconds));
+            assertThat(result.outcome()).isEqualTo(Outcome.NO_CANDIDATE);
+            assertThat(result.checkpoint().getEvidence()).isEqualTo(BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE);
+            assertThat(result.checkpoint().getObservedAt()).isEqualTo(UTC_NOW.plusSeconds(seconds));
+            session = tagoSnapshot(0, result.checkpoint().getEvidence(), result.checkpoint().getObservedAt());
+        }
+        var advanced = evaluator.evaluate(session, tagoObservation(session, 1, 200), UTC_NOW.plusSeconds(200));
+        assertThat(advanced.outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
+        assertThat(advanced.checkpoint().getEvidence()).isEqualTo(BoardingCheckpoint.Evidence.ID_ORDER);
+        assertThat(advanced.checkpoint().getProviderDataTime()).isNull();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1,0,PROGRESS_REGRESSION", "0,3,TARGET_NOT_AHEAD"})
+    void tago_regression_and_unverified_destination_are_held(int previous, int next, BoardingStateReason reason) {
+        var session = tagoSnapshot(previous, BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE, UTC_NOW);
+        assertThat(evaluator.evaluate(session, tagoObservation(session, next, 20), UTC_NOW.plusSeconds(20)).reason())
+                .isEqualTo(reason);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1,PREPARE_ALIGHT", "2,PREPARE_ALIGHT", "3,ARRIVAL_OBSERVED", "4,PASSED_OBSERVED"})
+    void tago_verified_progress_uses_common_decisions(int index, Outcome outcome) {
+        var session = tagoSnapshot(0, BoardingCheckpoint.Evidence.ID_ORDER, UTC_NOW);
+        assertThat(evaluator.evaluate(session, tagoObservation(session, index, 20), UTC_NOW.plusSeconds(20)).outcome())
+                .isEqualTo(outcome);
+    }
+
+    private static BoardingTrackingSnapshot tagoSnapshot(int index, BoardingCheckpoint.Evidence evidence, LocalDateTime time) {
+        var original = snapshot(index);
+        var traversal = new BoardingTraversalSnapshot(1, TransitProvider.TAGO, original.routeId(), "31010",
+                original.traversal().occurrences(), 3, BoardingTraversalSnapshot.AlightAvailability.UNKNOWN, null);
+        var stop = traversal.occurrences().get(index);
+        return new BoardingTrackingSnapshot(1L, 0, BoardingSessionStatus.TRACKING,
+                evidence == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE ? BoardingStateReason.BASELINE_UNVERIFIED : null,
+                TransitProvider.TAGO, original.routeId(), "31010", NUMBER, NUMBER, traversal,
+                new BoardingCheckpoint(stop.externalStopId(), stop.order(), index, evidence, null, time, null),
+                UTC_NOW.plusHours(4), true, 2);
+    }
+
+    private static BoardingProgressObservation tagoObservation(BoardingTrackingSnapshot session, int index, int seconds) {
+        var stop = session.traversal().occurrences().get(index);
+        return new BoardingProgressObservation(TransitProvider.TAGO, session.routeId(), session.cityCode(),
+                new Vehicle(NUMBER, NUMBER, stop.externalStopId(), stop.order(), null, NOW.plusSeconds(seconds), null, null, null),
+                Meaning.VERIFIED_REACHED, false, null, false);
+    }
+
     static BoardingTrackingSnapshot snapshot(int previousIndex) {
         var traversal = new BoardingTraversalSnapshot(1, TransitProvider.SEOUL_BUS, "route-id", null,
                 java.util.stream.IntStream.range(0, 5).mapToObj(index -> new BoardingTraversalSnapshot.Occurrence(

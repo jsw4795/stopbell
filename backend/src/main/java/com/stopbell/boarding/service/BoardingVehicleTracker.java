@@ -91,6 +91,13 @@ public class BoardingVehicleTracker {
         if (session.provider() == TransitProvider.SEOUL_BUS && Integer.valueOf(0).equals(vehicle.stopFlag())) {
             return moving(session, vehicle);
         }
+        if (session.provider() == TransitProvider.TAGO) {
+            if (vehicle.stopId() == null || vehicle.order() == null) {
+                return Input.held(BoardingStateReason.STALE_PROGRESS);
+            }
+            return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
+                    vehicle, BoardingProgressObservation.Meaning.VERIFIED_REACHED, false, null, false), null);
+        }
         if (session.provider() == TransitProvider.SEOUL_BUS && !Integer.valueOf(1).equals(vehicle.stopFlag())) {
             // Missing/unknown meaning is unavailable progress, not proof of lost continuity.
             return Input.held(BoardingStateReason.STALE_PROGRESS);

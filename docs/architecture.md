@@ -1,5 +1,7 @@
 # 아키텍처
 
+TAGO 하차 추적은 `transit.boarding.tago-experiment-enabled` 설정으로 기본 차단한다. 활성 시 기존 세션·polling·알림 경로를 재사용하며, 비활성 시 TAGO 세션을 polling하거나 runtime 전송 준비 상태로 복구하지 않는다. 동일 노선·도시의 cycle 내 응답은 기존 공유를 사용한다. 실험의 응답 최신성 가정과 제한은 [Domain](domain-model.md#snapshot-and-progress)을 따른다.
+
 ## 1. 아키텍처 목표
 
 향후 개선을 위한 명확한 확장 지점을 남기면서, 현재 StopBell 버전을 신뢰성 있게 지원할 수 있는 가장 단순한 아키텍처를 구축한다.

@@ -23,6 +23,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 class BoardingCandidateRevalidationTest {
     private final BoardingCandidateMetadataService metadata = mock(BoardingCandidateMetadataService.class);
@@ -41,6 +42,47 @@ class BoardingCandidateRevalidationTest {
     private final BoardingCandidateService service = new BoardingCandidateService(metadata, tago, seoul, details, references, clock, executor);
     private BoardingRouteSnapshot route;
     private Snapshot original;
+
+    @Test
+    void tago_flag_enables_only_unique_exact_unverified_baseline() {
+        var tagoRoute = route(TransitProvider.TAGO, 12L);
+        var vehicle = BoardingCandidateMapper.tago(tago("경기1234", "s1", 10), NOW);
+        var context = new Context(7L, 1L, 14L, 12L);
+        var snapshot = new Snapshot(context, tagoRoute, tagoRoute.fingerprint(), vehicle, null, NOW.plusSeconds(60));
+        assertThatThrownBy(() -> service.revalidateSelected(snapshot, tagoRoute, "경기1234"))
+                .isInstanceOf(ApiException.class).extracting("errorCode").isEqualTo(ErrorCode.BOARDING_TRACKING_UNSUPPORTED);
+        ReflectionTestUtils.setField(service, "tagoExperimentEnabled", true);
+        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기1234", "s2", 20)));
+        var selected = service.revalidateSelected(snapshot, tagoRoute, "경기1234");
+        assertThat(selected.progressIndex()).isEqualTo(1);
+        assertThat(selected.baselineVerified()).isFalse();
+        assertThat(selected.vehicle().providerDataTime()).isNull();
+        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기1234", "s2", 20),
+                tago("경기1234", "s2", 20)));
+        assertThatThrownBy(() -> service.revalidateSelected(snapshot, tagoRoute, "경기1234"))
+                .isInstanceOf(ApiException.class).extracting("errorCode").isEqualTo(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"MISSING_ID", "MISSING_ORDER", "MISMATCH", "REGRESSION", "TARGET", "MISSING_VEHICLE"})
+    void tago_start_rejects_invalid_current_position(String scenario) {
+        ReflectionTestUtils.setField(service, "tagoExperimentEnabled", true);
+        var tagoRoute = route(TransitProvider.TAGO, 12L);
+        var vehicle = BoardingCandidateMapper.tago(tago("경기1234", "s2", 20), NOW);
+        var snapshot = new Snapshot(new Context(7L, 1L, 14L, 12L), tagoRoute, tagoRoute.fingerprint(),
+                vehicle, null, NOW.plusSeconds(60));
+        var next = switch (scenario) {
+            case "MISSING_ID" -> tago("경기1234", null, 30);
+            case "MISSING_ORDER" -> tago("경기1234", "s3", null);
+            case "MISMATCH" -> tago("경기1234", "s1", 30);
+            case "REGRESSION" -> tago("경기1234", "s1", 10);
+            case "TARGET" -> tago("경기1234", "s4", 40);
+            default -> tago("다른차량", "s3", 30);
+        };
+        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(next));
+        assertThatThrownBy(() -> service.revalidateSelected(snapshot, tagoRoute, "경기1234"))
+                .isInstanceOf(ApiException.class).extracting("errorCode").isEqualTo(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+    }
 
     @BeforeEach
     void set_up() {
