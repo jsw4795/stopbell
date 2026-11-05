@@ -4,7 +4,7 @@
 
 > **현행 요구사항 정정 (2026-10-28):** §1~22의 목적 occurrence 하차 허용 근거를 시작 조건으로 둔 해석은 철회한다. 하차 가능성 공식 근거 조사는 종료하며 현재 계약은 [요구사항](../requirements.md#phase-9-탑승-세션과-하차-준비-알림)과 [API 지원 경계](../api.md#탑승-세션-api-task-903)를 따른다. 아래 실측 횟수·미실행·과거 보류 기록은 당시 사실로 보존한다.
 
-최신 실제 서울 143번·격리 MySQL·Notification 검증은 [§24](#24-실제-서울-143번-생성진행notification-검증-2026-10-28)를 따른다. §23까지의 미실행·미지원 설명은 각 작업 시점의 기록이며 현행 지원 경계는 API/Domain이 소유한다.
+서울 143번의 격리 MySQL·Notification 검증은 [§24](#24-실제-서울-143번-생성진행notification-검증-2026-10-28), 실제 iPhone 결과는 [§29](#29-실제-iphone-서울-143번-알림-검증-2026-11-05), 경기 TAGO 지원 사전 검증은 [§30](#30-경기-tago-하차-추적-사전-검증-2026-11-05)을 따른다. 이전 절의 미실행·미지원 설명은 각 작업 시점의 기록이며 현행 지원 경계는 API/Domain이 소유한다.
 
 §1~17은 Phase A 기록을 보존한다. **Phase B의 사전검증은 §18, 최초 점검·보류는 §19, 실제 실행은 §20, 후속 인증 없는 연결 진단과 로컬 경로 수정은 §21, HTTP 연결 완료 이후 Backend 안전 검증 보강은 §22**에 구분한다. 각 절의 승인·환경·호출 횟수는 해당 작업 시점의 기록이다. §21 종료 시점 누적 인증 데이터 요청 시도는 **서울1회/TAGO0회, 실제 데이터 확보0건**이며, §21의 **인증 없는 서울 HTTP 진단4회**는 별도다. 이후 서울 HTTP 성공 기록은 §22의 링크를 따른다.
 
@@ -1035,3 +1035,99 @@ cloudflared tunnel --protocol http2 --url http://127.0.0.1:8080
 - 경기버스(TAGO) 하차 알림 지원 및 실기기 검증
 
 남은 검증을 위해 TASK-908과 TASK-710은 `[ ]`를 유지한다.
+
+## 30. 경기 TAGO 하차 추적 사전 검증 (2026-11-05)
+
+### 30.1 판단과 조사 범위
+
+**현재 확인한 TAGO 실시간 API 계약과 관측만으로는 StopBell의 안전 기준을 충족하는 경기버스 하차 추적을 지원할 수 없다.** 같은 차량번호의 보고된 위치를 시간순으로 비교하고 정류장 ID·순번을 노선 occurrence에 대응시킬 수 있다. 그러나 해당 위치가 실제 도달·통과한 정류장인지, 충분히 최근에 생성된 값인지, 앞뒤 관측이 같은 차량의 같은 운행인지 확인할 근거가 부족하다. 이 제약을 해소할 수 있는 노선·구간에 한해 조건부 구현 가능성을 검토한다.
+
+기준은 `main`의 `8a07bc058322c6df33ce7d65f1ef2b961e3f3dd8`이다. 현행 [요구사항](../requirements.md#phase-9-탑승-세션과-하차-준비-알림), [API](../api.md#탑승-세션-api-task-903), [Domain](../domain-model.md#snapshot-and-progress)과 [ADR-012](../adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 기준으로 삼았다. §4의 무조건적인 validator 차단과 목적 정류장의 `ALLOWED` 선행 조건은 과거 구현 설명이다. 이번 조사 범위는 차량 진행과 준비 알림·완료 시점의 검증이다. 제품의 TAGO 지원 상태와 TASK-908 `[ ]`를 유지한다.
+
+### 30.2 현재 코드 경로와 Provider 차이
+
+아래 경로는 `backend/src/main/java/com/stopbell/` 기준이다.
+
+| 경로 | TAGO 처리 | 서울과의 차이 |
+| --- | --- | --- |
+| `transit/client/TagoVehicleLocationClient` · `dto/tago/TagoVehicleLocationItem` | `getRouteAcctoBusLcList`에 `routeId`, `cityCode`, JSON, `pageNo=1`, `numOfRows=1000` 요청. `resultCode=00`과 envelope, `totalCount == item 수`를 검사한다. 불일치면 protocol failure로 종료한다. 추가 페이지 자동 호출은 없다. DTO는 차량번호, ID·순번, 좌표를 읽는다 | 서울은 Route roster와 `vehId`별 detail을 분리 조회한다. TAGO에서 목록 응답의 완전성 검사는 차량별 정류장 필드나 원본 최신성을 검증하지 못한다 |
+| `transit/service/BoardingCandidateService` · `transit/mapper/BoardingCandidateMapper` | `vehicleno`를 임시 ID와 표시 번호로 모두 사용한다. 응답 수신 시각을 기록하고 `providerDataTime`, `stopFlag`는 null이다. 후보 mapper는 GPS를 쓰지 않는다. 위치가 exact `nodeid/nodeord`로 일치하면 `ROUTE_PROGRESS`와 선택 승차 occurrence까지의 배열 간격을 표시할 수 있다. 정류장 정보가 없으면 위치를 합성하지 않는다. 식별 가능한 후보에 reference를 줄 수 있으나 추적 상태는 `HELD` / `TAGO_ALIGHT_UNVERIFIED`다 | 서울은 `vehId`와 전체 `plainNo`를 분리하며, detail의 exact `stId/stOrd`, `stopFlag`, `dataTm`을 사용한다. roster의 `sectOrd`는 구간 순번으로만 다룬다 |
+| `boarding/service/BoardingSessionService` → `BoardingSessionStartValidator` → `transit/service/BoardingCandidateService.revalidateSelected` | 생성과 재확인은 공통 validator에서 사용자 소유 reference·현재 metadata를 확인한다. fingerprint/occurrence/번호 대조가 통과해도 TAGO 분기는 `PROVIDER_UNVERIFIED`를 기록하고 HTTP 409 `BOARDING_TRACKING_UNSUPPORTED`를 던진다. TAGO의 최신 roster 재조회와 생성 transaction 진입 전에 거부된다. 앞선 reference·metadata 오류는 별도로 먼저 반환될 수 있다 | 서울은 최신 roster/detail의 유일한 ID·번호 대응, 시각, 운행 종료·진행 충돌을 검사해 `VerifiedBoardingStart`를 만든다. 식별이 충분하면 위치 미검증 상태로도 `TRACKING` 접수가 가능하며 그 상태에서는 준비 알림 근거가 생길 때까지 기다린다 |
+| `transit/service/VehiclePollingCycle` · `boarding/service/BoardingVehicleTracker` | 공용 cycle의 `(routeId, cityCode)`별 TAGO 목록을 사용한다. 저장된 ID·번호와 비교하고 중복·소실·수신 시각 문제를 검사한다. 가상의 TAGO 세션에 exact 위치가 들어와도 관측 의미는 `UNVERIFIED`이며 별도 방향·회차 근거를 공급하지 않는다 | 서울은 roster/detail의 동일 ID·번호, 두 시각, roster의 명시적 운행종료 신호를 확인한다. exact detail의 flag 1은 `DIRECT_ARRIVAL`, flag 0은 검증을 거쳐 `VERIFIED_REACHED`로 해석한다. flag 0 해석은 143/N51 실측 기반 가정이며 무정차 통과 갱신은 미검증이다 |
+| `boarding/service/BoardingProgressEvaluator` · `BoardingSessionPollingService` | 평가기는 Provider·Route·city·차량, freshness(60초), 관측 공백(기본 PT2M), 방향 문맥·모호성, exact occurrence·순번 역행을 검사한다. `UNVERIFIED`는 검증된 기준점의 다음 진행으로 채택되지 않으며 미검증 기준점도 도달 근거로 승격할 수 없다. 제공시각 없는 동일 index 반복은 freshness를 갱신하지 않는다 | 서울은 `dataTm` 존재가 추가로 필수다. 공통 평가기가 TAGO의 null 제공시각을 받을 수 있어도 TAGO 원본 freshness를 증명하지는 못한다 |
+| `transit/mapper/TagoTransitObservationMapper` | 기존 도착 Alarm에 좌표, `nodeid/nodeord`, 로컬 `observedAt`을 공급한다. 방향과 제공시각은 null, `ArrivalEvidence.UNAVAILABLE`이다 | 이 경로의 GPS 기반 Alarm 판정은 탑승 차량의 하차 추적 근거와 별개다 |
+
+`TagoMetadataClient`의 `getRouteAcctoThrghSttnList`는 `TagoMetadataSource`를 통해 경유 정류장과 순번을 공급한다. `BusRouteStopOccurrence`는 `(route_id, stop_order)`를 유일하게 관리한다. 같은 Stop ID가 여러 순번에 있으면 별도의 occurrence다. `BoardingRouteSnapshot`과 `BoardingTraversalSnapshot`은 순서가 있는 occurrence 목록을 사용하고 현재 metadata의 구조 변경을 재검증한다. 예를 들어 같은 Stop의 순번 7과 21은 구분할 수 있지만, 다음 lap에서 다시 나온 순번 7은 이전 lap의 7과 같은 정적 occurrence에 매핑된다. GBIS의 `destinationName`은 표시용이며 현재 차량 방향을 확인하는 입력이 아니다.
+
+### 30.3 공식 명세와 실측이 필요한 의미
+
+2026-11-05에 공공데이터포털 위치 상세의 요청·응답 표와 노선 서비스 페이지를 다시 확인했다. 활용가이드의 세부 정의와 제한은 이미 원문·해시를 확인한 [§3](#3-공식-자료-재확인과-필드-계약) 및 [TASK-901 §4](TASK-901-bus-vehicle-identification.md#4-tago-공식-필드와-차량-식별)를 인용한다. [TAGO 버스위치정보](https://www.data.go.kr/data/15098533/openapi.do) · [TAGO 버스노선정보](https://www.data.go.kr/data/15098529/openapi.do) · [서울 버스위치정보](https://www.data.go.kr/data/15000332/openapi.do)
+
+| 질문 | 공식 자료에서 확인한 의미 | 실측 결과와 한계 |
+| --- | --- | --- |
+| 1. 현재 정류장은 무엇인가 | `nodeid`는 정류소 ID, `nodenm`은 이름이다. 위치 목록에서 두 필드가 가리키는 정류소를 실제 정차·통과·다음 정류장과 연결하는 규칙은 명시되지 않았다 | 기존 TAGO 위치와 정적 노선 정류장 ID가 일치한 사례가 있다. 차량이 보고 시점에 해당 정류장에 정차했는지는 미확인이다 |
+| 2. 마지막 통과 순번인가 | `nodeord`는 정류소 순서다. 마지막 통과 순번이라는 정의는 없다 | 수원 300의 7→8, 수원 7000의 1→3이 기록됐다. 실제 경유 시각이나 갱신 기준은 미확인이다 |
+| 3. 정류장 사이에서 변경되는가 | 정류장 도착 전·정차 중·출발 후의 전환 시점은 명시되지 않았다 | 표본 사이에서 ID·순번이 변경됐다. 동기화된 현장 기록이 없어 정류장 사이 이동 중 바뀌었는지 판정할 수 없다 |
+| 4. 정차와 운행 응답이 다른가 | 위치 목록의 개별 차량에 `stopFlag`나 운행상태 필드가 명시되지 않았다. 좌표는 선택 필드인 WGS84 맵매칭 좌표다 | 동일 ID·순번·좌표의 반복이 있었다. 실제 정차와 중계 응답 반복을 분리할 수 없다 |
+| 5. 시간순 연결이 가능한가 | `vehicleno`는 차량번호다. 요청 Route 문맥에서 묶을 수 있다. source event timestamp·sequence는 명시되지 않았다 | 같은 번호의 두 짧은 변화 사례를 로컬 수신 순서로 정렬할 수 있다. source 생성 순서·재전송·재등장의 동일 운행은 미확인이다 |
+| 6. 반복 방문과 회차를 구분할 수 있는가 | 정적 경유 목록에 순번, 노선 활용가이드에 선택 `updowncd`가 있다. 위치 목록에는 차량 방향·회차 전환·trip/lap 규칙이 명시되지 않았다 | 같은 ID의 다른 순번은 정적 occurrence로 구분 가능하다. 동일 번호의 실차 회차·순환 전후 관측과 현장 대조는 미확인이다 |
+| 7. 차량 식별자가 안정적인가 | 차량번호는 명시되지만 운행 중 불변성, 고유 범위와 재사용 정책은 확인되지 않았다 | 짧은 표본에서 같은 값이 유지됐고 2026-10-16의 합산 목록에 중복이 없었다. 차량 교체·노선 이동·번호 재등장·실차 대조는 미확인이다 |
+| 8. 원본 생성 시각과 서버 관측 시각을 분리할 수 있는가 | 위치 목록에서 차량별 제공·생성 시각을 명시하지 않는다. 포털의 실시간 및 가이드의 10~20초 표기는 원본 age의 상한을 제공하지 않는다 | 과거 수집기의 수신 시각만 있다. `observedAt`은 StopBell의 수신 시각이며 원본 생성 시각, 실제 물리 위치의 시각, 지연의 상한은 계산할 수 없다 |
+
+TAGO 도착정보의 `arrprevstationcnt`/`arrtime`은 정류소 기준 예측값이다. 위치 목록의 선택 차량과 일치하는 키가 없고, 실제 수원 7000 표본에서 해당 Route가 도착 목록에 없던 사례도 있다. 정류소 접근 조회도 정류소와 노선이 입력이며 차량별 시간·상태를 얻는 detail 경로로 확인되지 않았다. [TAGO 버스도착정보](https://www.data.go.kr/data/15098530/openapi.do) · [기존 수원 실측](../transit-provider-research.md#first-stop-차량-관찰)
+
+### 30.4 실측 원장과 신규 호출 여부
+
+다음은 기존 수집 기록에서 발췌한 **TAGO** 관측이다. 차량번호는 표본 내 별칭 `TAGO_A`, `TAGO_B`로 표기한다. 시각은 수집기의 응답 관측 시각(KST)이며 정류장 ID는 공개 노선 식별자다. [원래 관측표](../transit-provider-research.md#tago-경기-실시간-갱신-관찰) · [TASK-901 표본·추가 실측](TASK-901-bus-vehicle-identification.md#17-추가-제한-실측-결과--2026-10-16)
+
+| 관측일·수신 시각(KST) | 노선·차량 | Provider 제공 시각 | `nodeid` / `nodeord` | GPS | 이전 관측 대비 |
+| --- | --- | --- | --- | --- | --- |
+| 09-09 17:36:31 | 수원 300 `GGB200000006` / `TAGO_A` | 미제공 | `GGB214000513` / 7 | 있음 | 첫 기준 |
+| 09-09 17:36:37~17:36:57 | 300 / `TAGO_A` | 미제공 | `GGB214000513` / 7 | 있음 | 같은 값 4회 |
+| 09-09 17:37:02 | 300 / `TAGO_A` | 미제공 | `GGB214000512` / 8 | 있음 | 7→8, ID와 좌표도 변경 |
+| 09-09 17:37:08~17:37:45 | 300 / `TAGO_A` | 미제공 | `GGB214000512` / 8 | 있음 | 같은 값 6회 |
+| 09-09 첫 snapshot, 시각 미기록 | 수원 7000 `GGB200000112` / `TAGO_B` | 미제공 | `GGB228001174` / 1 | 있음 | 첫 기준 |
+| 09-09 19:41:05~19:41:31 | 7000 / `TAGO_B` | 미제공 | `GGB228000703` / 3 | 있음 | 1→3 이후 같은 값. 순번 2 응답 및 후속 정확한 표본 수 미기록 |
+| 10-16 18:00:16.339, 18:00:19.056 | 7000 / 개별 차량 선정 전 | 기록 없음 | 적어도 한 item의 ID가 누락·null·공백 중 하나, 해당 순번 미기록 | 기록 없음 | 같은 라운드의 두 페이지 10+2건, totalCount 12. 유효한 동일 차량 반복 관측 0회 |
+
+모두 2026년 기록이다. 수원 300의 위치 목록은 12회, 74초 구간에서 첫 관측 31초 뒤 한 번 달라졌다. 31초는 해당 표본의 수신 기준이며 실제 정류장 통과부터의 지연과 원본 갱신주기는 모른다. 7000의 1→3은 누락된 중간 **응답**을 보여 주며 차량의 무정차 통과를 입증하지 않는다. 10-16의 두 페이지는 동시 snapshot이 아니며 정확한 ID 누락 개수도 미확정이다. 현재 Client는 당시와 달리 명시적으로 페이지 크기를 요청하고 개수 불일치를 거부한다.
+
+이번 신규 인증 호출은 TAGO **0회**, 서울 **0회**, metadata·FCM **0회**다. TAGO 위치의 공개 개발계정 신청 가능 트래픽 10,000과 기존 가이드의 최대 30 TPS, 10-27에 확인한 상세기능 일일 승인 한도 10,000회를 확인했다. 공개 페이지는 로그아웃 상태였고 현재 계정 사용량·잔여량과 병행 소비는 확인하지 못했다. 기존 `.env`의 `PUBLIC_DATA_SERVICE_KEY`는 존재 여부만 검사했다. 과거 실행에 한정된 잔여량 확인 예외를 재사용하지 않았으며 신규 운행 여부는 확인하지 못했다. DB, Backend/Scheduler 및 FCM을 가동하지 않았다. [공개 이용 조건](https://www.data.go.kr/data/15098533/openapi.do#tab-layer-api-02) · [기존 계정 확인](#201-계정-확인과-이번-요청에-한정된-quota-예외)
+
+### 30.5 지원 판단과 위험
+
+| 등급 | 현재 확인된 범위 | 하차 추적 판정 |
+| --- | --- | --- |
+| **A. 검증 가능한 진행** | 온전한 목록에서 유일한 차량번호의 reported ID·순번이 노선의 한 occurrence와 일치하는지, 수신 순서대로 보고값이 증가·유지·역행했는지는 검증할 수 있다 | 표시용 진행과 일관성 검사까지 가능하다. 현재 A에 해당하는 알림·완료용 실제 도달 또는 통과 근거는 확보하지 못했다 |
+| **B. 조건부 검증 가능한 진행** | 실제 갱신 기준과 지연 한계, 동일 운행 연속성이 입증된 노선·구간에서 exact occurrence의 연속 증가를 확인한다. 초기에는 회차·중첩·반복 운행 경계를 배제한 구간을 검토한다 | 목적지 이전 gap 2/1과 완료를 각각 검증할 수 있는 후보 범위다. 수신 시각·순번 상승만으로는 승인할 수 없으며 현재 지원은 보류한다 |
+| **C. 검증 불가능한 진행** | ID·순번 누락/불일치, 불완전 목록, 중복 번호, 차량 소실·교체·불명확한 재등장, 역행/reset, 긴 관측 공백, 회차·lap 불명, 원본 최신성을 판별할 수 없는 경우 | 위치를 합성하거나 다른 차량으로 갈아타지 않는다. 알림과 완료를 보류하고 기존 불확실성·재확인 정책을 적용한다 |
+
+동일한 응답열이 신선한 이동 기록과 지연 재생 양쪽에서 나올 수 있다. 수신 시각으로 중복을 새 관측으로 승격하면 늦은 알림을 만들 수 있고, `nodeord`가 다음 정류장을 가리킨다면 도달 전에 완료할 수 있다. 반대로 큰 순번 점프나 긴 지연은 준비 구간 전체를 건너뛸 수 있다. 같은 번호가 회차 뒤 돌아오는 경우에도 증거 없는 자동 연결은 다른 운행의 위치를 사용자에게 알릴 수 있다. GPS 존재 여부나 정적 방향만으로 이 모호성이 해소되지는 않는다.
+
+### 30.6 다음 검증 및 구현 순서
+
+1. **제공기관 계약 확인.** `nodeid/nodeord`가 직전 통과·현재 도달·다음 접근 중 어느 상태를 보고하는지, 정차/무정차·출발·회차·리셋 시 전환 규칙을 확인한다. 차량번호의 유일 범위와 재사용, 원본 시각/sequence 또는 재생·캐시를 구분할 수 있는 신호와 최대 지연 계약을 확인한다. 원본 freshness를 평가할 근거가 계속 없다면 TAGO 단독 지원은 보류한다. 독립 신호가 필요하면 추가 Provider·계약 변경 여부를 별도 설계 판단으로 남긴다.
+2. **제한 실측과 현장 대조.** 계정의 해당 operation 잔여량을 확인한 뒤 과거 metadata와 대조 가능한 수원 7000(도시 31010)을 후보로 사용한다. 첫 정상 목록에서 실제 운행 차량을 확인하고 현장에서 대조한 차량번호 하나를 별칭으로 추적한다. 예비 관측은 20초 이상 간격, 최대 6회 위치 요청, 최대 150초, HTTPS로 진행한다. 현재 Client와 같은 단일 페이지 요청으로 count를 검사하고 실패·불완전 목록·예산 도달 시 종료한다. 재시도·자동 노선 탐색은 두지 않는다. 정차 진입·출발·무정차 통과·다음 정류장 전후를 동기화한 현장 시각과 비교하고, 회차·반복 Stop·다음 lap·소실 재등장은 별도 소규모 관측 구간으로 검증한다. 준비 offset 2/1 구간을 놓치는 빈도와 지연을 함께 기록한다. 6회 표본은 예비 확인에 사용하며 출시 조건을 입증하기 위해서는 복수 운행에서 재현이 필요하다.
+3. **비활성 상태에서 Provider 해석 검증.** 확인된 범위가 생기면 후보 재검증과 `BoardingVehicleTracker`에서 같은 TAGO 해석·검증을 사용한다. 전체 목록의 선택 번호 유일성, 노선 snapshot·exact ID/order, freshness, 순번 단조성, 동일 운행 연속성, 관측 공백 및 회차 모호성을 먼저 판정한다. `VERIFIED_REACHED`는 실제 도달 의미가 입증될 때 공급한다. `DIRECT_ARRIVAL`은 직접 도착 근거가 확보된 경우에만 사용한다. 후보 표시용 `ROUTE_PROGRESS`나 단순 `VERIFIED_REFERENCE`를 알림·완료 가능 진행으로 전달하지 않는다. 현재 평가기는 이미 검증된 기준점에서 일부 reference를 받아 진행·준비·통과를 판단할 수 있으므로 adapter에서 증거 승격 경계를 명시해야 한다. `BoardingSessionStartValidator`의 checkpoint 생성은 현재 `providerDataTime`을 필수로 변환한다. 승인된 freshness 근거가 마련된 뒤 실제 의미에 맞춰 처리하며 수신 시각을 원본 시각으로 채우지 않는다.
+4. **기존 세션·전송 경로로 통합 검증.** `BoardingSession`, `BoardingProgressEvaluator`, `BoardingTrackingStore`, `BoardingTrackingRuntime`과 `NotificationEvent`·`NotificationDelivery`·기존 FCM 전송을 재사용한다. 등록 시 이미 준비 구간이면 초기 checkpoint도 같은 검증을 통과해야 한다. 세션당 준비 알림 1회, 목적지 완료와 준비 알림 분리, 원래 관측 기한, 동시성·재시작 gate를 유지한다. 동일 Route·city의 polling 공유를 재사용하고 실제 호출량과 지연을 측정한다. 서울 경로의 시각·identity·occurrence 검증과 기존 Alarm에는 같은 변경을 적용하지 않는다. 운영 차단 변경은 실측·회귀·실차 및 iPhone 검증 결과를 토대로 별도 결정한다.
+
+### 30.7 후속 테스트 계획
+
+단위/재생 검증은 `TagoVehicleLocationClientTest`, `BoardingCandidateRevalidationTest`, `BoardingVehicleTrackerTest`, `BoardingProgressEvaluatorTest`를 중심으로 수행한다. 실제 응답의 비식별 발췌와 현장 시각으로 의미를 검증하고, 인공 fixture는 실패·경계 동작 검증에 사용한다. 저장·전송은 `BoardingSessionApiIntegrationTest`, `BoardingTrackingIntegrationTest`, `BoardingTrackingRuntimeTest`, `BoardingDispatchIntegrationTest`로 확인한다.
+
+| 시나리오 | 기대 결과 |
+| --- | --- |
+| 정상 진행 | 유일한 동일 차량과 신선한 동일 운행·exact occurrence가 단조 증가한다. 배열 index로 gap을 계산하며 ID나 raw 순번을 차감하지 않는다 |
+| 2정거장 전 설정 | gap 2에서 준비 Event 1건. 이후 gap 1에서 중복 없음. gap 2를 놓친 경우 검증된 gap 1에서 한 번만 생성 |
+| 1정거장 전 설정 | gap 2에서 Event 0건, 검증된 gap 1에서 1건. 등록 시 이미 구간에 있으면 검증된 현재 checkpoint와 Event/Delivery를 함께 반영 |
+| 목적지 도달 | 검증된 목적 occurrence 도달 근거에서 `COMPLETED` / `ARRIVAL_OBSERVED`. 신규 세션의 목적지 Push 없음. 단순 ID·순번 일치로는 보류 |
+| 목적지 통과 | 신뢰할 목적지 이전 기준점과 동일 운행의 이후 occurrence가 검증되면 `COMPLETED` / `PASSED_OBSERVED`. 준비 구간을 건너뛰어도 소급 Push 없음. 이전 기준점 없이 목적지/이후에서 최초 검증되면 보류 |
+| 지연·공백·부분 목록 | 지연/재생, 미래 시각, 원본 최신성 미확인, 허용 공백 초과 시 Event·완료 없음. timeout/개수 불일치는 정상 empty 또는 차량 소실과 구분 |
+| 식별 정보 변경 | 차량번호 변경·동시 중복·소실 후 재등장·다른 Route/도시 혼입에서 자동 교체 금지. 연속성 불명 시 보류 및 재확인 |
+| 순번 역행·metadata 변경 | 역행/reset과 같은 시각의 상충 위치, metadata 불일치에서 checkpoint 승격·알림·완료 금지 |
+| 중복 관측 | 동일 응답 수신 시각만 갱신되어도 freshness 연장·재시작 READY·중복 Event/Delivery 없음. 새 검증 관측 뒤에도 durable dedup 유지 |
+| 회차와 순환 | 같은 정류소의 다른 occurrence는 exact ID/order로 구분. 방향 충돌·같은 순번 재등장·lap이 불명확하면 보류하며 다음 lap을 자동 선택하지 않음 |
+| 서버 재시작 | 저장 checkpoint만으로 전송하지 않는다. 새 신선한 관측의 동일성·연속성과 현재 revision 검증 후에만 복구한다. 공백 초과·재생 데이터·지연된 이전 결과는 차단 |
+| 서울 회귀 | 143번의 정차·이동 detail, 제공시각과 ID·번호 재검증, 반복 occurrence, offset 2/1, 완료·복구·FCM 동작을 기존 기준으로 검증 |
+
+향후 실차 검증에서는 실제 탑승 차량·정류장 방문 시각과 Event/Delivery 및 iPhone 표시·tap·세션 최종 상태를 각각 대조한다. 이번 변경은 연구 문서에 한정되므로 테스트 계획을 새로 기록하고 제품 테스트는 실행하지 않았다.
