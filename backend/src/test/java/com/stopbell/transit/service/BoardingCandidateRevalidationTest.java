@@ -64,7 +64,7 @@ class BoardingCandidateRevalidationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"MISSING_ID", "MISSING_ORDER", "MISMATCH", "REGRESSION", "TARGET", "MISSING_VEHICLE"})
+    @ValueSource(strings = {"MISSING_ORDER", "MISMATCH", "REGRESSION", "TARGET", "MISSING_VEHICLE"})
     void tago_start_rejects_invalid_current_position(String scenario) {
         ReflectionTestUtils.setField(service, "tagoExperimentEnabled", true);
         var tagoRoute = route(TransitProvider.TAGO, 12L);
@@ -72,7 +72,6 @@ class BoardingCandidateRevalidationTest {
         var snapshot = new Snapshot(new Context(7L, 1L, 14L, 12L), tagoRoute, tagoRoute.fingerprint(),
                 vehicle, null, NOW.plusSeconds(60));
         var next = switch (scenario) {
-            case "MISSING_ID" -> tago("경기1234", null, 30);
             case "MISSING_ORDER" -> tago("경기1234", "s3", null);
             case "MISMATCH" -> tago("경기1234", "s1", 30);
             case "REGRESSION" -> tago("경기1234", "s1", 10);

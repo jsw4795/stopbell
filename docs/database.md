@@ -494,6 +494,8 @@ V18 `boarding_verification_pending`은 당시 VERIFYING과 UNVERIFIED_REFERENCE�
 
 V20 `boarding_pre_departure_notification_policy`는 nullable INT `notification_offset_stops`만 추가한다. NULL은 기존 ON/OFF+목적지 정책이며 기존 row를 backfill하거나 fingerprint·checkpoint·Event/Delivery를 수정하지 않는다. 새 요청 fingerprint만 정책 구분과 오프셋을 포함한다. 신규 애플리케이션 생성은 명시적으로 1/2를 저장하며 legacy boolean은 true로 유지한다. CHECK `ck_boarding_sessions_notification_offset`는 NULL 또는 (1/2 AND prepare_notification_enabled=TRUE)을 요구한다. DB DEFAULT가 없어 이전 row의 의미를 임의로 2로 바꾸지 않는다. 기존 세션·대기 목적지 알림의 전송 계약은 유지하고 새 세션의 목적지 Event는 생성·dispatch하지 않는다. Event UNIQUE·Delivery retry/TTL은 변경하지 않는다. 실제 개발 DB에는 이번 작업에서 적용하지 않으며 격리 MySQL에서 V19→V20 데이터 보존·CHECK·재적용 무변경을 검증한다.
 
+V27은 기존 evidence CHECK에 TAGO의 `UNVERIFIED_REFERENCE` + null Stop ID + 양의 order/유효 index 조합을 추가한다. 이는 미검증 기준점이며 알림 근거가 아니다. 다른 Provider와 기존 조합의 제약 및 기존 row·Event·Delivery를 보존한다. 도메인은 순서와 저장된 occurrence의 일치도 검사한다.
+
 
 #### Notification source 확장 (TASK-906 1단계)
 

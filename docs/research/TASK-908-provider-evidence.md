@@ -1153,3 +1153,11 @@ TAGO 도착정보의 `arrprevstationcnt`/`arrtime`은 정류소 기준 예측값
 남양주 165번의 사용자 관측과 자동 테스트는 실제 iPhone E2E 성공을 뜻하지 않는다. 실제 원본 지연, 다른 노선 의미, 무정차·회차, 차량번호 재사용과 FCM 수신은 남은 위험이며 TASK-908은 실제 현장 검증 전까지 미완료다. 활성화 및 호출량은 [로컬 실행](../local-development.md#tago-하차-추적-실험)을 따른다.
 
 자동 검증으로 Backend 전체 테스트와 추가 TAGO 후보 재검증·격리 MySQL polling 통합 테스트를 통과했다. 통합 사례는 미검증 기준점, 같은 위치 반복, 진행 시 준비 Event 한 건, 중복 방지와 목적지 완료를 확인한다. 이번 실행은 실제 Provider·FCM·iPhone을 사용하지 않았다.
+
+## 33. TAGO 순서 단독 진행과 M2352 (2026-11-05)
+
+사용자는 남양주 165번에서 TAGO 차량 선택·세션 생성·진행, 2정거장 및 1정거장 전 Push와 목적지 COMPLETED를 실제 iPhone에서 확인했다고 보고했다. 이는 사용자 보고이며 이번 작업에서 실기기를 재실행하지 않았다. M2352의 `nodeord=27`, `nodeid` 누락 응답에서 목적지 방문 순서 29에 대한 차량 선택이 차단된 사례도 사용자 제공이다. M2352 수정 후 실기기 결과는 아직 없다.
+
+이번 사용자 결정은 TAGO의 `nodeord`를 기본 진행값으로 사용하고 유일한 노선 방문 순서에 대응할 때 ID 누락을 허용한다. ID가 있으면 순서와 일치해야 하며 미정차 경유 지점도 간격에 포함한다. 최초 순서-only checkpoint는 `UNVERIFIED_REFERENCE`이고, 후속 검증된 진행에 기존 `VERIFIED_ORDER_ONLY`를 사용한다. 위치 ID와 Provider 생성시각을 합성하지 않는다. 정상 응답의 최신성 가정과 단일 준비 알림 정책은 유지한다. V27은 최초 미검증 TAGO 순서-only checkpoint를 보존하기 위해 기존 DB CHECK만 확장한다.
+
+자동 검증: 격리 MySQL과 합성 Provider 응답으로 M2352 27→28→29의 후보 선택, ID 없는 최초 checkpoint, 단일 준비 Event와 완료를 확인했다. V26→V27 기존 Session·Event·Delivery 보존 및 재실행 불변, Backend 전체 1,568개와 Flutter 후보·선택 17개 테스트가 실패·오류·skip 없이 통과했다. 실제 Provider·FCM 호출과 M2352 iPhone 재시험은 수행하지 않았다.

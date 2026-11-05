@@ -224,5 +224,14 @@ class NotificationSourceMigrationIntegrationTest {
             assertThatThrownBy(() -> jdbc.update("update boarding_sessions set prepare_notification_enabled=false where id=?", sessionId))
                     .isInstanceOf(DataAccessException.class).hasMessageContaining("ck_boarding_sessions_notification_offset");
         }
+        Flyway.configure().dataSource(dataSource).target("26").load().migrate();
+        var beforeV27 = jdbc.queryForList("select * from boarding_sessions order by id");
+        var v27 = Flyway.configure().dataSource(dataSource).target("27").load();
+        assertThat(v27.migrate().migrationsExecuted).isEqualTo(1);
+        v27.validate();
+        assertThat(v27.migrate().migrationsExecuted).isZero();
+        assertThat(jdbc.queryForList("select * from boarding_sessions order by id")).isEqualTo(beforeV27);
+        assertThat(jdbc.queryForList("select * from notification_events order by id")).isEqualTo(allEvents);
+        assertThat(jdbc.queryForList("select * from notification_deliveries order by id")).isEqualTo(allDeliveries);
     }
 }

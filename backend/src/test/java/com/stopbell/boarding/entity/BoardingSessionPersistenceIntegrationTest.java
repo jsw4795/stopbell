@@ -58,7 +58,7 @@ class BoardingSessionPersistenceIntegrationTest {
         assertThat(loaded.getCreatedAt()).isEqualTo(UTC_NOW);
         assertThat(loaded.getUpdatedAt()).isEqualTo(UTC_NOW);
         assertThat(loaded.getExpiresAt()).isEqualTo(UTC_NOW.plusHours(4));
-        assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class)).isEqualTo("26");
+        assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class)).isEqualTo("27");
         assertThat(jdbc.queryForObject("select open_user_id from boarding_sessions where id=?", Long.class, saved.getId()))
                 .isEqualTo(saved.getUser().getId());
         assertThat(jdbc.queryForObject("select json_type(traversal_snapshot) from boarding_sessions where id=?", String.class, saved.getId())).isEqualTo("OBJECT");
@@ -93,6 +93,7 @@ class BoardingSessionPersistenceIntegrationTest {
             "external_route_id=''", "city_code='31010'", "provider='TAGO', city_code=null",
             "checkpoint_stop_order=0", "checkpoint_index=-1", "checkpoint_evidence='OTHER'",
             "checkpoint_evidence='ID_ORDER', checkpoint_stop_external_id=null",
+            "checkpoint_evidence='UNVERIFIED_REFERENCE', checkpoint_stop_external_id=null, state_reason='BASELINE_UNVERIFIED'",
             "checkpoint_evidence='VERIFIED_ORDER_ONLY'", "state_reason='VEHICLE_MISSING'",
             "status='SUSPENDED', state_reason=null", "status='SUSPENDED', state_reason='USER_CANCELLED'",
             "status='CANCELLED', state_reason='USER_CANCELLED', ended_at=null",

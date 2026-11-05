@@ -79,7 +79,7 @@ class BoardingCandidateServiceTest {
     void experiment_exposes_only_unique_matching_positions_before_target() {
         ReflectionTestUtils.setField(service, "tagoExperimentEnabled", true);
         when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("A", "s1", 10),
-                tago("B", null, 20), tago("C", "s4", 40), tago("D", "s1", 10), tago("D", "s1", 10)));
+                tago("B", null, null), tago("C", "s4", 40), tago("D", "s1", 10), tago("D", "s1", 10)));
         var candidates = find(12L).candidates();
         assertThat(candidates.stream().filter(c -> "A".equals(c.vehicleNumber())).findFirst().orElseThrow().trackingSupport())
                 .isEqualTo(TrackingSupport.CONDITIONAL);
@@ -88,15 +88,39 @@ class BoardingCandidateServiceTest {
     }
 
     @Test
-    @DisplayName("nodeid가 없어도 번호 후보를 유지하고 검증되지 않은 order로 위치를 합성하지 않는다")
-    void missing_node_id_keeps_number_without_position() {
+    void m2352_order_only_is_selectable_and_ambiguous_or_invalid_order_is_held() {
+        ReflectionTestUtils.setField(service, "tagoExperimentEnabled", true);
+        var visits = List.of(new BoardingRouteSnapshot.Occurrence(11L, "s27", 27, "경유"),
+                new BoardingRouteSnapshot.Occurrence(12L, "s28", 28, "경유"),
+                new BoardingRouteSnapshot.Occurrence(14L, "s29", 29, "목적지"));
+        var m2352 = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "GGB222000209", "31130", 14L, 14L, visits, "M2352");
+        when(metadata.read(1L, 14L, 14L)).thenReturn(m2352);
+        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3417", null, 27),
+                tago("B", null, 99), tago("C", "wrong", 28), tago("D", null, null)));
+        var candidates = find(14L).candidates();
+        var selected = candidates.stream().filter(c -> "경기74아3417".equals(c.vehicleNumber())).findFirst().orElseThrow();
+        assertThat(selected.trackingSupport()).isEqualTo(TrackingSupport.CONDITIONAL);
+        assertThat(selected.boardingOccurrenceGap()).isEqualTo(2);
+        assertThat(selected.reasonCode()).isNull();
+        assertThat(candidates.stream().filter(c -> !"경기74아3417".equals(c.vehicleNumber())))
+                .allMatch(c -> c.trackingSupport() == TrackingSupport.HELD);
+        var duplicate = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "GGB222000209", "31130", 14L, 14L,
+                List.of(visits.getFirst(), new BoardingRouteSnapshot.Occurrence(15L, "duplicate", 27, "중복"), visits.getLast()), "M2352");
+        when(metadata.read(1L, 14L, 14L)).thenReturn(duplicate);
+        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3417", null, 27)));
+        assertThat(find(14L).candidates().getFirst().trackingSupport()).isEqualTo(TrackingSupport.HELD);
+    }
+
+    @Test
+    @DisplayName("TAGO nodeid가 없어도 유일한 순서로 후보 진행 위치를 표시하며 정류장 ID는 합성하지 않는다")
+    void missing_node_id_keeps_order_position() {
         when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("A", null, 30)));
         var candidate = find(12L).candidates().getFirst();
         assertThat(candidate.confirmationStatus()).isEqualTo(ConfirmationStatus.AVAILABLE);
         assertThat(candidate.candidateRef()).isNotNull();
-        assertThat(candidate.progress()).isNull();
-        assertThat(candidate.boardingOccurrenceGap()).isNull();
-        assertThat(candidate.reasonCode()).isEqualTo(ReasonCode.POSITION_UNAVAILABLE);
+        assertThat(candidate.progress().order()).isEqualTo(30);
+        assertThat(candidate.boardingOccurrenceGap()).isEqualTo(-1);
+        assertThat(references.resolve(candidate.candidateRef(), context(12L)).orElseThrow().rosterVehicle().stopId()).isNull();
     }
 
     @Test
@@ -110,7 +134,7 @@ class BoardingCandidateServiceTest {
     @DisplayName("검증된 traversal 배열 index로 정렬하고 raw order 차이는 간격으로 사용하지 않는다")
     void sort_by_traversal_index() {
         when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(
-                tago("Z", "s4", 40), tago("B", "s3", 30), tago("A", "s1", 10), tago("C", null, 20)));
+                tago("Z", "s4", 40), tago("B", "s3", 30), tago("A", "s1", 10), tago("C", null, null)));
         var candidates = find(12L).candidates();
         assertThat(candidates).extracting(Candidate::vehicleNumber).containsExactly("A", "B", "Z", "C");
         assertThat(candidates).extracting(Candidate::boardingOccurrenceGap).containsExactly(1, -1, -2, null);

@@ -92,11 +92,17 @@ public class BoardingVehicleTracker {
             return moving(session, vehicle);
         }
         if (session.provider() == TransitProvider.TAGO) {
-            if (vehicle.stopId() == null || vehicle.order() == null) {
+            if (vehicle.order() == null) {
                 return Input.held(BoardingStateReason.STALE_PROGRESS);
             }
+            int order = vehicle.order();
+            boolean orderOnly = vehicle.stopId() == null && session.traversal().occurrences().stream()
+                    .filter(occurrence -> occurrence.order() == order).count() == 1;
+            if (vehicle.stopId() == null && !orderOnly) {
+                return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+            }
             return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
-                    vehicle, BoardingProgressObservation.Meaning.VERIFIED_REACHED, false, null, false), null);
+                    vehicle, BoardingProgressObservation.Meaning.VERIFIED_REACHED, orderOnly, null, false), null);
         }
         if (session.provider() == TransitProvider.SEOUL_BUS && !Integer.valueOf(1).equals(vehicle.stopFlag())) {
             // Missing/unknown meaning is unavailable progress, not proof of lost continuity.

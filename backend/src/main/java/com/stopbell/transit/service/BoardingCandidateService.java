@@ -347,7 +347,8 @@ public class BoardingCandidateService {
         if (held == null && progressVehicle != null) {
             progressIndex = progressIndex(route, progressVehicle);
             if (progressIndex < 0) {
-                positionIssue = progressVehicle.stopId() == null || progressVehicle.order() == null
+                positionIssue = progressVehicle.order() == null || (route.provider() != TransitProvider.TAGO
+                        && progressVehicle.stopId() == null)
                         ? ReasonCode.POSITION_UNAVAILABLE : ReasonCode.METADATA_MISMATCH;
                 if (positionIssue == ReasonCode.METADATA_MISMATCH) {
                     held = positionIssue;
@@ -407,18 +408,21 @@ public class BoardingCandidateService {
     }
 
     private static int progressIndex(BoardingRouteSnapshot route, Vehicle vehicle) {
-        // No independent realtime-order validation exists for order-only observations.
-        // In particular, never fill a missing nodeid or treat a numeric match as a stop.
-        if (vehicle.stopId() == null || vehicle.order() == null || vehicle.order() <= 0) {
+        if (vehicle.order() == null || vehicle.order() <= 0
+                || (route.provider() != TransitProvider.TAGO && vehicle.stopId() == null)) {
             return -1;
         }
+        int match = -1;
         for (int index = 0; index < route.traversal().size(); index++) {
             var occurrence = route.traversal().get(index);
-            if (occurrence.order() == vehicle.order() && occurrence.externalStopId().equals(vehicle.stopId())) {
-                return index;
+            if (occurrence.order() == vehicle.order()) {
+                if (match >= 0 || (vehicle.stopId() != null && !occurrence.externalStopId().equals(vehicle.stopId()))) {
+                    return -1;
+                }
+                match = index;
             }
         }
-        return -1;
+        return match;
     }
 
     private static ReasonCode identityIssue(Vehicle vehicle, Set<String> conflicts) {

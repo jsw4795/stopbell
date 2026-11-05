@@ -76,6 +76,41 @@ class BoardingProgressEvaluatorTest {
                 Meaning.VERIFIED_REACHED, false, null, false);
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void tago_order_only_and_id_observations_can_alternate(boolean initialHasId) {
+        var base = tagoSnapshot(0, BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE, UTC_NOW);
+        var first = new BoardingCheckpoint(initialHasId ? "s0" : null, ORDERS.get(0), 0,
+                BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE, null, UTC_NOW, null);
+        var session = new BoardingTrackingSnapshot(base.id(), 0, base.status(), base.reason(), base.provider(),
+                base.routeId(), base.cityCode(), base.vehicleId(), base.vehicleNumber(), base.traversal(), first,
+                base.expiresAt(), true, 2);
+        var next = tagoObservation(session, 1, 20);
+        var v = next.vehicle();
+        var mixed = new BoardingProgressObservation(base.provider(), base.routeId(), base.cityCode(),
+                new Vehicle(v.id(), v.number(), initialHasId ? null : v.stopId(), v.order(), null, v.observedAt(), null, null, null),
+                Meaning.VERIFIED_REACHED, initialHasId, null, false);
+        var result = evaluator.evaluate(session, mixed, UTC_NOW.plusSeconds(20));
+        assertThat(result.outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
+        assertThat(result.checkpoint().getEvidence()).isEqualTo(initialHasId
+                ? BoardingCheckpoint.Evidence.VERIFIED_ORDER_ONLY : BoardingCheckpoint.Evidence.ID_ORDER);
+        assertThat(result.checkpoint().getStopExternalId()).isEqualTo(initialHasId ? null : "s1");
+    }
+
+    @Test
+    void tago_wrong_id_and_unknown_order_are_held_without_alert() {
+        var session = tagoSnapshot(0, BoardingCheckpoint.Evidence.ID_ORDER, UTC_NOW);
+        var observation = tagoObservation(session, 1, 20);
+        var vehicle = observation.vehicle();
+        for (var invalid : List.of(
+                new Vehicle(NUMBER, NUMBER, "wrong", vehicle.order(), null, vehicle.observedAt(), null, null, null),
+                new Vehicle(NUMBER, NUMBER, null, 999, null, vehicle.observedAt(), null, null, null))) {
+            var input = new BoardingProgressObservation(TransitProvider.TAGO, session.routeId(), session.cityCode(),
+                    invalid, Meaning.VERIFIED_REACHED, invalid.stopId() == null, null, false);
+            assertThat(evaluator.evaluate(session, input, UTC_NOW.plusSeconds(20)).outcome()).isEqualTo(Outcome.HELD);
+        }
+    }
+
     static BoardingTrackingSnapshot snapshot(int previousIndex) {
         var traversal = new BoardingTraversalSnapshot(1, TransitProvider.SEOUL_BUS, "route-id", null,
                 java.util.stream.IntStream.range(0, 5).mapToObj(index -> new BoardingTraversalSnapshot.Occurrence(

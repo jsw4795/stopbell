@@ -50,8 +50,9 @@ public class BoardingCheckpoint {
                 && stopOrder == 0 && index == -1;
         if ((!unlocated && (stopOrder <= 0 || index < 0)) || evidence == null || observedAt == null
                 || observedAt.getYear() < 1000 || observedAt.getYear() > 9999
-                || (!unlocated && (evidence != Evidence.VERIFIED_ORDER_ONLY ? stopExternalId == null || stopExternalId.isBlank()
-                    || stopExternalId.length() > 255 : stopExternalId != null))
+                || (!unlocated && (evidence == Evidence.ID_ORDER ? stopExternalId == null || stopExternalId.isBlank()
+                    || stopExternalId.length() > 255 : evidence == Evidence.VERIFIED_ORDER_ONLY ? stopExternalId != null
+                    : stopExternalId != null && (stopExternalId.isBlank() || stopExternalId.length() > 255)))
                 || (directionContext != null && (directionContext.isBlank() || directionContext.length() > 255))
                 || (providerDataTime != null && (providerDataTime.getYear() < 1000 || providerDataTime.getYear() > 9999
                     || providerDataTime.isAfter(observedAt)))) {
@@ -68,8 +69,10 @@ public class BoardingCheckpoint {
             throw new IllegalArgumentException("Checkpoint is outside traversal");
         }
         var occurrence = snapshot.occurrences().get(index);
-        if (stopOrder != occurrence.order() || (evidence != Evidence.VERIFIED_ORDER_ONLY
-                && !occurrence.externalStopId().equals(stopExternalId))) {
+        if (stopOrder != occurrence.order() || (stopExternalId != null
+                && !occurrence.externalStopId().equals(stopExternalId))
+                || (evidence == Evidence.UNVERIFIED_REFERENCE && stopExternalId == null
+                    && snapshot.provider() != com.stopbell.transit.domain.TransitProvider.TAGO)) {
             throw new IllegalArgumentException("Checkpoint contradicts traversal");
         }
     }

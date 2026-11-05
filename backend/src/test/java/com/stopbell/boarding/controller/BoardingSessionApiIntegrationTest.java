@@ -124,6 +124,55 @@ class BoardingSessionApiIntegrationTest {
     private BusRouteStopOccurrence target;
     private BusRouteStopOccurrence first;
 
+    @Test
+    void tago_m2352_order_only_candidate_creates_and_tracks_through_completion() {
+        org.springframework.test.util.ReflectionTestUtils.setField(candidates, "tagoExperimentEnabled", true);
+        org.springframework.test.util.ReflectionTestUtils.setField(polling, "tagoExperimentEnabled", true);
+        try {
+            route = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "GGB222000209", "M2352", "31130"));
+            occurrence("t26", 26);
+            occurrence("t27", 27);
+            occurrence("t28", 28);
+            target = occurrence("t29", 29);
+            var position = new java.util.concurrent.atomic.AtomicInteger(27);
+            when(tago.fetchVehicleLocations(any())).thenAnswer(invocation -> new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse(
+                    new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Response(
+                            new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Header("00", null),
+                            new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Body(
+                                    new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Items(List.of(
+                                            new com.stopbell.transit.dto.tago.TagoVehicleLocationItem("경기74아3417", null,
+                                                    position.get(), null, null))), 1, 1, 1000))));
+            var candidate = candidates.find(owner.getId(), route.getId(), target.getId(), target.getId()).candidates().getFirst();
+            assertThat(candidate.trackingSupport()).isEqualTo(com.stopbell.transit.dto.BoardingCandidatesResponse.TrackingSupport.CONDITIONAL);
+            assertThat(candidate.boardingOccurrenceGap()).isEqualTo(2);
+            var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, candidate.candidateRef(), null, 2));
+            var initial = sessions.findById(created.response().id()).orElseThrow().getCheckpoint();
+            assertThat(initial.getEvidence()).isEqualTo(BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE);
+            assertThat(initial.getStopExternalId()).isNull();
+            assertThat(initial.getStopOrder()).isEqualTo(27);
+            assertThat(initial.getProviderDataTime()).isNull();
+            assertThat(events.count()).isZero();
+            time.set(NOW.plusSeconds(20));
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            assertThat(events.count()).isZero();
+            position.set(28);
+            time.set(NOW.plusSeconds(40));
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            var checkpoint = sessions.findById(created.response().id()).orElseThrow().getCheckpoint();
+            assertThat(checkpoint.getEvidence()).isEqualTo(BoardingCheckpoint.Evidence.VERIFIED_ORDER_ONLY);
+            assertThat(checkpoint.getStopExternalId()).isNull();
+            assertThat(events.count()).isEqualTo(1);
+            position.set(29);
+            time.set(NOW.plusSeconds(60));
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            assertThat(service.find(owner.getId(), created.response().id()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
+            assertThat(events.count()).isEqualTo(1);
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(candidates, "tagoExperimentEnabled", false);
+            org.springframework.test.util.ReflectionTestUtils.setField(polling, "tagoExperimentEnabled", false);
+        }
+    }
+
     @BeforeEach
     void set_up() {
         jdbc.update("delete from notification_deliveries");
@@ -1575,7 +1624,7 @@ class BoardingSessionApiIntegrationTest {
 
     private BusRouteStopOccurrence occurrence(String id, int order) {
         return occurrences.saveAndFlush(new BusRouteStopOccurrence(route,
-                stops.saveAndFlush(new BusStop(TransitProvider.SEOUL_BUS, id, id.equals("s3") ? "목적지" : id, null, null)), order));
+                stops.saveAndFlush(new BusStop(route.getProvider(), id, id.equals("s3") ? "목적지" : id, null, null)), order));
     }
 
     private static SeoulBusVehicleLocationResponse roster(SeoulBusVehicleLocationItem... items) {
