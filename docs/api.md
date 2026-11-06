@@ -741,4 +741,4 @@ Flutter는 최종 확인 후 receipt를 Secure Storage에 계정별로 저장하
 
 ### Apple 서버 간 알림 (TASK-815 1단계)
 
-`apple.notifications.enabled=true`와 `apple.notifications.client-id`를 별도로 설정한 경우 `POST /auth/apple/notifications`가 인증 없이 JSON `{"payload":"<Apple JWS>"}`를 받는다. 기본값은 OFF이며 비활성화 시 404다. 검증과 저장이 성공하면 200, 잘못된 서명·Claim은 401, Apple 공개키 장애는 503, DB 실패는 서버 오류다. 성공 응답은 식별자별 인증 경계와 이벤트 저장 완료를 뜻하며 회원 삭제 완료를 뜻하지 않는다. 동일 `jti`는 중복 저장하지 않는다. 응답에는 사용자 정보가 없다.
+`apple.notifications.enabled=true`와 `apple.notifications.client-id`를 별도로 설정한 경우 `POST /auth/apple/notifications`가 인증 없이 JSON `{"payload":"<Apple JWS>"}`를 받는다. 기본값은 OFF이며 비활성화 시 404다. Worker는 별도 `apple.notifications.worker-enabled=true`도 필요하며 기본 OFF다. 검증과 저장이 성공하면 200, 잘못된 서명·Claim은 401, Apple 공개키 장애는 503, DB 실패는 서버 오류다. 성공 응답은 식별자별 인증 경계와 이벤트 저장 완료를 뜻하며 회원 삭제 완료를 뜻하지 않는다. 동일 `jti`는 중복 저장하지 않는다. 응답에는 사용자 정보가 없다.

@@ -309,7 +309,7 @@ Phase 5/7에서 구현한 correctness를 더 넓은 race, restart, 실제 환경
 - [x] TASK-812 Analytics / 장기 통계 필요성 결정 및 필요한 경우에만 최소 구현: 현재 공식 요구사항에 별도 수집을 정당화할 구체적인 제품 질문과 보존 근거가 없어 V1에서 별도 제품 Analytics·장기 통계 저장소를 도입하지 않는다. 운영 로그·지표와 NotificationEvent/Delivery의 correctness 역할을 유지하고, 향후 목적·최소 데이터·보존·삭제 근거가 생기면 재검토한다. 기존 Schema·보존 정책·Dependency·코드는 변경하지 않았다. [판단과 경계](architecture.md#analytics-도입-판단-task-812)를 따른다.
 - [ ] TASK-813 Production deployment / migration / backup & recovery readiness: 기존 Docker/health/shutdown 설정과 격리 restart 검증을 유지하고 [배포·복구 절차](production-operations.md)를 준비했다. 합성 데이터와 격리 MySQL 두 개를 사용한 fresh V1~V22 migration, 백업·별도 DB 복원 및 User/Alarm/Device/Notification과 Flyway history 비교, V21→V22 보존, migration 실패 시작 차단, readiness 집중 테스트 4회가 통과했다. 실제 운영 배포·secret 주입·backup/restore drill·traffic 차단·종료 예산은 미검증이다. 사용자는 운영 플랫폼과 복구 지점, 오래된 백업의 RefreshToken/Device 처리 정책을 결정하고 실제 복구와 배포를 검증해야 한다.
 - [x] TASK-814 Production UTC time contract 및 timestamp consistency
-- [ ] TASK-815 iOS public App Store release readiness: [출시 준비 점검](ios-release-readiness.md)을 추가했다. Apple 로그인 Backend API·암호화 credential 저장 및 기본 비활성화된 Flutter iOS 연동과 내부 회원 데이터 삭제를 구현했다. Backend Apple 철회·공개 탈퇴 API·영속 상태/재시작 복구를 구현했다. Flutter 탈퇴 UI와 receipt 기반 복구를 구현했다. 사용자가 실제 iPhone의 Apple 로그인·탈퇴·재가입을 검증했다. 철회 HTTP 응답·내부 상태의 직접 확인, 운영·출시 설정 검증과 서버 간 계정 상태 변경 알림, App Store 업로드·심사는 남았다. 개인정보 고지, capability/credential, 출시 빌드와 심사를 준비해야 한다.
+- [ ] TASK-815 iOS public App Store release readiness: [출시 준비 점검](ios-release-readiness.md)을 추가했다. Apple 로그인 Backend API·암호화 credential 저장 및 기본 비활성화된 Flutter iOS 연동과 내부 회원 데이터 삭제를 구현했다. Backend Apple 철회·공개 탈퇴 API·영속 상태/재시작 복구를 구현했다. Flutter 탈퇴 UI와 receipt 기반 복구를 구현했다. 사용자가 실제 iPhone의 Apple 로그인·탈퇴·재가입을 검증했다. 철회 HTTP 응답·내부 상태의 직접 확인, 운영·출시 설정 검증과 서버 간 계정 상태 변경 알림의 실환경 검증, App Store 업로드·심사는 남았다. 개인정보 고지, capability/credential, 출시 빌드와 심사를 준비해야 한다.
 - [x] TASK-816 프로젝트 종합 감사 후속 결함 수정
   - 목적: 종합 감사에서 발견한 AUD-01~AUD-13을 중요도에 따라 검토·수정하고 관련 테스트와 문서를 보강한다. 하나의 상위 Task로 관리하며 실제 수정·필수 검증 완료 전까지 `[ ]`를 유지한다.
   - 등록 범위 (2026-10-29): Task와 작업 계획만 추가한다. 이번 등록은 코드·Migration·테스트·Dependency·DB 변경이나 실제 Provider 호출·FCM 발송을 포함하지 않으며, 후속 지시 없이 수정에 착수하지 않는다. 기존 Task 번호와 완료 상태를 유지한다.
@@ -1082,9 +1082,11 @@ TASK-815 Backend 검증 (2026-11-03): Apple 철회 단위 15개, 회원 탈퇴 M
 
 TASK-815 receipt·Flutter 검증 (2026-11-03): 기존 Backend 회귀 1,541개에 receipt 관련 6개를 추가했다. V26 적용 후 첫 전체 실행의 Device migration 최신 버전 기대값 2개를 수정하고 집중 재검증했으며, 최종 Backend 전체 1,547개는 실패·오류·Skip 0이다. Flutter 정적 분석과 최종 전체 테스트 706개가 통과했다. 최종 확인·receipt 재시작 복구·수동 안내·인증 저장 실패·Refresh 및 늦은 응답 격리를 Mock과 격리 MySQL로 검증했다. 당시 실제 Apple 인증/철회·실기기·운영 및 출시 검증은 남아 있었으며 TASK-815는 미완료였다.
 
-TASK-815 Apple 인증 동시성 경계: 동일 Apple subject의 로그인과 검증된 삭제 이벤트를 영속 DB 행으로 직렬화하고 오래된 인증의 User·Token 발급 및 credential 덮어쓰기를 차단한다. 격리 MySQL 기반 Backend 전체 1,585개가 실패·오류·skip 없이 통과했고, 이후 보강한 검증 실패 시 경계 불변 단언도 선택 재실행해 통과했다. Worker·실제 삭제·운영 검증은 남아 TASK-815는 `[ ]`를 유지한다.
+TASK-815 Apple 서버 알림 삭제 Worker: 검증된 연결 해제·계정 삭제 이벤트에 대해 기존 계정 세대와 재가입 계정을 구분하고, 차단·source 중단 후 기존 삭제 transaction을 재사용한다. 격리 MySQL 기반 Backend 전체 1,603개 테스트가 실패·오류·skip 없이 통과했다. Worker와 수신은 기본 OFF이며 실환경 Apple 수신·운영 검증은 남아 TASK-815는 `[ ]`를 유지한다.
 
-TASK-815 서버 간 알림 1단계: 기본 OFF 수신 API, JWS 검증과 중복 방지 영속화를 구현했다. 삭제 이벤트는 PENDING이며 실제 삭제 Worker와 복구 처리는 후속 단계에 남는다. 실제 Apple 이벤트 수신 및 운영 설정은 미검증이다. TASK-815는 `[ ]`를 유지한다.
+TASK-815 Apple 인증 동시성 경계: 동일 Apple subject의 로그인과 검증된 삭제 이벤트를 영속 DB 행으로 직렬화하고 오래된 인증의 User·Token 발급 및 credential 덮어쓰기를 차단한다. 격리 MySQL 기반 Backend 전체 1,585개가 실패·오류·skip 없이 통과했고, 이후 보강한 검증 실패 시 경계 불변 단언도 선택 재실행해 통과했다. 당시 Worker·실제 삭제·운영 검증이 남아 TASK-815는 `[ ]`였다.
+
+TASK-815 서버 간 알림 1단계: 기본 OFF 수신 API, JWS 검증과 중복 방지 영속화를 구현했다. 당시 삭제 이벤트는 PENDING이었고 실제 삭제 Worker와 복구 처리는 후속 단계에 남아 있었다. 실제 Apple 이벤트 수신 및 운영 설정은 미검증이다. TASK-815는 `[ ]`를 유지한다.
 
 TASK-815 Apple 실기기 검증 (2026-11-06): 사용자가 실제 iPhone에서 Apple 최초 로그인·Backend 인증·APPLE 사용자 생성, 로그아웃 후 동일 계정 재로그인과 중복 없음, 앱 종료 후 세션 복원, 회원 탈퇴와 사용자·관련 데이터 및 Apple credential 삭제, 탈퇴 receipt 완료 기록 보존, 동일 계정 재가입과 새 세션·앱 사용 성공을 보고했다. Codex가 직접 실행한 검증은 아니다. 코드상 철회 경로는 존재하지만 실제 Apple HTTP 응답 및 내부 상태 전이의 직접 증거는 확인되지 않았다. 세부 결과와 남은 서버 간 알림·운영 키·출시 및 장애 검증은 [출시 준비 점검](ios-release-readiness.md#apple-로그인회원-탈퇴-실기기-검증-2026-11-06)을 따른다. TASK-815는 `[ ]`를 유지한다.
 

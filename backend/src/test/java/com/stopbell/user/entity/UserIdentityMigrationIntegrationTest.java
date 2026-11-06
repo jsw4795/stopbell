@@ -53,7 +53,7 @@ class UserIdentityMigrationIntegrationTest {
     @Test
     @DisplayName("Fresh DB의 전체 Migration은 Identity NOT NULL과 Provider별 복합 UNIQUE를 유지한다")
     void migrate_fresh_database() {
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(30);
+        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(31);
         assertIdentitySchema();
         insertIdentity("GOOGLE", "same-sub");
         insertIdentity("APPLE", "same-sub");
@@ -95,6 +95,21 @@ class UserIdentityMigrationIntegrationTest {
         assertThat(jdbc.queryForObject("select latest_revocation_at from apple_identity_boundaries where subject_hash=unhex(sha2('fixture-apple',256))", java.time.LocalDateTime.class))
                 .isEqualTo(java.time.LocalDateTime.parse("2026-01-01T00:00:20"));
         assertThat(jdbc.queryForObject("select count(*) from apple_identity_boundaries", Integer.class)).isOne();
+        flyway("latest", true).migrate();
+        assertLatestAndNoOp();
+    }
+
+    @Test
+    void upgradeV30PreservesExistingAppleStateWithoutInventingGeneration() {
+        flyway("30", true).migrate();
+        insertIdentity("APPLE", "v31-fixture");
+        long id = jdbc.queryForObject("select id from users where auth_provider='APPLE'", Long.class);
+        jdbc.update("insert into apple_credentials (user_id,encrypted_refresh_token) values (?,?)", id, "v1.fixture");
+        jdbc.update("insert into apple_notification_events (jti_hash,event_type,apple_subject,event_time,received_at,state) values (unhex(sha2('v31-jti',256)),'consent-revoked','v31-fixture','2026-01-01 00:00:20','2026-01-01 00:00:30','PENDING')");
+        assertThat(flyway("31", true).migrate().migrationsExecuted).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select apple_generation_issued_at from users where id=?", java.time.LocalDateTime.class, id)).isNull();
+        assertThat(jdbc.queryForObject("select encrypted_refresh_token from apple_credentials where user_id=?", String.class, id)).isEqualTo("v1.fixture");
+        assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=unhex(sha2('v31-jti',256))", String.class)).isEqualTo("PENDING");
         assertLatestAndNoOp();
     }
 
@@ -115,7 +130,7 @@ class UserIdentityMigrationIntegrationTest {
                 .hasRootCauseInstanceOf(SQLException.class);
         assertThatThrownBy(() -> jdbc.update("insert into apple_credentials (user_id, encrypted_refresh_token) values (?, 'v1.fixture')", Long.MAX_VALUE))
                 .hasRootCauseInstanceOf(SQLException.class);
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(7);
+        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(8);
         assertLatestAndNoOp();
     }
 
@@ -235,7 +250,7 @@ class UserIdentityMigrationIntegrationTest {
 
     private void assertLatestAndNoOp() {
         Flyway latest = flyway("latest", true);
-        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("30");
+        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("31");
         assertThat(latest.validateWithResult().validationSuccessful).isTrue();
         var history = jdbc.queryForList("select * from flyway_schema_history order by installed_rank");
         assertThat(latest.migrate().migrationsExecuted).isZero();

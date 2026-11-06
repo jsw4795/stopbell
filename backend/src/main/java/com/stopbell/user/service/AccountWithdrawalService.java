@@ -4,13 +4,10 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
-import com.stopbell.alarm.repository.AlarmRepository;
-import com.stopbell.boarding.repository.BoardingSessionRepository;
-import com.stopbell.boarding.service.BoardingTrackingRuntime;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
-import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import com.stopbell.user.auth.apple.AppleCredentialCipher;
+import com.stopbell.user.auth.apple.AppleIdentityBoundary;
 import com.stopbell.user.auth.apple.AppleTokenRevocation;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.repository.UserRepository;
@@ -19,7 +16,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -31,26 +27,21 @@ public class AccountWithdrawalService {
     private final AccountDeletionService deletion;
     private final ObjectProvider<AppleCredentialCipher> ciphers;
     private final ObjectProvider<AppleTokenRevocation> revocations;
-    private final AlarmRepository alarms;
-    private final BoardingSessionRepository sessions;
-    private final NotificationDeliveryRepository deliveries;
-    private final BoardingTrackingRuntime runtime;
+    private final AccountDeletionQuiescer quiescer;
     private final Clock clock;
     private final TransactionTemplate transaction;
+    private final AppleIdentityBoundary appleBoundary;
 
     public AccountWithdrawalService(UserRepository users, JdbcTemplate jdbc, AccountDeletionService deletion,
             ObjectProvider<AppleCredentialCipher> ciphers, ObjectProvider<AppleTokenRevocation> revocations,
-            AlarmRepository alarms, BoardingSessionRepository sessions, NotificationDeliveryRepository deliveries,
-            BoardingTrackingRuntime runtime, Clock jwtClock, PlatformTransactionManager manager) {
+            AccountDeletionQuiescer quiescer, Clock jwtClock, PlatformTransactionManager manager, AppleIdentityBoundary appleBoundary) {
         this.users = users;
+        this.appleBoundary = appleBoundary;
         this.jdbc = jdbc;
         this.deletion = deletion;
         this.ciphers = ciphers;
         this.revocations = revocations;
-        this.alarms = alarms;
-        this.sessions = sessions;
-        this.deliveries = deliveries;
-        this.runtime = runtime;
+        this.quiescer = quiescer;
         this.clock = jwtClock;
         transaction = new TransactionTemplate(manager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
@@ -82,12 +73,14 @@ public class AccountWithdrawalService {
                 return Result.PENDING;
             }
         }
+        if (state.equals("APPLE_NOTIFIED")) return Result.PENDING;
         // REVOKED / MANUAL_REQUIRED survive a failed deletion or an uncertain commit response.
         deletion.delete(userId);
         return state.equals("MANUAL_REQUIRED") ? Result.DELETED_MANUAL_APPLE_REVOCATION_REQUIRED : Result.DELETED;
     }
 
     private String prepare(long userId, String receiptHash) {
+        appleBoundary.lockExistingAppleUser(userId);
         var user = users.findByIdForUpdate(userId).orElse(null);
         if (user == null) return null;
         if (receiptHash != null) {
@@ -107,25 +100,7 @@ public class AccountWithdrawalService {
         String state = apple ? "PENDING" : "NOT_REQUIRED";
         jdbc.update("insert into account_deletions (user_id,state,requested_at,next_attempt_at) values (?,?,?,?)",
                 userId, state, now(), now().plusMinutes(1));
-        // Same order as deletion: User -> Alarm -> Session -> Delivery. Stop decisions before HTTP.
-        for (Long id : jdbc.queryForList("select id from alarms where user_id=? order by id", Long.class, userId)) {
-            alarms.findByIdForUpdate(id).ifPresent(alarm -> alarm.deactivate());
-        }
-        for (Long id : jdbc.queryForList("select id from boarding_sessions where user_id=? order by id", Long.class, userId)) {
-            sessions.findOwnedForUpdate(id, userId).ifPresent(session -> {
-                session.cancel(session.getRevision(), now());
-                long revision = session.getRevision();
-                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                    @Override public void afterCommit() { runtime.committed(id, revision, false); }
-                });
-            });
-        }
-        for (Long id : jdbc.queryForList("""
-                select d.id from notification_deliveries d join notification_events e on e.id=d.notification_event_id
-                where e.user_id=? order by d.id
-                """, Long.class, userId)) {
-            deliveries.findByIdForUpdate(id).ifPresent(delivery -> delivery.terminateDispatch(now()));
-        }
+        quiescer.stop(userId);
         return state;
     }
 
@@ -144,6 +119,7 @@ public class AccountWithdrawalService {
     }
 
     private String record(long userId, AppleTokenRevocation.Outcome outcome) {
+        appleBoundary.lockExistingAppleUser(userId);
         if (users.findByIdForUpdate(userId).isEmpty()) return null;
         var states = jdbc.queryForList("select state from account_deletions where user_id=? for update", String.class, userId);
         String state = states.getFirst();

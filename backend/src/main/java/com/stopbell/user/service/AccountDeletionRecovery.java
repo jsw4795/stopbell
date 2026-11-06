@@ -34,7 +34,7 @@ public class AccountDeletionRecovery {
         jdbc.update("delete from account_deletion_receipts where completed_at is not null and completed_at <= ?", now.minusDays(30));
         if (!enabled) return;
         for (long id : jdbc.queryForList("""
-                select user_id from account_deletions where next_attempt_at <= ?
+                select user_id from account_deletions where state <> 'APPLE_NOTIFIED' and next_attempt_at <= ?
                 order by next_attempt_at,user_id limit 10
                 """, Long.class, now)) {
             // Schedule before processing so a persistent DB failure on one account cannot starve others.

@@ -39,6 +39,8 @@ import com.stopbell.common.error.ErrorCode;
 import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.user.auth.apple.AppleCredentialCipher;
+import com.stopbell.user.auth.apple.AppleNotificationStore;
+import com.stopbell.user.auth.apple.AppleNotificationVerifier;
 import com.stopbell.user.auth.apple.AppleTokenRevocation;
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.identity.GoogleIdentityVerifier;
@@ -99,6 +101,8 @@ class AccountWithdrawalIntegrationTest {
     }
 
     @Autowired private AccountWithdrawalService withdrawal;
+    @Autowired private AccountDeletionService deletion;
+    @Autowired private AppleNotificationStore appleEvents;
     @Autowired private BoardingSessionRepository sessions;
     @Autowired private DeviceRepository devices;
     @Autowired private NotificationEventRepository events;
@@ -429,8 +433,8 @@ class AccountWithdrawalIntegrationTest {
     }
 
     @Test
-    @DisplayName("삭제 전 Snapshot을 읽은 로그인이 User 잠금을 기다려도 삭제 상태를 current read로 검사한다")
-    void stale_login_snapshot_cannot_issue_tokens() throws Exception {
+    @DisplayName("Apple 로그인과 앱 탈퇴가 같은 경계를 공유해 로그인 완료 후 탈퇴가 진행된다")
+    void login_and_withdrawal_serialize() throws Exception {
         var owner = apple();
         var read = new CountDownLatch(1);
         var resume = new CountDownLatch(1);
@@ -456,15 +460,18 @@ class AccountWithdrawalIntegrationTest {
             });
             assertThat(read.await(5, TimeUnit.SECONDS)).isTrue();
             var deleting = executor.submit(() -> withdrawal.withdraw(owner.getId()));
-            try {
-                assertThat(inHttp.await(5, TimeUnit.SECONDS)).isTrue();
-                resume.countDown();
-                assertThatThrownBy(() -> loggingIn.get(5, TimeUnit.SECONDS)).hasCauseInstanceOf(ApiException.class);
-                assertThat(count("refresh_tokens", owner)).isZero();
-            } finally { resume.countDown(); finish.countDown(); }
+            resume.countDown();
+            var tokens = loggingIn.get(5, TimeUnit.SECONDS);
+            try { assertThat(inHttp.await(5, TimeUnit.SECONDS)).isTrue(); }
+            finally { finish.countDown(); }
             assertThat(deleting.get(5, TimeUnit.SECONDS)).isEqualTo(AccountWithdrawalService.Result.DELETED);
-        } finally { doAnswer(call -> mockingDetails(users).getMockCreationSettings().getDefaultAnswer().answer(call))
-                .when(users).findByIdForUpdate(owner.getId()); }
+            assertThatThrownBy(() -> refresh.refresh(tokens.refreshToken())).isInstanceOf(InvalidRefreshTokenException.class);
+            assertThat(count("refresh_tokens", owner)).isZero();
+        } finally {
+            resume.countDown(); finish.countDown();
+            doAnswer(call -> mockingDetails(users).getMockCreationSettings().getDefaultAnswer().answer(call))
+                    .when(users).findByIdForUpdate(owner.getId());
+        }
     }
 
     @Test
@@ -654,6 +661,339 @@ class AccountWithdrawalIntegrationTest {
                     .when(users).findByIdForUpdate(owner.getId());
         }
         assertThat(withdrawal.withdraw(owner.getId())).isEqualTo(AccountWithdrawalService.Result.DELETED);
+    }
+
+    private AccountDeletionService.EventResult processAppleEvent(byte[] hash) {
+        var prepared = deletion.prepareAppleEvent(hash);
+        return prepared == AccountDeletionService.EventResult.READY ? deletion.deleteForAppleEvent(hash) : prepared;
+    }
+
+    private byte[] appleEvent(String type, String subject, java.time.Instant at) {
+        String jti = UUID.randomUUID().toString();
+        appleEvents.store(new AppleNotificationVerifier.Event(jti, type, subject, at));
+        try { return java.security.MessageDigest.getInstance("SHA-256").digest(jti.getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+        catch (java.security.NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"consent-revoked", "account-deleted"})
+    void verifiedAppleEventDeletesDataWithoutCallingRevoke(String type) throws Exception {
+        var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
+        var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
+        var pair = login.loginApple(identity, issued, (u, t) -> jdbc.update(
+                "insert into apple_credentials (user_id,encrypted_refresh_token,identity_issued_at) values (?,?,?)",
+                u.getId(), cipher.encrypt(u.getId(), "synthetic-refresh"), LocalDateTime.ofInstant(t, ZoneOffset.UTC)));
+        var owner = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow();
+        var other = users.saveAndFlush(new User(AuthProvider.GOOGLE, identity.providerUserId()));
+        var ownAlarm = alarm(owner);
+        var now = LocalDateTime.ofInstant(jwtClock.instant(), ZoneOffset.UTC).truncatedTo(ChronoUnit.MICROS);
+        var device = devices.saveAndFlush(new Device(owner, UUID.randomUUID().toString(),
+                "a".repeat(64), DevicePlatform.IOS, UUID.randomUUID().toString(), 0, now));
+        var evidence = new TransitEvent(TransitEventType.ONE_STOP_BEFORE, "vehicle", UUID.randomUUID(),
+                now.toInstant(ZoneOffset.UTC), null, null, null, null, null, null, null);
+        var event = events.saveAndFlush(new NotificationEvent(ownAlarm.getId(), owner, ownAlarm.getActivationGeneration(), evidence, now, now));
+        var delivery = deliveries.saveAndFlush(new NotificationDelivery(event, device, 0, now.plusMinutes(5), now));
+        var traversal = new BoardingTraversalSnapshot(1, TransitProvider.SEOUL_BUS, "route", null, List.of(
+                new BoardingTraversalSnapshot.Occurrence(1, "s0", 1),
+                new BoardingTraversalSnapshot.Occurrence(2, "s1", 2),
+                new BoardingTraversalSnapshot.Occurrence(3, "s2", 3)),
+                2, BoardingTraversalSnapshot.AlightAvailability.ALLOWED, "fixture");
+        var checkpoint = new BoardingCheckpoint("s0", 1, 0, BoardingCheckpoint.Evidence.ID_ORDER, null, now, now);
+        var session = sessions.saveAndFlush(new BoardingSession(owner, UUID.randomUUID().toString(),
+                "a".repeat(64), "vehicle", "number", "route", "target", traversal, checkpoint, now, now.plusHours(4)));
+        var hash = appleEvent(type, identity.providerUserId(), issued.plusSeconds(30));
+        assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.DELETED);
+        assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, hash)).isEqualTo("DELETED");
+        assertThat(users.existsById(owner.getId())).isFalse();
+        assertThat(users.existsById(other.getId())).isTrue();
+        assertThat(count("apple_credentials", owner)).isZero();
+        assertThat(count("refresh_tokens", owner)).isZero();
+        assertThat(alarms.existsById(ownAlarm.getId())).isFalse();
+        assertThat(sessions.existsById(session.getId())).isFalse();
+        assertThat(events.existsById(event.getId())).isFalse();
+        assertThat(deliveries.existsById(delivery.getId())).isFalse();
+        assertThat(devices.existsById(device.getId())).isFalse();
+        assertThatThrownBy(() -> refresh.refresh(pair.refreshToken())).isInstanceOf(InvalidRefreshTokenException.class);
+        mvc.perform(get("/api/v1/alarms").header("Authorization", "Bearer " + pair.accessToken())).andExpect(status().isUnauthorized());
+        verifyNoInteractions(revocation);
+    }
+
+    @Test void pendingDeletionBlocksReloginAndOldEventCannotDeleteNewAccount() {
+        var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
+        var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
+        login.loginApple(identity, issued, (u,t) -> {});
+        long oldId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
+        var eventTime = issued.plusSeconds(20);
+        var hash = appleEvent("consent-revoked", identity.providerUserId(), eventTime);
+        assertThatThrownBy(() -> login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {}))
+                .isInstanceOf(com.stopbell.user.auth.exception.InvalidSocialCredentialException.class);
+        assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.DELETED);
+        login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {});
+        long newId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
+        assertThat(newId).isNotEqualTo(oldId);
+        var delayed = appleEvent("consent-revoked", identity.providerUserId(), eventTime.minusSeconds(1));
+        assertThat(processAppleEvent(delayed)).isEqualTo(AccountDeletionService.EventResult.SKIPPED);
+        assertThat(users.existsById(newId)).isTrue();
+        assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.ALREADY_FINISHED);
+        assertThatThrownBy(() -> login.loginApple(identity, eventTime.minusSeconds(1), (u,t) -> {}))
+                .isInstanceOf(com.stopbell.user.auth.exception.InvalidSocialCredentialException.class);
+    }
+
+    @Test void lateRevocationStillDeletesOldAccountEvenAfterRelogin() {
+        var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
+        var initial = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
+        login.loginApple(identity, initial, (u,t) -> {});
+        long oldId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
+        var eventTime = initial.plusSeconds(30);
+        login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {});
+        assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId()).isEqualTo(oldId);
+        var hash = appleEvent("consent-revoked", identity.providerUserId(), eventTime);
+        assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.DELETED);
+        assertThat(users.existsById(oldId)).isFalse();
+        login.loginApple(identity, eventTime.plusSeconds(20), (u,t) -> {});
+        long newId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
+        assertThat(newId).isNotEqualTo(oldId);
+        assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.ALREADY_FINISHED);
+        assertThat(users.existsById(newId)).isTrue();
+    }
+
+    @Test void oneFailedEventDoesNotBlockOtherDueEvents() {
+        var issued = java.time.Instant.now().minusSeconds(100).truncatedTo(ChronoUnit.SECONDS);
+        var first = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        var second = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        var failHash = appleEvent("consent-revoked", first.getProviderUserId(), issued.plusSeconds(10));
+        var goodHash = appleEvent("account-deleted", second.getProviderUserId(), issued.plusSeconds(10));
+        jdbc.execute("create trigger reject_one_apple_worker before delete on users for each row begin if old.id = "
+                + first.getId() + " then signal sqlstate '45000' set message_text='synthetic failure'; end if; end");
+        try {
+            new AppleNotificationRecovery(jdbc, deletion, jwtClock, true, true).recover();
+            assertThat(users.existsById(first.getId())).isTrue();
+            assertThat(users.existsById(second.getId())).isFalse();
+            assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, failHash)).isEqualTo("PENDING");
+            assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, goodHash)).isEqualTo("DELETED");
+        } finally { jdbc.execute("drop trigger reject_one_apple_worker"); }
+    }
+
+    @Test void missingAppleUserIsSkippedAndFutureReenrolmentIsProtected() {
+        var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
+        var eventTime = java.time.Instant.now().minusSeconds(60).truncatedTo(ChronoUnit.SECONDS);
+        var hash = appleEvent("consent-revoked", identity.providerUserId(), eventTime);
+        assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.SKIPPED);
+        login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {});
+        long userId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
+        assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.ALREADY_FINISHED);
+        assertThat(users.existsById(userId)).isTrue();
+    }
+
+    @Test void unknownOrEqualAccountGenerationRequiresReview() {
+        var legacy = apple();
+        var now = java.time.Instant.now().minusSeconds(20).truncatedTo(ChronoUnit.SECONDS);
+        var hash = appleEvent("account-deleted", legacy.getProviderUserId(), now);
+        assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.REVIEW_REQUIRED);
+        assertThat(users.existsById(legacy.getId())).isTrue();
+        var subject = UUID.randomUUID().toString();
+        var equal = users.saveAndFlush(new User(AuthProvider.APPLE, subject, now));
+        var sameSecond = appleEvent("consent-revoked", subject, now.plusMillis(500));
+        assertThat(processAppleEvent(sameSecond)).isEqualTo(AccountDeletionService.EventResult.REVIEW_REQUIRED);
+        assertThat(users.existsById(equal.getId())).isTrue();
+    }
+
+    @Test void workerPreparationFailureLeavesEventRetryableWithoutPartialChanges() {
+        var issued = java.time.Instant.now().minusSeconds(100).truncatedTo(ChronoUnit.SECONDS);
+        var owner = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        var ownAlarm = alarm(owner);
+        var hash = appleEvent("consent-revoked", owner.getProviderUserId(), issued.plusSeconds(10));
+        jdbc.execute("create trigger reject_apple_worker_prepare before insert on account_deletions for each row signal sqlstate '45000' set message_text='synthetic failure'");
+        try {
+            new AppleNotificationRecovery(jdbc, deletion, jwtClock, true, true).recover();
+            assertThat(users.existsById(owner.getId())).isTrue();
+            assertThat(jdbc.queryForObject("select status from alarms where id=?", String.class, ownAlarm.getId())).isEqualTo("ACTIVE");
+            assertThat(count("account_deletions", owner)).isZero();
+            assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, hash)).isEqualTo("PENDING");
+            verifyNoInteractions(revocation);
+        } finally { jdbc.execute("drop trigger reject_apple_worker_prepare"); }
+        jdbc.update("update apple_notification_events set next_attempt_at=? where jti_hash=?", LocalDateTime.of(2000, 1, 1, 0, 0), hash);
+        new AppleNotificationRecovery(jdbc, deletion, jwtClock, true, true).recover();
+        assertThat(users.existsById(owner.getId())).isFalse();
+    }
+
+    @Test void workerRetriesAfterRollbackAndKeepsStateThroughRestart() throws Exception {
+        var issued = java.time.Instant.now().minusSeconds(100).truncatedTo(ChronoUnit.SECONDS);
+        var owner = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        var ownAlarm = alarm(owner);
+        var now = LocalDateTime.ofInstant(jwtClock.instant(), ZoneOffset.UTC).truncatedTo(ChronoUnit.MICROS);
+        var device = devices.saveAndFlush(new Device(owner, UUID.randomUUID().toString(), "a".repeat(64), DevicePlatform.IOS,
+                UUID.randomUUID().toString(), 0, now));
+        var evidence = new TransitEvent(TransitEventType.ONE_STOP_BEFORE, "vehicle", UUID.randomUUID(),
+                now.toInstant(ZoneOffset.UTC), null, null, null, null, null, null, null);
+        var event = events.saveAndFlush(new NotificationEvent(ownAlarm.getId(), owner, ownAlarm.getActivationGeneration(), evidence, now, now));
+        var delivery = deliveries.saveAndFlush(new NotificationDelivery(event, device, 0, now.plusMinutes(5), now));
+        var hash = appleEvent("consent-revoked", owner.getProviderUserId(), issued.plusSeconds(10));
+        jdbc.execute("create trigger reject_apple_worker_delete before delete on users for each row signal sqlstate '45000' set message_text='synthetic failure'");
+        try {
+            new AppleNotificationRecovery(jdbc, deletion, jwtClock, true, true).recover();
+            assertThat(users.existsById(owner.getId())).isTrue();
+            assertThat(alarms.existsById(ownAlarm.getId())).isTrue();
+            assertThat(jdbc.queryForObject("select status from alarms where id=?", String.class, ownAlarm.getId())).isEqualTo("INACTIVE");
+            assertThat(deliveries.findById(delivery.getId()).orElseThrow().getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
+            assertThat(jdbc.queryForObject("select state from account_deletions where user_id=?", String.class, owner.getId())).isEqualTo("APPLE_NOTIFIED");
+            assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, hash)).isEqualTo("PENDING");
+            assertThat(jdbc.queryForObject("select last_error from apple_notification_events where jti_hash=?", String.class, hash)).isEqualTo("PROCESSING_FAILED");
+            mvc.perform(get("/api/v1/alarms").header("Authorization", "Bearer " + tokens.createAccessToken(owner.getId())))
+                    .andExpect(status().isForbidden());
+            jdbc.update("update account_deletions set next_attempt_at=? where user_id=?", LocalDateTime.of(2000, 1, 1, 0, 0), owner.getId());
+            new AccountDeletionRecovery(jdbc, withdrawal, jwtClock, true).recover();
+            assertThat(jdbc.queryForObject("select state from account_deletions where user_id=?", String.class, owner.getId())).isEqualTo("APPLE_NOTIFIED");
+            verifyNoInteractions(revocation);
+        } finally { jdbc.execute("drop trigger reject_apple_worker_delete"); }
+        jdbc.update("update apple_notification_events set next_attempt_at=? where jti_hash=?", LocalDateTime.of(2000, 1, 1, 0, 0), hash);
+        new AppleNotificationRecovery(jdbc, deletion, jwtClock, true, true).recover();
+        assertThat(users.existsById(owner.getId())).isFalse();
+        assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, hash)).isEqualTo("DELETED");
+        assertThat(jdbc.queryForObject("select last_error from apple_notification_events where jti_hash=?", String.class, hash)).isNull();
+        new AppleNotificationRecovery(jdbc, deletion, jwtClock, true, true).recover();
+        assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, hash)).isEqualTo("DELETED");
+    }
+
+    @Test void eventWorkerAndNewLoginSerializeAcrossDeletion() throws Exception {
+        var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
+        var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
+        login.loginApple(identity, issued, (u,t) -> {});
+        var owner = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow();
+        var priorAlarm = alarm(owner);
+        var eventTime = issued.plusSeconds(20);
+        var hash = appleEvent("consent-revoked", identity.providerUserId(), eventTime);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var workerThread = new java.util.concurrent.atomic.AtomicReference<Thread>();
+        doAnswer(call -> {
+            if (Thread.currentThread() == workerThread.get()) {
+                entered.countDown();
+                assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
+            }
+            return mockingDetails(users).getMockCreationSettings().getDefaultAnswer().answer(call);
+        }).when(users).findByIdForUpdate(owner.getId());
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var deleting = executor.submit(() -> { workerThread.set(Thread.currentThread()); return processAppleEvent(hash); });
+            assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+            var started = new CountDownLatch(1);
+            var loggingIn = executor.submit(() -> { started.countDown(); return login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {}); });
+            try { assertThat(started.await(10, TimeUnit.SECONDS)).isTrue(); }
+            finally { release.countDown(); }
+            assertThat(deleting.get(10, TimeUnit.SECONDS)).isEqualTo(AccountDeletionService.EventResult.DELETED);
+            try { assertThat(loggingIn.get(10, TimeUnit.SECONDS)).isNotNull(); }
+            catch (java.util.concurrent.ExecutionException failure) {
+                assertThat(failure.getCause()).isInstanceOf(ApiException.class);
+                login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {});
+            }
+        } finally {
+            release.countDown();
+            doAnswer(call -> mockingDetails(users).getMockCreationSettings().getDefaultAnswer().answer(call))
+                    .when(users).findByIdForUpdate(owner.getId());
+        }
+        var current = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow();
+        assertThat(current.getId()).isNotEqualTo(owner.getId());
+        assertThat(alarms.existsById(priorAlarm.getId())).isFalse();
+        assertThat(count("alarms", current)).isZero();
+    }
+
+    @Test void concurrentWorkersProcessEventOnlyOnce() throws Exception {
+        var issued = java.time.Instant.now().minusSeconds(100).truncatedTo(ChronoUnit.SECONDS);
+        var owner = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        var hash = appleEvent("consent-revoked", owner.getProviderUserId(), issued.plusSeconds(10));
+        var start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var first = executor.submit(() -> { start.await(); return processAppleEvent(hash); });
+            var second = executor.submit(() -> { start.await(); return processAppleEvent(hash); });
+            start.countDown();
+            assertThat(List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(AccountDeletionService.EventResult.DELETED, AccountDeletionService.EventResult.ALREADY_FINISHED);
+        }
+        assertThat(users.existsById(owner.getId())).isFalse();
+    }
+
+    @Test void distinctAppleEventsProcessConcurrentlyWithoutDoubleDeletion() throws Exception {
+        var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
+        var owner = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        var first = appleEvent("consent-revoked", owner.getProviderUserId(), issued.plusSeconds(10));
+        var second = appleEvent("account-deleted", owner.getProviderUserId(), issued.plusSeconds(11));
+        var start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var one = executor.submit(() -> { start.await(); return processAppleEvent(first); });
+            var two = executor.submit(() -> { start.await(); return processAppleEvent(second); });
+            start.countDown();
+            assertThat(List.of(one.get(10, TimeUnit.SECONDS), two.get(10, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(AccountDeletionService.EventResult.DELETED, AccountDeletionService.EventResult.SKIPPED);
+        }
+        assertThat(users.existsById(owner.getId())).isFalse();
+        verifyNoInteractions(revocation);
+    }
+
+    @Test void eventReceiptAndWorkerProcessingSerializeForSameSubject() throws Exception {
+        var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
+        var owner = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        var first = appleEvent("consent-revoked", owner.getProviderUserId(), issued.plusSeconds(10));
+        var secondEvent = new AppleNotificationVerifier.Event(UUID.randomUUID().toString(), "account-deleted", owner.getProviderUserId(), issued.plusSeconds(11));
+        var start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var deleting = executor.submit(() -> { start.await(); return processAppleEvent(first); });
+            var receiving = executor.submit(() -> { start.await(); appleEvents.store(secondEvent); return true; });
+            start.countDown();
+            assertThat(deleting.get(10, TimeUnit.SECONDS)).isEqualTo(AccountDeletionService.EventResult.DELETED);
+            assertThat(receiving.get(10, TimeUnit.SECONDS)).isTrue();
+        }
+        byte[] second = java.security.MessageDigest.getInstance("SHA-256").digest(secondEvent.jti().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(processAppleEvent(second)).isEqualTo(AccountDeletionService.EventResult.SKIPPED);
+        assertThat(users.existsById(owner.getId())).isFalse();
+    }
+
+    @Test void distinctEventsForSameUserNeverDeleteRecreatedUser() {
+        var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
+        var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
+        login.loginApple(identity, issued, (u,t) -> {});
+        var first = appleEvent("consent-revoked", identity.providerUserId(), issued.plusSeconds(20));
+        var second = appleEvent("account-deleted", identity.providerUserId(), issued.plusSeconds(21));
+        assertThat(processAppleEvent(first)).isEqualTo(AccountDeletionService.EventResult.DELETED);
+        login.loginApple(identity, issued.plusSeconds(30), (u,t) -> {});
+        long current = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
+        assertThat(processAppleEvent(second)).isEqualTo(AccountDeletionService.EventResult.SKIPPED);
+        assertThat(users.existsById(current)).isTrue();
+    }
+
+    @Test void appleEventAndInAppWithdrawalShareReceiptAndDoNotDoubleDelete() throws Exception {
+        var issued = java.time.Instant.now().minusSeconds(100).truncatedTo(ChronoUnit.SECONDS);
+        var owner = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        jdbc.update("insert into apple_credentials (user_id,encrypted_refresh_token,identity_issued_at) values (?,?,?)",
+                owner.getId(), cipher.encrypt(owner.getId(), "synthetic-refresh"), LocalDateTime.ofInstant(issued, ZoneOffset.UTC));
+        var hash = appleEvent("consent-revoked", owner.getProviderUserId(), issued.plusSeconds(10));
+        String receiptHash = "b".repeat(64);
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        when(revocation.revoke(anyString())).thenAnswer(call -> {
+            entered.countDown();
+            assertThat(release.await(10, TimeUnit.SECONDS)).isTrue();
+            return AppleTokenRevocation.Outcome.REVOKED;
+        });
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var manual = executor.submit(() -> withdrawal.withdraw(owner.getId(), receiptHash));
+            try {
+                assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
+                assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.DELETED);
+            } finally { release.countDown(); }
+            assertThat(manual.get(10, TimeUnit.SECONDS)).isEqualTo(AccountWithdrawalService.Result.DELETED);
+        }
+        assertThat(jdbc.queryForObject("select state from account_deletion_receipts where receipt_hash=?", String.class, receiptHash)).isEqualTo("DELETED");
+        assertThat(users.existsById(owner.getId())).isFalse();
+        assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.ALREADY_FINISHED);
+    }
+
+    @Test void disabledWorkerLeavesPendingUserUnchanged() {
+        var issued = java.time.Instant.now().minusSeconds(100).truncatedTo(ChronoUnit.SECONDS);
+        var owner = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        var hash = appleEvent("consent-revoked", owner.getProviderUserId(), issued.plusSeconds(10));
+        new AppleNotificationRecovery(jdbc, deletion, jwtClock, true, false).recover();
+        assertThat(users.existsById(owner.getId())).isTrue();
+        assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, hash)).isEqualTo("PENDING");
     }
 
     private User user(AuthProvider provider) { return users.saveAndFlush(new User(provider, UUID.randomUUID().toString())); }

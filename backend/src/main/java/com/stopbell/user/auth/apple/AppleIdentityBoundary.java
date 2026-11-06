@@ -9,6 +9,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 
 import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
+import com.stopbell.user.entity.User;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -33,6 +34,27 @@ public class AppleIdentityBoundary {
             throw new InvalidSocialCredentialException();
         }
         jdbc.update("update apple_identity_boundaries set latest_identity_issued_at=? where subject_hash=?", time, key);
+    }
+
+    /** Acquire before the User lock when an in-app withdrawal targets an Apple user. */
+    public void lockExistingAppleUser(long userId) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) throw new IllegalStateException("Apple identity boundary requires a transaction");
+        var subjects = jdbc.query("select provider_user_id from users where id=? and auth_provider='APPLE'",
+                (rs, index) -> rs.getString(1), userId);
+        if (!subjects.isEmpty()) lock(subjects.getFirst());
+    }
+
+    /** Called while holding the subject boundary and User lock. */
+    public void requireNoApplicableEvent(User user) {
+        var events = jdbc.query("select apple_subject,event_time from apple_notification_events force index (ix_apple_notification_subject_state) where apple_subject=? and state in ('PENDING','REVIEW_REQUIRED') and event_type in ('consent-revoked','account-deleted') for update",
+                (rs, index) -> new PendingTime(rs.getString(1), rs.getObject(2, LocalDateTime.class)), user.getProviderUserId());
+        LocalDateTime generation = user.getAppleGenerationIssuedAt();
+        for (PendingTime event : events) {
+            if (user.getProviderUserId().equals(event.subject()) && (generation == null
+                    || !generation.truncatedTo(ChronoUnit.SECONDS).isAfter(event.time().truncatedTo(ChronoUnit.SECONDS)))) {
+                throw new InvalidSocialCredentialException();
+            }
+        }
     }
 
     /** Caller must hold the transaction through event storage and any future deletion decision. */
@@ -74,6 +96,8 @@ public class AppleIdentityBoundary {
     public record PendingAssessment(String subject, TemporalDecision decision) {
         @Override public String toString() { return "Apple pending assessment [redacted]"; }
     }
+
+    private record PendingTime(String subject, LocalDateTime time) { }
 
     private record Times(LocalDateTime identity, LocalDateTime revocation) { }
 

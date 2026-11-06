@@ -27,6 +27,7 @@ public class LoginService {
     private final JwtTokenService jwtTokenService;
     private final RefreshTokenService refreshTokenService;
     private final TransactionTemplate loginTransaction;
+    private final TransactionTemplate appleLoginTransaction;
     private final AppleIdentityBoundary appleBoundary;
 
     public LoginService(
@@ -42,6 +43,9 @@ public class LoginService {
         this.refreshTokenService = refreshTokenService;
         this.loginTransaction = new TransactionTemplate(transactionManager);
         this.loginTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.appleLoginTransaction = new TransactionTemplate(transactionManager);
+        this.appleLoginTransaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        this.appleLoginTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     }
 
     public TokenResponse login(ExternalIdentity identity) {
@@ -57,19 +61,20 @@ public class LoginService {
     }
 
     private TokenResponse login(ExternalIdentity identity, Instant issuedAt, BiConsumer<User, Instant> storeCredential) {
+        TransactionTemplate transaction = storeCredential == null ? loginTransaction : appleLoginTransaction;
         try {
-            return loginTransaction.execute(status -> {
+            return transaction.execute(status -> {
                 if (storeCredential != null) appleBoundary.acceptLogin(identity.providerUserId(), issuedAt);
                 User user = userRepository.findByAuthProviderAndProviderUserId(
                         identity.provider(),
                         identity.providerUserId()
-                ).orElseGet(() -> createUser(identity));
+                ).orElseGet(() -> createUser(identity, issuedAt));
                 if (storeCredential != null && !identity.providerUserId().equals(user.getProviderUserId())) throw new InvalidSocialCredentialException();
                 return issueTokens(user, issuedAt, storeCredential);
             });
         } catch (IdentityConflict conflict) {
             // execute() has completed rollback and discarded the failed persistence context.
-            return loginTransaction.execute(status -> {
+            return transaction.execute(status -> {
                 if (storeCredential != null) appleBoundary.acceptLogin(identity.providerUserId(), issuedAt);
                 User user = userRepository.findByAuthProviderAndProviderUserId(
                         identity.provider(), identity.providerUserId()
@@ -83,9 +88,10 @@ public class LoginService {
         }
     }
 
-    private User createUser(ExternalIdentity identity) {
+    private User createUser(ExternalIdentity identity, Instant issuedAt) {
         try {
-            return userRepository.saveAndFlush(new User(identity.provider(), identity.providerUserId()));
+            return userRepository.saveAndFlush(issuedAt == null ? new User(identity.provider(), identity.providerUserId())
+                    : new User(identity.provider(), identity.providerUserId(), issuedAt));
         } catch (DataIntegrityViolationException failure) {
             for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
                 if (cause instanceof ConstraintViolationException violation
@@ -108,6 +114,7 @@ public class LoginService {
                 .orElseThrow(() -> new IllegalStateException("User identity is unavailable"));
         userRepository.requireActive(locked.getId());
         if (storeCredential != null) {
+            appleBoundary.requireNoApplicableEvent(locked);
             storeCredential.accept(locked, issuedAt);
         }
         return new TokenResponse(

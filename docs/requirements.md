@@ -169,6 +169,8 @@ Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고
 
 인증된 사용자는 자신의 계정 삭제를 Backend에 요청할 수 있다. Apple 계정은 저장된 토큰 철회를 시도하며 완료·처리 중·수동 Apple 연결 해제 필요를 구분한다. 삭제 도중 신규 인증/사용자 데이터 생성을 차단하고 외부 장애와 DB 실패·재시작 후 삭제를 복구한다. 기존 사용자 소유 데이터 삭제 범위와 타 사용자 알림 관계 보존 정책을 유지한다. 공개 응답·재시도·Token 무효화는 [API](api.md#7-회원-탈퇴-task-815-backend)를 따른다. Flutter는 탈퇴 확인과 receipt 기반 결과 복구 및 Apple 수동 연결 해제 안내를 제공한다. 사용자 보고 실기기 탈퇴 결과와 미확인 철회 증거는 [출시 준비 점검](ios-release-readiness.md#apple-로그인회원-탈퇴-실기기-검증-2026-11-06)을 따르며 출시 검증은 후속 작업이다. TASK-815는 미완료다.
 
+Apple 서버의 검증된 `consent-revoked`와 `account-deleted`는 해당 기존 Apple 계정과 사용자 데이터를 삭제한다. 이후 재인증은 새 StopBell 계정이며 이전 알람과 탑승 데이터는 복원하지 않는다. 이메일 변경 알림은 사용자 데이터를 변경하지 않고, 불확실한 대상은 삭제하지 않고 검토한다. 처리·복구 조건은 [Architecture](architecture.md#apple-서버-간-알림과-자동-탈퇴-task-815)를 따른다.
+
 ## 5. 비기능 요구사항
 
 ### NFR-001 신뢰성

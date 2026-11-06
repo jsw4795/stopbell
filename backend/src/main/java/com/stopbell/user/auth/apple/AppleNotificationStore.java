@@ -36,19 +36,21 @@ public class AppleNotificationStore {
                 LocalDateTime.ofInstant(event.eventTime(), ZoneOffset.UTC),
                 LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC), pending ? "PENDING" : "IGNORED");
         if (pending) {
-            var saved = jdbc.queryForObject("select event_type,apple_subject,event_time from apple_notification_events where jti_hash=? for update",
-                    (rs, index) -> new SavedEvent(rs.getString(1), rs.getString(2), rs.getObject(3, LocalDateTime.class)), jtiHash);
-            if (!event.type().equals(saved.type()) || !event.subject().equals(saved.subject())
+            var saved = jdbc.queryForObject("select event_type,apple_subject,event_time,state from apple_notification_events where jti_hash=? for update",
+                    (rs, index) -> new SavedEvent(rs.getString(1), rs.getString(2), rs.getObject(3, LocalDateTime.class), rs.getString(4)), jtiHash);
+            if (!event.type().equals(saved.type()) || (saved.subject() != null && !event.subject().equals(saved.subject()))
                     || !LocalDateTime.ofInstant(event.eventTime(), ZoneOffset.UTC).equals(saved.time())) {
                 throw new IllegalStateException("Conflicting Apple notification identity");
             }
-            boundary.recordRevocation(boundaryKey, event.eventTime());
+            if (saved.state().equals("PENDING") || saved.state().equals("REVIEW_REQUIRED")) {
+                boundary.recordRevocation(boundaryKey, event.eventTime());
+            }
         }
         jdbc.update("delete from apple_notification_events where state='IGNORED' and received_at <= ?",
                 LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC).minusDays(30));
     }
 
-    private record SavedEvent(String type, String subject, LocalDateTime time) { }
+    private record SavedEvent(String type, String subject, LocalDateTime time, String state) { }
 
     private static byte[] hash(String value) {
         try { return MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)); }

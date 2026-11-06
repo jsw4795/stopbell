@@ -1,6 +1,7 @@
 package com.stopbell.user.entity;
 
 import java.time.LocalDateTime;
+import java.time.Instant;
 import java.time.ZoneOffset;
 
 import jakarta.persistence.Column;
@@ -29,6 +30,9 @@ public class User {
     @Column(name = "provider_user_id", nullable = false, length = 255)
     private String providerUserId;
 
+    @Column(name = "apple_generation_issued_at", updatable = false)
+    private LocalDateTime appleGenerationIssuedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -42,6 +46,14 @@ public class User {
         this.authProvider = authProvider;
         this.providerUserId = providerUserId;
     }
+
+    public User(AuthProvider authProvider, String providerUserId, Instant appleIssuedAt) {
+        this(authProvider, providerUserId);
+        if (authProvider != AuthProvider.APPLE || appleIssuedAt == null) throw new IllegalArgumentException("Apple identity required");
+        this.appleGenerationIssuedAt = LocalDateTime.ofInstant(appleIssuedAt, ZoneOffset.UTC);
+    }
+
+    public LocalDateTime getAppleGenerationIssuedAt() { return appleGenerationIssuedAt; }
 
     @PrePersist
     private void onPrePersist() {

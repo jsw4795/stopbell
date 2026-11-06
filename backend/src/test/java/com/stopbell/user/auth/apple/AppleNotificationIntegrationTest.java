@@ -22,6 +22,7 @@ import com.nimbusds.jwt.SignedJWT;
 import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.service.LoginService;
+import com.stopbell.user.service.AccountDeletionService;
 import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
 import com.stopbell.user.entity.AuthProvider;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -61,6 +62,7 @@ class AppleNotificationIntegrationTest {
     @Autowired LoginService login;
     @Autowired AppleNotificationStore store;
     @Autowired AppleIdentityBoundary boundary;
+    @Autowired AccountDeletionService deletion;
     @Autowired PlatformTransactionManager manager;
     @MockitoBean AppleNotificationVerifier configuredVerifier;
     static RSAKey key;
@@ -198,12 +200,26 @@ class AppleNotificationIntegrationTest {
         assertThatThrownBy(() -> login.loginApple(new ExternalIdentity(AuthProvider.APPLE, subject), eventTime, (u, t) -> {}))
                 .isInstanceOf(InvalidSocialCredentialException.class);
     }
+    @Test void signedEventPersistsThenDeletesOnlyItsAppleAccount() throws Exception {
+        String subject = UUID.randomUUID().toString();
+        String jti = UUID.randomUUID().toString();
+        Instant eventTime = Instant.now().minusSeconds(10).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+        var apple = new ExternalIdentity(AuthProvider.APPLE, subject);
+        login.loginApple(apple, eventTime.minusSeconds(10), (u, t) -> {});
+        login.login(new ExternalIdentity(AuthProvider.GOOGLE, subject));
+        assertThat(send(sign(eventClaims("account-deleted", jti, subject, eventTime), key, "key"))).isEqualTo(200);
+        assertThat(deletion.prepareAppleEvent(jtiHash(jti))).isEqualTo(AccountDeletionService.EventResult.READY);
+        assertThat(deletion.deleteForAppleEvent(jtiHash(jti))).isEqualTo(AccountDeletionService.EventResult.DELETED);
+        assertThat(jdbc.queryForObject("select count(*) from users where auth_provider='APPLE' and provider_user_id=?", Integer.class, subject)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from users where auth_provider='GOOGLE' and provider_user_id=?", Integer.class, subject)).isOne();
+        assertThat(send(sign(eventClaims("account-deleted", jti, subject, eventTime), key, "key"))).isEqualTo(200);
+        assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, jtiHash(jti))).isEqualTo("DELETED");
+    }
     @Test void pendingAssessmentUsesCurrentReadAfterAnOlderRepeatableReadSnapshot() throws Exception {
         String subject = UUID.randomUUID().toString();
         String jti = UUID.randomUUID().toString();
         Instant eventTime = Instant.now().minusSeconds(20).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
         var identity = new ExternalIdentity(AuthProvider.APPLE, subject);
-        login.loginApple(identity, eventTime.minusSeconds(10), (u, t) -> {});
         store.store(new AppleNotificationVerifier.Event(jti, "consent-revoked", subject, eventTime));
         var transaction = new TransactionTemplate(manager);
         transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);

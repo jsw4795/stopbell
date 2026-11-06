@@ -45,6 +45,8 @@ Database Schema와 달리 단순히 컬럼을 정의하는 것이 아니라, 서
 
     providerUserId
 
+    appleGenerationIssuedAt (nullable)
+
     createdAt
 
     updatedAt
@@ -60,6 +62,8 @@ Database에서는 MySQL `BIGINT AUTO_INCREMENT`를 사용한다. JPA 구현 시�
 `User.id`는 StopBell 내부 PK이며 Alarm, Device 등 다른 Domain이 사용자를 참조할 때 사용한다. 외부 Social Identity는 User에 직접 저장하며, 별도 `AuthIdentity` Domain은 만들지 않는다.
 
 `authProvider`는 `GOOGLE`, `APPLE`, `KAKAO`, `NAVER` 값을 갖는 `AuthProvider` Enum이며, JPA와 Database에는 문자열로 저장한다. 최초 Provider는 `GOOGLE`이고, Backend는 Google과 Apple의 검증된 `sub`를 `providerUserId`로 사용한다. `authProvider`와 `providerUserId` 조합은 하나의 StopBell User를 유일하게 식별해야 한다.
+
+`appleGenerationIssuedAt`은 새 Apple User 생성에 사용된 검증된 ID token 발급 시각이며 재로그인으로 바꾸지 않는다. 기존 User와 Google User는 NULL일 수 있다. 이벤트 판단은 [Architecture](architecture.md#apple-서버-간-알림과-자동-탈퇴-task-815)를 따른다.
 
 동일한 실제 사람이 서로 다른 Provider로 로그인하더라도 각각 별도 User로 처리한다. Account Linking과 Account Merge는 현재 범위에 포함하지 않는다.
 
@@ -755,7 +759,7 @@ TASK-707의 NotificationDelivery 생성자는 전달받은 expiresAt/createdAt�
 
 TASK-709의 `beginAttempt`는 PENDING/due/fresh row의 count/start/revision과 recovery 예약을 기록하고 이전 result/code를 지운다. `markAccepted`는 기한 이후 도착한 접수 응답도 terminal ACCEPTED로 기록한다. `recordFailure`와 `scheduleRetry`는 실제 결과 및 기한 이하 예약을 보존하고 `markFailed`/`expire`는 terminal 예약을 제거한다. local 종료는 이전 실제 result를 보존하며 가짜 result를 만들지 않는다. 모든 operational 시각은 UTC microsecond 값이다. Terminal row는 Service current-read gate로 제외하고 Entity도 attempt/결과/retry mutation을 거부한다.
 
-Alarm hard delete는 NotificationEvent/Delivery와 원본 alarmId/owner를 보존하고 PENDING만 명시적으로 종료한다. ACCEPTED/FAILED/EXPIRED는 보존한다. 진행/접수 중 FCM 회수는 보장하지 않는다. Event의 User, Delivery의 Event/Device는 non-cascade FK이며 참조 중 hard delete를 제한한다. 내부 회원 삭제는 소유 Event와 Delivery를 정리하고 다른 User의 Event·Delivery는 보존한다. 공개 탈퇴와 Apple 철회는 후속 작업이다. 기존 NotificationHistory 코드는 제거했고 legacy 데이터의 조건부 보존은 [database.md](database.md#notification_history-legacy-보존-정책)가 소유한다. Phase 8 Analytics와 operational delivery data는 별도 책임으로 유지한다.
+Alarm hard delete는 NotificationEvent/Delivery와 원본 alarmId/owner를 보존하고 PENDING만 명시적으로 종료한다. ACCEPTED/FAILED/EXPIRED는 보존한다. 진행/접수 중 FCM 회수는 보장하지 않는다. Event의 User, Delivery의 Event/Device는 non-cascade FK이며 참조 중 hard delete를 제한한다. 내부 회원 삭제는 소유 Event와 Delivery를 정리하고 다른 User의 Event·Delivery는 보존한다. 공개 탈퇴와 Apple 철회는 [Architecture](architecture.md#회원-탈퇴와-apple-철회-복구-task-815-backend)를 따른다. 기존 NotificationHistory 코드는 제거했고 legacy 데이터의 조건부 보존은 [database.md](database.md#notification_history-legacy-보존-정책)가 소유한다. Phase 8 Analytics와 operational delivery data는 별도 책임으로 유지한다.
 
 ------------------------------------------------------------------------
 
