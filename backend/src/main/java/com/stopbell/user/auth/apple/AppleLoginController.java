@@ -36,8 +36,8 @@ public class AppleLoginController {
         if (request == null) throw new InvalidSocialCredentialException();
         AppleAuthentication.Result result = authentication.authenticate(
                 request.identityToken(), request.authorizationCode(), request.nonce());
-        TokenResponse tokens = loginService.loginApple(new ExternalIdentity(AuthProvider.APPLE, result.subject()),
-                user -> credentials.store(user, result.refreshToken()));
+        TokenResponse tokens = loginService.loginApple(new ExternalIdentity(AuthProvider.APPLE, result.subject()), result.identityIssuedAt(),
+                (user, issuedAt) -> credentials.store(user, result.refreshToken(), issuedAt));
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(tokens);
     }
 

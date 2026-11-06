@@ -415,8 +415,8 @@ class AccountWithdrawalIntegrationTest {
             var deleting = executor.submit(() -> withdrawal.withdraw(owner.getId()));
             try {
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-                assertDeletionInProgress(() -> login.loginApple(new ExternalIdentity(AuthProvider.APPLE, owner.getProviderUserId()),
-                        ignored -> { throw new AssertionError("credential must not be replaced"); }));
+                assertDeletionInProgress(() -> login.loginApple(new ExternalIdentity(AuthProvider.APPLE, owner.getProviderUserId()), java.time.Instant.now(),
+                        (ignored, issuedAt) -> { throw new AssertionError("credential must not be replaced"); }));
                 assertDeletionInProgress(() -> refresh.refresh(token));
                 assertDeletionInProgress(() -> alarmService.activate(owner.getId(), alarm.getId()));
                 assertDeletionInProgress(() -> alarmService.create(owner.getId(),
@@ -452,7 +452,7 @@ class AccountWithdrawalIntegrationTest {
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var loggingIn = executor.submit(() -> {
                 loginThread.set(Thread.currentThread());
-                return login.loginApple(new ExternalIdentity(AuthProvider.APPLE, owner.getProviderUserId()), ignored -> {});
+                return login.loginApple(new ExternalIdentity(AuthProvider.APPLE, owner.getProviderUserId()), java.time.Instant.now(), (ignored, issuedAt) -> {});
             });
             assertThat(read.await(5, TimeUnit.SECONDS)).isTrue();
             var deleting = executor.submit(() -> withdrawal.withdraw(owner.getId()));

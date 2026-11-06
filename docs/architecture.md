@@ -706,4 +706,8 @@ Flutter는 탈퇴 전 세션을 동결하고 진행 중 Refresh 회전을 완료
 
 Apple 로그인과 독립적인 `apple.notifications.enabled`는 기본 false이며 활성화 시 `apple.notifications.client-id`에 대상 App ID를 지정한다. 알림은 Apple JWKS의 kid에 해당하는 RSA 공개키와 RS256으로 서명을 검증하고 알림 전용 issuer·audience·발급/선택적 만료 시각·jti·이벤트 필드를 확인한 후 저장한다. 원문 JWS와 식별자는 로그에 남기지 않는다. 키 조회 장애와 DB 오류는 성공으로 응답하지 않는다. 저장 상태와 보존은 [Database](database.md#apple_notification_events-task-815-알림-1단계)를 따른다.
 
-1단계는 `consent-revoked`, `account-deleted`를 PENDING으로만 저장하고 어떤 사용자도 삭제하지 않는다. `email-disabled`, `email-enabled`는 사용자 데이터를 변경하지 않는다. 확정 정책은 향후 두 삭제 이벤트에 기존 탈퇴·데이터 삭제를 적용하고, 재인증 이후의 계정에 지연 이벤트가 적용되지 않도록 인증 시각과 동시성을 검증하는 것이다. PENDING을 안전하게 처리하는 worker, 인증 시각 영속화, 재시작 복구와 사용자 삭제 연결은 2단계에서 구현해야 한다.
+Apple 인증은 검증 성공한 ID 토큰의 서명된 발급 시각을 credential 및 세션 발급 transaction에서 저장한다. User 존재 여부와 무관하게 subject SHA-256의 영속 경계 행을 먼저 잠근다. 삭제 대상 알림도 JWS 검증 후 같은 행을 잠가 이벤트와 철회 시각을 한 transaction에 저장한다. 동일 식별자의 로그인과 알림은 직렬화되고 서로 다른 식별자는 독립적이다. 로그인은 가장 최근 인증 및 철회 시각보다 초 단위로 확실히 이후인 토큰만 허용한다. 동일 초와 오래된 인증은 실패하며 credential·StopBell token을 교체하지 않는다. 기존 인증 이력이 없을 때 임의 시각을 채우지 않는다.
+
+향후 Worker는 `lockPendingEvent`로 같은 transaction에서 식별자 경계와 PENDING 이벤트를 순서대로 잠그고 판단을 받아야 한다. 잠금 후 인증 시각은 이전 REPEATABLE READ snapshot이 아닌 current read로 다시 확인한다. 인증이 이벤트보다 이후면 현재 계정을 보호하고, 같은 초 또는 인증 이력이 없으면 검토 상태로 보류한다. 이벤트가 나중이어도 결과는 시간상 후보일 뿐 삭제 권한이 아니다. Worker는 해당 Apple subject와 정확히 일치하는 APPLE User를 잠그고 기존 삭제·Receipt 정책을 확인해야 한다. 현재 Worker와 실제 데이터 삭제는 구현하지 않았다. 따라서 이벤트가 저장된 뒤 기존 User가 삭제되기 전에 재인증하면 기존 User와 데이터가 그대로 남을 수 있다. 시간 판단은 그 계정에 대한 삭제가 완료됐다는 증거가 아니며, 연결 해제 뒤 신규 계정 정책을 완성하려면 후속 Worker에서 이 경계를 별도로 해결해야 한다. Apple 발급·이벤트 시각 간 별도 시계 오차의 상한은 검증되지 않았으며 초 단위 비교가 그 오차를 증명하지 않는다.
+
+1단계는 `consent-revoked`, `account-deleted`를 PENDING으로만 저장하고 어떤 사용자도 삭제하지 않는다. `email-disabled`, `email-enabled`는 사용자 데이터를 변경하지 않는다. 확정 정책은 향후 두 삭제 이벤트에 기존 탈퇴·데이터 삭제를 적용하고, 재인증 이후의 계정에 지연 이벤트가 적용되지 않도록 위의 시간 판단과 동시성 경계를 사용하는 것이다. PENDING을 안전하게 처리하는 worker, 재시작 복구와 사용자 삭제 연결은 후속 단계에서 구현해야 한다.

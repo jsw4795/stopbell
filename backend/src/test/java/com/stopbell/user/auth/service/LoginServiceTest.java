@@ -57,7 +57,7 @@ class LoginServiceTest {
     void set_up() {
         when(manager.getTransaction(any())).thenReturn(first, recovery);
         when(users.findByIdForUpdate(user.getId())).thenReturn(Optional.of(user));
-        login = new LoginService(users, jwt, refresh, manager);
+        login = new LoginService(users, jwt, refresh, manager, mock(com.stopbell.user.auth.apple.AppleIdentityBoundary.class));
     }
 
     @Test

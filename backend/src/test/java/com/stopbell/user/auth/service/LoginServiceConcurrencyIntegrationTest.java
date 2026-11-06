@@ -398,10 +398,17 @@ class LoginServiceConcurrencyIntegrationTest {
         }).when(users).findByAuthProviderAndProviderUserId(identity.provider(), identity.providerUserId());
     }
 
+    private TokenResponse loginForProvider(ExternalIdentity identity) {
+        if (identity.provider() == AuthProvider.APPLE) {
+            return loginService.loginApple(identity, java.time.Instant.now(), (user, issuedAt) -> {});
+        }
+        return loginService.login(identity);
+    }
+
     private TokenResponse[] concurrentLogin(ExternalIdentity first, ExternalIdentity second) throws Exception {
         try (var executor = Executors.newFixedThreadPool(2)) {
-            var firstLogin = executor.submit(() -> loginService.login(first));
-            var secondLogin = executor.submit(() -> loginService.login(second));
+            var firstLogin = executor.submit(() -> loginForProvider(first));
+            var secondLogin = executor.submit(() -> loginForProvider(second));
             return new TokenResponse[]{firstLogin.get(20, TimeUnit.SECONDS), secondLogin.get(20, TimeUnit.SECONDS)};
         }
     }

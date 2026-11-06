@@ -125,6 +125,8 @@ UNIQUE(token_hash)
 
 V23은 `user_id BIGINT`를 기본키이자 `users(id)` 외래키로 두고, `encrypted_refresh_token VARCHAR(12000)`에 AES-256-GCM 암호문 envelope만 저장한다. 한 Apple User당 한 행이며 원문 토큰은 저장하지 않는다. 로그인은 소유 User를 잠근 뒤 행을 생성하거나 교체한다. User·credential·StopBell refresh token은 같은 transaction에서 저장된다. 키 주입·교체와 외부 통신 경계는 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다.
 
+V29는 `apple_credentials.identity_issued_at DATETIME(6) NULL`을 추가한다. 검증이 성공한 Apple ID 토큰의 서명된 발급 시각을 credential 및 StopBell token과 같은 transaction에서 UTC로 기록하며 기존 row는 NULL로 보존한다. 이 시각은 인증 성공 완료 시각이 아니며 실패·rollback·일반 refresh로 갱신되지 않는다.
+
 ### account_deletions
 
 V25는 삭제 요청과 외부 철회 결과를 사용자 데이터와 별도로 commit할 수 있도록 진행 행을 추가한다. `user_id BIGINT`는 PK이자 `users(id) ON DELETE CASCADE` FK이며 최종 로컬 삭제와 함께 제거한다. `state VARCHAR(24)`는 CHECK로 `PENDING`, `REVOKED`, `MANUAL_REQUIRED`, `NOT_REQUIRED`만 허용한다. `last_error VARCHAR(32)`에는 고정 분류만 저장하고 외부 본문·예외 원문·Token을 저장하지 않는다. `requested_at`, `next_attempt_at`은 UTC `DATETIME(6) NOT NULL`, 재시도 조회 index는 `(next_attempt_at,user_id)`다. 원래 Apple 암호문은 `apple_credentials`에 유지하며 진행 행에 복사하지 않는다. 상태 전이와 transaction·재시도 의미는 [Architecture](architecture.md#회원-탈퇴와-apple-철회-복구-task-815-backend)가 소유한다.
@@ -558,3 +560,8 @@ MySQL은 durable pending dispatch/outbox의 Source of Truth다. V1은 하나의 
 ### apple_notification_events (TASK-815 알림 1단계)
 
 V28은 검증된 알림의 `jti` SHA-256을 PK로 저장해 동시 중복 INSERT를 방지한다. 삭제 대상은 `event_type`, Apple subject, UTC `event_time`·`received_at`과 `PENDING`을 보존한다. Apple subject는 기존 User identity와 연결하기 위해 필요한 개인정보로 DB 접근을 제한하며 원문 JWS·Token·이메일은 저장하지 않는다. 이메일 이벤트는 subject 없이 `IGNORED`로 기록하며 30일 이후 다음 검증된 수신 시 정리한다. `PENDING`은 미처리 상태이므로 자동 삭제하지 않고 2단계 처리·보존 정책이 필요하다. 재시작에도 상태는 유지되지만 현재 처리 worker는 없다.
+
+
+### apple_identity_boundaries (TASK-815 인증 경계)
+
+V30은 Apple subject의 SHA-256을 PK로 하는 경계 행과 마지막으로 성공해 commit된 ID token 발급 시각·검증된 삭제 이벤트의 최신 발생 시각을 보존한다. 사용자 삭제와 별도로 유지되어 이전 로그인의 재생을 막으며 원문 subject나 token은 저장하지 않는다. V29의 기존 Apple credential 시각과 V28의 PENDING 삭제 이벤트를 backfill하고 NULL 인증 이력은 추측하지 않는다. 로그인·이벤트는 경계 행을 먼저 잠근 뒤 같은 transaction에서 나머지 변경을 commit한다. 재시작 후에도 유효하며 현재 자동 정리는 없다. 이 해시와 시각은 연결 가능한 개인정보이므로 DB 접근을 제한하고, 안전한 삭제 기준과 보존 기간은 후속 Worker 및 운영 정책에서 결정해야 한다.

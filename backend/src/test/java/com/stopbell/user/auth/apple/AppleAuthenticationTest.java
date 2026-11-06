@@ -129,6 +129,7 @@ class AppleAuthenticationTest {
             var result = authentication.authenticate(initial, "once", nonce);
             assertThat(result.subject()).isEqualTo("apple-user");
             assertThat(result.refreshToken()).isEqualTo("fixture-refresh");
+            assertThat(result.identityIssuedAt()).isEqualTo(NOW.minusSeconds(1));
             assertThat(result.toString()).doesNotContain("fixture-refresh", "apple-user");
             assertThatThrownBy(() -> authentication.authenticate(initial, "once", nonce))
                     .isInstanceOf(InvalidSocialCredentialException.class);

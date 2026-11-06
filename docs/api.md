@@ -653,7 +653,7 @@ Backend는 `GOOGLE_SERVER_CLIENT_ID`에 설정한 Backend용 Google Server Clien
 
 Apple 인증을 명시적으로 활성화한 경우 인증 없이 `POST /auth/apple/challenge`를 호출해 `{"nonce":"<서버 nonce>"}`를 받는다. 이어 `POST /auth/apple`에 JSON `{"identityToken":"<Apple ID Token>","authorizationCode":"<Apple code>","nonce":"<서버 nonce>"}`를 전달한다. 성공은 Google과 같은 StopBell Access/Refresh Token JSON과 `200`이며 두 응답은 `Cache-Control: no-store`다. 검증 실패·nonce 재사용은 `401 UNAUTHENTICATED`, Apple 인증 서비스 장애는 `503 SOCIAL_IDENTITY_UNAVAILABLE`, DB 또는 설정 실패는 서버 오류다. 누락·손상된 JSON은 기존 MVC 400 정책을 따른다. 비활성화 시 두 경로에 Controller가 없어 404다.
 
-nonce는 단일 프로세스에서 5분간 유효하고 시도 시 한 번만 소비된다. 실패하거나 서버 재시작 시 새 challenge와 Apple 인증이 필요하다. 코드 교환 성공 뒤 DB 실패 또는 응답 유실도 기존 코드를 재시도하지 않고 새 Apple 인증으로 복구한다. 인증과 계정 저장의 경계 및 운영 조건은 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다. 동일 이메일이라도 Apple과 Google 계정은 별도 User다.
+기존에 확인된 Apple 인증 또는 철회 이벤트보다 오래되거나 같은 초에 발급된 인증은 401로 거부한다. nonce는 단일 프로세스에서 5분간 유효하고 시도 시 한 번만 소비된다. 실패하거나 서버 재시작 시 새 challenge와 Apple 인증이 필요하다. 코드 교환 성공 뒤 DB 실패 또는 응답 유실도 기존 코드를 재시도하지 않고 새 Apple 인증으로 복구한다. 인증과 계정 저장의 경계 및 운영 조건은 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다. 동일 이메일이라도 Apple과 Google 계정은 별도 User다.
 
 Flutter iOS는 `APPLE_LOGIN_ENABLED`가 true인 경우에만 Apple 버튼을 표시한다. 매번 challenge nonce 원본을 네이티브 인증과 이 API에 전달하며, 실패한 code의 자동 재전송은 없다. Backend와 Client 활성화 설정을 함께 관리한다.
 
@@ -741,4 +741,4 @@ Flutter는 최종 확인 후 receipt를 Secure Storage에 계정별로 저장하
 
 ### Apple 서버 간 알림 (TASK-815 1단계)
 
-`apple.notifications.enabled=true`와 `apple.notifications.client-id`를 별도로 설정한 경우 `POST /auth/apple/notifications`가 인증 없이 JSON `{"payload":"<Apple JWS>"}`를 받는다. 기본값은 OFF이며 비활성화 시 404다. 검증과 저장이 성공하면 200, 잘못된 서명·Claim은 401, Apple 공개키 장애는 503, DB 실패는 서버 오류다. 성공 응답은 저장 완료를 뜻하며 회원 삭제 완료를 뜻하지 않는다. 동일 `jti`는 중복 저장하지 않는다. 응답에는 사용자 정보가 없다.
+`apple.notifications.enabled=true`와 `apple.notifications.client-id`를 별도로 설정한 경우 `POST /auth/apple/notifications`가 인증 없이 JSON `{"payload":"<Apple JWS>"}`를 받는다. 기본값은 OFF이며 비활성화 시 404다. 검증과 저장이 성공하면 200, 잘못된 서명·Claim은 401, Apple 공개키 장애는 503, DB 실패는 서버 오류다. 성공 응답은 식별자별 인증 경계와 이벤트 저장 완료를 뜻하며 회원 삭제 완료를 뜻하지 않는다. 동일 `jti`는 중복 저장하지 않는다. 응답에는 사용자 정보가 없다.

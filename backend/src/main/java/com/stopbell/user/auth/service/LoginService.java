@@ -1,8 +1,12 @@
 package com.stopbell.user.auth.service;
 
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
+import java.time.Instant;
+
+import com.stopbell.user.auth.apple.AppleIdentityBoundary;
 
 import com.stopbell.user.auth.identity.ExternalIdentity;
+import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
 import com.stopbell.user.auth.dto.TokenResponse;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
@@ -23,14 +27,17 @@ public class LoginService {
     private final JwtTokenService jwtTokenService;
     private final RefreshTokenService refreshTokenService;
     private final TransactionTemplate loginTransaction;
+    private final AppleIdentityBoundary appleBoundary;
 
     public LoginService(
             UserRepository userRepository,
             JwtTokenService jwtTokenService,
             RefreshTokenService refreshTokenService,
-            PlatformTransactionManager transactionManager
+            PlatformTransactionManager transactionManager,
+            AppleIdentityBoundary appleBoundary
     ) {
         this.userRepository = userRepository;
+        this.appleBoundary = appleBoundary;
         this.jwtTokenService = jwtTokenService;
         this.refreshTokenService = refreshTokenService;
         this.loginTransaction = new TransactionTemplate(transactionManager);
@@ -38,35 +45,40 @@ public class LoginService {
     }
 
     public TokenResponse login(ExternalIdentity identity) {
-        return login(identity, null);
+        if (identity != null && identity.provider() == AuthProvider.APPLE) throw new IllegalArgumentException("Apple login requires verified authentication");
+        return login(identity, null, null);
     }
 
-    public TokenResponse loginApple(ExternalIdentity identity, Consumer<User> storeCredential) {
-        if (identity == null || identity.provider() != AuthProvider.APPLE || storeCredential == null) {
+    public TokenResponse loginApple(ExternalIdentity identity, Instant issuedAt, BiConsumer<User, Instant> storeCredential) {
+        if (identity == null || identity.provider() != AuthProvider.APPLE || issuedAt == null || storeCredential == null) {
             throw new IllegalArgumentException("Apple identity is required");
         }
-        return login(identity, storeCredential);
+        return login(identity, issuedAt, storeCredential);
     }
 
-    private TokenResponse login(ExternalIdentity identity, Consumer<User> storeCredential) {
+    private TokenResponse login(ExternalIdentity identity, Instant issuedAt, BiConsumer<User, Instant> storeCredential) {
         try {
             return loginTransaction.execute(status -> {
+                if (storeCredential != null) appleBoundary.acceptLogin(identity.providerUserId(), issuedAt);
                 User user = userRepository.findByAuthProviderAndProviderUserId(
                         identity.provider(),
                         identity.providerUserId()
                 ).orElseGet(() -> createUser(identity));
-                return issueTokens(user, storeCredential);
+                if (storeCredential != null && !identity.providerUserId().equals(user.getProviderUserId())) throw new InvalidSocialCredentialException();
+                return issueTokens(user, issuedAt, storeCredential);
             });
         } catch (IdentityConflict conflict) {
             // execute() has completed rollback and discarded the failed persistence context.
             return loginTransaction.execute(status -> {
+                if (storeCredential != null) appleBoundary.acceptLogin(identity.providerUserId(), issuedAt);
                 User user = userRepository.findByAuthProviderAndProviderUserId(
                         identity.provider(), identity.providerUserId()
                 ).filter(existing -> existing.getAuthProvider() == identity.provider()
                         && identity.providerUserId().equals(existing.getProviderUserId())
                         && existing.getId() != null && existing.getId() > 0)
                         .orElseThrow(() -> conflict.failure);
-                return issueTokens(user, storeCredential);
+                if (storeCredential != null && !identity.providerUserId().equals(user.getProviderUserId())) throw new InvalidSocialCredentialException();
+                return issueTokens(user, issuedAt, storeCredential);
             });
         }
     }
@@ -87,7 +99,7 @@ public class LoginService {
         }
     }
 
-    private TokenResponse issueTokens(User user, Consumer<User> storeCredential) {
+    private TokenResponse issueTokens(User user, Instant issuedAt, BiConsumer<User, Instant> storeCredential) {
         String providerUserId = user.getProviderUserId();
         AuthProvider provider = user.getAuthProvider();
         User locked = userRepository.findByIdForUpdate(user.getId())
@@ -96,7 +108,7 @@ public class LoginService {
                 .orElseThrow(() -> new IllegalStateException("User identity is unavailable"));
         userRepository.requireActive(locked.getId());
         if (storeCredential != null) {
-            storeCredential.accept(locked);
+            storeCredential.accept(locked, issuedAt);
         }
         return new TokenResponse(
                 jwtTokenService.createAccessToken(locked.getId()),

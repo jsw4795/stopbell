@@ -1,5 +1,7 @@
 package com.stopbell.user.auth.apple;
 
+import java.time.Instant;
+
 import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -22,20 +24,25 @@ public final class AppleAuthentication {
             throw new IllegalStateException("Apple authentication requires no enclosing transaction");
         }
         nonces.consume(nonce);
-        String subject = verifier.verify(identityToken, nonce);
+        var identity = verifier.verifyIdentity(identityToken, nonce);
+        String subject = identity.subject();
         AppleCodeExchange.Tokens tokens = exchange.exchange(authorizationCode);
         if (!subject.equals(verifier.verifyExchangeToken(tokens.idToken()))) {
             throw new InvalidSocialCredentialException();
         }
-        return new Result(subject, tokens.refreshToken());
+        return new Result(subject, tokens.refreshToken(), identity.issuedAt());
     }
 
     public static final class Result {
         private final String subject;
         private final String refreshToken;
-        Result(String subject, String refreshToken) { this.subject = subject; this.refreshToken = refreshToken; }
+        private final Instant identityIssuedAt;
+        Result(String subject, String refreshToken, Instant identityIssuedAt) {
+            this.subject = subject; this.refreshToken = refreshToken; this.identityIssuedAt = identityIssuedAt;
+        }
         public String subject() { return subject; }
         public String refreshToken() { return refreshToken; }
+        public Instant identityIssuedAt() { return identityIssuedAt; }
         @Override public String toString() { return "Apple authentication result [redacted]"; }
     }
 }

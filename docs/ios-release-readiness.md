@@ -41,4 +41,4 @@
 
 프로젝트의 알림·기기 실측 및 운영 배포 잔여 조건은 TASK-710/810/813/908을 따른다. 위 정적 검토는 Apple 심사 통과를 보장하지 않는다.
 
-서버 간 알림 1단계는 기본 OFF로 수신·검증·영속화만 제공한다. 삭제 이벤트의 실제 처리 및 재인증 경쟁 방어는 2단계에 남아 있으며 실제 Apple 이벤트 수신은 검증하지 않았다. 운영 HTTPS 주소와 TLS 1.2 이상을 준비한 후 Apple Developer App ID의 server-to-server notification URL을 설정한다. 임시 Tunnel을 등록하지 않는다.
+서버 간 알림 1단계는 기본 OFF로 수신·검증·영속화만 제공한다. 삭제 이벤트와 로그인 간 영속 동시성 경계는 구현했으나 Worker의 실제 삭제 및 운영 검증은 남아 있으며 실제 Apple 이벤트 수신은 검증하지 않았다. 운영 HTTPS 주소와 TLS 1.2 이상을 준비한 후 Apple Developer App ID의 server-to-server notification URL을 설정한다. 임시 Tunnel을 등록하지 않는다.

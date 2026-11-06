@@ -20,10 +20,10 @@ class AppleNotificationControllerTest {
     }
     @Test void databaseFailureIsNotAcknowledged() {
         var verifier = mock(AppleNotificationVerifier.class);
-        var jdbc = mock(JdbcTemplate.class);
+        var store = mock(AppleNotificationStore.class);
         when(verifier.verify("valid")).thenReturn(new AppleNotificationVerifier.Event("id", "consent-revoked", "subject", Instant.now()));
-        when(jdbc.update(anyString(), any(Object[].class))).thenThrow(new DataAccessResourceFailureException("failed"));
-        var controller = new AppleNotificationController(verifier, jdbc, Clock.systemUTC());
+        doThrow(new DataAccessResourceFailureException("failed")).when(store).store(any());
+        var controller = new AppleNotificationController(verifier, store);
         assertThatThrownBy(() -> controller.receive(new AppleNotificationController.Request("valid")))
                 .isInstanceOf(IllegalStateException.class).hasMessage("Apple notification storage failed")
                 .hasNoCause();

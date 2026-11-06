@@ -24,6 +24,10 @@ public final class AppleIdentityTokenVerifier {
     }
 
     public String verify(String token, String nonce) {
+        return verifyIdentity(token, nonce).subject();
+    }
+
+    public VerifiedIdentity verifyIdentity(String token, String nonce) {
         if (token == null || token.isBlank() || nonce == null || nonce.isBlank()) {
             throw new InvalidSocialCredentialException();
         }
@@ -32,10 +36,10 @@ public final class AppleIdentityTokenVerifier {
 
     public String verifyExchangeToken(String token) {
         if (token == null || token.isBlank()) throw new InvalidSocialCredentialException();
-        return verifyClaims(token, null);
+        return verifyClaims(token, null).subject();
     }
 
-    private String verifyClaims(String token, String nonce) {
+    private VerifiedIdentity verifyClaims(String token, String nonce) {
         final Jwt jwt;
         try {
             jwt = decoder.decode(token);
@@ -57,6 +61,9 @@ public final class AppleIdentityTokenVerifier {
                 || subject == null || subject.isBlank() || subject.length() > 255) {
             throw new InvalidSocialCredentialException();
         }
-        return subject;
+        return new VerifiedIdentity(subject, issuedAt);
+    }
+    public record VerifiedIdentity(String subject, Instant issuedAt) {
+        @Override public String toString() { return "Apple verified identity [redacted]"; }
     }
 }
