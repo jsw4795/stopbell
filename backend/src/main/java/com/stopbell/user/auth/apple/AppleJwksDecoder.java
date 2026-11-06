@@ -39,6 +39,29 @@ public final class AppleJwksDecoder implements JwtDecoder {
 
     @Override
     public Jwt decode(String value) {
+        JWTClaimsSet claims = verifySignedClaims(value);
+        try {
+            Object subject = claims.getClaim("sub");
+            Object issuer = claims.getClaim("iss");
+            Object nonce = claims.getClaim("nonce");
+            Date issued = claims.getIssueTime();
+            Date expires = claims.getExpirationTime();
+            Date notBefore = claims.getNotBeforeTime();
+            if (!(subject instanceof String) || !(issuer instanceof String)
+                    || (nonce != null && !(nonce instanceof String))
+                    || issued == null || expires == null) throw invalid();
+            var builder = Jwt.withTokenValue(value).header("alg", "RS256").header("kid", SignedJWT.parse(value).getHeader().getKeyID())
+                    .subject((String) subject).issuer((String) issuer).audience(claims.getAudience())
+                    .issuedAt(issued.toInstant()).expiresAt(expires.toInstant());
+            if (nonce != null) builder.claim("nonce", nonce);
+            if (notBefore != null) builder.notBefore(notBefore.toInstant());
+            return builder.build();
+        } catch (ParseException | IllegalArgumentException failure) {
+            throw invalid();
+        }
+    }
+
+    JWTClaimsSet verifySignedClaims(String value) {
         if (value == null || value.length() > MAX_JWT_CHARS) throw invalid();
         final SignedJWT token;
         try {
@@ -56,22 +79,7 @@ public final class AppleJwksDecoder implements JwtDecoder {
                 || (rsa.getAlgorithm() != null && !JWSAlgorithm.RS256.equals(rsa.getAlgorithm()))) throw invalid();
         try {
             if (!token.verify(new RSASSAVerifier(rsa.toRSAPublicKey()))) throw invalid();
-            JWTClaimsSet claims = token.getJWTClaimsSet();
-            Object subject = claims.getClaim("sub");
-            Object issuer = claims.getClaim("iss");
-            Object nonce = claims.getClaim("nonce");
-            Date issued = claims.getIssueTime();
-            Date expires = claims.getExpirationTime();
-            Date notBefore = claims.getNotBeforeTime();
-            if (!(subject instanceof String) || !(issuer instanceof String)
-                    || (nonce != null && !(nonce instanceof String))
-                    || issued == null || expires == null) throw invalid();
-            var builder = Jwt.withTokenValue(value).header("alg", "RS256").header("kid", kid)
-                    .subject((String) subject).issuer((String) issuer).audience(claims.getAudience())
-                    .issuedAt(issued.toInstant()).expiresAt(expires.toInstant());
-            if (nonce != null) builder.claim("nonce", nonce);
-            if (notBefore != null) builder.notBefore(notBefore.toInstant());
-            return builder.build();
+            return token.getJWTClaimsSet();
         } catch (ParseException | com.nimbusds.jose.JOSEException | IllegalArgumentException failure) {
             throw invalid();
         }

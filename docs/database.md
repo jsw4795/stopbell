@@ -554,3 +554,7 @@ Session due JPQL은 Event·Session·Delivery를 join하고 위 두 Event 분기�
 TASK-708의 exact identity duplicate 조회는 Alarm lock 뒤 current locking read를 사용해 MySQL 기본 REPEATABLE READ의 과거 snapshot에 의존하지 않는다. JPA UNIQUE 실패는 전체 결정 transaction rollback 후 새 persistence context/transaction으로 확인하며 실행 순서는 [Notification decision transaction](architecture.md#notification-decision-transaction-task-708)을 따른다. SELECT는 최적화·duplicate 분류이고 DB UNIQUE가 최종 원자적 경계다.
 
 MySQL은 durable pending dispatch/outbox의 Source of Truth다. V1은 하나의 non-overlapping fixed-delay worker가 due PENDING Delivery를 처리한다. Kafka, RabbitMQ, Redis queue, multi-instance distributed lock, claim/lease, `claimedAt`, `SENDING`, stale-claim recovery는 V1에 도입하지 않는다. FCM accepted 뒤 DB update 전 crash하면 PENDING Delivery가 restart 뒤 다시 처리될 수 있고 duplicate Device 표시는 exactly-once 비보장 계약으로 허용한다.
+
+### apple_notification_events (TASK-815 알림 1단계)
+
+V28은 검증된 알림의 `jti` SHA-256을 PK로 저장해 동시 중복 INSERT를 방지한다. 삭제 대상은 `event_type`, Apple subject, UTC `event_time`·`received_at`과 `PENDING`을 보존한다. Apple subject는 기존 User identity와 연결하기 위해 필요한 개인정보로 DB 접근을 제한하며 원문 JWS·Token·이메일은 저장하지 않는다. 이메일 이벤트는 subject 없이 `IGNORED`로 기록하며 30일 이후 다음 검증된 수신 시 정리한다. `PENDING`은 미처리 상태이므로 자동 삭제하지 않고 2단계 처리·보존 정책이 필요하다. 재시작에도 상태는 유지되지만 현재 처리 worker는 없다.

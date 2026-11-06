@@ -700,4 +700,10 @@ Apple 인증은 명시적 활성화 시 공개 Backend API와 Flutter iOS 로그
 
 `AccountDeletionRecovery`는 독립 단일 scheduler에서 1분마다 기한이 된 최대 10개 요청을 순차 재개한다. `next_attempt_at,user_id`로 정렬하고 처리 전에 다음 기한을 저장하여 지속 실패 요청의 starvation을 피한다. User Access Token 만료·Client 종료·Backend 재시작 후에도 복구하며 분산 lease는 없다. 현재 단일 Backend 전제에서 동작하고, 중복 실행의 정합성은 동일 Token 재철회와 DB 전이/삭제 잠금으로 보호한다. `account.deletion.recovery-enabled` 기본값 true이며 테스트 격리 시 false로 지정할 수 있다. 끄면 요청 재시도 외의 자동 복구가 중단된다. pending 개수·최장 requested_at·last_error를 운영에서 감시하고, 인증 설정/Apple 장애/DB 장애가 지속되면 해당 원인을 복구해야 한다. 임의의 요청 만료나 자동 강제 삭제 정책은 추가하지 않는다.
 
-Flutter는 탈퇴 전 세션을 동결하고 진행 중 Refresh 회전을 완료한 뒤 receipt를 안전하게 저장한다. 사용자 데이터와 receipt 완료 기록은 같은 DB transaction에서 처리하며 receipt는 User 삭제 후에도 조회할 수 있다. 상태와 재시도 계약은 [API](api.md#7-회원-탈퇴-task-815-backend), 테이블은 [Database](database.md#account_deletion_receipts)를 따른다. Apple server-to-server 상태 변경 알림, 일일 토큰 유효성 관리, 실제 Apple 철회 응답의 직접 확인과 운영 secret·키 복구 검증은 후속 범위다. 사용자 보고 실기기 탈퇴 결과는 [출시 준비 점검](ios-release-readiness.md#apple-로그인회원-탈퇴-실기기-검증-2026-11-06)을 따른다. 실제 법적 보존·백업 정책은 새로 확정하지 않는다.
+Flutter는 탈퇴 전 세션을 동결하고 진행 중 Refresh 회전을 완료한 뒤 receipt를 안전하게 저장한다. 사용자 데이터와 receipt 완료 기록은 같은 DB transaction에서 처리하며 receipt는 User 삭제 후에도 조회할 수 있다. 상태와 재시도 계약은 [API](api.md#7-회원-탈퇴-task-815-backend), 테이블은 [Database](database.md#account_deletion_receipts)를 따른다. Apple server-to-server 상태 변경 알림의 실제 삭제 처리와 운영 검증, 일일 토큰 유효성 관리, 실제 Apple 철회 응답의 직접 확인과 운영 secret·키 복구 검증은 후속 범위다. 사용자 보고 실기기 탈퇴 결과는 [출시 준비 점검](ios-release-readiness.md#apple-로그인회원-탈퇴-실기기-검증-2026-11-06)을 따른다. 실제 법적 보존·백업 정책은 새로 확정하지 않는다.
+
+## Apple 서버 간 알림 수신 기반 (TASK-815 1단계)
+
+Apple 로그인과 독립적인 `apple.notifications.enabled`는 기본 false이며 활성화 시 `apple.notifications.client-id`에 대상 App ID를 지정한다. 알림은 Apple JWKS의 kid에 해당하는 RSA 공개키와 RS256으로 서명을 검증하고 알림 전용 issuer·audience·발급/선택적 만료 시각·jti·이벤트 필드를 확인한 후 저장한다. 원문 JWS와 식별자는 로그에 남기지 않는다. 키 조회 장애와 DB 오류는 성공으로 응답하지 않는다. 저장 상태와 보존은 [Database](database.md#apple_notification_events-task-815-알림-1단계)를 따른다.
+
+1단계는 `consent-revoked`, `account-deleted`를 PENDING으로만 저장하고 어떤 사용자도 삭제하지 않는다. `email-disabled`, `email-enabled`는 사용자 데이터를 변경하지 않는다. 확정 정책은 향후 두 삭제 이벤트에 기존 탈퇴·데이터 삭제를 적용하고, 재인증 이후의 계정에 지연 이벤트가 적용되지 않도록 인증 시각과 동시성을 검증하는 것이다. PENDING을 안전하게 처리하는 worker, 인증 시각 영속화, 재시작 복구와 사용자 삭제 연결은 2단계에서 구현해야 한다.
