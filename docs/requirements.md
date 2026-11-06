@@ -153,7 +153,7 @@ TASK-903의 설계에 TASK-908의 현행 정책을 반영한 요구사항이다.
 
 ## 4. 인증
 
-StopBell은 자체 ID/Password 회원가입을 제공하지 않고 Social Login만 지원한다. 최초 Provider는 Google이며, Apple 로그인은 Backend와 Flutter iOS에 연결했고 실제 인증과 출시 검증이 남았다. Provider가 다르면 계정을 자동 병합하지 않는다.
+StopBell은 자체 ID/Password 회원가입을 제공하지 않고 Social Login만 지원한다. 최초 Provider는 Google이며, Apple 로그인은 Backend와 Flutter iOS에 연결했고 사용자 보고 실기기 인증을 확인했다. 출시 환경 검증은 남았다. Provider가 다르면 계정을 자동 병합하지 않는다.
 
 Flutter는 Google ID Token으로 외부 Identity를 증명하고, Backend는 이를 검증한 뒤 StopBell 자체 Access Token과 Refresh Token을 발급한다. Google Token은 StopBell Application API의 장기 인증 Token으로 사용하지 않는다.
 
@@ -167,7 +167,7 @@ Flutter는 Access/Refresh Token Pair를 OS Secure Storage에 함께 보관하고
 
 ### 회원 탈퇴 (TASK-815 Backend)
 
-인증된 사용자는 자신의 계정 삭제를 Backend에 요청할 수 있다. Apple 계정은 저장된 토큰 철회를 시도하며 완료·처리 중·수동 Apple 연결 해제 필요를 구분한다. 삭제 도중 신규 인증/사용자 데이터 생성을 차단하고 외부 장애와 DB 실패·재시작 후 삭제를 복구한다. 기존 사용자 소유 데이터 삭제 범위와 타 사용자 알림 관계 보존 정책을 유지한다. 공개 응답·재시도·Token 무효화는 [API](api.md#7-회원-탈퇴-task-815-backend)를 따른다. Flutter는 탈퇴 확인과 receipt 기반 결과 복구 및 Apple 수동 연결 해제 안내를 제공한다. 실제 Apple/출시 검증은 후속 작업이며 TASK-815는 미완료다.
+인증된 사용자는 자신의 계정 삭제를 Backend에 요청할 수 있다. Apple 계정은 저장된 토큰 철회를 시도하며 완료·처리 중·수동 Apple 연결 해제 필요를 구분한다. 삭제 도중 신규 인증/사용자 데이터 생성을 차단하고 외부 장애와 DB 실패·재시작 후 삭제를 복구한다. 기존 사용자 소유 데이터 삭제 범위와 타 사용자 알림 관계 보존 정책을 유지한다. 공개 응답·재시도·Token 무효화는 [API](api.md#7-회원-탈퇴-task-815-backend)를 따른다. Flutter는 탈퇴 확인과 receipt 기반 결과 복구 및 Apple 수동 연결 해제 안내를 제공한다. 사용자 보고 실기기 탈퇴 결과와 미확인 철회 증거는 [출시 준비 점검](ios-release-readiness.md#apple-로그인회원-탈퇴-실기기-검증-2026-11-06)을 따르며 출시 검증은 후속 작업이다. TASK-815는 미완료다.
 
 ## 5. 비기능 요구사항
 

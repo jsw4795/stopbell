@@ -673,7 +673,7 @@ Apple 인증은 명시적 활성화 시 공개 Backend API와 Flutter iOS 로그
 
 기반은 기본 비활성화다. `apple.authentication.enabled=true`를 지정할 때 외부 설정으로 `client-id`, `team-id`, `key-id`, PKCS#8 `private-key-pem`, `credential-key-id`, `credential-keys` 맵을 주입한다. 비밀은 저장소와 로그에 넣지 않는다. `credential-keys`의 값은 Base64로 인코딩한 32바이트 독립 AES 키다. AES-256-GCM은 무작위 nonce와 User ID를 인증된 추가 데이터로 사용하고 key ID를 암호문에 포함한다. 키 교체 시 신규 key ID를 활성화하고 이전 키를 읽기 전용으로 유지하면서 별도 이관으로 재암호화한 뒤 복구·백업을 확인하고 이전 키를 제거한다. 키 유실 시 해당 credential은 복구할 수 없다. Apple refresh token은 암호화하여 저장하며 키 주입과 보관은 운영 환경의 책임이다.
 
-검증과 코드 교환 뒤 별도 transaction에서 Apple User를 조회·생성하고 User write lock 아래 credential을 교체한 뒤 StopBell Token Pair를 발급한다. User, credential과 StopBell refresh token은 함께 commit 또는 rollback한다. 동일 Identity 생성 충돌은 기존 로그인처럼 rollback 뒤 새 transaction에서 재조회한다. Apple Developer capability·실기기 검증은 미완료다. 운영 활성화 전 nonce 저장·속도 제한, 외부 장애·timeout, secret 관리와 코드 교환 응답 유실을 포함해 다시 검증한다. TASK-815는 미완료다.
+검증과 코드 교환 뒤 별도 transaction에서 Apple User를 조회·생성하고 User write lock 아래 credential을 교체한 뒤 StopBell Token Pair를 발급한다. User, credential과 StopBell refresh token은 함께 commit 또는 rollback한다. 동일 Identity 생성 충돌은 기존 로그인처럼 rollback 뒤 새 transaction에서 재조회한다. 사용자 보고 실기기 인증 결과는 [출시 준비 점검](ios-release-readiness.md#apple-로그인회원-탈퇴-실기기-검증-2026-11-06)을 따르며 정식 출시의 Apple Developer capability 검증은 남았다. 운영 활성화 전 nonce 저장·속도 제한, 외부 장애·timeout, secret 관리와 코드 교환 응답 유실을 포함해 다시 검증한다. TASK-815는 미완료다.
 
 
 ## 회원 탈퇴와 Apple 철회 복구 (TASK-815 Backend)
@@ -700,4 +700,4 @@ Apple 인증은 명시적 활성화 시 공개 Backend API와 Flutter iOS 로그
 
 `AccountDeletionRecovery`는 독립 단일 scheduler에서 1분마다 기한이 된 최대 10개 요청을 순차 재개한다. `next_attempt_at,user_id`로 정렬하고 처리 전에 다음 기한을 저장하여 지속 실패 요청의 starvation을 피한다. User Access Token 만료·Client 종료·Backend 재시작 후에도 복구하며 분산 lease는 없다. 현재 단일 Backend 전제에서 동작하고, 중복 실행의 정합성은 동일 Token 재철회와 DB 전이/삭제 잠금으로 보호한다. `account.deletion.recovery-enabled` 기본값 true이며 테스트 격리 시 false로 지정할 수 있다. 끄면 요청 재시도 외의 자동 복구가 중단된다. pending 개수·최장 requested_at·last_error를 운영에서 감시하고, 인증 설정/Apple 장애/DB 장애가 지속되면 해당 원인을 복구해야 한다. 임의의 요청 만료나 자동 강제 삭제 정책은 추가하지 않는다.
 
-Flutter는 탈퇴 전 세션을 동결하고 진행 중 Refresh 회전을 완료한 뒤 receipt를 안전하게 저장한다. 사용자 데이터와 receipt 완료 기록은 같은 DB transaction에서 처리하며 receipt는 User 삭제 후에도 조회할 수 있다. 상태와 재시도 계약은 [API](api.md#7-회원-탈퇴-task-815-backend), 테이블은 [Database](database.md#account_deletion_receipts)를 따른다. Apple server-to-server 상태 변경 알림, 일일 토큰 유효성 관리, 실제 Apple 인증/철회와 운영 secret·키 복구 검증은 후속 범위다. 실제 법적 보존·백업 정책은 새로 확정하지 않는다.
+Flutter는 탈퇴 전 세션을 동결하고 진행 중 Refresh 회전을 완료한 뒤 receipt를 안전하게 저장한다. 사용자 데이터와 receipt 완료 기록은 같은 DB transaction에서 처리하며 receipt는 User 삭제 후에도 조회할 수 있다. 상태와 재시도 계약은 [API](api.md#7-회원-탈퇴-task-815-backend), 테이블은 [Database](database.md#account_deletion_receipts)를 따른다. Apple server-to-server 상태 변경 알림, 일일 토큰 유효성 관리, 실제 Apple 철회 응답의 직접 확인과 운영 secret·키 복구 검증은 후속 범위다. 사용자 보고 실기기 탈퇴 결과는 [출시 준비 점검](ios-release-readiness.md#apple-로그인회원-탈퇴-실기기-검증-2026-11-06)을 따른다. 실제 법적 보존·백업 정책은 새로 확정하지 않는다.
