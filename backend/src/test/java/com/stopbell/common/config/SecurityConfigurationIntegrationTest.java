@@ -110,6 +110,20 @@ class SecurityConfigurationIntegrationTest {
     }
 
     @Test
+    @DisplayName("삭제된 User의 기존 Access Token은 보호 API에서 거부된다")
+    void deleted_user_cannot_access_protected_endpoint() throws Exception {
+        String token = jwtTokenService.createAccessToken(42L);
+        try {
+            org.mockito.Mockito.when(users.existsById(42L)).thenReturn(false);
+            mockMvc.perform(get("/test/authentication").header("Authorization", "Bearer " + token))
+                    .andExpect(this::assertUnauthenticated);
+        } finally {
+            org.mockito.Mockito.reset(users);
+            org.mockito.Mockito.when(users.existsById(org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
+        }
+    }
+
+    @Test
     @DisplayName("유효한 Access Token 요청은 JWT subject를 Authentication name으로 전달한다")
     void authenticate_valid_access_token() throws Exception {
         String accessToken = jwtTokenService.createAccessToken(42L);
