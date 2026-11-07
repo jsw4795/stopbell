@@ -1581,7 +1581,7 @@ class BoardingTrackingIntegrationTest {
         var original = onlyEvent();
         time.set(NOW.plusSeconds(14400));
         var metadataSnapshot = new BoardingRouteSnapshot(route.getId(), TransitProvider.SEOUL_BUS, "route-id", null,
-                traversal.get(3).occurrenceId(), null, traversal.stream().map(item -> new BoardingRouteSnapshot.Occurrence(
+                traversal.get(3).occurrenceId(), traversal.get(1).occurrenceId(), traversal.stream().map(item -> new BoardingRouteSnapshot.Occurrence(
                         item.occurrenceId(), item.externalStopId(), item.order(), "정류장")).toList(), "7000");
         var checkpoint = new BoardingCheckpoint("s2", traversal.get(2).order(), 2, BoardingCheckpoint.Evidence.ID_ORDER,
                 null, utc(), utc().minusSeconds(1));
