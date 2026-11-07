@@ -62,6 +62,7 @@ apple:
   notifications:
     enabled: ${APPLE_NOTIFICATIONS_ENABLED:true}
     worker-enabled: ${APPLE_NOTIFICATIONS_WORKER_ENABLED:true}
+    client-id: ${APPLE_NOTIFICATIONS_CLIENT_ID:com.stopbell.stopbell}
 
 account:
   deletion:
