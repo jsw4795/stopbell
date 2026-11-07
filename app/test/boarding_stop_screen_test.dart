@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:ui' show BoxHeightStyle;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:http/http.dart' as http;
@@ -15,6 +17,23 @@ import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/features/transit/bus_route_timeline.dart';
 
 import 'boarding_test_fakes.dart';
+
+const _longNameStops = [
+  BusRouteStopOccurrence(
+    id: 11,
+    name: '테크노마트앞.강변역(C)',
+    order: 1,
+    canNotifyOneStopBefore: false,
+    canNotifyOneStopAfter: true,
+  ),
+  BusRouteStopOccurrence(
+    id: 22,
+    name: '잠실광역환승센터',
+    order: 2,
+    canNotifyOneStopBefore: true,
+    canNotifyOneStopAfter: false,
+  ),
+];
 
 void main() {
   late AuthSession auth;
@@ -107,6 +126,15 @@ void main() {
     }
     expect(find.textContaining('승차 정류장 · 반복 정류장'), findsOneWidget);
     expect(find.textContaining('목표 정류장 · 반복 정류장'), findsOneWidget);
+    for (final (role, order) in [('boarding', 3), ('target', 9)]) {
+      expect(
+        find.descendant(
+          of: find.byKey(ValueKey('summary-$role')),
+          matching: find.textContaining('종점 방면\n이전: 이전 · 다음: 다음\n노선 순서 $order'),
+        ),
+        findsOneWidget,
+      );
+    }
     await tap(tester, 'find-candidates');
     await tester.pumpAndSettle();
     expect(queries.single, (754, 22, 11));
@@ -120,6 +148,53 @@ void main() {
     await tap(tester, 'find-candidates');
     await tester.pumpAndSettle();
     expect(queries.last, (754, 22, 11));
+  });
+
+  testWidgets('review puts both stop names on full-width rows', (tester) async {
+    await setup(tester);
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pumpWidget(screen(stops: (_) async => _longNameStops));
+    await tester.pumpAndSettle();
+    await tap(tester, 'occurrence-11');
+    await tap(tester, 'occurrence-22');
+
+    final boarding = find.byKey(const ValueKey('summary-boarding'));
+    final target = find.byKey(const ValueKey('summary-target'));
+    expect(tester.getTopLeft(boarding).dx, tester.getTopLeft(target).dx);
+    expect(tester.getSize(boarding).width, tester.getSize(target).width);
+    expect(
+      tester.getBottomLeft(boarding).dy,
+      lessThan(tester.getTopLeft(target).dy),
+    );
+    for (final (row, stop) in [
+      (boarding, _longNameStops[0]),
+      (target, _longNameStops[1]),
+    ]) {
+      final label = find.descendant(
+        of: row,
+        matching: find.textContaining(stop.name),
+      );
+      final richText = find.descendant(
+        of: label,
+        matching: find.byType(RichText),
+      );
+      final paragraph = tester.renderObject<RenderParagraph>(richText);
+      final start = paragraph.text.toPlainText().indexOf(stop.name);
+      final boxes = paragraph.getBoxesForSelection(
+        TextSelection(
+          baseOffset: start,
+          extentOffset: start + stop.name.length,
+        ),
+        boxHeightStyle: BoxHeightStyle.max,
+      );
+      expect(boxes.map((box) => box.top).toSet(), hasLength(1));
+    }
+    final reselect = find.byKey(const ValueKey('reselect-stops'));
+    final candidates = find.byKey(const ValueKey('find-candidates'));
+    expect(reselect.hitTestable(), findsOneWidget);
+    expect(candidates.hitTestable(), findsOneWidget);
+    expect(tester.getCenter(reselect).dy, tester.getCenter(candidates).dy);
+    expect(tester.takeException(), isNull);
   });
 
   for (final brightness in [Brightness.light, Brightness.dark]) {
@@ -560,7 +635,7 @@ void main() {
             body: BoardingStopScreen(
               route: boardingRoute,
               authSession: auth,
-              findStops: (_) async => boardingStops,
+              findStops: (_) async => _longNameStops,
               findCandidates:
                   ({
                     required routeId,
@@ -580,6 +655,14 @@ void main() {
       expect(find.text('노선도에서 승차 정류장을 선택하세요.').hitTestable(), findsOneWidget);
       await tap(tester, 'occurrence-11');
       await tap(tester, 'occurrence-22');
+      expect(
+        find.textContaining('승차 정류장 · ${_longNameStops[0].name}'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('목표 정류장 · ${_longNameStops[1].name}'),
+        findsOneWidget,
+      );
       for (final widget in [
         find.byKey(const ValueKey('summary-target')),
         find.byKey(const ValueKey('summary-boarding')),

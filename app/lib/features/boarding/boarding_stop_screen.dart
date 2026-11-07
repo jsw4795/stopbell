@@ -368,11 +368,21 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
             '승차 정류장 이후의 정류장을 선택해 주세요',
             icon: Icons.flag_outlined,
           ),
-          _stopSummary(boarding, target: false),
+          _summaryCard(_stopSummary(boarding, target: false)),
         ] else ...[
-          StopSelectionPair(
-            first: _stopSummary(boarding, target: false),
-            second: _stopSummary(target, target: true),
+          _summaryCard(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _stopSummary(boarding, target: false),
+                const Divider(
+                  height: 1,
+                  indent: StopBellSpacing.sm,
+                  endIndent: StopBellSpacing.sm,
+                ),
+                _stopSummary(target, target: true),
+              ],
+            ),
           ),
           if (!_staleStops)
             StopSelectionPair(
@@ -409,6 +419,18 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     );
   }
 
+  Widget _summaryCard(Widget child) {
+    final colors = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(StopBellRadius.card),
+      ),
+      child: child,
+    );
+  }
+
   Widget _stopSummary(BusRouteStopOccurrence stop, {required bool target}) {
     final role = target ? '목표 정류장' : '승차 정류장';
     final details = selectedStopContext(stop, _stops);
@@ -416,47 +438,40 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     final colors = theme.colorScheme;
     final stopColors = StopBellColors.of(context);
     final accent = target ? stopColors.targetStop : stopColors.boardingStop;
-    return DecoratedBox(
+    return Padding(
       key: ValueKey(target ? 'summary-target' : 'summary-boarding'),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        border: Border.all(color: colors.outlineVariant),
-        borderRadius: BorderRadius.circular(StopBellRadius.card),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(StopBellSpacing.sm),
-        child: Row(
-          children: [
-            Icon(
-              target ? Icons.flag_outlined : Icons.directions_bus_outlined,
-              size: 18,
-              color: accent,
-            ),
-            const SizedBox(width: StopBellSpacing.sm),
-            Expanded(
-              child: Text.rich(
-                TextSpan(
-                  text: '$role · ',
-                  style: theme.textTheme.labelSmall?.copyWith(color: accent),
-                  children: [
-                    TextSpan(
-                      text: stop.name,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: colors.onSurface,
-                        fontWeight: FontWeight.w600,
-                      ),
+      padding: const EdgeInsets.all(StopBellSpacing.sm),
+      child: Row(
+        children: [
+          Icon(
+            target ? Icons.flag_outlined : Icons.directions_bus_outlined,
+            size: 18,
+            color: accent,
+          ),
+          const SizedBox(width: StopBellSpacing.sm),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                text: '$role · ',
+                style: theme.textTheme.labelSmall?.copyWith(color: accent),
+                children: [
+                  TextSpan(
+                    text: stop.name,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: colors.onSurface,
+                      fontWeight: FontWeight.w600,
                     ),
-                    if (details != null)
-                      TextSpan(
-                        text: '\n$details',
-                        style: theme.textTheme.labelMedium,
-                      ),
-                  ],
-                ),
+                  ),
+                  if (details != null)
+                    TextSpan(
+                      text: '\n$details',
+                      style: theme.textTheme.labelMedium,
+                    ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
