@@ -221,6 +221,9 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
               child: const Text('취소'),
             ),
             TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
               onPressed: () => Navigator.pop(context, true),
               child: const Text('삭제'),
             ),
@@ -350,6 +353,9 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
         ),
       ],
       TextButton(
+        style: TextButton.styleFrom(
+          foregroundColor: Theme.of(context).colorScheme.error,
+        ),
         onPressed: _canMutate ? _confirmDelete : null,
         child: const Text('삭제'),
       ),

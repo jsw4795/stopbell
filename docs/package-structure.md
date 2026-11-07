@@ -254,6 +254,7 @@ Infrastructure Layer는 JPA Repository, 실제 도입된 SQL Mapper, 외부 Tran
 app/
 └── lib/
     ├── core/
+    │   └── theme/
     ├── features/
     │   ├── auth/
     │   ├── alarm/
@@ -271,6 +272,8 @@ app/
 ### core
 
 앱 전체에서 사용하는 설정, API client, routing, error handling 등 실제 공통 기반 기능을 둔다. authenticated API client는 Auth Session이 제공한 현재 Access Token을 사용하고 refresh lifecycle은 Auth Session에 위임한다.
+
+`core/theme/`은 [Flutter 공통 디자인 시스템](development-guidelines.md#flutter-공통-디자인-시스템)의 테마와 표시 토큰을 소유한다.
 
 ### features
 

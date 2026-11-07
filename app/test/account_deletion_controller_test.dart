@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:stopbell/core/authenticated_api_client.dart';
+import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/alarm/alarm_creation_intent.dart';
 import 'package:stopbell/features/auth/account_deletion_client.dart';
 import 'package:stopbell/features/auth/account_deletion_controller.dart';
@@ -561,6 +562,7 @@ void main() {
     (tester) async {
       await tester.pumpWidget(
         MaterialApp(
+          theme: StopBellTheme.dark,
           home: LoginScreen(
             authSession: auth,
             deletion: controller,
@@ -573,6 +575,13 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('회원 탈퇴'));
       await tester.pumpAndSettle();
+      final confirm = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, '탈퇴 확인'),
+      );
+      expect(
+        confirm.style?.foregroundColor?.resolve({}),
+        StopBellTheme.dark.colorScheme.error,
+      );
       await tester.tap(find.text('취소'));
       await tester.pumpAndSettle();
       expect(client.calls, 0);

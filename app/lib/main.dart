@@ -7,6 +7,7 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'core/app_config.dart';
 import 'core/authenticated_api_client.dart';
+import 'core/theme/stopbell_theme.dart';
 import 'features/notification/installation_storage.dart';
 import 'features/notification/device_api_client.dart';
 import 'features/notification/push_permission_service.dart';
@@ -39,6 +40,10 @@ void main() {
   } on AppConfigException catch (error) {
     runApp(
       MaterialApp(
+        theme: StopBellTheme.light,
+        darkTheme: StopBellTheme.dark,
+        themeMode: ThemeMode.system,
+        builder: StopBellTheme.withSystemOverlay,
         home: Scaffold(body: Center(child: Text(error.message))),
       ),
     );
@@ -280,6 +285,10 @@ class _StopBellApplicationState extends State<StopBellApplication>
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'StopBell',
+      theme: StopBellTheme.light,
+      darkTheme: StopBellTheme.dark,
+      themeMode: ThemeMode.system,
+      builder: StopBellTheme.withSystemOverlay,
       scaffoldMessengerKey: _messengerKey,
       navigatorKey: _navigatorKey,
       home: _storageFailed
@@ -361,6 +370,9 @@ class _LoginScreenState extends State<LoginScreen> {
             child: const Text('취소'),
           ),
           TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('탈퇴 확인'),
           ),
@@ -504,6 +516,9 @@ class _LoginScreenState extends State<LoginScreen> {
               actions: [
                 if (deletion != null)
                   TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: Theme.of(context).colorScheme.error,
+                    ),
                     onPressed: _isLoading ? null : _confirmDeletion,
                     child: const Text('회원 탈퇴'),
                   ),
@@ -547,7 +562,10 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('StopBell', style: TextStyle(fontSize: 32)),
+                Text(
+                  'StopBell',
+                  style: Theme.of(context).textTheme.headlineLarge,
+                ),
                 const SizedBox(height: 24),
                 if (widget.authSession.state == AuthState.initializing)
                   const Text('인증 상태 확인 중...')

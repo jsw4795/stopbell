@@ -26,6 +26,10 @@ class BoardingSessionView extends StatelessWidget {
             child: const Text('계속 추적'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('추적 취소 확인'),
           ),

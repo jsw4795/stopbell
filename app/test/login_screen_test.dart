@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
 import 'package:stopbell/features/auth/apple_auth_service.dart';
 import 'package:stopbell/features/auth/backend_auth_client.dart';
@@ -146,6 +149,48 @@ class FlowAlarms extends Fake implements AlarmClient {
 }
 
 void main() {
+  testWidgets('로그인 화면은 시스템 밝기를 따르고 Apple 버튼 스타일을 유지한다', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.light;
+    await tester.pumpWidget(
+      app(
+        session(FakeAuthenticator(), FakeStorage()),
+        appleAuthenticator: FakeAuthenticator(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final login = find.byType(LoginScreen);
+    final apple = find.byType(SignInWithAppleButton);
+    final brandStyle = tester.widget<SignInWithAppleButton>(apple).style;
+    final brandSize = tester.getSize(apple);
+    expect(Theme.of(tester.element(login)).brightness, Brightness.light);
+
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+    await tester.pumpAndSettle();
+
+    expect(
+      Theme.of(tester.element(login)).colorScheme,
+      StopBellTheme.dark.colorScheme,
+    );
+    final statusRegion = find.ancestor(
+      of: login,
+      matching: find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+    );
+    final overlay = tester
+        .widget<AnnotatedRegion<SystemUiOverlayStyle>>(statusRegion)
+        .value;
+    expect(overlay.statusBarBrightness, Brightness.dark);
+    expect(overlay.statusBarIconBrightness, Brightness.light);
+    expect(tester.widget<SignInWithAppleButton>(apple).style, brandStyle);
+    expect(tester.getSize(apple), brandSize);
+    expect(find.text('Google로 계속하기'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('기본 설정에서 iOS Apple 버튼을 표시한다', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);

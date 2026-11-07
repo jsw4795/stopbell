@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_colors.dart';
 import 'bus_route_stop_occurrence.dart';
 import 'stop_display_name.dart';
 
@@ -169,6 +170,7 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
   Widget build(BuildContext context) {
     final turn = _turn;
     final theme = Theme.of(context);
+    final stopColors = StopBellColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -209,15 +211,11 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                   fontWeight: FontWeight.w600,
                 ),
                 mutedTitle: theme.textTheme.titleMedium!.copyWith(
-                  color: theme.brightness == Brightness.dark
-                      ? const Color(0xffb0b0b0)
-                      : const Color(0xff666666),
+                  color: stopColors.nonstopStop,
                   fontWeight: FontWeight.w600,
                 ),
                 badge: theme.textTheme.labelSmall!.copyWith(
-                  color: theme.brightness == Brightness.dark
-                      ? const Color(0xffb0b0b0)
-                      : const Color(0xff666666),
+                  color: stopColors.nonstopStop,
                   fontWeight: FontWeight.w600,
                 ),
                 detail: theme.textTheme.bodySmall!.copyWith(
@@ -410,20 +408,14 @@ class _StopRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final boardingColor = theme.brightness == Brightness.dark
-        ? const Color(0xff82d9a1)
-        : const Color(0xff17683f);
-    final muted = theme.brightness == Brightness.dark
-        ? const Color(0xffb0b0b0)
-        : const Color(0xff666666);
+    final colors = Theme.of(context).colorScheme;
+    final stopColors = StopBellColors.of(context);
     final accent = target
-        ? colors.primary
+        ? stopColors.targetStop
         : boarding
-        ? boardingColor
+        ? stopColors.boardingStop
         : nonstop
-        ? muted
+        ? stopColors.nonstopStop
         : turn
         ? colors.primary
         : colors.outline;
@@ -466,7 +458,7 @@ class _StopRow extends StatelessWidget {
                         child: FractionallySizedBox(
                           heightFactor: first || last ? 0.5 : 1,
                           child: ColoredBox(
-                            color: colors.primary.withValues(alpha: 0.55),
+                            color: colors.primary.withValues(alpha: 0.75),
                             child: const SizedBox(width: 2),
                           ),
                         ),
@@ -516,14 +508,14 @@ class _StopRow extends StatelessWidget {
                       Icon(
                         Icons.flag_outlined,
                         size: 18,
-                        color: colors.primary,
+                        color: stopColors.targetStop,
                         semanticLabel: '목표 정류장',
                       ),
                     if (boarding)
                       Icon(
                         Icons.directions_bus_outlined,
                         size: 18,
-                        color: boardingColor,
+                        color: stopColors.boardingStop,
                         semanticLabel: '승차 정류장',
                       ),
                   ],

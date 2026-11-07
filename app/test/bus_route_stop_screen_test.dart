@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/features/transit/bus_route_stop_screen.dart';
@@ -42,6 +43,7 @@ const last = BusRouteStopOccurrence(
 
 Widget screen(Future<List<BusRouteStopOccurrence>> Function(int) findStops) =>
     MaterialApp(
+      theme: StopBellTheme.light,
       home: Scaffold(
         body: BusRouteStopScreen(
           route: route,

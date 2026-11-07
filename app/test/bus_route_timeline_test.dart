@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/features/transit/bus_route_timeline.dart';
 import 'package:stopbell/features/transit/stop_display_name.dart';
@@ -43,7 +44,7 @@ bool highlighted(WidgetTester tester, Finder label) => tester
 
 Widget timeline(List<BusRouteStopOccurrence> stops, {double scale = 1}) =>
     MaterialApp(
-      theme: ThemeData.dark(),
+      theme: StopBellTheme.dark,
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context)
             .copyWith(textScaler: TextScaler.linear(scale)),
@@ -78,7 +79,9 @@ void main() {
       BusRouteStopOccurrence? selected;
       await tester.pumpWidget(
         MaterialApp(
-          theme: ThemeData(brightness: brightness),
+          theme: brightness == Brightness.light
+              ? StopBellTheme.light
+              : StopBellTheme.dark,
           home: Scaffold(
             body: StatefulBuilder(
               builder: (context, setState) => BusRouteTimeline(

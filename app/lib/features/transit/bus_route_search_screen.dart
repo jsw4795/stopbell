@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_spacing.dart';
 import 'bus_route.dart';
 
 enum _SearchState { idle, loading, success, empty, error }
@@ -56,7 +57,7 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
   Widget build(BuildContext context) {
     final loading = _state == _SearchState.loading;
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -70,12 +71,12 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
             textInputAction: TextInputAction.search,
             onSubmitted: (_) => _search(),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: StopBellSpacing.md),
           FilledButton(
             onPressed: loading ? null : _search,
             child: const Text('검색'),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: StopBellSpacing.lg),
           Expanded(child: _buildResults()),
         ],
       ),

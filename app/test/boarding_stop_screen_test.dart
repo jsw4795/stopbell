@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:http/http.dart' as http;
+import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
 import 'package:stopbell/features/boarding/boarding_candidate_client.dart';
 import 'package:stopbell/features/boarding/boarding_candidates.dart';
@@ -39,7 +40,8 @@ void main() {
     BusRoute route = boardingRoute,
     Future<List<BusRouteStopOccurrence>> Function(int)? stops,
   }) => MaterialApp(
-    darkTheme: ThemeData.dark(),
+    theme: StopBellTheme.light,
+    darkTheme: StopBellTheme.dark,
     home: Scaffold(
       body: BoardingStopScreen(
         route: route,
@@ -572,6 +574,7 @@ void main() {
       addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       await tester.pumpWidget(
         MaterialApp(
+          darkTheme: StopBellTheme.dark,
           builder: (context, child) => MediaQuery(
             data: MediaQuery.of(context)
                 .copyWith(textScaler: const TextScaler.linear(2)),
@@ -605,7 +608,7 @@ void main() {
       ]) {
         await tester.ensureVisible(widget);
         expect(widget.hitTestable(), findsOneWidget);
-        expect(Theme.of(tester.element(widget)).brightness, Brightness.light);
+        expect(Theme.of(tester.element(widget)).brightness, Brightness.dark);
       }
       await tap(tester, 'occurrence-11');
       await tap(tester, 'occurrence-22');

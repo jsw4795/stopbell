@@ -163,6 +163,38 @@ V1에서 앱은 비교적 얇은 클라이언트로 유지한다.
 
 특별한 이유 없이 교통 모니터링 비즈니스 로직을 모바일 앱으로 옮기지 않는다.
 
+### Flutter 공통 디자인 시스템
+
+제품과 시작 설정 오류의 `MaterialApp`은 `StopBellTheme.light`와 `StopBellTheme.dark`를 `ThemeMode.system`으로 적용한다. 화면 바탕과 AppBar의 상태 표시줄 아이콘도 밝기에 맞춘다.
+
+| 파일 | 책임 |
+| --- | --- |
+| `app/lib/core/theme/stopbell_theme.dart` | `ThemeData`, Material `ColorScheme`, `TextTheme`, 컴포넌트 및 시스템 UI 스타일 |
+| `app/lib/core/theme/stopbell_colors.dart` | 성공·경고와 교통 전용 `ThemeExtension`. 화면에서 `StopBellColors.of(context)`로 참조 |
+| `app/lib/core/theme/stopbell_spacing.dart` | 공통 간격, 터치 크기, 모서리 반경 |
+
+`ColorScheme.primary`와 `onPrimary`는 주요 액션, `secondary`는 보조 액션에 사용한다. 페이지 바탕은 `scaffoldBackgroundColor`, 카드·필드는 `surface`, 기본 글자와 보조 글자는 `onSurface`와 `onSurfaceVariant`를 사용한다. `outline`은 입력 경계와 중립 표시, `outlineVariant`는 장식용 구분선에 사용한다. 오류와 삭제·탈퇴 같은 위험 액션은 `error`와 `onError`를 사용한다.
+
+승차 정류장은 `boardingStop`(녹색), 목표 정류장은 `targetStop`(파랑), 미정차는 `nonstopStop`(회색)을 사용한다. 추적 중과 추적 보류는 `activeTracking`과 `heldTracking`, 차량 위치 표시는 향후 `busLocation`을 사용한다. 정류장 마커와 상태 표시는 색과 함께 라벨·아이콘·Semantics로 구분한다. 노선 유형 데이터가 확정되기 전에는 버스번호로 색상을 추정하지 않는다. 향후 유형색은 정류장과 추적의 의미색과 분리한다.
+
+| 텍스트 역할 | `TextTheme` | 크기 / 굵기 / 줄 높이 |
+| --- | --- | --- |
+| 화면 제목 | `headlineLarge` | 28 / 700 / 34 |
+| 섹션 제목 | `titleLarge` | 20 / 600 / 26 |
+| 노선번호 등 주요 정보 | `headlineSmall` | 24 / 700 / 30 |
+| 정류장 이름·상단 바 제목 | `titleMedium` | 17 / 600 / 23 |
+| 본문 | `bodyMedium`, `bodyLarge` | 16 / 400 / 22 |
+| 보조 정보 | `bodySmall` | 14 / 400 / 20 |
+| 상태 정보 | `labelSmall` | 13 / 600 / 18 |
+| 캡션 | `labelMedium` | 12 / 400 / 16 |
+| 버튼 | `labelLarge` | 16 / 600 / 22 |
+
+iOS의 플랫폼 기본 폰트와 시스템 글자 배율을 유지한다. 화면 여백은 16, 간격은 4·8·12·16·24를 사용한다. 버튼과 필드 반경은 12, 카드는 14, 다이얼로그는 16이다. 작은 화면, 키보드, 큰 글씨에서 콘텐츠가 줄바꿈되거나 스크롤될 수 있게 구성한다.
+
+주요 액션은 `FilledButton`(최소 높이 50), 보조는 `OutlinedButton`(46), 링크는 `TextButton`(44)을 사용한다. `IconButton`에는 최소 44×44 터치 영역과 접근성 이름을 유지한다. `TextField`는 최소 높이 48과 공통 Surface·포커스·오류·비활성 테마를 상속한다. 카드·리스트·선택 컨트롤·다이얼로그·SnackBar·Divider·진행 표시도 기존 Material 위젯의 테마를 우선 사용한다. 로그인 브랜드 위젯은 제공자의 버튼 규격을 유지한다.
+
+화면별 리디자인에서 색·간격·텍스트 스타일을 추가하기 전에 기존 토큰을 확인한다. 작은 글자는 배경 대비 4.5:1 이상, 의미 있는 그래픽은 3:1 이상을 검증 기준으로 삼는다. 선택과 비활성 표현은 기존 이벤트와 상태 판정에서 파생한다.
+
 ## 5. 테스트
 
 사용자에게 실패를 일으킬 수 있는 동작을 우선 테스트한다.
