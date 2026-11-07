@@ -49,6 +49,48 @@ public class TransitSourceMetadataService {
         }
     }
 
+    /** Called inside the route transaction after the normalized entities have been flushed. */
+    @Transactional
+    public void saveTagoLinkedBatch(List<SourceRecord> records) {
+        if (records.isEmpty()) throw new IllegalArgumentException("TAGO source batch must not be empty");
+        for (SourceRecord record : records) {
+            if (record.sourceSystem() != TransitSourceSystem.TAGO || record.entityId() == null
+                    || (record.dataKind() != TransitSourceDataKind.ROUTE && record.dataKind() != TransitSourceDataKind.OCCURRENCE)) {
+                throw new IllegalArgumentException("Expected linked TAGO source records");
+            }
+        }
+        Instant now = clock.instant();
+        jdbc.batchUpdate("""
+                INSERT INTO transit_source_metadata
+                    (source_system, data_kind, source_key, route_id, stop_id, occurrence_id,
+                     raw_payload, source_version, collected_at, updated_at)
+                VALUES (?, ?, ?, ?, NULL, ?, CAST(? AS JSON), ?, ?, ?) AS incoming
+                ON DUPLICATE KEY UPDATE
+                    updated_at = IF(transit_source_metadata.raw_payload <=> incoming.raw_payload
+                        AND transit_source_metadata.source_version <=> incoming.source_version
+                        AND transit_source_metadata.collected_at <=> incoming.collected_at
+                        AND transit_source_metadata.route_id <=> incoming.route_id
+                        AND transit_source_metadata.stop_id <=> incoming.stop_id
+                        AND transit_source_metadata.occurrence_id <=> incoming.occurrence_id,
+                        transit_source_metadata.updated_at, incoming.updated_at),
+                    route_id = incoming.route_id, stop_id = incoming.stop_id,
+                    occurrence_id = incoming.occurrence_id, raw_payload = incoming.raw_payload,
+                    source_version = incoming.source_version, collected_at = incoming.collected_at
+                """, records, records.size(), (statement, record) -> {
+                    statement.setString(1, record.sourceSystem().name());
+                    statement.setString(2, record.dataKind().name());
+                    statement.setString(3, record.sourceKey());
+                    if (record.dataKind() == TransitSourceDataKind.ROUTE) statement.setLong(4, record.entityId());
+                    else statement.setNull(4, java.sql.Types.BIGINT);
+                    if (record.dataKind() == TransitSourceDataKind.OCCURRENCE) statement.setLong(5, record.entityId());
+                    else statement.setNull(5, java.sql.Types.BIGINT);
+                    statement.setString(6, record.rawPayload());
+                    statement.setString(7, record.sourceVersion());
+                    statement.setTimestamp(8, Timestamp.from(record.collectedAt()));
+                    statement.setTimestamp(9, Timestamp.from(now));
+                });
+    }
+
     /** Unlinked Seoul rows retain any existing association for the same source identity. */
     @Transactional
     public void saveUnlinkedBatch(List<SourceRecord> records) {

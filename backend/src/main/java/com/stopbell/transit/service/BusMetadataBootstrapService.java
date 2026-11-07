@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
+import com.stopbell.transit.metadata.TagoMetadataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -44,6 +45,8 @@ public class BusMetadataBootstrapService {
             log.info("Metadata bootstrap started: provider={}", provider);
             if (source instanceof SeoulCsvMetadataSource seoulSource) {
                 syncService.syncSeoulSource(seoulSource);
+            } else if (source instanceof TagoMetadataSource tagoSource) {
+                syncService.syncTagoSource(tagoSource);
             } else {
                 syncService.syncCompleteProviderSnapshot(source.fetchCompleteSnapshot());
             }

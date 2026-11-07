@@ -18,11 +18,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
+import com.stopbell.transit.metadata.TagoMetadataSource;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ByteArrayResource;
 
 class BusMetadataBootstrapServiceTest {
+
+    @Test
+    @DisplayName("TAGO bootstrap은 원본 수집 동기화 경로를 사용한다")
+    void tago_bootstrap_uses_raw_sync() {
+        TagoMetadataSource source = mock(TagoMetadataSource.class);
+        org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
+        BusMetadataSyncService syncService = mock(BusMetadataSyncService.class);
+        new BusMetadataBootstrapService(List.of(source), syncService).bootstrap(TransitProvider.TAGO);
+        verify(syncService).syncTagoSource(source);
+        verify(source, org.mockito.Mockito.never()).fetchCompleteSnapshot();
+    }
 
     @Test
     @DisplayName("source parser 검증 실패 시 provider cleanup 경로를 호출하지 않는다")

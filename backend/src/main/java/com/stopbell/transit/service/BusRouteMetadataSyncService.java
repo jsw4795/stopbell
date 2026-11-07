@@ -13,6 +13,7 @@ import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.domain.TransitSourceDataKind;
 import com.stopbell.transit.domain.TransitSourceSystem;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
+import com.stopbell.transit.metadata.TagoMetadataSource;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
 import com.stopbell.transit.entity.BusStop;
@@ -56,7 +57,20 @@ public class BusRouteMetadataSyncService {
         return reconcile(snapshot, Objects.requireNonNull(raw, "Seoul raw data must not be null"));
     }
 
+    @Transactional
+    public BusRoute syncTagoRoute(BusRouteMetadataSnapshot snapshot, TagoRouteRawData raw) {
+        if (snapshot.provider() != TransitProvider.TAGO) {
+            throw new IllegalArgumentException("Raw TAGO metadata requires a TAGO route");
+        }
+        Objects.requireNonNull(raw, "TAGO raw data must not be null");
+        return reconcile(snapshot, null, raw);
+    }
+
     private BusRoute reconcile(BusRouteMetadataSnapshot snapshot, SeoulRouteRawData raw) {
+        return reconcile(snapshot, raw, null);
+    }
+
+    private BusRoute reconcile(BusRouteMetadataSnapshot snapshot, SeoulRouteRawData raw, TagoRouteRawData tagoRaw) {
         BusRoute route = busRouteRepository
                 .findByProviderAndExternalRouteId(snapshot.provider(), snapshot.externalRouteId())
                 .orElseGet(() -> busRouteRepository.save(new BusRoute(
@@ -102,6 +116,9 @@ public class BusRouteMetadataSyncService {
         if (raw != null) {
             records.add(record(TransitSourceDataKind.ROUTE, snapshot.externalRouteId(), route.getId(),
                     raw.routePayload(), raw.collectedAt()));
+        } else if (tagoRaw != null) {
+            records.add(tagoRecord(TransitSourceDataKind.ROUTE, snapshot.externalRouteId(), route.getId(),
+                    tagoRaw.routePayload(), tagoRaw.collectedAt()));
         }
         Set<String> processedStops = new HashSet<>();
         for (Map.Entry<OccurrenceKey, IncomingOccurrence> incomingOccurrence : incomingOccurrences.entrySet()) {
@@ -129,12 +146,24 @@ public class BusRouteMetadataSyncService {
                         snapshot.externalRouteId(), incomingOccurrence.getKey().stopOrder());
                 records.add(record(TransitSourceDataKind.OCCURRENCE, key, existing.getId(),
                         raw.occurrencePayloads().get(key), raw.collectedAt()));
+            } else if (tagoRaw != null) {
+                String key = TagoMetadataSource.occurrenceSourceKey(snapshot.externalRouteId(), incomingOccurrence.getKey().stopOrder());
+                records.add(tagoRecord(TransitSourceDataKind.OCCURRENCE, key, existing.getId(),
+                        tagoRaw.occurrencePayloads().get(key), tagoRaw.collectedAt()));
             }
         }
         if (raw != null) {
             sourceMetadataService.saveAll(records);
+        } else if (tagoRaw != null) {
+            occurrenceRepository.flush();
+            sourceMetadataService.saveTagoLinkedBatch(records);
         }
         return route;
+    }
+
+    private static SourceRecord tagoRecord(TransitSourceDataKind kind, String key, Long id, String payload, Instant collectedAt) {
+        if (id == null || payload == null) throw new IllegalStateException("Missing normalized ID or TAGO raw row: " + key);
+        return new SourceRecord(TransitSourceSystem.TAGO, kind, key, id, payload, null, collectedAt);
     }
 
     private static SourceRecord record(TransitSourceDataKind kind, String key, Long id, String payload, Instant collectedAt) {
@@ -147,6 +176,8 @@ public class BusRouteMetadataSyncService {
     public record SeoulRouteRawData(String routePayload, Map<String, String> stopPayloads,
             Map<String, String> occurrencePayloads, Instant collectedAt) {
     }
+
+    public record TagoRouteRawData(String routePayload, Map<String, String> occurrencePayloads, Instant collectedAt) { }
 
     private record OccurrenceKey(String externalStopId, int stopOrder) {
     }

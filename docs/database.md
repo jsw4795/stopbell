@@ -451,6 +451,8 @@ V33은 기존 `bus_routes`에 nullable `route_type VARCHAR(24)`를 추가하고 
 
 저장 서비스는 단일 DB upsert로 동일 키의 행 ID를 유지하며 목록 전체를 하나의 트랜잭션에서 처리한다. 같은 입력의 재처리는 갱신 시각도 유지하고, 새 수집 시각이나 값이 바뀌면 갱신한다. 출처 간 충돌은 독립 행으로 보존한다. JSON은 원본의 필드와 JSON 값을 보존하며 원문 바이트 및 키 순서는 보장하지 않는다. 서울 CSV 파서는 정규화 snapshot과 별도로 서비스 범위 밖을 포함한 원본 행을 반환한다. 경유 키는 `노선ID 길이:노선ID:정류장순번`이며 순번은 검증된 양의 정수다. 서울 서비스 노선과 해당 정류장·경유 원본은 정규화 데이터와 같은 노선 transaction에서 내부 ID에 연결해 저장한다. 서비스 범위 밖 원본과 미참조 정류장도 종류와 원본 키로 구분해 500건 단위 transaction의 JDBC batch UPSERT로 저장하며 기존 FK를 보존한다. 모든 원본 저장 성공 후에만 cleanup과 완료 시각 갱신을 수행한다. 원본 파일 보관과 수집 이력은 후속 단계다. 일반 Route/Stop 조회는 원본 테이블을 읽지 않는다.
 
+TAGO는 정규화 snapshot과 같은 집합으로 검증된 ROUTE와 OCCURRENCE 원본을 노선별 transaction의 JDBC batch UPSERT로 저장하고 각각 route_id와 occurrence_id에 연결한다. 같은 원본 키의 행 ID는 유지하며 occurrence가 교체되면 새 내부 ID에 연결한다. TAGO STOP 원본은 생성하지 않고 source_version은 NULL이다. 전체 노선 성공 후에만 cleanup과 완료 시각 갱신을 수행한다.
+
 ### Phase 9 Boarding persistence contract (TASK-903)
 
 이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했고 TASK-906 1단계에서 Notification source를 V16으로 확장했다. 2026-10-28 요구사항 정정은 V17로 사전 알림 선택과 목적지 Event를 확장했고 TASK-908의 V18은 미검증 관측 접수를 추가했고 V19는 즉시 TRACKING 의미로 전환한다. V20은 하차 전 알림 시점만 추가하며 기존 V1~V19 Migration과 Alarm/BusAlarmTarget Schema는 수정하지 않는다.
