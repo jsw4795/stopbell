@@ -102,4 +102,8 @@ TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TAS
 
 ## Phase 3-A-2A-2 서울 원본 연결 (2026-11-07)
 
-서울 서비스 범위의 원본 행을 기존 정규화 데이터와 같은 Route transaction에 저장하고 내부 ID에 연결한다. 서비스 범위 밖 원본 저장은 후속 단계다. 상세 실행 경계는 [Architecture](../architecture.md)를 따른다.
+서울 서비스 범위의 원본 행을 기존 정규화 데이터와 같은 Route transaction에 저장하고 내부 ID에 연결한다. 당시 서비스 범위 밖 원본 저장은 후속 단계였다. 상세 실행 경계는 [Architecture](../architecture.md)를 따른다.
+
+## Phase 3-A-2A-3 서울 전체 원본 저장 (2026-11-07)
+
+서비스 대상 Route의 기존 transaction을 유지하고 나머지 서울 CSV 원본은 정규화 엔티티 생성 없이 배치 저장한다. 공유 Stop과 기존 FK를 보호하며 모든 배치 성공 후에만 cleanup 및 완료 시각 갱신을 허용한다. 상세 계약은 [Database](../database.md#transit-원본-메타데이터-저장-phase-3-a-1)와 [Architecture](../architecture.md)를 따른다.

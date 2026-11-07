@@ -278,9 +278,10 @@ class SeoulCsvMetadataSyncIntegrationTest {
     @DisplayName("서울 서비스 범위 원본을 FK와 함께 저장하고 동일 수집 재처리 시 ID와 원본 행을 유지한다")
     void save_raw_rows_with_ids_and_replay_same_collection() {
         String routes = ROUTES.replace("7016,지선,50.0", " 7016 ,지선,050.00")
-                + "outside,경기 노선,경기,9.0\n";
-        String stops = STOPS + "outside-stop,범위 밖,일반차로,00999,127.0,37.0,설치\n";
-        String routeStops = ROUTE_STOPS + "100100586,stop-1,000.50,2\noutside,outside-stop,0,1\n";
+                + "outside,경기 노선,경기,9.0\nincheon,인천 노선,인천,1.0\n";
+        String stops = STOPS + "outside-stop,범위 밖,일반차로,00999,127.0,37.0,설치\n"
+                + "unreferenced,미참조,일반차로,00111,127.0,37.0,설치\n";
+        String routeStops = ROUTE_STOPS + "100100586,stop-1,000.50,2\noutside,outside-stop,0,1\noutside,stop-1,0,2\n";
         SeoulCsvMetadataSource source = source(routes, routeStops, stops);
         var collected = source.fetchSnapshotWithRawRows();
         Instant collectedAt = Instant.parse("2026-11-07T00:00:00Z");
@@ -288,7 +289,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
         List<Map<String, Object>> before = jdbc.queryForList("SELECT * FROM transit_source_metadata ORDER BY id");
         DatabaseSnapshot normalized = databaseSnapshot();
 
-        assertThat(before).hasSize(2 + 3 + 5);
+        assertThat(before).hasSize(collected.rawRows().size()).hasSize(16);
         var json = tools.jackson.databind.json.JsonMapper.builder().build();
         for (Map<String, Object> stored : before) {
             var original = collected.rawRows().stream()
@@ -299,7 +300,9 @@ class SeoulCsvMetadataSyncIntegrationTest {
                     .isEqualTo(json.valueToTree(original.fields()));
         }
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata WHERE source_key IN "
-                + "('outside','outside-stop','7:outside:1')", Integer.class)).isZero();
+                + "('outside','outside-stop','7:outside:1')", Integer.class)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id IN ('outside','incheon')", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_stops WHERE external_stop_id IN ('outside-stop','unreferenced')", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata WHERE data_kind='STOP' "
                 + "AND source_key='stop-1'", Integer.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata m "
@@ -393,6 +396,94 @@ class SeoulCsvMetadataSyncIntegrationTest {
         } finally {
             jdbc.execute("DROP TRIGGER reject_second_route_raw");
         }
+    }
+
+    @Test
+    @DisplayName("범위 밖 배치 실패는 배치를 롤백하고 cleanup과 완료를 차단하며 재시도한다")
+    void roll_back_outside_batch_and_retry() {
+        seedMetadata();
+        SeoulCsvMetadataSource source = source(ROUTES.replace("7016", "변경")
+                + "outside,경기 노선,경기,1.0\n", ROUTE_STOPS,
+                STOPS + "outside-stop,범위 밖,일반차로,00009,127.0,37.0,설치\n");
+        var collected = source.fetchSnapshotWithRawRows();
+        Instant collectedAt = Instant.parse("2026-11-07T00:00:00Z");
+        jdbc.execute("""
+                CREATE TRIGGER reject_outside BEFORE INSERT ON transit_source_metadata
+                FOR EACH ROW BEGIN
+                  IF NEW.source_key = 'outside-stop' THEN
+                    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'outside failure';
+                  END IF;
+                END
+                """);
+        try {
+            assertThatThrownBy(() -> syncService.syncSeoulSnapshot(source, collected, collectedAt))
+                    .isInstanceOf(DataAccessException.class);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata WHERE source_key='outside'",
+                    Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT route_number FROM bus_routes WHERE external_route_id=?",
+                    String.class, ROUTE_A)).isEqualTo("변경");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='stale-route'",
+                    Integer.class)).isEqualTo(1);
+            assertThat(lastCompleteSyncAt()).isEqualTo(PREVIOUS_COMPLETION);
+        } finally {
+            jdbc.execute("DROP TRIGGER reject_outside");
+        }
+        syncService.syncSeoulSnapshot(source, collected, collectedAt);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata WHERE source_key='outside'",
+                Integer.class)).isEqualTo(1);
+        assertThat(lastCompleteSyncAt()).isAfter(PREVIOUS_COMPLETION);
+    }
+
+    @Test
+    @DisplayName("범위 밖 원본 갱신은 기존 유효 FK와 ID를 유지한다")
+    void preserve_existing_association_in_outside_batch() {
+        seedMetadata();
+        Long id = jdbc.queryForObject("SELECT id FROM transit_source_metadata WHERE data_kind='ROUTE' AND source_key='stale-route'", Long.class);
+        Long routeId = jdbc.queryForObject("SELECT route_id FROM transit_source_metadata WHERE id=?", Long.class, id);
+        jdbc.execute("""
+                CREATE TRIGGER reject_cleanup BEFORE DELETE ON bus_routes
+                FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'stop cleanup'
+                """);
+        try {
+            assertThatThrownBy(() -> bootstrap(source(ROUTES + "stale-route,이전 노선,경기,1.0\n",
+                    ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS)).isInstanceOf(DataAccessException.class);
+            assertThat(jdbc.queryForObject("SELECT route_id FROM transit_source_metadata WHERE id=?", Long.class, id))
+                    .isEqualTo(routeId);
+        } finally {
+            jdbc.execute("DROP TRIGGER reject_cleanup");
+        }
+    }
+
+    @Test
+    @DisplayName("두 번째 배치 실패 시 첫 배치는 보존되고 재처리로 전체 원본을 저장한다")
+    void retry_after_second_batch_fails() {
+        StringBuilder stops = new StringBuilder(STOPS);
+        for (int i = 0; i < 501; i++) {
+            stops.append("extra-").append(i).append(",추가,일반차로,00100,127.0,37.0,설치\n");
+        }
+        SeoulCsvMetadataSource source = source(ROUTES, ROUTE_STOPS, stops.toString());
+        var collected = source.fetchSnapshotWithRawRows();
+        Instant collectedAt = Instant.parse("2026-11-07T00:00:00Z");
+        jdbc.execute("""
+                CREATE TRIGGER reject_last_batch BEFORE INSERT ON transit_source_metadata
+                FOR EACH ROW BEGIN
+                  IF NEW.source_key = 'extra-500' THEN
+                    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'second batch failure';
+                  END IF;
+                END
+                """);
+        try {
+            assertThatThrownBy(() -> syncService.syncSeoulSnapshot(source, collected, collectedAt))
+                    .isInstanceOf(DataAccessException.class);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata WHERE source_key LIKE 'extra-%'",
+                    Integer.class)).isEqualTo(500);
+            assertThat(syncStateRepository.findById(TransitProvider.SEOUL_BUS)).isEmpty();
+        } finally {
+            jdbc.execute("DROP TRIGGER reject_last_batch");
+        }
+        syncService.syncSeoulSnapshot(source, collected, collectedAt);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata", Integer.class))
+                .isEqualTo(collected.rawRows().size());
     }
 
     private void seedMetadata() {

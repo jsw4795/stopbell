@@ -2,18 +2,22 @@ package com.stopbell.transit.service;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.domain.TransitSourceDataKind;
+import com.stopbell.transit.domain.TransitSourceSystem;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource.RawSourceRow;
 import com.stopbell.transit.service.BusRouteMetadataSyncService.SeoulRouteRawData;
+import com.stopbell.transit.service.TransitSourceMetadataService.SourceRecord;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusMetadataSyncState;
 import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
@@ -28,20 +32,24 @@ public class BusMetadataSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(BusMetadataSyncService.class);
     private static final int PROGRESS_LOG_INTERVAL = 100;
+    private static final int RAW_BATCH_SIZE = 500;
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     private final BusRouteMetadataSyncService routeMetadataSyncService;
+    private final TransitSourceMetadataService sourceMetadataService;
     private final BusProviderMetadataCleanupService providerMetadataCleanupService;
     private final BusMetadataSyncStateRepository syncStateRepository;
     private final Clock clock;
 
     public BusMetadataSyncService(
             BusRouteMetadataSyncService routeMetadataSyncService,
+            TransitSourceMetadataService sourceMetadataService,
             BusProviderMetadataCleanupService providerMetadataCleanupService,
             BusMetadataSyncStateRepository syncStateRepository,
             @Qualifier("transitMetadataClock") Clock clock
     ) {
         this.routeMetadataSyncService = routeMetadataSyncService;
+        this.sourceMetadataService = sourceMetadataService;
         this.providerMetadataCleanupService = providerMetadataCleanupService;
         this.syncStateRepository = syncStateRepository;
         this.clock = clock;
@@ -79,7 +87,11 @@ public class BusMetadataSyncService {
                         SeoulCsvMetadataSource.occurrenceSourceKey(route.externalRouteId(), occurrence.stopOrder()));
             }
         }
-        Set<String> savedStops = new HashSet<>();
+        Map<TransitSourceDataKind, Set<String>> saved = new EnumMap<>(TransitSourceDataKind.class);
+        for (TransitSourceDataKind kind : TransitSourceDataKind.values()) {
+            saved.put(kind, new HashSet<>());
+        }
+        Set<String> savedStops = saved.get(TransitSourceDataKind.STOP);
         syncComplete(complete, route -> {
             Map<String, String> stops = new HashMap<>();
             Map<String, String> occurrences = new HashMap<>();
@@ -94,6 +106,24 @@ public class BusMetadataSyncService {
             routeMetadataSyncService.syncSeoulRoute(route, new SeoulRouteRawData(
                     payload(rows, TransitSourceDataKind.ROUTE, route.externalRouteId()), stops, occurrences, collectedAt));
             savedStops.addAll(stops.keySet());
+            saved.get(TransitSourceDataKind.ROUTE).add(route.externalRouteId());
+            saved.get(TransitSourceDataKind.OCCURRENCE).addAll(occurrences.keySet());
+        }, () -> {
+            List<SourceRecord> batch = new ArrayList<>(RAW_BATCH_SIZE);
+            for (RawSourceRow row : collected.rawRows()) {
+                if (saved.get(row.dataKind()).contains(row.sourceKey())) {
+                    continue;
+                }
+                batch.add(new SourceRecord(TransitSourceSystem.SEOUL_TDATA, row.dataKind(), row.sourceKey(),
+                        null, JSON.writeValueAsString(row.fields()), null, collectedAt));
+                if (batch.size() == RAW_BATCH_SIZE) {
+                    sourceMetadataService.saveUnlinkedBatch(batch);
+                    batch.clear();
+                }
+            }
+            if (!batch.isEmpty()) {
+                sourceMetadataService.saveUnlinkedBatch(batch);
+            }
         });
     }
 
@@ -112,11 +142,11 @@ public class BusMetadataSyncService {
     }
 
     public void syncCompleteProviderSnapshot(CompleteBusMetadataSnapshot completeSnapshot) {
-        syncComplete(completeSnapshot, this::syncRoute);
+        syncComplete(completeSnapshot, this::syncRoute, () -> {});
     }
 
     private void syncComplete(CompleteBusMetadataSnapshot completeSnapshot,
-            java.util.function.Consumer<BusRouteMetadataSnapshot> syncRoute) {
+            java.util.function.Consumer<BusRouteMetadataSnapshot> syncRoute, Runnable beforeCleanup) {
         TransitProvider provider = completeSnapshot.provider();
         int totalRoutes = completeSnapshot.routes().size();
         Set<String> externalRouteIds = completeSnapshot.routes().stream()
@@ -132,6 +162,7 @@ public class BusMetadataSyncService {
                         provider, routesProcessed, totalRoutes);
             }
         }
+        beforeCleanup.run();
         providerMetadataCleanupService.cleanupProvider(provider, externalRouteIds);
         Instant completedAt = Instant.now(clock);
         BusMetadataSyncState state = syncStateRepository.findById(provider)

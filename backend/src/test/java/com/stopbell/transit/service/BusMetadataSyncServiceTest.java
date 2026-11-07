@@ -33,6 +33,7 @@ class BusMetadataSyncServiceTest {
         when(stateRepository.findById(TransitProvider.SEOUL_BUS)).thenReturn(Optional.empty());
         BusMetadataSyncService service = new BusMetadataSyncService(
                 routeSyncService,
+                mock(TransitSourceMetadataService.class),
                 cleanupService,
                 stateRepository,
                 Clock.fixed(completedAt, ZoneOffset.UTC)
@@ -60,6 +61,7 @@ class BusMetadataSyncServiceTest {
         when(routeSyncService.syncRoute(any())).thenThrow(new IllegalStateException("route failure"));
         BusMetadataSyncService service = new BusMetadataSyncService(
                 routeSyncService,
+                mock(TransitSourceMetadataService.class),
                 cleanupService,
                 stateRepository,
                 Clock.fixed(Instant.parse("2026-09-22T08:00:00Z"), ZoneOffset.UTC)
