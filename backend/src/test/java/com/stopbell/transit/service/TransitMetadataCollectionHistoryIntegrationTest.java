@@ -1,9 +1,12 @@
 package com.stopbell.transit.service;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.doReturn;
 
 import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.*;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.concurrent.*;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,6 +17,7 @@ import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {"transit.monitoring.enabled=false", "notification.dispatch.enabled=false", "notification.fcm.enabled=false"})
@@ -24,19 +28,29 @@ class TransitMetadataCollectionHistoryIntegrationTest {
         SharedMySqlExtension.database(registry, "collection_history");
     }
     @Autowired TransitMetadataCollectionHistoryService service;
+    @MockitoSpyBean(name = "transitMetadataClock") Clock clock;
 
     @Test @DisplayName("실행을 독립 저장하고 조회와 완료 재요청에서 ID와 시각을 보존한다")
     void persists_runs_and_transitions() {
+        doReturn(Instant.parse("2026-11-07T00:00:00.123456123Z")).when(clock).instant();
         var first = service.start(TransitProvider.SEOUL_BUS);
         var second = service.start(TransitProvider.TAGO);
         assertThat(first.getId()).isNotEqualTo(second.getId());
         service.collected(first.getId());
         service.syncing(first.getId());
         var completed = service.complete(first.getId());
+        assertThat(completed.getFinishedAt()).isEqualTo(Instant.parse("2026-11-07T00:00:00.123456123Z"));
+        var persisted = service.find(first.getId());
+        assertThat(persisted.getFinishedAt()).isEqualTo(Instant.parse("2026-11-07T00:00:00.123456Z"));
+        assertThat(persisted.getUpdatedAt()).isEqualTo(persisted.getFinishedAt());
+        doReturn(Instant.parse("2026-11-07T00:00:01Z")).when(clock).instant();
         var retried = service.complete(first.getId());
+        var reloaded = service.find(first.getId());
         assertThat(retried.getId()).isEqualTo(first.getId());
-        assertThat(retried.getFinishedAt()).isEqualTo(completed.getFinishedAt());
-        assertThat(service.find(first.getId()).getStatus()).isEqualTo(TransitCollectionStatus.COMPLETED);
+        assertThat(retried.getFinishedAt()).isEqualTo(persisted.getFinishedAt());
+        assertThat(reloaded.getFinishedAt()).isEqualTo(persisted.getFinishedAt());
+        assertThat(reloaded.getUpdatedAt()).isEqualTo(persisted.getUpdatedAt());
+        assertThat(reloaded.getStatus()).isEqualTo(TransitCollectionStatus.COMPLETED);
         assertThat(service.findByProvider(TransitProvider.SEOUL_BUS)).extracting("id").contains(first.getId());
         assertThat(service.findByStatus(TransitCollectionStatus.COLLECTING)).extracting("id").contains(second.getId());
         var failed = service.fail(second.getId(), TransitCollectionFailureStage.COLLECTION, TransitCollectionFailureCode.SOURCE_UNAVAILABLE);

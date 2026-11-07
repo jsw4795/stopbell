@@ -53,7 +53,7 @@ class UserIdentityMigrationIntegrationTest {
     @Test
     @DisplayName("Fresh DB의 전체 Migration은 Identity NOT NULL과 Provider별 복합 UNIQUE를 유지한다")
     void migrate_fresh_database() {
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(33);
+        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(34);
         assertIdentitySchema();
         insertIdentity("GOOGLE", "same-sub");
         insertIdentity("APPLE", "same-sub");
@@ -151,7 +151,7 @@ class UserIdentityMigrationIntegrationTest {
                 .hasRootCauseInstanceOf(SQLException.class);
         assertThatThrownBy(() -> jdbc.update("insert into apple_credentials (user_id, encrypted_refresh_token) values (?, 'v1.fixture')", Long.MAX_VALUE))
                 .hasRootCauseInstanceOf(SQLException.class);
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(10);
+        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(11);
         assertLatestAndNoOp();
     }
 
@@ -271,7 +271,7 @@ class UserIdentityMigrationIntegrationTest {
 
     private void assertLatestAndNoOp() {
         Flyway latest = flyway("latest", true);
-        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("33");
+        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("34");
         assertThat(latest.validateWithResult().validationSuccessful).isTrue();
         var history = jdbc.queryForList("select * from flyway_schema_history order by installed_rank");
         assertThat(latest.migrate().migrationsExecuted).isZero();

@@ -19,6 +19,7 @@ import com.stopbell.transit.repository.BusRouteRepository;
 import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
 import com.stopbell.transit.repository.BusStopRepository;
 import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
+import com.stopbell.transit.repository.TransitMetadataCollectionRunRepository;
 
 import static org.mockito.Mockito.mock;
 
@@ -112,6 +113,11 @@ class StopBellApplicationTests {
         @Bean
         com.stopbell.transit.service.TransitSourceMetadataService transitSourceMetadataService() {
             return mock(com.stopbell.transit.service.TransitSourceMetadataService.class);
+        }
+
+        @Bean
+        TransitMetadataCollectionRunRepository transitMetadataCollectionRunRepository() {
+            return mock(TransitMetadataCollectionRunRepository.class);
         }
 
         @Bean
