@@ -20,6 +20,15 @@
 
 AI 채팅 인수인계의 진입점과 유지관리 시점은 [CHAT_HANDOFF](CHAT_HANDOFF.md)를 따른다. 이 문서는 책임 문서를 안내하며 설계 계약을 소유하지 않는다.
 
+### 문서 갱신 시점
+
+- 일반 Task 완료 시 관련 설계 문서를 확인해 변경된 내용을 동기화하고, [Task 완료 절차](task-list.md#task-completion-workflow)에 따라 `task-list.md`를 갱신한다. 이미 정확한 문서는 수정하지 않는다.
+- 주요 Phase 완료 시 `roadmap.md`와 `CHAT_HANDOFF.md`를 함께 갱신한다. 현재 또는 다음 Phase가 바뀌면 `CHAT_HANDOFF.md`의 진행 상황도 갱신한다.
+- 중요한 설계 결정이 변경되면 해당 ADR과 관련 책임 문서를 갱신한다. Flutter UI 리뉴얼 계획이 바뀌면 `roadmap.md`를 갱신하고 필요하면 `CHAT_HANDOFF.md`에도 반영한다.
+- 단순 버그 수정은 관련 문서의 정보가 실제로 바뀐 경우에만 해당 문서를 갱신한다. ChatGPT 채팅방 이동만으로 문서를 갱신할 필요는 없다.
+
+필요한 문서 동기화는 별도 후속 작업으로 미루지 않고 해당 구현 작업의 로컬 Commit에 함께 포함한다. Task 완료 표시는 구현과 필요한 검증이 성공한 경우에만 같은 Commit에 포함한다. `CHAT_HANDOFF.md`는 매 Task마다 수정하지 않으며 구체적인 갱신 조건은 해당 문서를 따른다.
+
 ## 4. 백엔드 가이드라인
 
 기본 스택:
