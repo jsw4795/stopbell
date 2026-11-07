@@ -107,3 +107,7 @@ TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TAS
 ## Phase 3-A-2A-3 서울 전체 원본 저장 (2026-11-07)
 
 서비스 대상 Route의 기존 transaction을 유지하고 나머지 서울 CSV 원본은 정규화 엔티티 생성 없이 배치 저장한다. 공유 Stop과 기존 FK를 보호하며 모든 배치 성공 후에만 cleanup 및 완료 시각 갱신을 허용한다. 상세 계약은 [Database](../database.md#transit-원본-메타데이터-저장-phase-3-a-1)와 [Architecture](../architecture.md)를 따른다.
+
+## Phase 3-A-3A-1 수집 이력 확장 (2026-11-08)
+
+기존 최소 sync state 결정 이후 수집 실행의 성공·실패·중단을 추적해야 한다는 사용자 요구에 따라 별도 이력 기반을 추가한다. 기존 `lastCompleteSyncAt`과 최신 원본 UPSERT의 책임은 유지한다. 이력 상태와 저장 계약은 [Database](../database.md#transit-metadata-수집-이력-phase-3-a-3a-1)를 따른다. 이번 단계는 독립 서비스만 제공하며 Bootstrap 자동 기록 및 원본 파일 아카이브는 후속 작업이다.

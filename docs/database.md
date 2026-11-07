@@ -441,7 +441,7 @@ Route snapshot sync는 동일 Route/Stop identity의 display·operational metada
 
 `destination_name`은 V12 nullable migration으로 추가한 사용자 표시 metadata다. 동일 occurrence의 목적지만 변경되거나 경기 검증 실패로 null이 되면 기존 내부 ID를 유지하며 current snapshot 값으로 갱신한다. 서울 원본 동기화는 입력 행선지가 없을 때 기존 값을 보존한다. GBIS ID와 방향 raw field는 정규화 occurrence의 identity가 아니며 별도의 원본 메타데이터에 보존한다.
 
-TASK-513은 V10의 `bus_metadata_sync_states`에 `provider VARCHAR(20)` PK와 `last_complete_sync_at DATETIME(6) NOT NULL`을 저장한다. `BusMetadataSyncState`는 Java `Instant`로 매핑하며 complete sync 성공 뒤에만 갱신한다. fresh DB bootstrap 완료와 마지막 complete sync 성공 age의 근거이며 readiness 연계의 최종 검증은 TASK-807에 남는다. sync/checksum history, staging table, error journal은 추가하지 않았다.
+TASK-513은 V10의 `bus_metadata_sync_states`에 `provider VARCHAR(20)` PK와 `last_complete_sync_at DATETIME(6) NOT NULL`을 저장한다. `BusMetadataSyncState`는 Java `Instant`로 매핑하며 complete sync 성공 뒤에만 갱신한다. fresh DB bootstrap 완료와 마지막 complete sync 성공 age의 근거이며 readiness 연계의 최종 검증은 TASK-807에 남는다. 당시 sync/checksum history, staging table, error journal은 추가하지 않았다. 수집 실행 이력은 아래 Phase 3-A-3A-1에서 별도로 확장한다.
 
 ### Transit 원본 메타데이터 저장 (Phase 3-A-1)
 
@@ -449,11 +449,19 @@ V33은 기존 `bus_routes`에 nullable `route_type VARCHAR(24)`를 추가하고 
 
 원본 행은 `source_system`(SEOUL_TDATA/TAGO/GBIS), `data_kind`(ROUTE/STOP/OCCURRENCE), `source_key` 복합 UNIQUE로 식별한다. JSON 객체, nullable 원본 버전, 수집 시각과 갱신 시각을 저장한다. 기존 Route/Stop/Occurrence 중 같은 종류의 nullable FK 하나로 연결하며 FK 삭제 시 연결만 NULL이 되고 원본은 보존된다. 경유 source key는 제공기관의 노선과 순번을 모호하지 않게 인코딩해야 하며 내부 occurrence ID로 취급하지 않는다. 서울 서비스 범위 밖의 원본은 연결 없이 저장할 수 있다.
 
-저장 서비스는 단일 DB upsert로 동일 키의 행 ID를 유지하며 목록 전체를 하나의 트랜잭션에서 처리한다. 같은 입력의 재처리는 갱신 시각도 유지하고, 새 수집 시각이나 값이 바뀌면 갱신한다. 출처 간 충돌은 독립 행으로 보존한다. JSON은 원본의 필드와 JSON 값을 보존하며 원문 바이트 및 키 순서는 보장하지 않는다. 서울 CSV 파서는 정규화 snapshot과 별도로 서비스 범위 밖을 포함한 원본 행을 반환한다. 경유 키는 `노선ID 길이:노선ID:정류장순번`이며 순번은 검증된 양의 정수다. 서울 서비스 노선과 해당 정류장·경유 원본은 정규화 데이터와 같은 노선 transaction에서 내부 ID에 연결해 저장한다. 서비스 범위 밖 원본과 미참조 정류장도 종류와 원본 키로 구분해 500건 단위 transaction의 JDBC batch UPSERT로 저장하며 기존 FK를 보존한다. 모든 원본 저장 성공 후에만 cleanup과 완료 시각 갱신을 수행한다. 원본 파일 보관과 수집 이력은 후속 단계다. 일반 Route/Stop 조회는 원본 테이블을 읽지 않는다.
+저장 서비스는 단일 DB upsert로 동일 키의 행 ID를 유지하며 목록 전체를 하나의 트랜잭션에서 처리한다. 같은 입력의 재처리는 갱신 시각도 유지하고, 새 수집 시각이나 값이 바뀌면 갱신한다. 출처 간 충돌은 독립 행으로 보존한다. JSON은 원본의 필드와 JSON 값을 보존하며 원문 바이트 및 키 순서는 보장하지 않는다. 서울 CSV 파서는 정규화 snapshot과 별도로 서비스 범위 밖을 포함한 원본 행을 반환한다. 경유 키는 `노선ID 길이:노선ID:정류장순번`이며 순번은 검증된 양의 정수다. 서울 서비스 노선과 해당 정류장·경유 원본은 정규화 데이터와 같은 노선 transaction에서 내부 ID에 연결해 저장한다. 서비스 범위 밖 원본과 미참조 정류장도 종류와 원본 키로 구분해 500건 단위 transaction의 JDBC batch UPSERT로 저장하며 기존 FK를 보존한다. 모든 원본 저장 성공 후에만 cleanup과 완료 시각 갱신을 수행한다. 원본 파일 보관은 후속 단계이며 수집 이력 기반은 아래에 정의한다. 일반 Route/Stop 조회는 원본 테이블을 읽지 않는다.
 
 TAGO는 정규화 snapshot과 같은 집합으로 검증된 ROUTE와 OCCURRENCE 원본을 노선별 transaction의 JDBC batch UPSERT로 저장하고 각각 route_id와 occurrence_id에 연결한다. 같은 원본 키의 행 ID는 유지하며 occurrence가 교체되면 새 내부 ID에 연결한다. TAGO STOP 원본은 생성하지 않고 source_version은 NULL이다. 전체 노선 성공 후에만 cleanup과 완료 시각 갱신을 수행한다.
 
 GBIS ROUTE와 OCCURRENCE 원본은 전체 수집 결과를 출처별 키와 공식 source version으로 UPSERT한다. 검증된 TAGO traversal에만 각각 route_id와 occurrence_id를 연결하며, 현재 일치하지 않는 수집 행은 기존 연결도 NULL로 갱신한다. GBIS 전용 원본도 보존하고 STOP을 합성하지 않는다. TAGO 노선 저장 후 500건씩 별도 transaction으로 저장하며 실패 시 cleanup과 완료 시각 갱신을 차단한다. 동일 수집과 시각의 재처리는 원본 ID와 변경되지 않은 updated_at을 유지하고, 미수집 원본은 삭제하지 않는다.
+
+### Transit metadata 수집 이력 (Phase 3-A-3A-1)
+
+V34의 `transit_metadata_collection_runs`는 독립 실행 ID, `provider`(SEOUL_BUS/TAGO), 상태, UTC 의미의 시작·종료·생성·갱신 시각과 실패 단계·코드·고정 메시지를 저장한다. GBIS는 별도 Provider가 아니라 TAGO 실행의 일부다. 상태와 Provider, 종료 시각 및 실패 정보의 일관성에 CHECK를 두고 Provider/시작 시각과 상태를 색인한다. 원본 파일의 테이블이나 FK는 아직 없다.
+
+정상 순서는 COLLECTING → COLLECTED → SYNCING → COMPLETED이며 진행 상태에서 FAILED 또는 INTERRUPTED로 종료할 수 있다. 종료 상태에서 다른 상태로 전이할 수 없다. 현재 상태와 같은 요청은 변경 없이 성공하며 FAILED 재요청은 같은 단계와 코드일 때만 허용한다. 상태 변경은 행 잠금 transaction으로 직렬화한다. `start`는 호출마다 새 실행을 생성하며 시작 요청 자체의 중복 제거는 제공하지 않는다. 실패 메시지는 예외나 외부 문자열이 아닌 코드별 고정 문구다. COMPLETED는 Provider DB 동기화와 완료 시각 갱신까지 성공한 후에만 호출해야 하는 오케스트레이션 계약이며 이 독립 서비스가 동기화 성공 여부를 검증하지는 않는다.
+
+이번 단계는 이력 저장 기반만 제공한다. Bootstrap 연결과 자동 수집 이력 기록, 원본 파일 아카이브는 미구현이며 `bus_metadata_sync_states.last_complete_sync_at`의 기존 의미는 변하지 않는다.
 
 ### Phase 9 Boarding persistence contract (TASK-903)
 
