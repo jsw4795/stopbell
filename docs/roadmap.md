@@ -1,8 +1,8 @@
 # 로드맵
 
-## 현재 진행 상태 (2026-10-30)
+## 과거 진행 상태 (2026-10-30)
 
-아래 초기 Phase 0/1 체크리스트와 dependency diagram은 당시 계획·단계 관계를 보존한다. 현재 구현 완료 여부는 이 요약과 [Task List](task-list.md)를 기준으로 확인하며 초기 미체크 항목을 모두 미구현으로 읽지 않는다. 이번 문서 정리에서는 기존 체크박스를 변경하지 않는다.
+이 절은 2026-10-30 당시 기록이며 현재 상태는 아래 데이터 개선 및 UI 로드맵과 [Task List](task-list.md)를 확인한다. 특히 TAGO는 이후 기본 OFF 실험과 제한된 실기기 검증이 추가됐다. 아래 초기 Phase 0/1 체크리스트와 dependency diagram은 당시 계획·단계 관계를 보존한다. 현재 구현 완료 여부는 최신 현황과 [Task List](task-list.md)를 기준으로 확인하며 초기 미체크 항목을 모두 미구현으로 읽지 않는다. 이번 문서 정리에서는 기존 체크박스를 변경하지 않는다.
 
 | 영역 | 구현 상태 | 남은 검증·책임 |
 | --- | --- | --- |
@@ -12,6 +12,69 @@
 | Phase 9 BoardingSession | TASK-903 설계와 TASK-904~907 구현 완료. TASK-908 변경으로 번호 입력 없는 명시적 차량 선택·즉시 TRACKING·2정거장 전(기본)/1정거장 전 준비 알림 구현 | 서울 조건부 지원·TAGO 정확한 하차 추적 보류. TASK-908 실제 버스/iPhone E2E 미완료 |
 
 TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 검증을 대체하지 않는다. 상세 결과는 [Local Development](local-development.md#task-710-실제-iphone-수신-및-tap-검증), TASK-908의 정책 변경과 실측 경계는 [증거 보고서 §28](research/TASK-908-provider-evidence.md#28-하차-전-단일-알림과-이동-진행-평가-2026-10-29)을 따른다. TASK-814/816은 완료이며, UTC의 구현·검증 범위와 운영 데이터 미확인 조건은 [TASK-814 결과](task-list.md#task-814-utc-구현-및-검증-결과-2026-10-30)를 따른다.
+
+## 교통 메타데이터 개선과 Flutter 리뉴얼 진행 현황 (2026-11-08)
+
+이 표는 기존 Phase 0~9와 별도의 작업 흐름이다. 상태는 기준 커밋 `d18935780245ff693e9123c9374947263f67ab86`에서 확인한 구현 수준이며 최신 HEAD와 [Task List](task-list.md)를 다시 확인한다. 완료는 해당 단계의 코드 구현을 뜻하며 운영 적용이나 실제 Provider 검증을 뜻하지 않는다. 과거 자동 테스트 결과는 Git 및 해당 문서를 확인하며 이번 문서 작업에서 재실행하지 않았다.
+
+| 단계 | 작업 | 상태 |
+| --- | --- | --- |
+| 3-A-1 | 원본 DB 저장 기반 | 구현 완료 |
+| 3-A-2A | 서울 원본 필드 보존·저장 | 구현 완료 |
+| 3-A-2B-1 / 2 | TAGO 원본 필드 보존 / DB 저장 | 구현 완료 |
+| 3-A-2B-3A / 3B | GBIS 원본 필드 보존 / DB 저장 | 구현 완료 |
+| 3-A-3A-1 | 수집 이력 DB 기반 | 구현 완료; 독립 서비스와 관련 테스트 존재 |
+| 3-A-3A-2 | 원본 파일 아카이브 | 다음 |
+| 3-A-3B | 실제 수집 경로에 이력 연결 | 예정 |
+| 3-A-4 | 동기화 변경분 분석 | 예정 |
+| 3-B | 안전한 데이터 최신화·공식 노선유형 저장 및 API 제공 | 예정 |
+| 3-C | Flutter 공식 유형별 색상 적용 | 예정; UI-2와 연결 |
+| UI-0 / UI-1 | 공통 디자인 시스템 / 세로 타임라인 | 주요 부분 구현; 보완 범위 확인 |
+| UI-2~UI-8 | 검색부터 실시간 다중 차량 표시·통합 검증 | 예정; 아래 로드맵 참조 |
+
+원본 필드 보존 → DB 저장 → 수집 이력 → 파일 아카이브 → 수집 경로 연결 → 변경분 분석 → 안전한 최신화 → 공식 유형 저장·API 제공의 순서다. `bus_routes.route_type`의 존재는 공식 유형 매핑 완료를 뜻하지 않는다. 상세 저장·동기화 계약은 [Database](database.md)와 [ADR-009](adr/ADR-009-bus-transit-metadata-persistence-and-diff-sync-strategy.md)를 따른다.
+
+실제 Provider 최신성·동일 운행 및 전체 노선 검증, 운영 적용, TASK-710과 TASK-908의 잔여 iPhone E2E는 각각 별도로 남는다. 서울은 조건부 지원이며 TAGO는 기본 OFF 실험이다. 일부 실제 기기 성공이 전체 검증 완료를 뜻하지 않는다. [TASK-908 기록](task-list.md)을 따른다.
+
+## Flutter UI/UX 전면 리뉴얼 로드맵
+
+UI-0 → UI-1 → UI-2 → UI-3 → UI-4 → UI-5 → UI-6 → UI-7 → UI-8 순서로 진행한다. 이는 기존 Phase를 대체하지 않는 독립 하위 로드맵이다. UI-0/1의 기존 구현을 재사용하고 처음부터 재구현하지 않는다. 기능 계약의 최종 기준은 [요구사항](requirements.md), 구조는 [Architecture](architecture.md), HTTP 계약은 [API](api.md), 결정은 관련 ADR이다.
+
+### UI-0 — 공통 디자인 시스템
+
+주요 기반 구현: `app/lib/core/theme/stopbell_theme.dart`, `stopbell_colors.dart`, `stopbell_spacing.dart`. Light/Dark, 색상·간격·타이포그래피, 버튼·카드·입력, 로딩·오류·빈 화면 및 접근성을 기존 자산 위에서 점검·보완한다. 공식 노선유형 색상과 승차·목표·추적 상태 의미색을 구분한다. 전체 항목의 완료는 별도 확인한다.
+
+### UI-1 — 세로 노선 타임라인과 정류장 선택
+
+`BusRouteTimeline`과 승차·목표 선택의 주요 부분은 구현되어 있다. 전체 occurrence를 하나의 연속 세로 노선도로 보여주고 반복 정류장, 선택 구간과 잠금·재선택을 보존한다. 방향 버튼은 필터가 아닌 출발점 또는 검증된 회차점 이동이며 스크롤로 방향을 표시한다. 미정차 표기는 선택 자체를 막지 않는다. Stop ID와 occurrence를 구분하고 신규 하차 알림에서 승차를 먼저 고른 후 순서가 뒤인 목표를 선택한다. [상세 요구사항](requirements.md#fr-002-정류장-선택)과 [구조](architecture.md)를 확인한다.
+
+### UI-2 — 공식 노선유형 및 검색 화면
+
+3-B의 공식 유형 저장·API 및 3-C 색상 적용과 연결한다. 검색과 노선 카드, 지역, 공식 유형·색상, 미확인 fallback, Light/Dark를 개선한다. 서울 T-Data `노선유형`, TAGO `routetp`, GBIS `routeTypeCd` 등 공식 원본을 검토하며 노선번호로 추측하지 않는다. 정확한 매핑·API는 후속 설계와 검증이 필요하다.
+
+### UI-3 — 차량 후보 조회 및 탑승 확정
+
+후보 목록의 차량번호, 관측 시각·신선도, 선택 차량, 승차·목표 요약과 2 occurrence 전 기본/1 occurrence 전 선택을 보여준다. 확정 정보 위계는 차량번호 → 승차·목표 → 알림 시점이다. 단일 후보도 자동 선택하지 않고 `candidateRef`·`selectionKey`, 최신 재검증과 Provider 오류/차량 없음 구분을 지킨다. 실제 탑승 확인을 주장하지 않으며 확정 즉시 TRACKING으로 별도 Start 버튼은 없다. [API](api.md#탑승-세션-api-task-903)와 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다.
+
+### UI-4 — 하차 추적 화면
+
+선택 차량번호·노선, 승차·목표, 추적과 알림 상태, 마지막 관측, 근거 있는 진행, 종료·취소와 오류·보류·복구를 명확히 보여준다. TRACKING 자체를 검증된 위치로 표현하지 않고 근거 없는 남은 occurrence·실제 정차 수·ETA·실제 탑승을 추측하지 않는다. checkpoint 복구와 Notification 중복 방지는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
+
+### UI-5 — 홈 및 알람 관리
+
+도착 Alarm과 하차 추적 진입, 활성 알람·상세·생성·활성화·비활성화·취소·삭제, 상태별 로딩·오류·빈 목록과 내비게이션을 정리한다. INACTIVE/ACTIVE/FOLLOW_UP, 생성 후 활성화, 불확실한 생성 결과와 중복 POST 방지, 최신 상태 재조회 및 Notification tap을 보존한다. [요구사항](requirements.md)과 [API](api.md)를 따른다.
+
+### UI-6 — 로그인·설정·계정
+
+로그인·Apple 로그인, Push 권한, 계정·알림 설정, 로그아웃·탈퇴, 개인정보·약관, 오류 복구와 Light/Dark를 개선한다. 토큰 갱신·Secure Storage·세션 소유권·Apple 토큰 철회와 삭제 데이터 정리 계약은 유지한다. 실제 출시 준비는 [TASK 목록](task-list.md)과 [iOS 준비](ios-release-readiness.md)를 따른다.
+
+### UI-7 — 실시간 다중 차량 위치 표시
+
+필수 후속 목표이며 아직 미구현이다. 정류장 선택의 세로 타임라인에 여러 차량 마커와 선택 차량을 표시하고 관측 시각·신선도, 위치 불확실성, 반복 정류장·순환 노선 및 Light/Dark를 다룬다. 지도 대체가 아니다. 별도의 읽기 전용 노선 전체 차량 위치 API, Provider 조사, 식별자·실시간 관측 검증, occurrence 매핑, polling·캐싱·호출량 제한과 오류·stale 정책의 선행 설계가 필요하다. 기존 후보 API의 고주기 반복으로 대체하지 않으며 하차 판정이나 TRACKING 세션을 변경하지 않는다. 세부 정책은 아직 확정되지 않았다.
+
+### UI-8 — 전체 통합 검증
+
+서울·경기 검색과 공식 색상, 반복 정류장·회차, 승차·목표 선택, 후보·확정·TRACKING·준비 알림·복구, 기존 도착 Alarm, 홈·계정, Light/Dark, 다중 차량 타임라인과 실제 iPhone을 검증한다. 기존 [TASK-908](task-list.md) 및 TASK-710 등 실기기 책임을 연결하며 이 계획만으로 완료 처리하지 않는다.
 
 ## Phase 0 — 조사 및 PoC
 
@@ -207,7 +270,7 @@ TASK-812는 현재 별도 제품 Analytics를 도입하지 않기로 판단했�
 
 ## Phase 9 — BoardingSession 현재 흐름
 
-노선 → 목적/선택적 승차 occurrence → 후보 조회 → 사용자의 차량 선택 → 준비 알림 시점 설정·등록 → 즉시 TRACKING 순서다. 단일 후보도 자동 확정하지 않으며 번호 입력·수동 대조는 요구하지 않는다. 기존 세션 조회·취소·동일 차량 재확인과 checkpoint 복구·Notification 연결은 구현되어 있다.
+노선 → 필수 승차 occurrence → 이후 목적 occurrence → 후보 조회 → 사용자의 차량 선택 → 준비 알림 시점 설정·등록 → 즉시 TRACKING 순서다. 단일 후보도 자동 확정하지 않으며 번호 입력·수동 대조는 요구하지 않는다. 기존 세션 조회·취소·동일 차량 재확인과 checkpoint 복구·Notification 연결은 구현되어 있다.
 
 새 세션은 목적지 이전 준비 알림을 한 번 생성하고 목적지 도달·통과는 추적 완료에 사용한다. 기존 NULL offset 세션의 ON/OFF·목적지 Push는 호환 정책으로 보존한다. 실제 탑승·정차·하차 사실을 검증하지 않는다. 상세 계약은 [요구사항](requirements.md#phase-9-탑승-세션과-하차-준비-알림)과 [API](api.md#탑승-세션-api-task-903)가 소유하며 TASK-908 현장 검증은 남아 있다.
 

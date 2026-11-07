@@ -18,6 +18,8 @@
 
 사용자 보장 동작은 `requirements.md`, runtime/component/transaction boundary는 `architecture.md`, Domain 의미와 invariant는 `domain-model.md`, Schema/constraint/index는 `database.md`, HTTP contract는 `api.md`, Task 상태·dependency·acceptance criteria는 `task-list.md`, phase 목표와 release gate는 `roadmap.md`, 결정·대안·근거는 ADR이 상세 Source가 된다. 같은 계약의 상세 규칙을 여러 문서에 복제하지 않고, 다른 문서는 필요한 수준으로 해당 owner 문서를 참조한다.
 
+AI 채팅 인수인계의 진입점과 유지관리 시점은 [CHAT_HANDOFF](CHAT_HANDOFF.md)를 따른다. 이 문서는 책임 문서를 안내하며 설계 계약을 소유하지 않는다.
+
 ## 4. 백엔드 가이드라인
 
 기본 스택:
