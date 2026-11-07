@@ -443,6 +443,14 @@ Route snapshot sync는 동일 Route/Stop identity의 display·operational metada
 
 TASK-513은 V10의 `bus_metadata_sync_states`에 `provider VARCHAR(20)` PK와 `last_complete_sync_at DATETIME(6) NOT NULL`을 저장한다. `BusMetadataSyncState`는 Java `Instant`로 매핑하며 complete sync 성공 뒤에만 갱신한다. fresh DB bootstrap 완료와 마지막 complete sync 성공 age의 근거이며 readiness 연계의 최종 검증은 TASK-807에 남는다. sync/checksum history, staging table, error journal은 추가하지 않았다.
 
+### Transit 원본 메타데이터 저장 (Phase 3-A-1)
+
+V33은 기존 `bus_routes`에 nullable `route_type VARCHAR(24)`를 추가하고 `transit_source_metadata`를 생성한다. 공통 타입은 `TRUNK`, `BRANCH`, `METROPOLITAN`, `LOCAL`, `VILLAGE`, `CIRCULAR`, `AIRPORT`, `TOUR`이며 NULL은 미분류다. 원본 유형의 공통 타입 변환 및 기존 데이터 보강은 아직 수행하지 않는다.
+
+원본 행은 `source_system`(SEOUL_TDATA/TAGO/GBIS), `data_kind`(ROUTE/STOP/OCCURRENCE), `source_key` 복합 UNIQUE로 식별한다. JSON 객체, nullable 원본 버전, 수집 시각과 갱신 시각을 저장한다. 기존 Route/Stop/Occurrence 중 같은 종류의 nullable FK 하나로 연결하며 FK 삭제 시 연결만 NULL이 되고 원본은 보존된다. 경유 source key는 제공기관의 노선과 순번을 모호하지 않게 인코딩해야 하며 내부 occurrence ID로 취급하지 않는다. 서울 서비스 범위 밖의 원본은 연결 없이 저장할 수 있다.
+
+저장 서비스는 단일 DB upsert로 동일 키의 행 ID를 유지하며 목록 전체를 하나의 트랜잭션에서 처리한다. 같은 입력의 재처리는 갱신 시각도 유지하고, 새 수집 시각이나 값이 바뀌면 갱신한다. 출처 간 충돌은 독립 행으로 보존한다. JSON은 원본의 필드와 JSON 값을 보존하며 원문 바이트 및 키 순서는 보장하지 않는다. 파서 연결, 원본 파일 보관과 수집 이력은 후속 단계다. 일반 Route/Stop 조회는 원본 테이블을 읽지 않는다.
+
 ### Phase 9 Boarding persistence contract (TASK-903)
 
 이 절은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 Schema 계약이다. TASK-905 1단계에서 `boarding_sessions`를 V15와 JPA로 구현했고 TASK-906 1단계에서 Notification source를 V16으로 확장했다. 2026-10-28 요구사항 정정은 V17로 사전 알림 선택과 목적지 Event를 확장했고 TASK-908의 V18은 미검증 관측 접수를 추가했고 V19는 즉시 TRACKING 의미로 전환한다. V20은 하차 전 알림 시점만 추가하며 기존 V1~V19 Migration과 Alarm/BusAlarmTarget Schema는 수정하지 않는다.

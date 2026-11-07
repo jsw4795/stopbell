@@ -1,5 +1,6 @@
 package com.stopbell.transit.entity;
 
+import com.stopbell.transit.domain.BusRouteType;
 import com.stopbell.transit.domain.TransitProvider;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -41,6 +42,10 @@ public class BusRoute {
 
     @Column(name = "city_code", length = CITY_CODE_MAX_LENGTH)
     private String cityCode;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "route_type", length = 24)
+    private BusRouteType routeType;
 
     protected BusRoute() {
     }
@@ -84,6 +89,10 @@ public class BusRoute {
         if (value.length() > maxLength) {
             throw new IllegalArgumentException(fieldName + " exceeds maximum length " + maxLength);
         }
+    }
+
+    public BusRouteType getRouteType() {
+        return routeType;
     }
 
     public Long getId() {

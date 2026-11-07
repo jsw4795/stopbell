@@ -317,6 +317,9 @@ Alarm은 생성, 수정, 삭제와 상태 관리를 위해 JPA Repository 기반
     externalRouteId
     routeNumber
     cityCode (TAGO only)
+    routeType (nullable)
+
+공통 routeType은 출처별 원본 유형과 별도이며 NULL은 미분류다. 유형 변환과 기존 노선 보강은 후속 단계에서 수행한다.
 
 Route identity는 `(provider, externalRouteId)`다. `id`는 StopBell 내부 PK이고, `routeNumber`는 display metadata다. `cityCode`는 TAGO metadata/realtime request를 재현하는 typed context이며 identity가 아니다. TAGO에는 non-blank cityCode가 필요하고 SEOUL_BUS에는 `null`이어야 한다.
 

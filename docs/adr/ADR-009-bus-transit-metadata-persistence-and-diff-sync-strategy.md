@@ -95,3 +95,7 @@ TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TAS
 - Route/Stop 검색 또는 Alarm grouping에서 JPA query만으로 성능·표현 요구를 충족하지 못함
 - Provider가 stable metadata version 또는 deletion contract를 제공해 더 안전한 incremental strategy가 가능해짐
 - metadata 변경이 Alarm snapshot reconciliation을 실제 제품 요구로 만듦
+
+## Phase 3-A-1 원본 저장 기반 (2026-11-07)
+
+사용자 결정에 따라 기존 정규화 metadata 및 Route 단위 동기화 정책을 유지하면서 출처별 원본 JSON의 별도 저장 기반을 추가한다. 원본 파일 수집 및 parser 연결은 후속 단계다. 공통 노선유형은 nullable 필드로 준비하며 원본 유형이나 미확인 값을 임의로 변환하지 않는다. Schema와 저장 서비스의 구체 계약은 [Database](../database.md#transit-원본-메타데이터-저장-phase-3-a-1)를 따른다.
