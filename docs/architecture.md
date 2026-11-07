@@ -200,6 +200,8 @@ Flutter 구현은 사용자 확정 → Push 준비 → `Random.secure` UUID v4 �
 
 `BoardingCandidateClient`는 기존 `AuthenticatedApiClient`/Auth Session refresh와 generation을 사용한다. 화면의 Route ID·목적/승차 occurrence 변경, 재조회, 화면 폐기에는 요청 epoch를 무효화하며 logout 시작/계정 세대 변경에는 후보·선택 문맥을 제거한다. 미전송 후보 reference는 화면 메모리에만 두고 서버 추천 순서와 관측 시각을 보존한다. 2단계 생성 요청의 원래 reference 보존은 아래 pending intent 경계를 따른다. 후보 상태·불확실성의 의미는 [후보 API](api.md#후보-조회)를 따르며 unknown enum은 미확인 상태로 표시한다.
 
+정류장 선택과 후보 결과는 같은 `BoardingStopScreen`에 있으며 후보 결과를 표시하는 동안에도 노선도의 스크롤 상태를 유지한다. 상단 뒤로 가기와 Android 시스템 뒤로 가기는 진행 중 후보 요청 또는 표시 중인 후보를 무효화하고 기존 선택으로 복귀한다. iOS 가장자리 스와이프는 별도 Navigator Route가 없는 이 화면 전환에는 연결되지 않는다.
+
 1단계의 후보 조회·비교와 2단계의 확정·세션 관리가 구현됐다. 차량 선택 접수와 진행 검증·추적 지원을 구분하고 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 제한을 안내한다. 3단계의 세션 FCM 수신/tap 구현과 검증 경계는 아래 별도 절을 따른다. 새 Dependency, GPS/위치 권한, polling이나 후보 목록의 영속 저장은 추가하지 않는다.
 
 ### Flutter 탑승 확정과 세션 관리 (TASK-907 2단계)

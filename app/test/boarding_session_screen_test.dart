@@ -151,7 +151,7 @@ void main() {
       await pump(tester);
       await candidates(tester);
       final buttons = tester.widgetList<OutlinedButton>(
-        find.widgetWithText(OutlinedButton, '선택 불가 · 차량 정보 또는 추적 지원 확인 보류'),
+        find.widgetWithText(OutlinedButton, '선택 불가'),
       );
       expect(buttons, hasLength(2));
       expect(buttons.every((b) => b.onPressed == null), isTrue);

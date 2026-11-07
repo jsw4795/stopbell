@@ -35,7 +35,13 @@ class BoardingCandidatesView extends StatelessWidget {
         'Provider 제공 시각: ${result.providerDataTime == null ? '알 수 없음' : boardingTime(result.providerDataTime!)}',
       ),
       Text('화면 수신 시각: ${boardingTime(receivedAt)}'),
-      const Text('원하는 차량을 목록에서 선택하세요. 차량번호 입력 없이 버스 도착 전에도 등록할 수 있어요.'),
+      if (result.candidateSetStatus != CandidateSetStatus.unknown &&
+          result.candidates.isNotEmpty)
+        Text(
+          result.candidates.any(canConfirmBoardingCandidate)
+              ? '원하는 차량을 목록에서 선택하세요. 차량번호 입력 없이 버스 도착 전에도 등록할 수 있어요.'
+              : '현재 선택 가능한 차량이 없어요. 차량별 보류 사유를 확인해 주세요.',
+        ),
       const Text(
         '진행 정보는 정확한 현재 위치·실제 정차·탑승 사실을 보장하지 않아요. 원본 갱신 시각이 없거나 정보가 지연될 수 있어요.',
       ),
@@ -64,19 +70,32 @@ class _CandidateCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final item = candidate;
-    final canCompare =
+    final canSelect = canConfirmBoardingCandidate(item);
+    final canIdentify =
         item.confirmationStatus == ConfirmationStatus.available &&
         item.vehicleNumber != null &&
         item.candidateRef != null;
     final progress = item.progress;
-    final reasons = <String>{
-      if (item.reasonCode != null) item.reasonCode!,
-      if (item.trackingReasonCode != null) item.trackingReasonCode!,
-      ...item.limitations,
-    };
+    final reason = item.reasonCode;
+    final trackingReason = item.trackingReasonCode;
+    final details = item.limitations.toSet()
+      ..remove(reason)
+      ..remove(trackingReason);
+    final identityNote = reason != null
+        ? _reasonMessage(reason)
+        : item.vehicleNumber == null
+        ? _reasonMessage('VEHICLE_NUMBER_MISSING')
+        : !canIdentify
+        ? '차량을 확인할 수 없어요. 후보를 다시 조회해 주세요.'
+        : null;
+    final trackingNote = trackingReason != null
+        ? _reasonMessage(trackingReason)
+        : item.trackingSupport != TrackingSupport.conditional
+        ? '하차 추적 지원을 확인할 수 없어요.'
+        : null;
     return Card(
       key: ValueKey('candidate-$index'),
-      color: canCompare
+      color: canSelect
           ? null
           : Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Padding(
@@ -89,12 +108,13 @@ class _CandidateCard extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             Text(
-              '차량 선택: ${canCompare
-                  ? '선택 가능'
+              '차량 정보: ${canIdentify
+                  ? '확인 가능'
                   : item.confirmationStatus == ConfirmationStatus.unknown
                   ? '상태 미확인 · 확인 보류'
                   : '확인 보류'}',
             ),
+            if (identityNote != null) Text(identityNote),
             Text(
               '하차 추적 지원: ${switch (item.trackingSupport) {
                 TrackingSupport.conditional => '등록 후 진행 검증 · 대기할 수 있음',
@@ -102,6 +122,10 @@ class _CandidateCard extends StatelessWidget {
                 TrackingSupport.unknown => '알 수 없음 · 보류',
               }}',
             ),
+            if (trackingNote != null &&
+                (trackingReason == null || trackingReason != reason))
+              Text(trackingNote),
+            for (final detail in details) Text('참고: ${_reasonMessage(detail)}'),
             Text(
               progress == null
                   ? '진행 참고: 위치 정보 없음'
@@ -132,16 +156,9 @@ class _CandidateCard extends StatelessWidget {
             if (onSelect != null)
               OutlinedButton(
                 key: ValueKey('select-${item.candidateRef ?? index}'),
-                onPressed: canConfirmBoardingCandidate(item)
-                    ? () => onSelect!(item)
-                    : null,
-                child: Text(
-                  canConfirmBoardingCandidate(item)
-                      ? '이 차량 선택'
-                      : '선택 불가 · 차량 정보 또는 추적 지원 확인 보류',
-                ),
+                onPressed: canSelect ? () => onSelect!(item) : null,
+                child: Text(canSelect ? '이 차량 선택' : '선택 불가'),
               ),
-            for (final reason in reasons) Text('• ${_reasonMessage(reason)}'),
           ],
         ),
       ),
@@ -170,7 +187,7 @@ String _reasonMessage(String code) => switch (code) {
   'DETAIL_PROTOCOL_FAILURE' => '상세 정보 형식을 확인할 수 없어요.',
   'DETAIL_ID_MISMATCH' => '조회한 차량과 상세 차량 식별 정보가 일치하지 않아요.',
   'DETAIL_NUMBER_MISMATCH' => '목록과 상세 정보의 차량번호가 일치하지 않아요.',
-  'TAGO_ALIGHT_UNVERIFIED' => '이 차량의 하차 알림 추적은 아직 검증되지 않았어요.',
+  'TAGO_ALIGHT_UNVERIFIED' => '이 노선의 하차 알림 추적은 아직 검증되지 않아 사용할 수 없어요.',
   'TARGET_NOT_AHEAD' => '목적지가 현재 진행 방향의 앞쪽인지 확인되지 않았어요.',
   'REVALIDATION_REQUIRED' => '차량 확인 시 최신 정보를 다시 검증해야 해요.',
   _ => '해석할 수 없는 제한 사유가 있어요. 지원 여부를 확인할 수 없어요.',

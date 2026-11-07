@@ -12,7 +12,7 @@ import 'boarding_creation_intent.dart';
 
 enum _StopsState { loading, success, empty, error }
 
-enum _Picker { target, boarding }
+enum _Picker { target, boarding, review }
 
 class BoardingStopScreen extends StatefulWidget {
   const BoardingStopScreen({
@@ -44,7 +44,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   List<BusRouteStopOccurrence> _stops = const [];
   BusRouteStopOccurrence? _target;
   BusRouteStopOccurrence? _boarding;
-  _Picker? _picker = _Picker.target;
+  _Picker _picker = _Picker.target;
+  _Picker? _returnTo;
   BoardingCandidates? _result;
   DateTime? _receivedAt;
   bool _loadingCandidates = false;
@@ -107,6 +108,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       _target = null;
       _boarding = null;
       _picker = _Picker.target;
+      _returnTo = null;
       _stops = const [];
       _state = _StopsState.loading;
     });
@@ -125,14 +127,18 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   }
 
   void _select(BusRouteStopOccurrence? stop) {
-    if (!_current || _picker == null || _staleStops) return;
+    if (!_current || _staleStops || _result != null) return;
+    if (stop == null && _picker == _Picker.target) return;
     setState(() {
       if (_picker == _Picker.target) {
+        if (_target?.id != stop!.id) _boarding = null;
         _target = stop;
+        _picker = _Picker.boarding;
       } else {
         _boarding = stop;
+        _picker = _Picker.review;
       }
-      _picker = null;
+      _returnTo = null;
       _invalidateCandidates();
     });
   }
@@ -153,7 +159,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         target.id == _target?.id &&
         boardingId == _boarding?.id;
     setState(() {
-      _picker = null;
+      _picker = _Picker.review;
+      _returnTo = null;
       _loadingCandidates = true;
     });
     try {
@@ -199,17 +206,56 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       '${stop.destinationName == null ? '방면 정보 없음' : '${stop.destinationName} 방면'}\n'
       '이전: ${stop.previousStopName ?? '없음'} · 다음: ${stop.nextStopName ?? '없음'}';
 
-  void _pick(_Picker picker) => setState(() => _picker = picker);
+  void _pick(_Picker picker) {
+    if (!_current || _staleStops || picker == _picker) return;
+    setState(() {
+      _returnTo ??= _picker;
+      _picker = picker;
+      _invalidateCandidates();
+    });
+  }
+
+  bool get _showingCandidates => _result != null || _loadingCandidates;
+
+  String get _backLabel {
+    if (_showingCandidates) return '정류장 선택으로';
+    if (_returnTo != null) return '정류장 변경 취소';
+    if (_picker == _Picker.boarding) return '목표 정류장 선택으로';
+    return '노선 다시 선택';
+  }
+
+  void _back() {
+    if (!_current) return;
+    if (_showingCandidates) {
+      setState(_invalidateCandidates);
+    } else if (_returnTo != null) {
+      setState(() {
+        _picker = _returnTo!;
+        _returnTo = null;
+      });
+    } else if (_picker == _Picker.boarding) {
+      setState(() => _picker = _Picker.target);
+    } else {
+      widget.onBack();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     if (!_current) return const SizedBox.shrink();
-    return BusStopSelectionLayout(
-      route: widget.route,
-      title: '하차 알림',
-      onBack: widget.onBack,
-      body: _state == _StopsState.success ? _routeAndCandidates() : _status(),
-      summary: _state == _StopsState.success ? _summary() : null,
+    return PopScope<Object?>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _back();
+      },
+      child: BusStopSelectionLayout(
+        route: widget.route,
+        title: '하차 알림',
+        onBack: _back,
+        backLabel: _backLabel,
+        body: _state == _StopsState.success ? _routeAndCandidates() : _status(),
+        summary: _state == _StopsState.success ? _summary() : null,
+      ),
     );
   }
 
@@ -240,7 +286,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   );
 
   Widget _routeAndCandidates() => IndexedStack(
-    index: _result != null && _picker == null ? 1 : 0,
+    index: _result == null ? 0 : 1,
     sizing: StackFit.expand,
     children: [
       BusRouteTimeline(
@@ -248,7 +294,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         targetId: _target?.id,
         boardingId: _boarding?.id,
         rowKey: (id) => ValueKey('occurrence-$id'),
-        onSelect: _picker == null || _staleStops ? null : _select,
+        onSelect: _staleStops || _result != null ? null : _select,
       ),
       if (_result == null)
         const SizedBox.shrink()
@@ -297,6 +343,12 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   Widget _summary() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      if (!_staleStops && _result == null && !_loadingCandidates)
+        Text(switch (_picker) {
+          _Picker.target => '노선도에서 목표 정류장을 선택하세요.',
+          _Picker.boarding => '노선도에서 승차 정류장을 선택하세요.',
+          _Picker.review => '노선도에서 승차 정류장을 바꾸거나 차량 후보를 조회하세요.',
+        }, style: Theme.of(context).textTheme.titleSmall),
       _modeButton(_Picker.target, _target),
       _modeButton(_Picker.boarding, _boarding),
       if (_picker == _Picker.boarding && !_staleStops)
@@ -330,7 +382,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   Widget _modeButton(_Picker picker, BusRouteStopOccurrence? stop) {
     final target = picker == _Picker.target;
     final active = picker == _picker;
-    final role = target ? '목표' : '승차';
+    final role = target ? '목표 정류장' : '승차 정류장';
     final details = stop == null ? null : selectedStopContext(stop, _stops);
     final name = stop?.name ?? (target ? '선택해 주세요' : '선택 안 함');
     final colors = Theme.of(context).colorScheme;
@@ -338,7 +390,9 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       selected: active,
       child: TextButton(
         key: ValueKey(target ? 'pick-target' : 'pick-boarding'),
-        onPressed: _staleStops ? null : () => _pick(picker),
+        onPressed: _staleStops || (!target && _target == null)
+            ? null
+            : () => _pick(picker),
         style: TextButton.styleFrom(
           alignment: Alignment.centerLeft,
           backgroundColor: active ? colors.primaryContainer : null,
@@ -359,7 +413,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
                 '$role · $name${details == null ? '' : '\n$details'}',
               ),
             ),
-            if (active) const Icon(Icons.edit_outlined, size: 16),
+            const SizedBox(width: 8),
+            Text(active ? '선택 중' : '변경'),
           ],
         ),
       ),

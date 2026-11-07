@@ -81,6 +81,43 @@ void main() {
   );
 
   testWidgets(
+    'TAGO tracking hold explains the disabled button even with verified vehicle details',
+    (tester) async {
+      final selected = <BoardingCandidate>[];
+      final tago = {
+        ...candidateJson(tracking: 'HELD'),
+        'trackingReasonCode': 'TAGO_ALIGHT_UNVERIFIED',
+        'limitations': ['TAGO_ALIGHT_UNVERIFIED', 'PROVIDER_TIME_MISSING'],
+      };
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: BoardingCandidatesView(
+                result: BoardingCandidates.fromJson(
+                  candidatesJson(candidates: [tago]),
+                ),
+                receivedAt: DateTime.utc(2026),
+                onSelect: selected.add,
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('차량 정보: 확인 가능'), findsOneWidget);
+      expect(find.text('하차 추적 지원: 보류'), findsOneWidget);
+      expect(find.textContaining('이 노선의 하차 알림 추적은 아직 검증되지 않아'), findsOneWidget);
+      expect(find.textContaining('참고: 원본 정보의 갱신 시각'), findsOneWidget);
+      expect(find.textContaining('현재 선택 가능한 차량이 없어요'), findsOneWidget);
+      final button = find.widgetWithText(OutlinedButton, '선택 불가');
+      expect(tester.widget<OutlinedButton>(button).onPressed, isNull);
+      await tester.ensureVisible(button);
+      await tester.tap(button);
+      expect(selected, isEmpty);
+    },
+  );
+
+  testWidgets(
     'multiple candidates keep server order, full numbers and no automatic selection or session action',
     (tester) async {
       await show(
@@ -96,7 +133,7 @@ void main() {
         tester.getTopLeft(find.text('서울70사9999')).dy,
         lessThan(tester.getTopLeft(find.text('서울70사1234')).dy),
       );
-      expect(find.textContaining('선택 가능'), findsNWidgets(2));
+      expect(find.text('차량 정보: 확인 가능'), findsNWidgets(2));
       expect(find.textContaining('등록 후 진행 검증 · 대기할 수 있음'), findsNWidgets(2));
       expect(find.textContaining('차량번호 입력 없이 버스 도착 전에도 등록'), findsOneWidget);
       expect(find.textContaining('실제 정차 수·거리·남은 시간이 아니에요'), findsNWidgets(2));
@@ -105,7 +142,7 @@ void main() {
       expect(find.byType(FilledButton), findsNothing);
       await tester.tap(find.text('서울70사1234'));
       await tester.pump();
-      expect(find.textContaining('선택 가능'), findsNWidgets(2));
+      expect(find.text('차량 정보: 확인 가능'), findsNWidgets(2));
     },
   );
 
@@ -137,7 +174,7 @@ void main() {
       );
       expect(find.textContaining('일부 차량 정보는 확인되지 않았어요'), findsOneWidget);
       expect(find.text('차량번호 없음 · 식별 불가'), findsOneWidget);
-      expect(find.text('차량 선택: 확인 보류'), findsOneWidget);
+      expect(find.text('차량 정보: 확인 보류'), findsOneWidget);
       expect(find.text('하차 추적 지원: 보류'), findsOneWidget);
       expect(find.text('진행 참고: 위치 정보 없음'), findsOneWidget);
       for (final text in ['서로 일치하지 않아요', '오래되어 다시 확인', '추적은 아직 검증되지']) {
@@ -158,7 +195,7 @@ void main() {
         ),
       );
       expect(find.textContaining('목록의 상태를 확인할 수 없어요'), findsOneWidget);
-      expect(find.text('차량 선택: 상태 미확인 · 확인 보류'), findsOneWidget);
+      expect(find.text('차량 정보: 상태 미확인 · 확인 보류'), findsOneWidget);
       expect(find.text('하차 추적 지원: 알 수 없음 · 보류'), findsOneWidget);
       await show(tester, candidatesJson(status: 'EMPTY'));
       expect(find.text('현재 확인 가능한 차량 후보가 없어요.'), findsOneWidget);

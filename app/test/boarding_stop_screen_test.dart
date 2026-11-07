@@ -11,6 +11,7 @@ import 'package:stopbell/features/boarding/boarding_candidates_view.dart';
 import 'package:stopbell/features/boarding/boarding_stop_screen.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
+import 'package:stopbell/features/transit/bus_route_timeline.dart';
 
 import 'boarding_test_fakes.dart';
 
@@ -117,6 +118,107 @@ void main() {
       await tap(tester, 'find-candidates');
       await tester.pumpAndSettle();
       expect(queries.last, (754, 11, null));
+    },
+  );
+
+  testWidgets(
+    'selecting target starts boarding and each selection can be changed',
+    (tester) async {
+      await setup(tester);
+      await tester.pumpWidget(screen());
+      await tester.pumpAndSettle();
+      expect(find.text('노선도에서 목표 정류장을 선택하세요.'), findsOneWidget);
+      await tap(tester, 'occurrence-22');
+      expect(find.text('노선도에서 승차 정류장을 선택하세요.'), findsOneWidget);
+      expect(find.byKey(const ValueKey('no-boarding')), findsOneWidget);
+      await tap(tester, 'occurrence-11');
+      expect(find.byIcon(Icons.flag_outlined), findsNWidgets(2));
+      await tap(tester, 'pick-boarding');
+      await tap(tester, 'occurrence-22');
+      await tap(tester, 'find-candidates');
+      await tester.pumpAndSettle();
+      expect(queries.single, (754, 22, 22));
+
+      await tap(tester, 'pick-target');
+      await tester.tap(find.byTooltip('정류장 변경 취소'));
+      await tester.pumpAndSettle();
+      await tap(tester, 'find-candidates');
+      await tester.pumpAndSettle();
+      expect(queries.last, (754, 22, 22));
+
+      await tap(tester, 'pick-target');
+      await tap(tester, 'occurrence-11');
+      expect(find.text('승차 정류장 · 선택 안 함'), findsOneWidget);
+      await tap(tester, 'no-boarding');
+      await tap(tester, 'find-candidates');
+      await tester.pumpAndSettle();
+      expect(queries.last, (754, 11, null));
+    },
+  );
+
+  testWidgets(
+    'system back restores the selected stops and scroll and ignores a late query',
+    (tester) async {
+      await setup(tester);
+      tester.view.physicalSize = const Size(390, 800);
+      var loads = 0;
+      await tester.pumpWidget(
+        screen(
+          stops: (_) async {
+            loads++;
+            return [
+              for (var id = 1; id <= 60; id++)
+                BusRouteStopOccurrence(
+                  id: id,
+                  name: '정류장 $id',
+                  order: id,
+                  canNotifyOneStopBefore: true,
+                  canNotifyOneStopAfter: true,
+                ),
+            ];
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      final timeline = find.byType(BusRouteTimeline);
+      final scrollable = find.descendant(
+        of: timeline,
+        matching: find.byType(Scrollable),
+      );
+      final position = tester.state<ScrollableState>(scrollable).position;
+      position.jumpTo(290);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('occurrence-7')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('occurrence-6')));
+      await tester.pump();
+      final selectedOffset = position.pixels;
+      expect(selectedOffset, greaterThan(0));
+      await tap(tester, 'find-candidates');
+      await tester.pumpAndSettle();
+      expect(find.byType(BoardingCandidatesView), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(BoardingCandidatesView), findsNothing);
+      expect(find.text('목표 정류장 · 정류장 7'), findsOneWidget);
+      expect(find.text('승차 정류장 · 정류장 6'), findsOneWidget);
+      expect(
+        tester.state<ScrollableState>(scrollable).position.pixels,
+        selectedOffset,
+      );
+      expect(loads, 1);
+
+      final pending = Completer<BoardingCandidates>();
+      respond = () => pending.future;
+      await tap(tester, 'find-candidates');
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(requestChecks.last(), isFalse);
+      pending.complete(BoardingCandidates.fromJson(candidatesJson()));
+      await tester.pumpAndSettle();
+      expect(find.byType(BoardingCandidatesView), findsNothing);
+      expect(queries, [(754, 7, 6), (754, 7, 6)]);
+      expect(loads, 1);
     },
   );
 
@@ -348,6 +450,15 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      for (final widget in [
+        find.byKey(const ValueKey('pick-target')),
+        find.byKey(const ValueKey('pick-boarding')),
+        find.byType(BusRouteTimeline),
+      ]) {
+        await tester.ensureVisible(widget);
+        expect(widget.hitTestable(), findsOneWidget);
+        expect(Theme.of(tester.element(widget)).brightness, Brightness.light);
+      }
       await tap(tester, 'occurrence-22');
       await tap(tester, 'pick-boarding');
       await tap(tester, 'occurrence-11');

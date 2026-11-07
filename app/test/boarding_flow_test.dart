@@ -160,6 +160,15 @@ void main() {
         ),
         isEmpty,
       );
+      await tester.tap(find.byTooltip('정류장 선택으로'));
+      await tester.pumpAndSettle();
+      expect(find.text('서울70사1234'), findsNothing);
+      expect(find.byKey(const ValueKey('occurrence-22')), findsOneWidget);
+      expect(find.textContaining('목표 정류장 · 반복 정류장'), findsOneWidget);
+      expect(
+        requests.where((r) => r.url.path == '/api/v1/bus-routes/1390/stops'),
+        hasLength(1),
+      );
       await tester.ensureVisible(find.byTooltip('노선 다시 선택'));
       await tester.tap(find.byTooltip('노선 다시 선택'));
       await tester.pumpAndSettle();

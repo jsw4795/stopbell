@@ -10,6 +10,7 @@ class BusStopSelectionLayout extends StatelessWidget {
     required this.onBack,
     required this.body,
     this.summary,
+    this.backLabel = '노선 다시 선택',
   });
 
   final BusRoute route;
@@ -17,29 +18,11 @@ class BusStopSelectionLayout extends StatelessWidget {
   final VoidCallback? onBack;
   final Widget body;
   final Widget? summary;
-
-  static final _light = ColorScheme.fromSeed(
-    seedColor: const Color(0xff1465bf),
-  );
-  static final _dark = ColorScheme.fromSeed(
-    seedColor: const Color(0xff1465bf),
-    brightness: Brightness.dark,
-  );
+  final String backLabel;
 
   @override
   Widget build(BuildContext context) {
-    final dark =
-        Theme.of(context).brightness == Brightness.dark ||
-        MediaQuery.platformBrightnessOf(context) == Brightness.dark;
-    final colors = dark ? _dark : _light;
-    final theme = ThemeData(colorScheme: colors);
-    return Theme(
-      data: theme,
-      child: Material(color: colors.surface, child: _layout(theme)),
-    );
-  }
-
-  Widget _layout(ThemeData theme) {
+    final theme = Theme.of(context);
     final colors = theme.colorScheme;
     return SafeArea(
       child: LayoutBuilder(
@@ -51,7 +34,7 @@ class BusStopSelectionLayout extends StatelessWidget {
               child: Row(
                 children: [
                   IconButton(
-                    tooltip: '노선 다시 선택',
+                    tooltip: backLabel,
                     onPressed: onBack,
                     icon: const Icon(Icons.arrow_back),
                   ),
