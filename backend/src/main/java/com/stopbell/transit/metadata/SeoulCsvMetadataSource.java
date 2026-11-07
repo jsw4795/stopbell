@@ -18,6 +18,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.transit.domain.TransitSourceDataKind;
 import com.stopbell.transit.service.BusMetadataSource;
 import com.stopbell.transit.service.BusRouteMetadataSnapshot;
 import com.stopbell.transit.service.BusStopOccurrenceMetadataSnapshot;
@@ -97,14 +98,22 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
     }
 
     public CompleteSourceSnapshot fetchCompleteSourceSnapshot() {
+        return parseSnapshot(false).normalized();
+    }
+
+    /** Returns validated, unfiltered CSV rows alongside the existing normalized source snapshot. */
+    public SeoulCsvSnapshot fetchSnapshotWithRawRows() {
+        return parseSnapshot(true);
+    }
+
+    private SeoulCsvSnapshot parseSnapshot(boolean preserveRaw) {
         try {
-            Map<String, Map<String, String>> routes = indexBy(
-                    readRows("route master", routeMaster, ROUTE_HEADERS), "노선ID"
-            );
-            Map<String, Map<String, String>> stops = indexBy(
-                    readRows("stop master", stopMaster, STOP_HEADERS), "정류장ID"
-            );
-            List<Map<String, String>> routeStops = readRows("route-stop master", routeStopMaster, ROUTE_STOP_HEADERS);
+            List<Map<String, String>> rawRoutes = readRows("route master", routeMaster, ROUTE_HEADERS);
+            List<Map<String, String>> rawStops = readRows("stop master", stopMaster, STOP_HEADERS);
+            List<Map<String, String>> rawRouteStops = readRows("route-stop master", routeStopMaster, ROUTE_STOP_HEADERS);
+            Map<String, Map<String, String>> routes = indexBy(normalizeRows(rawRoutes), "노선ID");
+            Map<String, Map<String, String>> stops = indexBy(normalizeRows(rawStops), "정류장ID");
+            List<Map<String, String>> routeStops = normalizeRows(rawRouteStops);
 
             if (routes.isEmpty() || stops.isEmpty() || routeStops.isEmpty()) {
                 throw new IllegalStateException("Seoul CSV source must not be empty");
@@ -153,10 +162,33 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
                         occurrences
                 ));
             }
-            return new CompleteSourceSnapshot(snapshots);
+            List<RawSourceRow> rawRows = new ArrayList<>();
+            if (preserveRaw) {
+                for (Map<String, String> row : rawRoutes) {
+                    rawRows.add(new RawSourceRow(TransitSourceDataKind.ROUTE, row.get("노선ID").trim(), row));
+                }
+                for (Map<String, String> row : rawStops) {
+                    rawRows.add(new RawSourceRow(TransitSourceDataKind.STOP, row.get("정류장ID").trim(), row));
+                }
+                for (Map<String, String> row : rawRouteStops) {
+                    String routeId = row.get("노선ID").trim();
+                    int order = positiveInteger(row.get("정류장순번").trim(), "정류장순번");
+                    rawRows.add(new RawSourceRow(TransitSourceDataKind.OCCURRENCE,
+                            routeId.length() + ":" + routeId + ":" + order, row));
+                }
+            }
+            return new SeoulCsvSnapshot(new CompleteSourceSnapshot(snapshots), rawRows);
         } catch (IOException | NumberFormatException exception) {
             throw new IllegalStateException("Unable to parse Seoul metadata CSV", exception);
         }
+    }
+
+    private static List<Map<String, String>> normalizeRows(List<Map<String, String>> rows) {
+        return rows.stream().map(row -> {
+            Map<String, String> normalized = new HashMap<String, String>();
+            row.forEach((key, value) -> normalized.put(key, value.trim()));
+            return normalized;
+        }).toList();
     }
 
     private static Map<String, Map<String, String>> indexBy(List<Map<String, String>> rows, String identityColumn) {
@@ -237,7 +269,7 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
                 }
                 Map<String, String> row = new HashMap<>();
                 for (int index = 0; index < headers.size(); index++) {
-                    row.put(headers.get(index), values.get(index).trim());
+                    row.put(headers.get(index), values.get(index));
                 }
                 rows.add(row);
             }
@@ -308,6 +340,23 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
             throw new IllegalStateException("Seoul CSV longitude is outside the valid range");
         }
         return coordinate;
+    }
+
+    /** Raw rows are independent of the normalized snapshot and include out-of-scope data. */
+    public record SeoulCsvSnapshot(CompleteSourceSnapshot normalized, List<RawSourceRow> rawRows) {
+        public SeoulCsvSnapshot {
+            Objects.requireNonNull(normalized, "Normalized snapshot must not be null");
+            rawRows = List.copyOf(rawRows);
+        }
+    }
+
+    /** The occurrence key is length-prefixed route ID followed by the validated numeric stop order. */
+    public record RawSourceRow(TransitSourceDataKind dataKind, String sourceKey, Map<String, String> fields) {
+        public RawSourceRow {
+            Objects.requireNonNull(dataKind, "Data kind must not be null");
+            Objects.requireNonNull(sourceKey, "Source key must not be null");
+            fields = Map.copyOf(fields);
+        }
     }
 
     /** A fully validated T Data source snapshot before any V1 provider-scope decision is applied. */

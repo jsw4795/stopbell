@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
+
+import com.stopbell.transit.domain.TransitSourceDataKind;
 import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +41,43 @@ class SeoulCsvMetadataSourceTest {
                 );
         assertThat(route(snapshot, "241006973").routeType()).isEqualTo("경기");
         assertThat(route(snapshot, "241006973").occurrences()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("원본 세 CSV의 모든 필드와 서비스 범위 밖 행을 정규화 결과와 별도로 보존한다")
+    void preserve_all_raw_fields_and_out_of_scope_rows() {
+        String routes = SCOPED_ROUTES.replace("100100447,7016,지선,50.0", "100100447, 7016 ,지선,50.00");
+        String routeStops = SCOPED_ROUTE_STOPS + "241006973,111000907,001.50,1\n";
+        String stops = SCOPED_STOPS + "999,미사용 정류장,일반차로,00000,127.00,37.00,미설치\n";
+        SeoulCsvMetadataSource source = source(routes, routeStops, stops);
+
+        SeoulCsvMetadataSource.SeoulCsvSnapshot snapshot = source.fetchSnapshotWithRawRows();
+        assertThat(snapshot.normalized()).isEqualTo(source.fetchCompleteSourceSnapshot());
+        assertThat(source.fetchCompleteSnapshot().routes()).extracting("externalRouteId")
+                .containsExactlyInAnyOrder("100100447", "102900001", "100100586")
+                .doesNotContain("241006973", "300000001");
+        assertThat(raw(snapshot, TransitSourceDataKind.ROUTE, "100100447").fields()).containsExactlyInAnyOrderEntriesOf(
+                Map.of("노선ID", "100100447", "노선명", " 7016 ", "노선유형", "지선", "거리", "50.00"));
+        assertThat(raw(snapshot, TransitSourceDataKind.STOP, "111000907").fields()).containsExactlyInAnyOrderEntriesOf(
+                Map.of("정류장ID", "111000907", "정류장명", "은평공영차고지", "정류장유형", "일반차로",
+                        "정류장번호", "35331", "좌표X", "126.883807875", "좌표Y", "37.5918053134", "BIT설치여부", "미설치"));
+        assertThat(raw(snapshot, TransitSourceDataKind.OCCURRENCE, "9:241006973:1").fields())
+                .containsExactlyInAnyOrderEntriesOf(Map.of("노선ID", "241006973", "노드ID", "111000907",
+                        "링크거리누계", "001.50", "정류장순번", "1"));
+        assertThat(raw(snapshot, TransitSourceDataKind.OCCURRENCE, "9:100100447:1").fields().get("노드ID"))
+                .isEqualTo("111000907");
+        assertThat(raw(snapshot, TransitSourceDataKind.ROUTE, "300000001").fields().get("노선유형")).isEqualTo("인천");
+        assertThat(raw(snapshot, TransitSourceDataKind.STOP, "999").fields().get("정류장번호")).isEqualTo("00000");
+        assertThat(snapshot.rawRows()).hasSize(6 + 7 + 8);
+        assertThatThrownBy(() -> snapshot.rawRows().clear()).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> raw(snapshot, TransitSourceDataKind.ROUTE, "100100447").fields().clear())
+                .isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    private SeoulCsvMetadataSource.RawSourceRow raw(SeoulCsvMetadataSource.SeoulCsvSnapshot snapshot,
+            TransitSourceDataKind kind, String key) {
+        return snapshot.rawRows().stream().filter(row -> row.dataKind() == kind && row.sourceKey().equals(key))
+                .findFirst().orElseThrow();
     }
 
     @Test
