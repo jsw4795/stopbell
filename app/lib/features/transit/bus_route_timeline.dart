@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
+import '../../core/theme/stopbell_spacing.dart';
 import 'bus_route_stop_occurrence.dart';
 import 'stop_display_name.dart';
 
@@ -171,12 +172,24 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
     final turn = _turn;
     final theme = Theme.of(context);
     final stopColors = StopBellColors.of(context);
+    final boardingIndex = widget.stops.indexWhere(
+      (stop) => stop.id == widget.boardingId,
+    );
+    final targetIndex = widget.stops.indexWhere(
+      (stop) => stop.id == widget.targetId,
+    );
+    final hasSelectedLeg = boardingIndex >= 0 && targetIndex > boardingIndex;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (turn != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+            padding: const EdgeInsets.fromLTRB(
+              StopBellSpacing.screenPadding,
+              StopBellSpacing.xs,
+              StopBellSpacing.screenPadding,
+              StopBellSpacing.sm,
+            ),
             child: Row(
               children: [
                 Expanded(
@@ -186,7 +199,7 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                     onPressed: () => _goTo(0),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: StopBellSpacing.sm),
                 Expanded(
                   child: _DirectionButton(
                     label: turn.inbound,
@@ -202,7 +215,12 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final metrics = (
-                width: math.max(0.0, constraints.maxWidth - _StopRow.gutters),
+                width: math.max(
+                  0.0,
+                  constraints.maxWidth -
+                      _StopRow.railWidth -
+                      StopBellSpacing.screenPadding,
+                ),
                 scaler: MediaQuery.textScalerOf(context),
                 direction: Directionality.of(context),
                 locale: Localizations.maybeLocaleOf(context),
@@ -254,6 +272,7 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                 itemExtentBuilder: (index, _) => layout.extents[index],
                 itemBuilder: (context, index) {
                   final stop = widget.stops[index];
+                  final selectable = widget.isSelectable?.call(stop) ?? true;
                   return _StopRow(
                     key: widget.rowKey?.call(stop.id) ?? ValueKey(stop.id),
                     label: layout.labels[index],
@@ -262,15 +281,18 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                     first: index == 0,
                     last: index == widget.stops.length - 1,
                     turn: index == turn?.index,
-                    target: stop.id == widget.targetId,
-                    boarding: stop.id == widget.boardingId,
-                    unavailable:
-                        widget.isSelectable != null &&
-                        !widget.isSelectable!(stop),
-                    onTap:
-                        widget.onSelect == null ||
-                            (widget.isSelectable != null &&
-                                !widget.isSelectable!(stop))
+                    target: index == targetIndex,
+                    boarding: index == boardingIndex,
+                    incomingSelected:
+                        hasSelectedLeg &&
+                        index > boardingIndex &&
+                        index <= targetIndex,
+                    outgoingSelected:
+                        hasSelectedLeg &&
+                        index >= boardingIndex &&
+                        index < targetIndex,
+                    unavailable: !selectable,
+                    onTap: widget.onSelect == null || !selectable
                         ? null
                         : () => widget.onSelect!(stop),
                   );
@@ -331,7 +353,10 @@ class _TimelineLayout {
       );
       painter.text = span;
       painter.layout(maxWidth: metrics.width);
-      final extent = math.max(58.0, painter.height.ceilToDouble() + 20);
+      final extent = math.max(
+        52.0,
+        painter.height.ceilToDouble() + 2 * StopBellSpacing.sm,
+      );
       labels.add(span);
       extents.add(extent);
       offsets.add(offsets.last + extent);
@@ -359,21 +384,36 @@ class _DirectionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final direction = '$label 방면';
     return Semantics(
       selected: active,
-      child: TextButton(
-        onPressed: onPressed,
-        style: TextButton.styleFrom(
-          backgroundColor: active
-              ? colors.primaryContainer
-              : colors.surfaceContainerLow,
-          foregroundColor: active
-              ? colors.onPrimaryContainer
-              : colors.onSurfaceVariant,
-          minimumSize: const Size(0, 48),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Tooltip(
+        message: direction,
+        excludeFromSemantics: true,
+        child: TextButton(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(
+            backgroundColor: active
+                ? colors.primaryContainer
+                : colors.surfaceContainerLow,
+            foregroundColor: active
+                ? colors.onPrimaryContainer
+                : colors.onSurfaceVariant,
+            minimumSize: const Size(0, StopBellSpacing.minimumTouchSize),
+            padding: const EdgeInsets.symmetric(
+              horizontal: StopBellSpacing.md,
+              vertical: StopBellSpacing.xs,
+            ),
+            shape: const StadiumBorder(),
+            textStyle: Theme.of(context).textTheme.labelSmall,
+          ),
+          child: Text(
+            direction,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
-        child: Text('$label 방면', textAlign: TextAlign.center),
       ),
     );
   }
@@ -390,11 +430,13 @@ class _StopRow extends StatelessWidget {
     required this.turn,
     required this.target,
     required this.boarding,
+    required this.incomingSelected,
+    required this.outgoingSelected,
     required this.onTap,
     required this.unavailable,
   });
 
-  static const gutters = 96.0;
+  static const railWidth = 56.0;
   final TextSpan label;
   final bool nonstop;
   final bool selectionLocked;
@@ -403,6 +445,8 @@ class _StopRow extends StatelessWidget {
   final bool turn;
   final bool target;
   final bool boarding;
+  final bool incomingSelected;
+  final bool outgoingSelected;
   final VoidCallback? onTap;
   final bool unavailable;
 
@@ -420,7 +464,7 @@ class _StopRow extends StatelessWidget {
         ? colors.primary
         : colors.outline;
     final selected = target || boarding;
-    final visibleLabel = nonstop && selected
+    final visibleLabel = selected
         ? TextSpan(
             text: label.text,
             style: label.style?.copyWith(color: accent),
@@ -441,85 +485,95 @@ class _StopRow extends StatelessWidget {
             : colors.surface,
         child: InkWell(
           onTap: onTap,
-          child: Row(
+          child: Stack(
+            fit: StackFit.expand,
             children: [
-              SizedBox(
-                width: 56,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (!first || !last)
-                      Align(
-                        alignment: first
-                            ? Alignment.bottomCenter
-                            : last
-                            ? Alignment.topCenter
-                            : Alignment.center,
-                        child: FractionallySizedBox(
-                          heightFactor: first || last ? 0.5 : 1,
-                          child: ColoredBox(
-                            color: colors.primary.withValues(alpha: 0.75),
-                            child: const SizedBox(width: 2),
+              if (!last)
+                PositionedDirectional(
+                  start: railWidth,
+                  end: StopBellSpacing.screenPadding,
+                  bottom: 0,
+                  child: Divider(height: 1, color: colors.outlineVariant),
+                ),
+              Row(
+                children: [
+                  SizedBox(
+                    width: railWidth,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // The rail halves meet at each marker's center. Keep
+                        // their geometry independent of the label and marker.
+                        Column(
+                          children: [
+                            Expanded(
+                              child: _RailSegment(
+                                color: first
+                                    ? null
+                                    : incomingSelected
+                                    ? stopColors.targetStop
+                                    : colors.outline,
+                              ),
+                            ),
+                            Expanded(
+                              child: _RailSegment(
+                                color: last
+                                    ? null
+                                    : outgoingSelected
+                                    ? stopColors.targetStop
+                                    : colors.outline,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Center(
+                          child: Container(
+                            width: selected || turn ? 24 : 12,
+                            height: selected || turn ? 24 : 12,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: selected || turn ? accent : colors.surface,
+                              border: Border.all(color: accent, width: 1.5),
+                            ),
+                            child: IconTheme(
+                              data: IconThemeData(
+                                color: colors.surface,
+                                size: 14,
+                              ),
+                              child: target
+                                  ? const Icon(
+                                      Icons.flag_outlined,
+                                      semanticLabel: '목표 정류장',
+                                    )
+                                  : boarding
+                                  ? const Icon(
+                                      Icons.directions_bus_outlined,
+                                      semanticLabel: '승차 정류장',
+                                    )
+                                  : turn
+                                  ? const Icon(Icons.turn_left)
+                                  : const SizedBox.shrink(),
+                            ),
                           ),
                         ),
-                      ),
-                    Center(
-                      child: Container(
-                        width: turn ? 24 : 16,
-                        height: turn ? 24 : 16,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: selected || turn ? accent : colors.surface,
-                          border: Border.all(color: accent, width: 2),
-                        ),
-                        child: turn
-                            ? Icon(
-                                Icons.turn_left,
-                                size: 15,
-                                color: nonstop && !selected
-                                    ? colors.surface
-                                    : colors.onPrimary,
-                              )
-                            : null,
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Opacity(
+                      opacity: unavailable && !selected ? 0.75 : 1,
+                      child: Text.rich(
+                        visibleLabel,
+                        style: const TextStyle(inherit: false),
+                        textScaler: MediaQuery.textScalerOf(context),
+                        locale: Localizations.maybeLocaleOf(context),
+                        textHeightBehavior: DefaultTextStyle.of(context)
+                            .textHeightBehavior,
                       ),
                     ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Opacity(
-                  opacity: unavailable && !selected ? 0.75 : 1,
-                  child: Text.rich(
-                    visibleLabel,
-                    style: const TextStyle(inherit: false),
-                    textScaler: MediaQuery.textScalerOf(context),
-                    locale: Localizations.maybeLocaleOf(context),
-                    textHeightBehavior: DefaultTextStyle.of(context)
-                        .textHeightBehavior,
                   ),
-                ),
-              ),
-              SizedBox(
-                width: 40,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (target)
-                      Icon(
-                        Icons.flag_outlined,
-                        size: 18,
-                        color: stopColors.targetStop,
-                        semanticLabel: '목표 정류장',
-                      ),
-                    if (boarding)
-                      Icon(
-                        Icons.directions_bus_outlined,
-                        size: 18,
-                        color: stopColors.boardingStop,
-                        semanticLabel: '승차 정류장',
-                      ),
-                  ],
-                ),
+                  const SizedBox(width: StopBellSpacing.screenPadding),
+                ],
               ),
             ],
           ),
@@ -527,4 +581,21 @@ class _StopRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class _RailSegment extends StatelessWidget {
+  const _RailSegment({required this.color});
+
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) => color == null
+      ? const SizedBox.shrink()
+      : Align(
+          child: SizedBox(
+            width: 2,
+            height: double.infinity,
+            child: ColoredBox(color: color!),
+          ),
+        );
 }

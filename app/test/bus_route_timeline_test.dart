@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stopbell/core/theme/stopbell_colors.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/features/transit/bus_route_timeline.dart';
@@ -158,6 +159,43 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('only the exact selected occurrences bound the highlighted leg', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StopBellTheme.light,
+        home: Scaffold(
+          body: BusRouteTimeline(
+            stops: shortRoute,
+            boardingId: 2,
+            targetId: 4,
+            selectionLocked: true,
+            onSelect: null,
+          ),
+        ),
+      ),
+    );
+    final selectedRail = find.byWidgetPredicate(
+      (widget) =>
+          widget is ColoredBox &&
+          widget.color == StopBellColors.light.targetStop,
+    );
+    final halves = [
+      for (var id = 1; id <= 5; id++)
+        find.descendant(of: row(id), matching: selectedRail),
+    ];
+    expect(halves[0], findsNothing);
+    expect(halves[1], findsOneWidget);
+    expect(halves[2], findsNWidgets(2));
+    expect(halves[3], findsOneWidget);
+    expect(halves[4], findsNothing);
+    expect(tester.getTopLeft(halves[1]).dy, tester.getCenter(row(2)).dy);
+    expect(tester.getBottomLeft(halves[3]).dy, tester.getCenter(row(4)).dy);
+    expect(tester.getBottomLeft(halves[1]), tester.getTopLeft(halves[2].first));
+    expect(tester.getBottomLeft(halves[2].last), tester.getTopLeft(halves[3]));
+  });
 
   testWidgets(
     'single traversal preserves order and uses the first return occurrence even with a repeated turn name',

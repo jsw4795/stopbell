@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_colors.dart';
+import '../../core/theme/stopbell_spacing.dart';
 import '../auth/auth_session.dart';
 import '../transit/bus_route.dart';
 import '../transit/bus_route_stop_occurrence.dart';
@@ -348,81 +350,113 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     ],
   );
 
-  Widget _summary() => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      if (!_staleStops && _result == null && !_loadingCandidates)
-        Text(switch (_picker) {
-          _Picker.target => '승차 정류장 이후의 정류장을 선택해 주세요',
-          _Picker.boarding => '노선도에서 승차 정류장을 선택하세요.',
-          _Picker.review => '승차 및 목표 정류장 선택이 완료되었습니다.',
-        }, style: Theme.of(context).textTheme.titleSmall),
-      _stopSummary(_Picker.boarding, _boarding),
-      _stopSummary(_Picker.target, _target),
-      if (_picker == _Picker.review && !_staleStops)
-        OutlinedButton(
-          key: const ValueKey('reselect-stops'),
-          onPressed: _reselectStops,
-          child: const Text('정류장 다시 선택'),
-        ),
-      FilledButton(
-        key: const ValueKey('find-candidates'),
-        onPressed:
-            _target == null ||
-                _boarding == null ||
-                !_validTarget(_target!) ||
-                _loadingCandidates ||
-                _staleStops
-            ? null
-            : _findCandidates,
-        child: Text(
-          _result == null && _error == null ? '차량 후보 조회' : '차량 후보 다시 조회',
-        ),
-      ),
-      if (_loadingCandidates) ...[
-        const Center(child: CircularProgressIndicator()),
-        const Text('차량 후보를 조회하고 있어요.'),
-      ],
-      if (_error != null) Text(_error!),
-      if (_staleStops)
-        OutlinedButton(
-          onPressed: _loadStops,
-          child: const Text('정류장 목록 다시 선택'),
-        ),
-    ],
-  );
-
-  Widget _stopSummary(_Picker picker, BusRouteStopOccurrence? stop) {
-    final target = picker == _Picker.target;
-    final active = picker == _picker;
-    final role = target ? '목표 정류장' : '승차 정류장';
-    final details = stop == null ? null : selectedStopContext(stop, _stops);
-    final name = stop?.name ?? '선택해 주세요';
-    final colors = Theme.of(context).colorScheme;
-    return Container(
-      key: ValueKey(target ? 'summary-target' : 'summary-boarding'),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: active ? colors.primaryContainer : null,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            target ? Icons.flag_outlined : Icons.directions_bus_outlined,
-            size: 18,
-            color: active ? colors.onPrimaryContainer : colors.onSurface,
+  Widget _summary() {
+    final boarding = _boarding;
+    final target = _target;
+    if (_picker == _Picker.boarding || boarding == null) {
+      return const StopSelectionNotice(
+        '노선도에서 승차 정류장을 선택하세요.',
+        icon: Icons.directions_bus_outlined,
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: StopBellSpacing.sm,
+      children: [
+        if (_picker == _Picker.target || target == null) ...[
+          const StopSelectionNotice(
+            '승차 정류장 이후의 정류장을 선택해 주세요',
+            icon: Icons.flag_outlined,
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '$role · $name${details == null ? '' : '\n$details'}',
-              style: TextStyle(
-                color: active ? colors.onPrimaryContainer : colors.onSurface,
+          _stopSummary(boarding, target: false),
+        ] else ...[
+          StopSelectionPair(
+            first: _stopSummary(boarding, target: false),
+            second: _stopSummary(target, target: true),
+          ),
+          if (!_staleStops)
+            StopSelectionPair(
+              first: OutlinedButton(
+                key: const ValueKey('reselect-stops'),
+                onPressed: _reselectStops,
+                child: const Text('정류장 다시 선택', textAlign: TextAlign.center),
+              ),
+              second: FilledButton(
+                key: const ValueKey('find-candidates'),
+                onPressed: !_validTarget(target) || _loadingCandidates
+                    ? null
+                    : _findCandidates,
+                child: Text(
+                  _result == null && _error == null
+                      ? '차량 후보 조회'
+                      : '차량 후보 다시 조회',
+                  textAlign: TextAlign.center,
+                ),
               ),
             ),
-          ),
+          if (_loadingCandidates) ...[
+            const LinearProgressIndicator(),
+            const Text('차량 후보를 조회하고 있어요.'),
+          ],
+          if (_error != null) Text(_error!),
+          if (_staleStops)
+            OutlinedButton(
+              onPressed: _loadStops,
+              child: const Text('정류장 목록 다시 선택'),
+            ),
         ],
+      ],
+    );
+  }
+
+  Widget _stopSummary(BusRouteStopOccurrence stop, {required bool target}) {
+    final role = target ? '목표 정류장' : '승차 정류장';
+    final details = selectedStopContext(stop, _stops);
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final stopColors = StopBellColors.of(context);
+    final accent = target ? stopColors.targetStop : stopColors.boardingStop;
+    return DecoratedBox(
+      key: ValueKey(target ? 'summary-target' : 'summary-boarding'),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(StopBellRadius.card),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(StopBellSpacing.sm),
+        child: Row(
+          children: [
+            Icon(
+              target ? Icons.flag_outlined : Icons.directions_bus_outlined,
+              size: 18,
+              color: accent,
+            ),
+            const SizedBox(width: StopBellSpacing.sm),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  text: '$role · ',
+                  style: theme.textTheme.labelSmall?.copyWith(color: accent),
+                  children: [
+                    TextSpan(
+                      text: stop.name,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: colors.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (details != null)
+                      TextSpan(
+                        text: '\n$details',
+                        style: theme.textTheme.labelMedium,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

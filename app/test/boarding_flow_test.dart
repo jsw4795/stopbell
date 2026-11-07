@@ -179,12 +179,7 @@ void main() {
       await tester.pumpAndSettle();
       await search(tester, 754);
       expect(find.text('서울70사1234'), findsNothing);
-      expect(
-        tester
-            .widget<FilledButton>(find.byKey(const ValueKey('find-candidates')))
-            .onPressed,
-        isNull,
-      );
+      expect(find.byKey(const ValueKey('find-candidates')), findsNothing);
     },
   );
 

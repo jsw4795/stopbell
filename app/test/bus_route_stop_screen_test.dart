@@ -8,6 +8,7 @@ import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/features/transit/bus_route_stop_screen.dart';
+import 'package:stopbell/features/transit/bus_route_timeline.dart';
 
 import 'alarm_test_fakes.dart';
 
@@ -41,21 +42,24 @@ const last = BusRouteStopOccurrence(
   canNotifyOneStopAfter: false,
 );
 
-Widget screen(Future<List<BusRouteStopOccurrence>> Function(int) findStops) =>
-    MaterialApp(
-      theme: StopBellTheme.light,
-      home: Scaffold(
-        body: BusRouteStopScreen(
-          route: route,
-          findStops: findStops,
-          onBack: () {},
-          alarmClient: EmptyAlarmClient(),
-          creationController: ScreenCreationFake(EmptyAlarmClient()),
-          onCreated: (_, {bool activationUnverified = false}) {},
-          onShowAlarms: () {},
-        ),
-      ),
-    );
+Widget screen(
+  Future<List<BusRouteStopOccurrence>> Function(int) findStops, {
+  TransitionBuilder? builder,
+}) => MaterialApp(
+  theme: StopBellTheme.light,
+  builder: builder,
+  home: Scaffold(
+    body: BusRouteStopScreen(
+      route: route,
+      findStops: findStops,
+      onBack: () {},
+      alarmClient: EmptyAlarmClient(),
+      creationController: ScreenCreationFake(EmptyAlarmClient()),
+      onCreated: (_, {bool activationUnverified = false}) {},
+      onShowAlarms: () {},
+    ),
+  ),
+);
 
 void main() {
   testWidgets(
@@ -124,6 +128,56 @@ void main() {
       expect(requests, 1);
     },
   );
+
+  testWidgets('long selected name keeps arrival options and action reachable', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const name = '평내동행정복지센터.대명루첸.평내초등학교.평내호평역환승센터';
+    await tester.pumpWidget(
+      screen(
+        (_) async => const [
+          BusRouteStopOccurrence(
+            id: 1,
+            name: name,
+            order: 1,
+            canNotifyOneStopBefore: false,
+            canNotifyOneStopAfter: true,
+          ),
+          middle,
+        ],
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: const TextScaler.linear(2),
+            padding: const EdgeInsets.only(bottom: 34),
+          ),
+          child: child!,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey(1)));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('선택한 정류장: $name'), findsOneWidget);
+    expect(find.byType(BusRouteTimeline).hitTestable(), findsOneWidget);
+    final after = find.widgetWithText(SwitchListTile, '한 정거장 후 알림');
+    await tester.ensureVisible(after);
+    await tester.pumpAndSettle();
+    await tester.tap(after.hitTestable());
+    await tester.pumpAndSettle();
+    expect(tester.widget<SwitchListTile>(after).value, isTrue);
+
+    final start = find.widgetWithText(FilledButton, '알람 시작');
+    await tester.ensureVisible(start);
+    await tester.pumpAndSettle();
+    expect(start.hitTestable(), findsOneWidget);
+    expect(tester.getBottomRight(start).dy, lessThanOrEqualTo(568 - 34));
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('loading then empty response is distinct from failure', (
     tester,

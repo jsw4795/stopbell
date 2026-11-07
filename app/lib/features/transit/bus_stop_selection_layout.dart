@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_spacing.dart';
 import 'bus_route.dart';
 
 class BusStopSelectionLayout extends StatelessWidget {
@@ -25,71 +26,169 @@ class BusStopSelectionLayout extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     return SafeArea(
-      child: LayoutBuilder(
-        builder: (context, constraints) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 6, 16, 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    tooltip: backLabel,
-                    onPressed: onBack,
-                    icon: const Icon(Icons.arrow_back),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          route.routeNumber,
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Wrap(
-                          spacing: 8,
-                          children: [
-                            Text(
-                              route.regionName,
-                              style: theme.textTheme.bodySmall,
-                            ),
-                            Text(
-                              title,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: colors.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+      child: Material(
+        color: colors.surface,
+        child: LayoutBuilder(
+          builder: (context, constraints) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  StopBellSpacing.sm,
+                  StopBellSpacing.xs,
+                  StopBellSpacing.screenPadding,
+                  StopBellSpacing.sm,
+                ),
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: backLabel,
+                      onPressed: onBack,
+                      icon: const Icon(Icons.arrow_back),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(Icons.directions_bus_outlined, color: colors.primary),
-                ],
-              ),
-            ),
-            Expanded(child: body),
-            if (summary != null) ...[
-              const Divider(height: 1),
-              Material(
-                color: colors.surfaceContainerLow,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: constraints.maxHeight * 0.50,
-                  ),
-                  child: SingleChildScrollView(
-                    key: const ValueKey('stop-selection-summary'),
-                    primary: false,
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-                    child: summary,
-                  ),
+                    const SizedBox(width: StopBellSpacing.xs),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            route.routeNumber,
+                            style: theme.textTheme.headlineLarge,
+                          ),
+                          Wrap(
+                            spacing: StopBellSpacing.sm,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                route.regionName,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: colors.onSurfaceVariant,
+                                ),
+                              ),
+                              Text(
+                                title,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: colors.secondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: StopBellSpacing.sm),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: colors.primaryContainer,
+                        borderRadius: BorderRadius.circular(
+                          StopBellRadius.card,
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(StopBellSpacing.sm),
+                        child: Icon(
+                          Icons.directions_bus_outlined,
+                          color: colors.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
+              Expanded(child: body),
+              if (summary != null) ...[
+                const Divider(height: 1),
+                Material(
+                  color: colors.surfaceContainerLow,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: constraints.maxHeight * 0.42,
+                    ),
+                    child: SingleChildScrollView(
+                      key: const ValueKey('stop-selection-summary'),
+                      primary: false,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: StopBellSpacing.screenPadding,
+                        vertical: StopBellSpacing.sm,
+                      ),
+                      child: summary,
+                    ),
+                  ),
+                ),
+              ],
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Keep related controls side by side when there is room for their labels.
+class StopSelectionPair extends StatelessWidget {
+  const StopSelectionPair({
+    super.key,
+    required this.first,
+    required this.second,
+  });
+
+  final Widget first;
+  final Widget second;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final scale = MediaQuery.textScalerOf(context).scale(16) / 16;
+        if (constraints.maxWidth < 320 * scale) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              first,
+              const SizedBox(height: StopBellSpacing.xs),
+              second,
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: first),
+            const SizedBox(width: StopBellSpacing.sm),
+            Expanded(child: second),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class StopSelectionNotice extends StatelessWidget {
+  const StopSelectionNotice(this.message, {super.key, required this.icon});
+
+  final String message;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainer,
+        borderRadius: BorderRadius.circular(StopBellRadius.card),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(StopBellSpacing.md),
+        child: Row(
+          children: [
+            Icon(icon, size: 18, color: colors.primary),
+            const SizedBox(width: StopBellSpacing.sm),
+            Expanded(
+              child: Semantics(
+                liveRegion: true,
+                child: Text(message, style: theme.textTheme.bodySmall),
+              ),
+            ),
           ],
         ),
       ),

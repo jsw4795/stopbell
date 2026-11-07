@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_colors.dart';
+import '../../core/theme/stopbell_spacing.dart';
 import '../alarm/alarm.dart';
 import '../alarm/alarm_api_client.dart';
 import '../alarm/alarm_creation_controller.dart';
@@ -216,36 +218,60 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
         .firstOrNull;
     final details = target == null ? null : selectedStopContext(target, _stops);
     final canChange = !_creating && !_outcomeUnknown;
+    final theme = Theme.of(context);
     return BusStopSelectionLayout(
       route: widget.route,
       title: '도착 알람',
       onBack: _creating ? null : widget.onBack,
       body: _buildStops(),
       summary: target == null && _createMessage == null
-          ? null
+          ? _state == _StopState.success
+                ? const StopSelectionNotice(
+                    '알람을 받을 정류장을 선택하세요.',
+                    icon: Icons.flag_outlined,
+                  )
+                : null
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
+              spacing: StopBellSpacing.xs,
               children: [
                 if (target != null) ...[
-                  Text(
-                    '선택한 정류장: ${target.name}${details == null ? '' : '\n$details'}',
+                  Text.rich(
+                    TextSpan(
+                      text: '선택한 정류장: ',
+                      children: [
+                        TextSpan(
+                          text: target.name,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: StopBellColors.of(context).targetStop,
+                          ),
+                        ),
+                        if (details != null) TextSpan(text: '\n$details'),
+                      ],
+                    ),
+                    style: theme.textTheme.bodySmall,
                   ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('한 정거장 전 알림'),
-                    value: _notifyOneStopBefore,
-                    onChanged: canChange && target.canNotifyOneStopBefore
-                        ? (value) =>
-                              setState(() => _notifyOneStopBefore = value)
-                        : null,
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('한 정거장 후 알림'),
-                    value: _notifyOneStopAfter,
-                    onChanged: canChange && target.canNotifyOneStopAfter
-                        ? (value) => setState(() => _notifyOneStopAfter = value)
-                        : null,
+                  StopSelectionPair(
+                    first: SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('한 정거장 전 알림'),
+                      value: _notifyOneStopBefore,
+                      onChanged: canChange && target.canNotifyOneStopBefore
+                          ? (value) =>
+                                setState(() => _notifyOneStopBefore = value)
+                          : null,
+                    ),
+                    second: SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      title: const Text('한 정거장 후 알림'),
+                      value: _notifyOneStopAfter,
+                      onChanged: canChange && target.canNotifyOneStopAfter
+                          ? (value) =>
+                                setState(() => _notifyOneStopAfter = value)
+                          : null,
+                    ),
                   ),
                   if (!_outcomeUnknown)
                     FilledButton(
