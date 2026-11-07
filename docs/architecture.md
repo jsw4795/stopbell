@@ -192,11 +192,11 @@ Flutter 구현은 사용자 확정 → Push 준비 → `Random.secure` UUID v4 �
 
 `BusRouteTimeline`은 두 알림 화면의 표시와 스크롤을 담당하며, 각 화면이 선택과 API 요청 상태를 소유한다. Stop API는 별도의 회차 필드를 노출하지 않는다. [GBIS 보강 계약](adr/ADR-009-bus-transit-metadata-persistence-and-diff-sync-strategy.md)에 따라 순서가 증가하고 ID가 유일한 전체 occurrence의 `destinationName`이 서로 다른 두 연속 구간이며, 두 번째 구간 첫 행 및 마지막 행의 이름이 각각 해당 행선지와 일치할 때만 방향 이동을 제공한다. 회차 행은 두 번째 구간의 첫 occurrence다. 반복 이름, 중간 순번, 실시간 차량 정보로 회차를 추정하지 않는다. 누락·불일치·단일 행선지에서도 API의 전체 순서와 선택 ID는 보존한다.
 
-표시 전용 정류장명 가공은 앞뒤 공백을 정리하고 정확한 끝 `(미정차)` 접미사만 분리한다. 원본 모델과 선택 ID는 유지하며, 배지와 이름을 같은 텍스트 레이아웃으로 측정한다. 동일한 목록에서 방향 버튼은 실제 텍스트 레이아웃과 행 높이를 공유하는 occurrence 인덱스 위치로 이동한다. 헤더 아래의 스크롤 위치로 방향을 표시하며 작은 경계 흔들림은 무시한다. 정류장 선택이나 방향 이동은 목록을 필터링하거나 재조회하지 않는다.
+표시 전용 정류장명 가공은 앞뒤 공백을 정리하고 정확한 끝 `(미정차)` 접미사만 분리한다. 원본 모델과 선택 ID는 유지하며, 미정차 보조 텍스트와 이름을 같은 텍스트 레이아웃으로 측정한다. 동일한 목록에서 방향 버튼은 실제 텍스트 레이아웃과 행 높이를 공유하는 occurrence 인덱스 위치로 이동한다. 헤더 아래의 스크롤 위치로 방향을 표시하며 작은 경계 흔들림은 무시한다. 정류장 선택이나 방향 이동은 목록을 필터링하거나 재조회하지 않는다.
 
 ### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
 
-로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 승차 지점을 먼저 선택하고 그 이후의 필수 목적 occurrence를 선택한다. 선택 가능 여부는 occurrence의 order로 판단하며 공통 노선도의 선택 제한은 하차 화면에서만 적용한다. 후보 조회와 신규 생성은 서버에서 순서를 재검증한다. 기존 세션 재확인에서 이전 선택 조합이 순서 오류로 거부되면 승차를 생략해 후보를 다시 조회한다. 서버는 재확인 시 기존 차량·노선·목적 traversal을 계속 검증하며 신규 생성에서는 승차를 요구한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.
+로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 승차 지점을 먼저 선택하고 그 이후의 필수 목적 occurrence를 선택한다. 선택 가능 여부는 occurrence의 order로 판단하며 두 정류장 선택 후 하차 화면에서만 선택을 잠근다. 재선택은 양쪽 선택과 후보 epoch를 초기화하고 승차 단계부터 시작한다. 후보 조회와 신규 생성은 서버에서 순서를 재검증한다. 기존 세션 재확인에서 이전 선택 조합이 순서 오류로 거부되면 승차를 생략해 후보를 다시 조회한다. 서버는 재확인 시 기존 차량·노선·목적 traversal을 계속 검증하며 신규 생성에서는 승차를 요구한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.
 
 `BoardingCandidateClient`는 기존 `AuthenticatedApiClient`/Auth Session refresh와 generation을 사용한다. 화면의 Route ID·목적/승차 occurrence 변경, 재조회, 화면 폐기에는 요청 epoch를 무효화하며 logout 시작/계정 세대 변경에는 후보·선택 문맥을 제거한다. 미전송 후보 reference는 화면 메모리에만 두고 서버 추천 순서와 관측 시각을 보존한다. 2단계 생성 요청의 원래 reference 보존은 아래 pending intent 경계를 따른다. 후보 상태·불확실성의 의미는 [후보 API](api.md#후보-조회)를 따르며 unknown enum은 미확인 상태로 표시한다.
 

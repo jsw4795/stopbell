@@ -45,7 +45,6 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   BusRouteStopOccurrence? _target;
   BusRouteStopOccurrence? _boarding;
   _Picker _picker = _Picker.boarding;
-  _Picker? _returnTo;
   BoardingCandidates? _result;
   DateTime? _receivedAt;
   bool _loadingCandidates = false;
@@ -108,7 +107,6 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       _target = null;
       _boarding = null;
       _picker = _Picker.boarding;
-      _returnTo = null;
       _stops = const [];
       _state = _StopsState.loading;
     });
@@ -130,18 +128,22 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       _boarding != null && stop.order > _boarding!.order;
 
   void _select(BusRouteStopOccurrence stop) {
-    if (!_current || _staleStops || _result != null) return;
+    if (!_current ||
+        _staleStops ||
+        _result != null ||
+        _picker == _Picker.review) {
+      return;
+    }
     if (_picker == _Picker.target && !_validTarget(stop)) return;
     setState(() {
-      if (_picker != _Picker.target) {
+      if (_picker == _Picker.boarding) {
         _boarding = stop;
-        if (_target != null && !_validTarget(_target!)) _target = null;
-        _picker = _target == null ? _Picker.target : _Picker.review;
+        _target = null;
+        _picker = _Picker.target;
       } else {
         _target = stop;
         _picker = _Picker.review;
       }
-      _returnTo = null;
       _invalidateCandidates();
     });
   }
@@ -168,7 +170,6 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         boardingId == _boarding?.id;
     setState(() {
       _picker = _Picker.review;
-      _returnTo = null;
       _loadingCandidates = true;
     });
     try {
@@ -214,11 +215,12 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       '${stop.destinationName == null ? '방면 정보 없음' : '${stop.destinationName} 방면'}\n'
       '이전: ${stop.previousStopName ?? '없음'} · 다음: ${stop.nextStopName ?? '없음'}';
 
-  void _pick(_Picker picker) {
-    if (!_current || _staleStops || picker == _picker) return;
+  void _reselectStops() {
+    if (!_current || _staleStops) return;
     setState(() {
-      _returnTo ??= _picker;
-      _picker = picker;
+      _boarding = null;
+      _target = null;
+      _picker = _Picker.boarding;
       _invalidateCandidates();
     });
   }
@@ -227,7 +229,6 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
 
   String get _backLabel {
     if (_showingCandidates) return '정류장 선택으로';
-    if (_returnTo != null) return '정류장 변경 취소';
     if (_picker == _Picker.target) return '승차 정류장 선택으로';
     return '노선 다시 선택';
   }
@@ -236,11 +237,6 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     if (!_current) return;
     if (_showingCandidates) {
       setState(_invalidateCandidates);
-    } else if (_returnTo != null) {
-      setState(() {
-        _picker = _returnTo!;
-        _returnTo = null;
-      });
     } else if (_picker == _Picker.target) {
       setState(() => _picker = _Picker.boarding);
     } else {
@@ -302,8 +298,11 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         targetId: _target?.id,
         boardingId: _boarding?.id,
         isSelectable: _picker == _Picker.target ? _validTarget : null,
+        selectionLocked: _picker == _Picker.review,
         rowKey: (id) => ValueKey('occurrence-$id'),
-        onSelect: _staleStops || _result != null ? null : _select,
+        onSelect: _staleStops || _result != null || _picker == _Picker.review
+            ? null
+            : _select,
       ),
       if (_result == null)
         const SizedBox.shrink()
@@ -356,10 +355,16 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         Text(switch (_picker) {
           _Picker.target => '승차 정류장 이후의 정류장을 선택해 주세요',
           _Picker.boarding => '노선도에서 승차 정류장을 선택하세요.',
-          _Picker.review => '정류장을 변경하거나 차량 후보를 조회하세요.',
+          _Picker.review => '승차 및 목표 정류장 선택이 완료되었습니다.',
         }, style: Theme.of(context).textTheme.titleSmall),
-      _modeButton(_Picker.boarding, _boarding),
-      _modeButton(_Picker.target, _target),
+      _stopSummary(_Picker.boarding, _boarding),
+      _stopSummary(_Picker.target, _target),
+      if (_picker == _Picker.review && !_staleStops)
+        OutlinedButton(
+          key: const ValueKey('reselect-stops'),
+          onPressed: _reselectStops,
+          child: const Text('정류장 다시 선택'),
+        ),
       FilledButton(
         key: const ValueKey('find-candidates'),
         onPressed:
@@ -387,44 +392,37 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     ],
   );
 
-  Widget _modeButton(_Picker picker, BusRouteStopOccurrence? stop) {
+  Widget _stopSummary(_Picker picker, BusRouteStopOccurrence? stop) {
     final target = picker == _Picker.target;
     final active = picker == _picker;
     final role = target ? '목표 정류장' : '승차 정류장';
     final details = stop == null ? null : selectedStopContext(stop, _stops);
     final name = stop?.name ?? '선택해 주세요';
     final colors = Theme.of(context).colorScheme;
-    return Semantics(
-      selected: active,
-      child: TextButton(
-        key: ValueKey(target ? 'pick-target' : 'pick-boarding'),
-        onPressed: _staleStops || (target && _boarding == null)
-            ? null
-            : () => _pick(picker),
-        style: TextButton.styleFrom(
-          alignment: Alignment.centerLeft,
-          backgroundColor: active ? colors.primaryContainer : null,
-          foregroundColor: active
-              ? colors.onPrimaryContainer
-              : colors.onSurface,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              target ? Icons.flag_outlined : Icons.directions_bus_outlined,
-              size: 18,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '$role · $name${details == null ? '' : '\n$details'}',
+    return Container(
+      key: ValueKey(target ? 'summary-target' : 'summary-boarding'),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: active ? colors.primaryContainer : null,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            target ? Icons.flag_outlined : Icons.directions_bus_outlined,
+            size: 18,
+            color: active ? colors.onPrimaryContainer : colors.onSurface,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$role · $name${details == null ? '' : '\n$details'}',
+              style: TextStyle(
+                color: active ? colors.onPrimaryContainer : colors.onSurface,
               ),
             ),
-            const SizedBox(width: 8),
-            Text(active ? '선택 중' : '변경'),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

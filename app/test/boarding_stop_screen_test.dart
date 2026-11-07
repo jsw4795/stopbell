@@ -81,52 +81,58 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets(
-    'boarding then target enforces route order and supports changes',
-    (tester) async {
-      await setup(tester);
-      await tester.pumpWidget(screen());
-      await tester.pumpAndSettle();
-      expect(find.text('노선도에서 승차 정류장을 선택하세요.'), findsOneWidget);
-      expect(
-        tester
-            .widget<FilledButton>(find.byKey(const ValueKey('find-candidates')))
-            .onPressed,
-        isNull,
-      );
-      expect(find.byKey(const ValueKey('no-boarding')), findsNothing);
-      await tap(tester, 'occurrence-11');
-      expect(find.text('승차 정류장 이후의 정류장을 선택해 주세요'), findsOneWidget);
-      expect(
-        tester
-            .widget<FilledButton>(find.byKey(const ValueKey('find-candidates')))
-            .onPressed,
-        isNull,
-      );
-      await tap(tester, 'occurrence-11');
-      expect(
-        tester
-            .widget<FilledButton>(find.byKey(const ValueKey('find-candidates')))
-            .onPressed,
-        isNull,
-      );
-      await tap(tester, 'occurrence-22');
-      await tap(tester, 'find-candidates');
-      await tester.pumpAndSettle();
-      expect(queries.single, (754, 22, 11));
-      await tap(tester, 'pick-boarding');
-      await tap(tester, 'occurrence-22');
-      expect(find.text('목표 정류장 · 선택해 주세요'), findsOneWidget);
-      expect(
-        tester
-            .widget<FilledButton>(find.byKey(const ValueKey('find-candidates')))
-            .onPressed,
-        isNull,
-      );
-      await tap(tester, 'occurrence-11');
-      expect(find.text('목표 정류장 · 선택해 주세요'), findsOneWidget);
-    },
-  );
+  testWidgets('selection locks and reselect starts from boarding', (
+    tester,
+  ) async {
+    await setup(tester);
+    await tester.pumpWidget(screen());
+    await tester.pumpAndSettle();
+    expect(find.text('노선도에서 승차 정류장을 선택하세요.'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const ValueKey('find-candidates')))
+          .onPressed,
+      isNull,
+    );
+    expect(find.byKey(const ValueKey('pick-boarding')), findsNothing);
+    expect(find.byKey(const ValueKey('pick-target')), findsNothing);
+    await tap(tester, 'occurrence-11');
+    expect(find.text('승차 정류장 이후의 정류장을 선택해 주세요'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const ValueKey('find-candidates')))
+          .onPressed,
+      isNull,
+    );
+    await tap(tester, 'occurrence-11');
+    expect(
+      tester
+          .widget<FilledButton>(find.byKey(const ValueKey('find-candidates')))
+          .onPressed,
+      isNull,
+    );
+    await tap(tester, 'occurrence-22');
+    expect(find.text('승차 및 목표 정류장 선택이 완료되었습니다.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('reselect-stops')), findsOneWidget);
+    for (final id in [11, 22]) {
+      await tap(tester, 'occurrence-$id');
+    }
+    expect(find.textContaining('승차 정류장 · 반복 정류장'), findsOneWidget);
+    expect(find.textContaining('목표 정류장 · 반복 정류장'), findsOneWidget);
+    await tap(tester, 'find-candidates');
+    await tester.pumpAndSettle();
+    expect(queries.single, (754, 22, 11));
+    await tap(tester, 'reselect-stops');
+    expect(find.byType(BoardingCandidatesView), findsNothing);
+    expect(find.text('승차 정류장 · 선택해 주세요'), findsOneWidget);
+    expect(find.text('목표 정류장 · 선택해 주세요'), findsOneWidget);
+    expect(find.text('노선도에서 승차 정류장을 선택하세요.'), findsOneWidget);
+    await tap(tester, 'occurrence-11');
+    await tap(tester, 'occurrence-22');
+    await tap(tester, 'find-candidates');
+    await tester.pumpAndSettle();
+    expect(queries.last, (754, 22, 11));
+  });
 
   for (final brightness in [Brightness.light, Brightness.dark]) {
     testWidgets('repeated stops across turn use order in $brightness', (
@@ -167,14 +173,86 @@ void main() {
       await tap(tester, 'find-candidates');
       await tester.pumpAndSettle();
       expect(queries.single, (754, 3, 2));
-      await tap(tester, 'pick-boarding');
+      await tap(tester, 'reselect-stops');
       await tap(tester, 'occurrence-1');
+      await tap(tester, 'occurrence-3');
       expect(find.textContaining('목표 정류장 · 반복'), findsOneWidget);
       await tap(tester, 'find-candidates');
       await tester.pumpAndSettle();
       expect(queries.last, (754, 3, 1));
     });
   }
+
+  testWidgets(
+    'locked route keeps selections while direction and scrolling remain usable',
+    (tester) async {
+      await setup(tester);
+      tester.view.physicalSize = const Size(390, 800);
+      final stops = [
+        for (var id = 1; id <= 20; id++)
+          BusRouteStopOccurrence(
+            id: id,
+            name: id == 11
+                ? '회차'
+                : id == 20
+                ? '종점'
+                : '정류장 $id',
+            order: id,
+            destinationName: id < 11 ? '회차' : '종점',
+            canNotifyOneStopBefore: true,
+            canNotifyOneStopAfter: true,
+          ),
+      ];
+      await tester.pumpWidget(screen(stops: (_) async => stops));
+      await tester.pumpAndSettle();
+      await tap(tester, 'occurrence-1');
+      final restricted = tester.widgetList<Semantics>(
+        find.descendant(
+          of: find.byKey(const ValueKey('occurrence-1')),
+          matching: find.byType(Semantics),
+        ),
+      );
+      expect(restricted.any((s) => s.properties.enabled == false), isTrue);
+      await tap(tester, 'occurrence-2');
+      expect(find.text('승차 및 목표 정류장 선택이 완료되었습니다.'), findsOneWidget);
+      await tester.tap(find.text('회차 방면'));
+      await tester.pumpAndSettle();
+      final locked = tester.widgetList<Semantics>(
+        find.descendant(
+          of: find.byKey(const ValueKey('occurrence-1')),
+          matching: find.byType(Semantics),
+        ),
+      );
+      expect(
+        locked.any((s) => s.properties.hint?.contains('선택 완료') ?? false),
+        isTrue,
+      );
+      expect(locked.any((s) => s.properties.enabled == false), isFalse);
+      for (final id in [1, 2, 3]) {
+        await tap(tester, 'occurrence-$id');
+      }
+      expect(find.textContaining('승차 정류장 · 정류장 1'), findsOneWidget);
+      expect(find.textContaining('목표 정류장 · 정류장 2'), findsOneWidget);
+      await tester.tap(find.text('종점 방면'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('occurrence-11')), findsOneWidget);
+      final scroll = tester
+          .state<ScrollableState>(
+            find.descendant(
+              of: find.byType(BusRouteTimeline),
+              matching: find.byType(Scrollable),
+            ),
+          )
+          .position;
+      final offset = scroll.pixels;
+      await tester.drag(find.byType(ListView).first, const Offset(0, -80));
+      await tester.pumpAndSettle();
+      expect(scroll.pixels, greaterThan(offset));
+      await tap(tester, 'find-candidates');
+      await tester.pumpAndSettle();
+      expect(queries.single, (754, 2, 1));
+    },
+  );
 
   testWidgets('nonstop occurrences remain selectable as boarding and target', (
     tester,
@@ -252,6 +330,11 @@ void main() {
         selectedOffset,
       );
       expect(loads, 1);
+      expect(find.byKey(const ValueKey('reselect-stops')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('occurrence-6')));
+      await tester.pump();
+      expect(find.text('승차 정류장 · 정류장 6'), findsOneWidget);
+      expect(find.text('목표 정류장 · 정류장 7'), findsOneWidget);
 
       final pending = Completer<BoardingCandidates>();
       respond = () => pending.future;
@@ -323,7 +406,20 @@ void main() {
       await setup(tester);
       final old = Completer<BoardingCandidates>();
       respond = () => old.future;
-      await tester.pumpWidget(screen());
+      await tester.pumpWidget(
+        screen(
+          stops: (_) async => [
+            ...boardingStops,
+            const BusRouteStopOccurrence(
+              id: 33,
+              name: '새 목표',
+              order: 15,
+              canNotifyOneStopBefore: true,
+              canNotifyOneStopAfter: true,
+            ),
+          ],
+        ),
+      );
       await tester.pumpAndSettle();
       await tap(tester, 'occurrence-11');
       await tap(tester, 'occurrence-22');
@@ -331,8 +427,9 @@ void main() {
       await tap(tester, 'find-candidates');
       expect(queries, hasLength(1));
       expect(find.text('차량 후보를 조회하고 있어요.'), findsOneWidget);
-      await tap(tester, 'pick-boarding');
-      await tap(tester, 'occurrence-11');
+      await tap(tester, 'reselect-stops');
+      await tap(tester, 'occurrence-22');
+      await tap(tester, 'occurrence-33');
       expect(requestChecks.first(), isFalse);
       respond = () async => BoardingCandidates.fromJson(
         candidatesJson(candidates: [candidateJson(number: '새 차량')]),
@@ -347,6 +444,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('새 차량'), findsOneWidget);
       expect(find.text('이전 차량'), findsNothing);
+      expect(find.textContaining('목표 정류장 · 새 목표'), findsOneWidget);
+      expect(queries[1], (754, 33, 22));
       await tap(tester, 'find-candidates');
       expect(requestChecks[1](), isFalse);
       await tester.pumpAndSettle();
@@ -365,8 +464,9 @@ void main() {
       await tap(tester, 'occurrence-11');
       await tap(tester, 'occurrence-22');
       await tap(tester, 'find-candidates');
-      await tap(tester, 'pick-boarding');
+      await tap(tester, 'reselect-stops');
       await tap(tester, 'occurrence-11');
+      await tap(tester, 'occurrence-22');
       expect(requestChecks.first(), isFalse);
       await tap(tester, 'find-candidates');
       await tester.pumpWidget(
@@ -499,8 +599,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       for (final widget in [
-        find.byKey(const ValueKey('pick-target')),
-        find.byKey(const ValueKey('pick-boarding')),
+        find.byKey(const ValueKey('summary-target')),
+        find.byKey(const ValueKey('summary-boarding')),
         find.byType(BusRouteTimeline),
       ]) {
         await tester.ensureVisible(widget);
@@ -547,12 +647,7 @@ void main() {
                 .onPressed,
             isNull,
           );
-          expect(
-            tester
-                .widget<TextButton>(find.byKey(const ValueKey('pick-target')))
-                .onPressed,
-            isNull,
-          );
+          expect(find.byKey(const ValueKey('reselect-stops')), findsNothing);
           await tester.tap(find.text('정류장 목록 다시 선택'));
           await tester.pumpAndSettle();
           await query(tester);

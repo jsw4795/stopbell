@@ -104,20 +104,35 @@ void main() {
       final badge =
           (firstLabel.textSpan! as TextSpan).children!.first as TextSpan;
       expect(badge.text, '  미정차 ');
-      final badgeLight = badge.style!.color!.computeLuminance();
-      final backgroundLight = badge.style!.backgroundColor!.computeLuminance();
-      final contrast = (badgeLight > backgroundLight
-          ? (badgeLight + 0.05) / (backgroundLight + 0.05)
-          : (backgroundLight + 0.05) / (badgeLight + 0.05));
-      expect(contrast, greaterThanOrEqualTo(4.5));
+      expect(badge.style!.backgroundColor, isNull);
+      final normalLabel = tester.widget<Text>(
+        find.descendant(of: row(2), matching: find.byType(Text)).first,
+      );
+      final mutedColor = firstLabel.textSpan!.style!.color!;
+      expect(mutedColor.r, mutedColor.g);
+      expect(mutedColor.g, mutedColor.b);
+      expect(mutedColor, isNot(normalLabel.textSpan!.style!.color));
+      final background = Theme.of(tester.element(row(1))).colorScheme.surface;
+      final a = mutedColor.computeLuminance();
+      final b = background.computeLuminance();
       expect(
+        (a > b ? (a + .05) / (b + .05) : (b + .05) / (a + .05)),
+        greaterThanOrEqualTo(4.5),
+      );
+      Container marker() => tester.widget<Container>(
         find.descendant(
           of: row(1),
           matching: find.byWidgetPredicate(
-            (w) => w is Opacity && w.opacity == 0.7,
+            (w) =>
+                w is Container &&
+                w.decoration is BoxDecoration &&
+                (w.decoration! as BoxDecoration).shape == BoxShape.circle,
           ),
         ),
-        findsOneWidget,
+      );
+      expect(
+        (marker().decoration! as BoxDecoration).border!.top.color,
+        mutedColor,
       );
       await tester.tap(row(1));
       await tester.pumpAndSettle();
@@ -130,15 +145,12 @@ void main() {
         find.descendant(of: row(1), matching: find.byIcon(Icons.flag_outlined)),
         findsOneWidget,
       );
-      expect(
-        find.descendant(
-          of: row(1),
-          matching: find.byWidgetPredicate(
-            (w) => w is Opacity && w.opacity == 0.7,
-          ),
-        ),
-        findsNothing,
+      final colors = Theme.of(tester.element(row(1))).colorScheme;
+      expect((marker().decoration! as BoxDecoration).color, colors.primary);
+      final selectedLabel = tester.widget<Text>(
+        find.descendant(of: row(1), matching: find.byType(Text)).first,
       );
+      expect(selectedLabel.textSpan!.style!.color, colors.primary);
       expect(stops.first.name, '강남역 (미정차)');
       expect(tester.takeException(), isNull);
     });

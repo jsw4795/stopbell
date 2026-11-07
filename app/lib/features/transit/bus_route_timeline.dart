@@ -89,6 +89,7 @@ class BusRouteTimeline extends StatefulWidget {
     this.boardingId,
     this.rowKey,
     this.isSelectable,
+    this.selectionLocked = false,
   });
 
   final List<BusRouteStopOccurrence> stops;
@@ -97,6 +98,7 @@ class BusRouteTimeline extends StatefulWidget {
   final int? boardingId;
   final Key Function(int id)? rowKey;
   final bool Function(BusRouteStopOccurrence)? isSelectable;
+  final bool selectionLocked;
 
   @override
   State<BusRouteTimeline> createState() => _BusRouteTimelineState();
@@ -207,12 +209,15 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                   fontWeight: FontWeight.w600,
                 ),
                 mutedTitle: theme.textTheme.titleMedium!.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                  color: theme.brightness == Brightness.dark
+                      ? const Color(0xffb0b0b0)
+                      : const Color(0xff666666),
                   fontWeight: FontWeight.w600,
                 ),
                 badge: theme.textTheme.labelSmall!.copyWith(
-                  color: theme.colorScheme.onSecondaryContainer,
-                  backgroundColor: theme.colorScheme.secondaryContainer,
+                  color: theme.brightness == Brightness.dark
+                      ? const Color(0xffb0b0b0)
+                      : const Color(0xff666666),
                   fontWeight: FontWeight.w600,
                 ),
                 detail: theme.textTheme.bodySmall!.copyWith(
@@ -255,6 +260,7 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                     key: widget.rowKey?.call(stop.id) ?? ValueKey(stop.id),
                     label: layout.labels[index],
                     nonstop: stopDisplayName(stop.name).isNonstop,
+                    selectionLocked: widget.selectionLocked,
                     first: index == 0,
                     last: index == widget.stops.length - 1,
                     turn: index == turn?.index,
@@ -380,6 +386,7 @@ class _StopRow extends StatelessWidget {
     super.key,
     required this.label,
     required this.nonstop,
+    required this.selectionLocked,
     required this.first,
     required this.last,
     required this.turn,
@@ -392,6 +399,7 @@ class _StopRow extends StatelessWidget {
   static const gutters = 96.0;
   final TextSpan label;
   final bool nonstop;
+  final bool selectionLocked;
   final bool first;
   final bool last;
   final bool turn;
@@ -407,15 +415,34 @@ class _StopRow extends StatelessWidget {
     final boardingColor = theme.brightness == Brightness.dark
         ? const Color(0xff82d9a1)
         : const Color(0xff17683f);
-    final accent = target || turn
+    final muted = theme.brightness == Brightness.dark
+        ? const Color(0xffb0b0b0)
+        : const Color(0xff666666);
+    final accent = target
         ? colors.primary
         : boarding
         ? boardingColor
+        : nonstop
+        ? muted
+        : turn
+        ? colors.primary
         : colors.outline;
     final selected = target || boarding;
+    final visibleLabel = nonstop && selected
+        ? TextSpan(
+            text: label.text,
+            style: label.style?.copyWith(color: accent),
+            children: label.children,
+          )
+        : label;
     return Semantics(
       selected: selected,
       enabled: !unavailable,
+      hint: selectionLocked
+          ? '정류장 선택 완료. 다시 선택하려면 정류장 다시 선택 버튼을 누르세요.'
+          : unavailable
+          ? '승차 정류장 이후의 정류장을 선택해 주세요.'
+          : null,
       child: Material(
         color: selected
             ? Color.alphaBlend(accent.withValues(alpha: 0.10), colors.surface)
@@ -445,24 +472,23 @@ class _StopRow extends StatelessWidget {
                         ),
                       ),
                     Center(
-                      child: Opacity(
-                        opacity: nonstop && !selected ? 0.7 : 1,
-                        child: Container(
-                          width: turn ? 24 : 16,
-                          height: turn ? 24 : 16,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: selected || turn ? accent : colors.surface,
-                            border: Border.all(color: accent, width: 2),
-                          ),
-                          child: turn
-                              ? Icon(
-                                  Icons.turn_left,
-                                  size: 15,
-                                  color: colors.onPrimary,
-                                )
-                              : null,
+                      child: Container(
+                        width: turn ? 24 : 16,
+                        height: turn ? 24 : 16,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: selected || turn ? accent : colors.surface,
+                          border: Border.all(color: accent, width: 2),
                         ),
+                        child: turn
+                            ? Icon(
+                                Icons.turn_left,
+                                size: 15,
+                                color: nonstop && !selected
+                                    ? colors.surface
+                                    : colors.onPrimary,
+                              )
+                            : null,
                       ),
                     ),
                   ],
@@ -470,9 +496,9 @@ class _StopRow extends StatelessWidget {
               ),
               Expanded(
                 child: Opacity(
-                  opacity: unavailable && !selected ? 0.5 : 1,
+                  opacity: unavailable && !selected ? 0.75 : 1,
                   child: Text.rich(
-                    label,
+                    visibleLabel,
                     style: const TextStyle(inherit: false),
                     textScaler: MediaQuery.textScalerOf(context),
                     locale: Localizations.maybeLocaleOf(context),
