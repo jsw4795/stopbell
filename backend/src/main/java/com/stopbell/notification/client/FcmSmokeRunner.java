@@ -48,7 +48,7 @@ public class FcmSmokeRunner implements ApplicationRunner {
         try {
             if (!"true".equals(option(args, "notification.fcm.smoke"))
                     || !"none".equals(option(args, "spring.main.web-application-type"))
-                    || environment.getProperty("transit.monitoring.enabled", Boolean.class, false)) {
+                    || environment.getProperty("transit.monitoring.enabled", Boolean.class, true)) {
                 log.info("FCM smoke result=SKIPPED code=EXPLICIT_LOCAL_CLI_REQUIRED");
                 return;
             }

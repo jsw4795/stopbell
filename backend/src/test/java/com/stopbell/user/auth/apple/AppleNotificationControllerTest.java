@@ -13,10 +13,16 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 class AppleNotificationControllerTest {
-    @Test void disabledByDefault() {
+    @Test void explicitlyDisabled() {
         new ApplicationContextRunner().withUserConfiguration(AppleNotificationController.class,
-                AppleNotificationController.Config.class).run(context ->
+                AppleNotificationController.Config.class).withPropertyValues("apple.notifications.enabled=false").run(context ->
                 assertThat(context).doesNotHaveBean(AppleNotificationController.class));
+    }
+    @Test void enabledByDefaultRequiresAppId() {
+        new ApplicationContextRunner().withUserConfiguration(AppleNotificationController.Config.class)
+                .withBean(Clock.class, Clock::systemUTC)
+                .run(context -> assertThat(context).hasFailed()
+                        .getFailure().hasRootCauseMessage("Apple notification App ID is required"));
     }
     @Test void databaseFailureIsNotAcknowledged() {
         var verifier = mock(AppleNotificationVerifier.class);

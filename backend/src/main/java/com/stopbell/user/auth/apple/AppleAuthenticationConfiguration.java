@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(prefix = "apple.authentication", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "apple.authentication", name = "enabled", havingValue = "true", matchIfMissing = true)
 @EnableConfigurationProperties(AppleAuthenticationProperties.class)
 public class AppleAuthenticationConfiguration {
     @Bean

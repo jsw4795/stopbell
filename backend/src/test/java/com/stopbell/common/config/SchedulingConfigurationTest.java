@@ -106,9 +106,9 @@ class SchedulingConfigurationTest {
     }
 
     @Test
-    @DisplayName("기본 및 명시적 비활성 설정은 Monitoring과 Dispatch를 등록하거나 실행하지 않는다")
+    @DisplayName("명시적 비활성 설정은 Monitoring과 Dispatch를 등록하거나 실행하지 않는다")
     void disabled_settings_register_no_tasks() {
-        for (var properties : List.of(new String[0], new String[]{"transit.monitoring.enabled=false",
+        for (var properties : List.<String[]>of(new String[]{"transit.monitoring.enabled=false",
                 "notification.dispatch.enabled=false"})) {
             new ApplicationContextRunner().withUserConfiguration(SchedulingConfiguration.class,
                     BusAlarmMonitoringScheduler.class, NotificationDispatchConfiguration.class)

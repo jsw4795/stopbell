@@ -35,9 +35,9 @@ class NotificationDispatchConfigurationTest {
             .withBean("transitMetadataClock", Clock.class, Clock::systemUTC);
 
     @Test
-    @DisplayName("설정 누락이나 false이면 FCM enabled와 무관하게 Worker가 생성되지 않는다")
-    void disabled_by_default_independent_of_fcm() {
-        for (String enabled : List.of("", "notification.dispatch.enabled=false")) {
+    @DisplayName("명시적 false이면 FCM enabled와 무관하게 Worker가 생성되지 않는다")
+    void disabled_condition_registers_no_worker() {
+        for (String enabled : List.of("notification.dispatch.enabled=false")) {
             ApplicationContextRunner runner = context.withPropertyValues("notification.fcm.enabled=true");
             if (!enabled.isEmpty()) {
                 runner = runner.withPropertyValues(enabled);
@@ -51,9 +51,24 @@ class NotificationDispatchConfigurationTest {
     }
 
     @Test
+    @DisplayName("공통 설정 기본값과 안전한 FCM 설정으로 Worker를 생성한다")
+    void applicationDefaultsCreateWorker() throws Exception {
+        var defaults = new org.springframework.boot.env.YamlPropertySourceLoader()
+                .load("application", new org.springframework.core.io.ClassPathResource("application.yml")).getFirst();
+        context.withInitializer(app -> app.getEnvironment().getPropertySources().addLast(defaults))
+                .withPropertyValues("notification.fcm.project-id=test-project",
+                        "notification.fcm.credential-path=/synthetic/never-read.json")
+                .run(app -> {
+                    assertThat(app).hasNotFailed().hasSingleBean(NotificationDispatchWorker.class);
+                    assertThat(app.getBean(com.stopbell.notification.client.FcmClientProperties.class).enabled()).isTrue();
+                    verifyNoInteractions(app.getBean(FcmProviderClient.class));
+                });
+    }
+
+    @Test
     @DisplayName("dispatch를 켜도 FCM 정적 설정이 없으면 startup을 차단한다")
     void missing_fcm_settings_fail_closed() {
-        context.withPropertyValues("notification.dispatch.enabled=true").run(app -> {
+        context.run(app -> {
             assertThat(app).hasFailed();
             assertThat(app.getStartupFailure()).hasRootCauseMessage(
                     "notification.dispatch.enabled requires valid static FCM settings");

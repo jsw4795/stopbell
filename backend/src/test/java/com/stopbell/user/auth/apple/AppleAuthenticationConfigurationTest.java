@@ -20,10 +20,10 @@ class AppleAuthenticationConfigurationTest {
             .withBean(AppleIdentityBoundary.class, () -> mock(AppleIdentityBoundary.class));
 
     @Test
-    void disabledByDefaultAndRequiresSecretsWhenEnabled() {
-        context.run(ctx -> assertThat(ctx).doesNotHaveBean(AppleAuthentication.class));
-        context.withPropertyValues("apple.authentication.enabled=true")
-                .run(ctx -> assertThat(ctx).hasFailed());
+    void enabledByDefaultRequiresSecretsAndCanBeDisabled() {
+        context.run(ctx -> assertThat(ctx).hasFailed());
+        context.withPropertyValues("apple.authentication.enabled=false")
+                .run(ctx -> assertThat(ctx).hasNotFailed().doesNotHaveBean(AppleAuthentication.class));
     }
 
     @Test

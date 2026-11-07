@@ -8,7 +8,7 @@
 - Release entitlement는 `aps-environment=production`이고 Debug/Profile은 development다. 세 구성에 Sign in with Apple entitlement `Default`를 추가했다. 실제 Apple Developer App ID capability·provisioning profile, 배포 인증서, Push capability와 APNs/Firebase 연결은 미검증이다. Firebase 설정 파일은 프로젝트에 포함되어 있으며 출시 대상 Firebase 앱과 Bundle ID 일치를 확인한다. Google URL scheme과 iOS/Web client ID도 출시 대상과 일치해야 한다. Client secret이나 서버 credential을 앱에 넣지 않는다.
 - `API_BASE_URL`, `GOOGLE_IOS_CLIENT_ID`, `GOOGLE_SERVER_CLIENT_ID`는 빌드 시 `--dart-define`으로 주입한다. Release는 인증 복원 전에 설정을 검증하며 HTTPS가 아니면 시작을 중단한다. 값은 앱 바이너리에서 추출 가능하므로 secret을 넣지 않는다. 실제 운영 HTTPS 주소와 인증서, 외부 접근성은 별도 검증한다.
 - Google 로그인과 로그아웃·secure storage 기반 세션 복원, 설치본 정보 및 notification lifecycle이 구현되어 있다. 로그아웃은 계정 삭제가 아니다. 실제 앱 종료·재실행, 기존 설치본·Keychain, 기기 변경, Push 수신 및 tap은 출시 빌드에서 재검증해야 한다.
-- Apple 로그인 Backend API와 Flutter 연동은 기본 비활성화 상태로 구현했다. iOS에서 `--dart-define=APPLE_LOGIN_ENABLED=true`일 때 버튼이 보인다. 빌드 설정과 Backend의 `apple.authentication.enabled` 및 실제 설정을 일치시킨 뒤 활성화한다. 서버 nonce 저장 범위와 설정·키 교체, 운영 조건은 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다. 실기기 인증·탈퇴 결과와 미확인 철회 증거는 아래에 기록한다.
+- Apple 로그인 Backend API는 기본 활성화되며 Flutter 연동은 기본 비활성화 상태다. iOS에서 `--dart-define=APPLE_LOGIN_ENABLED=true`일 때 버튼이 보인다. 빌드 설정과 Backend의 `apple.authentication.enabled` 및 실제 설정을 일치시킨 뒤 활성화한다. 서버 nonce 저장 범위와 설정·키 교체, 운영 조건은 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다. 실기기 인증·탈퇴 결과와 미확인 철회 증거는 아래에 기록한다.
 - TASK-815-A Flutter 연동은 `sign_in_with_apple` 8.2.0과 Mock 인증·공통 세션·Device/Boarding 집중 테스트, Flutter 전체 테스트 676개, entitlement 정적 검사 및 서명 없는 iOS Release 빌드로 검증했다. 이 자동·정적 검증은 실제 Apple Developer 출시 설정이나 아래 실기기 검증을 대신하지 않는다.
 - 개발용 Firebase smoke는 별도 entrypoint이고 Debug 보호가 있다. 일반 entrypoint의 push 진단 출력은 `kDebugMode`로 제한된다. Release 설정에 개발 API 주소를 넣지 않는다.
 
@@ -41,4 +41,4 @@
 
 프로젝트의 알림·기기 실측 및 운영 배포 잔여 조건은 TASK-710/810/813/908을 따른다. 위 정적 검토는 Apple 심사 통과를 보장하지 않는다.
 
-서버 간 알림 수신과 삭제 Worker는 각각 기본 OFF다. `apple.notifications.enabled`와 `apple.notifications.worker-enabled`를 모두 명시적으로 켜기 전에는 Worker가 실행되지 않는다. 실제 Apple 이벤트 수신과 운영 환경의 삭제·장애 복구는 검증하지 않았다. PENDING·REVIEW_REQUIRED와 APPLE_NOTIFIED backlog 감시 및 불확실한 구형 계정의 운영 확인 절차를 준비한다. 운영 HTTPS 주소와 TLS 1.2 이상을 준비한 후 Apple Developer App ID의 server-to-server notification URL을 설정한다. 임시 Tunnel을 등록하지 않는다.
+서버 간 알림 수신과 삭제 Worker는 각각 기본 ON이며 두 설정이 모두 true일 때 Worker가 실행된다. 실제 Apple 이벤트 수신과 운영 환경의 삭제·장애 복구는 검증하지 않았다. PENDING·REVIEW_REQUIRED와 APPLE_NOTIFIED backlog 감시 및 불확실한 구형 계정의 운영 확인 절차를 준비한다. 운영 HTTPS 주소와 TLS 1.2 이상을 준비한 후 Apple Developer App ID의 server-to-server notification URL을 설정한다. 임시 Tunnel을 등록하지 않는다.

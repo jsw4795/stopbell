@@ -10,6 +10,10 @@ google:
   server-client-id: test-google-server-client-id
 
 transit:
+  boarding:
+    tago-experiment-enabled: false
+  monitoring:
+    enabled: false
   client:
     connect-timeout: PT2S
     response-timeout: PT5S
@@ -20,3 +24,21 @@ transit:
       service-key: test-tago-service-key
     seoul:
       service-key: test-seoul-service-key
+
+# Keep automatic external work and Apple credential configuration isolated in tests.
+notification:
+  dispatch:
+    enabled: false
+  fcm:
+    enabled: false
+
+apple:
+  authentication:
+    enabled: false
+  notifications:
+    enabled: false
+    worker-enabled: false
+
+account:
+  deletion:
+    recovery-enabled: false

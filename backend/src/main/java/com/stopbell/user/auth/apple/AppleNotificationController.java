@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@ConditionalOnProperty(prefix = "apple.notifications", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "apple.notifications", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class AppleNotificationController {
     private final AppleNotificationVerifier verifier;
     private final AppleNotificationStore store;
@@ -35,7 +35,7 @@ public class AppleNotificationController {
         @Override public String toString() { return "Apple notification request [redacted]"; }
     }
     @Configuration(proxyBeanMethods = false)
-    @ConditionalOnProperty(prefix = "apple.notifications", name = "enabled", havingValue = "true")
+    @ConditionalOnProperty(prefix = "apple.notifications", name = "enabled", havingValue = "true", matchIfMissing = true)
     static class Config {
         @Bean AppleNotificationVerifier appleNotificationVerifier(@Value("${apple.notifications.client-id:}") String clientId, Clock jwtClock) {
             return new AppleNotificationVerifier(new AppleJwksDecoder(), clientId, jwtClock);

@@ -7,8 +7,8 @@
 1. 단일 인스턴스만 실행하고 이전 writer를 중지할 수 있는 배포 구간을 확보한다. V22 적용 중과 이후 구 Backend를 새 Backend와 혼합 실행하지 않는다. 적용된 migration 파일을 수정하거나 임의로 DB를 downgrade하지 않는다.
 2. 영속 MySQL 8.4, HTTPS 공개 endpoint, 접근 제어, 재시작 정책과 public traffic 차단 수단을 준비한다. 개발용 Compose는 운영 구성이 아니다. 서비스 중지·복구 담당자, 복구 목표, DB 계정 권한과 백업 암호화·보존·접근 정책을 정한다.
 3. 기존 schema와 Flyway history 및 pending migration, V4 미적용 DB의 필수 read-only preflight, UTC 이전 데이터 영향을 확인한다. 영향이나 호환성이 불명확하면 중단한다. 사전에 복원 가능한 백업 또는 snapshot을 만들고 별도 격리 환경에서 복구를 검증한다. 자동 백업과 가능하면 PITR을 준비한다.
-4. `backend/Dockerfile`의 image를 검증해 사용한다. `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `JWT_SECRET`, `GOOGLE_SERVER_CLIENT_ID`, `PUBLIC_DATA_SERVICE_KEY`를 실행 환경에서 주입한다. JWT 키는 충분히 무작위인 UTF-8 32 bytes 이상이어야 한다. Secret은 image, Git, 명령행 인자와 로그에 넣지 않는다. FCM 사용 시 `FCM_ENABLED`, `FCM_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS`와 UID 10001이 읽을 수 있는 외부 credential을 별도로 준비한다. 실제 주입과 권한·교체·회수를 확인한다.
-5. 기본 설정의 monitoring과 dispatch는 비활성이다. 최초 배포와 복구에서는 outbound polling 및 dispatch를 차단하고 시작한다. 활성화된 dispatch는 실제 FCM 전송을 발생시킬 수 있다. Provider 설정과 평문 서울 API의 위험은 기존 [Transit 계약](architecture.md#transit)을 확인한다.
+4. `backend/Dockerfile`의 image를 검증해 사용한다. `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`, `JWT_SECRET`, `GOOGLE_SERVER_CLIENT_ID`, `PUBLIC_DATA_SERVICE_KEY`를 실행 환경에서 주입한다. JWT 키는 충분히 무작위인 UTF-8 32 bytes 이상이어야 한다. Secret은 image, Git, 명령행 인자와 로그에 넣지 않는다. FCM 사용 시 `FCM_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS`와 UID 10001이 읽을 수 있는 외부 credential을 별도로 준비한다. 실제 주입과 권한·교체·회수를 확인한다.
+5. 기본 설정의 monitoring과 dispatch는 활성이다. 최초 배포와 복구에서는 명시적으로 false를 설정해 outbound polling 및 dispatch를 차단하고 시작한다. 활성화된 dispatch는 실제 FCM 전송을 발생시킬 수 있다. Provider 설정과 평문 서울 API의 위험은 기존 [Transit 계약](architecture.md#transit)을 확인한다.
 
 ## 배포와 점검
 
@@ -30,7 +30,7 @@ V32 적용 시에도 이전 Backend의 인증 요청과 삭제 작업을 종료�
 
 ## Apple 알림 backlog 조사 (TASK-815)
 
-수신과 Worker는 기본 OFF다. 활성화 전 격리 환경에서 수신·복구 및 아래 조회를 검증하고, DB에는 최소 권한으로 접근한다. 다음 읽기 전용 집계는 UTC 기준이며 식별자와 자격 증명을 반환하지 않는다. 반복 실패의 기준은 운영자가 정한 횟수로 적용한다.
+수신과 Worker는 기본 ON이다. 활성화 전 격리 환경에서 수신·복구 및 아래 조회를 검증하고, DB에는 최소 권한으로 접근한다. 다음 읽기 전용 집계는 UTC 기준이며 식별자와 자격 증명을 반환하지 않는다. 반복 실패의 기준은 운영자가 정한 횟수로 적용한다.
 
 ```sql
 SELECT state, COUNT(*) AS event_count
@@ -63,7 +63,7 @@ REVIEW_REQUIRED는 자동 처리하지 않는다. 권한이 제한된 DB 세션�
 
 1. 테스트 대상 Apple 계정과 StopBell 환경을 분리하고 삭제 대상과 복구 방법을 확인한다. 테스트용 계정에 Apple 로그인으로 가입해 User ID를 안전하게 기록하고 Alarm을 만든다. 실제 사용자 데이터나 운영 DB를 테스트에 사용하지 않는다.
 2. 지속 실행과 재시작 복구가 가능한 Backend와 고정 도메인을 준비한다. 유효한 인증서와 TLS 1.2 이상을 사용하고 외부에서 로그인 페이지 또는 접근 인증 없이 `POST https://<고정 도메인>/auth/apple/notifications`에 도달하는지 검증한다. JWS 검증은 Backend에서 수행한다. 기존 로컬 개발의 임시 `trycloudflare.com` URL은 등록하지 않는다. Named Cloudflare Tunnel은 선택 가능하지만 고정 도메인, 터널·Backend의 지속 가용성과 장애 복구를 별도로 검증해야 한다. 실제 공개 URL은 아직 확정되지 않았다.
-3. Backend에 Spring 환경변수 `APPLE_NOTIFICATIONS_ENABLED=true`, `APPLE_NOTIFICATIONS_WORKER_ENABLED=true`, `APPLE_NOTIFICATIONS_CLIENT_ID=<Apple App ID>`를 주입한다. 두 기능은 기본 OFF이며 Worker 활성화는 검증된 알림 대상의 실제 데이터를 삭제할 수 있다. 대상 DB와 환경을 확인한 뒤 순차적으로 활성화하고, 앞 절의 backlog 조회 및 경보를 준비한다.
+3. Backend에 Spring 환경변수 `APPLE_NOTIFICATIONS_ENABLED=true`, `APPLE_NOTIFICATIONS_WORKER_ENABLED=true`, `APPLE_NOTIFICATIONS_CLIENT_ID=<Apple App ID>`를 주입한다. 두 기능은 기본 ON이며 Worker 활성화는 검증된 알림 대상의 실제 데이터를 삭제할 수 있다. 대상 DB와 환경을 확인한 뒤 순차적으로 활성화하고, 앞 절의 backlog 조회 및 경보를 준비한다.
 4. Apple Developer의 Certificates, Identifiers & Profiles → Identifiers에서 해당 Primary App ID와 그룹을 확인한다. Sign in with Apple의 Configure에서 Server-to-Server Notification Endpoint URL에 위의 고정 절대 HTTPS URL을 입력하고 Done 및 Save한다. 그룹당 URL은 하나이므로 기존 App ID 설정 변경이 다른 앱이나 서비스에 영향을 줄 수 있다면 변경 전에 사용자 확인을 받는다. [Apple 등록 안내](https://developer.apple.com/help/account/capabilities/enabling-server-to-server-notifications/)
 5. 테스트 iPhone 설정에서 Apple 계정의 Sign in with Apple 목록을 열고 대상 앱의 Apple 로그인 사용을 중단한다. 기기 및 OS 버전에 따라 메뉴 이름이 다를 수 있다. Apple 계정 자체는 삭제하지 않는다.
 6. 제한된 DB 세션에서 앞 절의 상태 집계와 대상 이벤트를 확인한다. 200은 저장 완료이지 삭제 완료가 아니다. PENDING에서 DELETED로 처리되고 해당 User와 Alarm 등 관련 데이터가 삭제됐는지, 기존 Access/Refresh Token이 거부되는지 확인한다. 이메일 설정 이벤트는 IGNORED이며 삭제하지 않는다. Apple 전달 시간과 성공은 사전 보장되지 않는다.

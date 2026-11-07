@@ -67,7 +67,7 @@ class FcmSmokeRunnerTest {
         when(devices.findById(10L)).thenReturn(java.util.Optional.of(device));
         when(alarms.findById(20L)).thenReturn(java.util.Optional.of(alarm));
         when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
-        when(environment.getProperty("transit.monitoring.enabled", Boolean.class, false)).thenReturn(false);
+        when(environment.getProperty("transit.monitoring.enabled", Boolean.class, true)).thenReturn(false);
         when(provider.send(any())).thenReturn(new NotificationSendResult(ACCEPTED, null, Duration.ZERO, Instant.now(), 1, true));
         runner.run(arguments());
         var order = inOrder(transactions, devices, alarms, provider);
@@ -87,7 +87,7 @@ class FcmSmokeRunnerTest {
     @Test
     @DisplayName("owner가 다른 Alarm이나 비활성 Device를 선택하면 smoke 전송을 거부한다")
     void rejects_ineligible_device() {
-        when(environment.getProperty("transit.monitoring.enabled", Boolean.class, false)).thenReturn(false);
+        when(environment.getProperty("transit.monitoring.enabled", Boolean.class, true)).thenReturn(false);
         var device = mock(Device.class);
         var alarm = mock(Alarm.class);
         when(devices.findById(10L)).thenReturn(java.util.Optional.of(device));

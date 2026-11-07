@@ -7,7 +7,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 @ConfigurationProperties("notification.dispatch")
 public record NotificationDispatchProperties(
-        @DefaultValue("false") boolean enabled,
+        @DefaultValue("true") boolean enabled,
         @DefaultValue("50") int batchSize,
         @DefaultValue("PT1S") Duration fixedDelay
 ) {

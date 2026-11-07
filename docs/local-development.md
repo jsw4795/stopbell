@@ -2,7 +2,7 @@
 
 ## TAGO 하차 추적 실험
 
-기존 서울 실기기 환경에서 Backend에 `TAGO_BOARDING_EXPERIMENT_ENABLED=true`를 설정하고 재시작한다. 기본값은 `false`이며 Flutter 별도 설정은 없다. 기존과 같이 monitoring, notification dispatch 및 FCM을 활성화하고 Cloudflare Tunnel과 iPhone Profile을 연결한다. 남양주 165번의 목적지와 실제 차량을 선택한 후 최초 위치 확인 중 상태에서 진행을 관찰한다. 2정거장 전과 1정거장 전은 각각 별도 세션으로 확인한다. 사용 후 설정을 제거하거나 `false`로 되돌려 재시작한다.
+TAGO 실험은 기본 활성화되며 Flutter 별도 설정은 없다. monitoring, notification dispatch 및 FCM도 기본 활성화된다. Cloudflare Tunnel과 iPhone Profile을 연결한다. 남양주 165번의 목적지와 실제 차량을 선택한 후 최초 위치 확인 중 상태에서 진행을 관찰한다. 2정거장 전과 1정거장 전은 각각 별도 세션으로 확인한다. 필요하면 `TAGO_BOARDING_EXPERIMENT_ENABLED=false`로 끄고 재시작한다.
 
 이 실험은 TAGO 응답이 최신이라는 가정을 사용한다. 원본 생성 시각 및 운행 식별자가 없어 실제 지연·동일 운행을 보장하지 않으며 실기기 성공을 자동 테스트로 대신하지 않는다. 20초 간격으로 한 노선을 하루 종일 조회하면 약 4,320회로 알려진 일일 10,000회 한도의 상당 부분을 사용하며, 다른 조회와 여러 노선도 한도를 공유한다. 같은 주기·노선 응답은 공유되지만 실제 이용량과 기관별 한도를 확인해야 한다.
 
@@ -143,7 +143,7 @@ Local profile은 Spring Boot Config Data import로 Backend 디렉터리의 상�
 
 `.env`는 Git에 커밋하지 않으며, `.env.example`에는 필요한 key만 유지한다. 운영·배포 환경에서는 OS Environment Variable 또는 배포 환경의 Secret 관리 기능을 사용한다. Spring Boot 기본 property precedence에 따라 OS Environment Variable과 command-line property는 `.env`에서 import한 Config Data보다 우선한다.
 
-`PUBLIC_DATA_SERVICE_KEY`는 TAGO와 서울 Transit 설정에 공통으로 주입된다. `GOOGLE_SERVER_CLIENT_ID`와 `FCM_PROJECT_ID`는 식별 설정이며 비밀 인증키가 아니다. FCM은 기본 비활성이고 활성화 시 `FCM_ENABLED`, `FCM_PROJECT_ID`와 저장소 밖 Service Account JSON의 `GOOGLE_APPLICATION_CREDENTIALS` 경로를 사용한다. 실제 private key 파일을 `.env`나 예제 파일에 복사하지 않는다. Test profile의 설정은 격리된 합성 값이며 운영에서 재사용하지 않는다. JWT 서명 키는 UTF-8 기준 최소 32 bytes이고 충분한 무작위성이 필요하다. 키 교체는 기존 Access Token 검증에 영향을 주므로 운영 시점과 재인증 영향을 계획한다. 운영 Secret 주입·권한·교체·회수와 사고 대응의 실제 적용 검증은 TASK-813에서 수행한다.
+`PUBLIC_DATA_SERVICE_KEY`는 TAGO와 서울 Transit 설정에 공통으로 주입된다. `GOOGLE_SERVER_CLIENT_ID`와 `FCM_PROJECT_ID`는 식별 설정이며 비밀 인증키가 아니다. FCM은 기본 활성화되며 `FCM_PROJECT_ID`와 저장소 밖 Service Account JSON의 `GOOGLE_APPLICATION_CREDENTIALS` 경로를 사용한다. 실제 private key 파일을 `.env`나 예제 파일에 복사하지 않는다. Test profile의 설정은 격리된 합성 값이며 운영에서 재사용하지 않는다. JWT 서명 키는 UTF-8 기준 최소 32 bytes이고 충분한 무작위성이 필요하다. 키 교체는 기존 Access Token 검증에 영향을 주므로 운영 시점과 재인증 영향을 계획한다. 운영 Secret 주입·권한·교체·회수와 사고 대응의 실제 적용 검증은 TASK-813에서 수행한다.
 
 ------------------------------------------------------------------------
 
@@ -353,10 +353,10 @@ Backend 디렉터리에서 사용자가 다음을 실행한다. `10`/`20`은 선
 ```sh
 export GOOGLE_APPLICATION_CREDENTIALS='/absolute/path/outside-repository/service-account.json'
 export FCM_PROJECT_ID='stopbell'
-./gradlew bootRun --args='--spring.profiles.active=local --spring.main.web-application-type=none --transit.monitoring.enabled=false --notification.fcm.enabled=true --notification.fcm.smoke=true --notification.fcm.smoke-device-id=10 --notification.fcm.smoke-alarm-id=20'
+./gradlew bootRun --args='--spring.profiles.active=local --spring.main.web-application-type=none --transit.monitoring.enabled=false --notification.dispatch.enabled=false --apple.notifications.enabled=false --account.deletion.recovery-enabled=false --notification.fcm.enabled=true --notification.fcm.smoke=true --notification.fcm.smoke-device-id=10 --notification.fcm.smoke-alarm-id=20'
 ```
 
-`local` + 명시적 command-line Smoke opt-in + non-web + monitoring disabled 조건에서만 실행한다. Device/FID는 read-only transaction 안에서 메모리로 읽고 같은 owner/IOS/enabled를 확인한 뒤 transaction 종료 후 **한 번만** 전송한다. 완료/실패 뒤 context를 닫으며 자동 startup 전송·공개 테스트 endpoint·worker·scheduler를 추가하지 않는다. Event/Delivery/Alarm/Device row를 INSERT/UPDATE하지 않고 Delivery를 ACCEPTED로 꾸미지 않는다. 일반 startup은 `notification.fcm.enabled=false`이고 설정 없이도 정상 초기화된다.
+`local` + 명시적 command-line Smoke opt-in + non-web + monitoring disabled 조건에서만 실행한다. Device/FID는 read-only transaction 안에서 메모리로 읽고 같은 owner/IOS/enabled를 확인한 뒤 transaction 종료 후 **한 번만** 전송한다. 완료/실패 뒤 context를 닫으며 자동 startup 전송·공개 테스트 endpoint·worker·scheduler를 추가하지 않는다. Event/Delivery/Alarm/Device row를 INSERT/UPDATE하지 않고 Delivery를 ACCEPTED로 꾸미지 않는다. 일반 startup은 FCM과 dispatch가 기본 활성화되므로 필수 정적 설정을 요구한다.
 
 Smoke payload는 `ALARM_EVENT`, 선택 `alarmId`, `ARRIVED`, **합성 navigation hint `notificationEventId=1`**이며 Event row를 생성하거나 존재를 주장하지 않는다. notification은 `StopBell 알림 / 버스가 목표 정류장에 도착했어요.`다. 이 테스트에서만 APNs expiration을 현재 UTC + 60초로 주고, 후속 운영 Event Type TTL을 확정하지 않는다. 실제 Alarm ownership/current detail 확인은 기존 Flutter tap contract를 따른다.
 
@@ -375,7 +375,7 @@ Smoke payload는 `ALARM_EVENT`, 선택 `alarmId`, `ARRIVED`, **합성 navigation
 
 ### TASK-706 자동 dispatch 구성 경계
 
-TASK-706 Worker 구조와 집중 Fake Provider/MySQL Testcontainers 검증을 추가했다. `notification.dispatch.enabled=false`가 기본이며 TASK-705 FCM enabled/local Smoke와 독립적이다. TASK-706 당시 handler 부재 gate는 TASK-709에서 production Handler와 FCM 정적 설정 gate로 대체했다. 실제 자동 Firebase/iPhone 검증의 현재 진행 상태는 아래 TASK-710 기록을 따르며, 전체 E2E 및 운영 latency tuning은 미완료다. **TASK-710 검증 전 운영 자동 활성화하지 않는다.** 설정과 구현/후속 recovery 경계는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. Codex는 실제 Firebase 전송, local DB dispatch/bootRun, iPhone/Flutter/Xcode 작업을 수행하지 않았다.
+TASK-706 Worker 구조와 집중 Fake Provider/MySQL Testcontainers 검증을 추가했다. 현재 `notification.dispatch.enabled=true`가 기본이며 TASK-705 FCM enabled/local Smoke와 독립적이다. TASK-706 당시 handler 부재 gate는 TASK-709에서 production Handler와 FCM 정적 설정 gate로 대체했다. 실제 자동 Firebase/iPhone 검증의 현재 진행 상태는 아래 TASK-710 기록을 따르며, 전체 E2E 및 운영 latency tuning은 미완료다. **TASK-710 검증 전 운영 자동 활성화하지 않는다.** 설정과 구현/후속 recovery 경계는 [Architecture](architecture.md#notification-dispatch-worker-구현-task-706)를 따른다. Codex는 실제 Firebase 전송, local DB dispatch/bootRun, iPhone/Flutter/Xcode 작업을 수행하지 않았다.
 
 ## TASK-710 실제 iPhone 수신 및 tap 검증
 
@@ -557,7 +557,7 @@ Compose file은 저장소 루트에 있으며, 서비스 이름은 `mysql`이다
 
 ### TASK-709 retry/expiry 실행 경계
 
-기본 `notification.dispatch.enabled=false`를 유지한다. 자동 dispatch를 직접 검증할 때만 별도 true 설정과 기존 FCM enabled/project/신뢰하는 credential path/timeout 설정을 함께 제공한다. 정적 설정 누락은 startup을 차단하지만 Backend 기본 실행 및 TASK-705 명시적 one-shot Smoke는 영향을 받지 않는다. 실제 credential 내용은 로그하거나 저장소에 추가하지 않는다.
+기본 `notification.dispatch.enabled=true`에는 유효한 FCM enabled/project/신뢰하는 credential path/timeout 설정이 필요하며 정적 설정 누락은 startup을 차단한다. one-shot Smoke에서 자동 dispatch를 차단하려면 명시적으로 false를 지정한다. 실제 credential 내용은 로그하거나 저장소에 추가하지 않는다.
 
 런타임 인증/프로젝트/APNs 등 CONFIGURATION 결과가 나오면 Worker는 미시작 Delivery를 보존하고 expiry만 처리한다. 설정·인증을 고친 뒤 Backend 재시작으로 차단을 해제한다. 이미 FAILED인 Delivery는 자동 복구하지 않는다. retry/recovery/count/TTL을 운영자가 초기화하거나 오래된 알림의 기한을 연장하는 흐름은 없다. 개발 후보값·안전 상한은 [ADR-010](adr/ADR-010-notification-device-and-durable-delivery.md#task-709-구현-설정과-검증-2026-10-13), transaction/Worker 경계는 [Architecture](architecture.md#notification-dispatch와-result-transaction-task-709)를 따른다.
 
@@ -600,3 +600,14 @@ docker buildx rm stopbell-repro
 GitHub Actions의 `.github/workflows/ci.yml`은 `main` push, pull request 및 수동 실행에서 독립된 Backend와 Flutter job을 실행한다. Backend는 Ubuntu runner의 Docker와 Java 21, Gradle Wrapper로 `./gradlew --no-daemon build`를 실행하며 실제 MySQL/Flyway 검증에는 격리 Testcontainers를 사용한다. Flutter는 3.47.1 stable에서 lockfile을 강제한 dependency resolution 뒤 `flutter analyze --no-pub`와 `flutter test --no-pub`를 실행한다. Action은 commit SHA로 고정하고 읽기 전용 repository permission을 사용한다.
 
 일반 CI에는 실제 Transit Provider 호출, 운영 credential, Firebase 전송 및 서명된 iOS archive를 사용하지 않는다. Testcontainers image와 Flutter/Gradle dependency 다운로드에는 runner 네트워크가 필요하다. 로컬에서 같은 Backend 검증은 `cd backend && ./gradlew --no-daemon build`, Flutter 검증은 `cd app && flutter pub get --enforce-lockfile && flutter analyze --no-pub && flutter test --no-pub`로 수행한다. 운영 배포와 기기 실측을 대체하지 않는다.
+
+
+### Backend 기본 기능 및 필수 설정
+
+Monitoring, notification dispatch, FCM, TAGO 하차 추적 실험, Apple 인증, Apple 서버 알림 수신·삭제 Worker 및 계정 삭제 복구는 기본 ON이다. 각 Spring 설정에 명시적으로 `false`를 지정해 끌 수 있다. 예를 들어 `--transit.monitoring.enabled=false`를 사용할 수 있다. 테스트 profile은 외부 작업과 Apple 인증을 별도로 끈다.
+
+기본 local profile은 저장소 밖 `.env`를 읽으며 기존 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, `GOOGLE_SERVER_CLIENT_ID`, `PUBLIC_DATA_SERVICE_KEY`, `FCM_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS`를 사용한다. FCM 경로는 저장소 밖 Service Account JSON을 가리켜야 한다. 기본 dispatch는 FCM 정적 설정이 유효하지 않으면 시작을 차단하며 파일 내용과 실제 전송은 실행 시 검증된다.
+
+Apple 인증에는 Spring 설정 `apple.authentication.client-id`, `team-id`, `key-id`, `private-key-pem`, `credential-key-id`, `credential-keys`가 필요하다. 서버 알림은 `apple.notifications.client-id`도 요구하며 누락 시 시작이 실패한다. 비밀은 외부에서 주입한다. Apple Developer에 HTTPS server-to-server notification URL을 등록해야 실제 알림을 수신할 수 있다. Flutter의 Apple 로그인 버튼 설정은 별도다.
+
+필수 설정을 준비한 뒤 `backend`에서 `env -u JAVA_HOME ./gradlew bootRun --args='--server.address=127.0.0.1'`로 실행한다. 기존 `.env`나 환경변수의 명시적 false는 기본값보다 우선한다.

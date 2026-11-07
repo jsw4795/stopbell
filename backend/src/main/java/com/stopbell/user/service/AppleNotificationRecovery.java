@@ -21,8 +21,8 @@ public class AppleNotificationRecovery {
     private final boolean enabled;
 
     public AppleNotificationRecovery(JdbcTemplate jdbc, AccountDeletionService deletion, Clock jwtClock,
-            @Value("${apple.notifications.enabled:false}") boolean notificationsEnabled,
-            @Value("${apple.notifications.worker-enabled:false}") boolean workerEnabled) {
+            @Value("${apple.notifications.enabled:true}") boolean notificationsEnabled,
+            @Value("${apple.notifications.worker-enabled:true}") boolean workerEnabled) {
         this.jdbc = jdbc;
         this.deletion = deletion;
         this.clock = jwtClock;

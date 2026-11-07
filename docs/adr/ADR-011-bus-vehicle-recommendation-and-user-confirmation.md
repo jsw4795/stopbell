@@ -102,7 +102,7 @@ Polling 간격은 다음 외부 조회를 언제 실행할지, Observation Fresh
 
 ### 5. nodeid 없는 미정차·경유 가능 지점
 
-2026-11-05 사용자 확정: 기본 OFF TAGO 실험은 유일한 노선 방문 순서의 `nodeord`를 진행 판단에 사용하고 `nodeid`가 있을 때만 추가 일치를 요구한다. 최초 관측은 미검증으로 유지하며, 후속 진행과 공통 알림은 [Domain](../domain-model.md#snapshot-and-progress)을 따른다. 아래의 기존 order-only 제한은 당시 결정 기록이다.
+2026-11-05 사용자 확정: TAGO 실험은 유일한 노선 방문 순서의 `nodeord`를 진행 판단에 사용하고 `nodeid`가 있을 때만 추가 일치를 요구한다. 최초 관측은 미검증으로 유지하며, 후속 진행과 공통 알림은 [Domain](../domain-model.md#snapshot-and-progress)을 따른다. 아래의 기존 order-only 제한은 당시 결정 기록이다.
 
 `nodeid` 누락은 후보 제거 조건도, 미정차·경유 지점이라는 확인 사실도 아니다. TAGO 번호가 유효하면 번호 확인 후보로 보존한다.
 

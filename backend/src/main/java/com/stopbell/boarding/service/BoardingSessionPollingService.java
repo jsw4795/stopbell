@@ -27,7 +27,7 @@ public class BoardingSessionPollingService {
     private final BoardingVehicleTracker tracker;
     private final BoardingProgressEvaluator evaluator;
     private final Clock clock;
-    @Value("${transit.boarding.tago-experiment-enabled:false}")
+    @Value("${transit.boarding.tago-experiment-enabled:true}")
     private boolean tagoExperimentEnabled;
 
     public BoardingSessionPollingService(BoardingTrackingStore store, BoardingTrackingMetadata metadata,

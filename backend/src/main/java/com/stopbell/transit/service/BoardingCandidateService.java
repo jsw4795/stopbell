@@ -48,7 +48,7 @@ public class BoardingCandidateService {
     private final BoardingCandidateReferenceStore references;
     private final Clock clock;
     private final BoardingCandidateDetailExecutor detailExecutor;
-    @Value("${transit.boarding.tago-experiment-enabled:false}")
+    @Value("${transit.boarding.tago-experiment-enabled:true}")
     private boolean tagoExperimentEnabled;
 
     public BoardingCandidateService(

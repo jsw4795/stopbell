@@ -32,8 +32,8 @@ public class RuntimeReadinessHealthIndicator implements HealthIndicator {
             @Qualifier("transitMonitoringScheduler") ThreadPoolTaskScheduler monitoringScheduler,
             @Qualifier("notificationDispatchScheduler") ThreadPoolTaskScheduler dispatchScheduler,
             ObjectProvider<BusAlarmMonitoringScheduler> monitoring, ObjectProvider<NotificationDispatchWorker> dispatch,
-            @Value("${transit.monitoring.enabled:false}") boolean monitoringEnabled,
-            @Value("${notification.dispatch.enabled:false}") boolean dispatchEnabled) {
+            @Value("${transit.monitoring.enabled:true}") boolean monitoringEnabled,
+            @Value("${notification.dispatch.enabled:true}") boolean dispatchEnabled) {
         this.dataSources = dataSources;
         this.metadata = metadata;
         this.monitoringScheduler = monitoringScheduler;

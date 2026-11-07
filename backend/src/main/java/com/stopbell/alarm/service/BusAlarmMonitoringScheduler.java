@@ -44,7 +44,7 @@ import org.springframework.stereotype.Component;
  * Single-instance, synchronous fixed-delay polling orchestration for Bus Alarms.
  */
 @Component
-@ConditionalOnProperty(prefix = "transit.monitoring", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "transit.monitoring", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class BusAlarmMonitoringScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(BusAlarmMonitoringScheduler.class);

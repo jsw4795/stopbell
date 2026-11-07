@@ -9,7 +9,7 @@ public record FcmClientProperties(
         boolean enabled, String projectId, String credentialPath,
         Duration connectTimeout, Duration readTimeout, Duration requestBudget
 ) {
-    // Missing/invalid FCM configuration is handled lazily, without failing Backend startup.
+    // Dispatch validates static settings at startup; credential contents are read on use.
     public boolean configured() {
         return enabled && projectId != null && projectId.matches("[a-z][a-z0-9-]{4,61}[a-z0-9]")
                 && credentialPath != null && !credentialPath.isBlank()

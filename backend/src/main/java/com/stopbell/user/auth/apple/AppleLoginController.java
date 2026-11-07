@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@ConditionalOnProperty(prefix = "apple.authentication", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "apple.authentication", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class AppleLoginController {
     private final AppleAuthentication authentication;
     private final AppleCredentialStore credentials;

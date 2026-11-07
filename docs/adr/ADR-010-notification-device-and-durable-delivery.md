@@ -317,7 +317,7 @@ V1은 하나의 Spring Backend와 하나의 fixed-delay, non-overlapping worker�
 
 ### TASK-706 Worker 구현 경계
 
-TASK-706은 단일 fixed-delay Worker, bounded due 조회, current recipient preflight, immutable attempt snapshot, 짧은 시작/결과 transaction과 transaction 밖 TASK-705 Provider 호출 경로를 구현했다. TASK-706 당시 실제 accounting/result 정책은 `NotificationAttemptHandler` 계약으로 TASK-709에 남겼다. TASK-709는 production handler를 연결하고 handler 부재 gate를 필수 FCM 정적 설정 gate로 대체했다. 자동 dispatch는 계속 기본 비활성화다. 구현 상세·설정·검증 경계는 [TASK-706 Architecture](../architecture.md#notification-dispatch-worker-구현-task-706)가 소유한다. 운영 dispatch/recovery 완성이나 실제 iPhone E2E를 의미하지 않는다.
+TASK-706은 단일 fixed-delay Worker, bounded due 조회, current recipient preflight, immutable attempt snapshot, 짧은 시작/결과 transaction과 transaction 밖 TASK-705 Provider 호출 경로를 구현했다. TASK-706 당시 실제 accounting/result 정책은 `NotificationAttemptHandler` 계약으로 TASK-709에 남겼다. TASK-709는 production handler를 연결하고 handler 부재 gate를 필수 FCM 정적 설정 gate로 대체했다. 자동 dispatch는 기본 활성화다. 구현 상세·설정·검증 경계는 [TASK-706 Architecture](../architecture.md#notification-dispatch-worker-구현-task-706)가 소유한다. 운영 dispatch/recovery 완성이나 실제 iPhone E2E를 의미하지 않는다.
 
 ### Delivery semantics와 failure taxonomy
 
@@ -520,7 +520,7 @@ UNREGISTERED cleanup은 Delivery → Device lock 안에서 원래 Device ID/Even
 
 | 설정 | Provisional 개발값 | 검증 범위 |
 | --- | --- | --- |
-| `notification.dispatch.enabled` | false | 명시적 opt-in, single Backend만 지원 |
+| `notification.dispatch.enabled` | true | 명시적 false로 비활성화, single Backend만 지원 |
 | `notification.dispatch.batch-size` / `fixed-delay` | 50 / PT1S | 1~1,000 / 1ms~1분 |
 | `notification.dispatch.retry.max-attempts` | 3 | 최초 포함 1~10 |
 | `base-retry-delay` / `max-retry-delay` | PT10S / PT60S | 10초≤base≤cap≤5분 |

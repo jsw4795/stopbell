@@ -21,7 +21,7 @@ import org.springframework.transaction.PlatformTransactionManager;
         FcmClientProperties.class})
 public class NotificationDispatchConfiguration {
     @Bean
-    @ConditionalOnProperty(prefix = "notification.dispatch", name = "enabled", havingValue = "true")
+    @ConditionalOnProperty(prefix = "notification.dispatch", name = "enabled", havingValue = "true", matchIfMissing = true)
     NotificationRetryPolicy notificationRetryPolicy(NotificationRetryProperties retry, FcmClientProperties fcm) {
         if (!fcm.configured()) {
             throw new IllegalStateException("notification.dispatch.enabled requires valid static FCM settings");
@@ -30,7 +30,7 @@ public class NotificationDispatchConfiguration {
     }
 
     @Bean
-    @ConditionalOnProperty(prefix = "notification.dispatch", name = "enabled", havingValue = "true")
+    @ConditionalOnProperty(prefix = "notification.dispatch", name = "enabled", havingValue = "true", matchIfMissing = true)
     NotificationAttemptHandler notificationAttemptHandler(NotificationRetryPolicy retry, DeviceRepository devices,
             @Qualifier("transitMetadataClock") Clock clock, OperationalMetrics metrics) {
         DurableNotificationAttemptHandler handler = new DurableNotificationAttemptHandler(retry, devices, clock);
@@ -39,7 +39,7 @@ public class NotificationDispatchConfiguration {
     }
 
     @Bean
-    @ConditionalOnProperty(prefix = "notification.dispatch", name = "enabled", havingValue = "true")
+    @ConditionalOnProperty(prefix = "notification.dispatch", name = "enabled", havingValue = "true", matchIfMissing = true)
     NotificationDispatchWorker notificationDispatchWorker(NotificationDispatchProperties properties,
             NotificationAttemptHandler handler, NotificationDeliveryRepository deliveries,
             DeviceRepository devices, PlatformTransactionManager manager, FcmProviderClient provider,
