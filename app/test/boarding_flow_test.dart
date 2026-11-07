@@ -113,6 +113,8 @@ void main() {
     await tester.tap(find.text('하차 알림 · 차량 후보 찾기'));
     await tester.pumpAndSettle();
     await search(tester, 1390);
+    await tester.tap(find.byKey(const ValueKey('occurrence-11')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('occurrence-22')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('find-candidates')));
@@ -126,7 +128,10 @@ void main() {
       var calls = 0;
       candidateResponse = (request) async {
         expect(request.url.path, '/api/v1/bus-routes/1390/boarding-candidates');
-        expect(request.url.queryParameters, {'targetStopOccurrenceId': '22'});
+        expect(request.url.queryParameters, {
+          'targetStopOccurrenceId': '22',
+          'boardingStopOccurrenceId': '11',
+        });
         expect(
           request.headers['authorization'],
           calls == 0

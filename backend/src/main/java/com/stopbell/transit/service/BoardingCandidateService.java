@@ -69,6 +69,7 @@ public class BoardingCandidateService {
     public BoardingCandidatesResponse find(Long userId, Long routeId, Long targetId, Long boardingId) {
         var deadline = detailExecutor.deadline();
         BoardingRouteSnapshot route = metadataService.read(routeId, targetId, boardingId);
+        route.validateSelectionOrder();
         Context context = new Context(userId, routeId, targetId, boardingId);
         Roster roster;
         try {

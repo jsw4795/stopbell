@@ -129,7 +129,12 @@ public class BoardingSessionService {
             // Release an expired generated UNIQUE key before a new identity INSERT.
             sessions.flush();
             var original = start.metadata();
+            if (original.boardingOccurrenceId() == null) {
+                throw new ApiException(ErrorCode.INVALID_REQUEST);
+            }
+            original.validateSelectionOrder();
             var latest = metadata.read(original.routeId(), original.targetOccurrenceId(), original.boardingOccurrenceId());
+            latest.validateSelectionOrder();
             if (!latest.fingerprint().equals(original.fingerprint())) {
                 throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
             }

@@ -196,7 +196,7 @@ Flutter 구현은 사용자 확정 → Push 준비 → `Random.secure` UUID v4 �
 
 ### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
 
-로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 목적·선택 승차 지점을 선택한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.
+로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 승차 지점을 먼저 선택하고 그 이후의 필수 목적 occurrence를 선택한다. 선택 가능 여부는 occurrence의 order로 판단하며 공통 노선도의 선택 제한은 하차 화면에서만 적용한다. 후보 조회와 신규 생성은 서버에서 순서를 재검증한다. 기존 세션 재확인에서 이전 선택 조합이 순서 오류로 거부되면 승차를 생략해 후보를 다시 조회한다. 서버는 재확인 시 기존 차량·노선·목적 traversal을 계속 검증하며 신규 생성에서는 승차를 요구한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.
 
 `BoardingCandidateClient`는 기존 `AuthenticatedApiClient`/Auth Session refresh와 generation을 사용한다. 화면의 Route ID·목적/승차 occurrence 변경, 재조회, 화면 폐기에는 요청 epoch를 무효화하며 logout 시작/계정 세대 변경에는 후보·선택 문맥을 제거한다. 미전송 후보 reference는 화면 메모리에만 두고 서버 추천 순서와 관측 시각을 보존한다. 2단계 생성 요청의 원래 reference 보존은 아래 pending intent 경계를 따른다. 후보 상태·불확실성의 의미는 [후보 API](api.md#후보-조회)를 따르며 unknown enum은 미확인 상태로 표시한다.
 

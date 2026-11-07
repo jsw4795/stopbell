@@ -80,6 +80,7 @@ class BusRouteTimeline extends StatefulWidget {
     this.targetId,
     this.boardingId,
     this.rowKey,
+    this.isSelectable,
   });
 
   final List<BusRouteStopOccurrence> stops;
@@ -87,6 +88,7 @@ class BusRouteTimeline extends StatefulWidget {
   final int? targetId;
   final int? boardingId;
   final Key Function(int id)? rowKey;
+  final bool Function(BusRouteStopOccurrence)? isSelectable;
 
   @override
   State<BusRouteTimeline> createState() => _BusRouteTimelineState();
@@ -236,7 +238,13 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                     turn: index == turn?.index,
                     target: stop.id == widget.targetId,
                     boarding: stop.id == widget.boardingId,
-                    onTap: widget.onSelect == null
+                    unavailable:
+                        widget.isSelectable != null &&
+                        !widget.isSelectable!(stop),
+                    onTap:
+                        widget.onSelect == null ||
+                            (widget.isSelectable != null &&
+                                !widget.isSelectable!(stop))
                         ? null
                         : () => widget.onSelect!(stop),
                   );
@@ -348,6 +356,7 @@ class _StopRow extends StatelessWidget {
     required this.target,
     required this.boarding,
     required this.onTap,
+    required this.unavailable,
   });
 
   static const gutters = 96.0;
@@ -358,6 +367,7 @@ class _StopRow extends StatelessWidget {
   final bool target;
   final bool boarding;
   final VoidCallback? onTap;
+  final bool unavailable;
 
   @override
   Widget build(BuildContext context) {
@@ -374,6 +384,7 @@ class _StopRow extends StatelessWidget {
     final selected = target || boarding;
     return Semantics(
       selected: selected,
+      enabled: !unavailable,
       child: Material(
         color: selected
             ? Color.alphaBlend(accent.withValues(alpha: 0.10), colors.surface)
@@ -424,13 +435,16 @@ class _StopRow extends StatelessWidget {
                 ),
               ),
               Expanded(
-                child: Text.rich(
-                  label,
-                  style: const TextStyle(inherit: false),
-                  textScaler: MediaQuery.textScalerOf(context),
-                  locale: Localizations.maybeLocaleOf(context),
-                  textHeightBehavior: DefaultTextStyle.of(context)
-                      .textHeightBehavior,
+                child: Opacity(
+                  opacity: unavailable && !selected ? 0.5 : 1,
+                  child: Text.rich(
+                    label,
+                    style: const TextStyle(inherit: false),
+                    textScaler: MediaQuery.textScalerOf(context),
+                    locale: Localizations.maybeLocaleOf(context),
+                    textHeightBehavior: DefaultTextStyle.of(context)
+                        .textHeightBehavior,
+                  ),
                 ),
               ),
               SizedBox(

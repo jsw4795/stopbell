@@ -640,3 +640,9 @@ metadata persistence가 생기면 Flutter Route/Stop 조회 결과의 internal `
 ## 후속 결정 상태
 
 이 문서는 조사 및 PoC 기록으로서 위의 당시 관찰과 미확정 항목을 보존한다. 이후 ADR-009는 이 PoC를 근거로 서울 static metadata를 T Data CSV full import, 경기 static metadata를 TAGO throttled full sync로 채택했고, `SEOUL_BUS` namespace와 서울 버스위치정보조회 realtime 역할을 유지했다. TASK-507은 metadata persistence/reconciliation을 구현했으며, source adapter와 명시적 one-shot bootstrap은 TASK-513의 후속 구현 책임이다. 이 후속 결정은 과거의 노선정보조회 서비스 preflight 또는 source 접근 실패 기록을 삭제하거나 재해석하지 않는다.
+
+### 정류장별 미정차 표시 근거 확인
+
+현재 TAGO 노선별 경유정류소 수집 필드는 route ID, node ID, 이름, 순서, 좌표이며 정차 여부 필드는 확인되지 않았다. 서울 T Data 노선-정류장 CSV 수집은 노선 ID, 노드 ID, 순서와 정류장 master의 정류장유형 등을 사용한다. 이 유형은 도로·시설 구분에 사용되며 해당 노선 차량의 정차 여부를 뜻한다는 근거가 없다. 저장된 occurrence와 API에도 정차 여부가 없다. 따라서 미정차를 추정하거나 표시하지 않는다. 신뢰할 수 있는 출처와 occurrence별 의미가 확인되면 nullable 값으로 동기화·API·클라이언트에 전달하는 방안을 별도 검토한다.
+
+출처: [TAGO Open API 안내](https://tago.go.kr/v5/use/openapi.jsp), [서울 T Data 노선-정류장 정보](https://t-data.seoul.go.kr/category/dataviewopenapi.do?data_id=1034), 위 TAGO 표본 및 현재 metadata 수집 코드. 목록에 해당 필드가 없다는 관찰은 다른 미조사 원본에 존재하지 않는다는 증명은 아니다.

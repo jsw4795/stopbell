@@ -7,6 +7,8 @@ import java.util.HexFormat;
 import java.util.List;
 
 import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.common.error.ApiException;
+import com.stopbell.common.error.ErrorCode;
 
 /** Immutable, consistently read metadata; names are excluded from the structural fingerprint. */
 public record BoardingRouteSnapshot(
@@ -32,6 +34,19 @@ public record BoardingRouteSnapshot(
             }
         }
         return -1;
+    }
+
+    /** Validate new selections without changing legacy session recovery. */
+    public void validateSelectionOrder() {
+        if (boardingOccurrenceId == null) {
+            return;
+        }
+        int boarding = indexOf(boardingOccurrenceId);
+        int target = indexOf(targetOccurrenceId);
+        if (boarding < 0 || target < 0
+                || traversal.get(boarding).order() >= traversal.get(target).order()) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST);
+        }
     }
 
     /** Stable opaque selection hint across fresh lookups; never an authorization or progress grant. */

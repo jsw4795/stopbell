@@ -52,6 +52,23 @@ class BoardingCandidateServiceTest {
     }
 
     @Test
+    void invalid_selection_order_is_rejected_before_provider_call() {
+        var stops = List.of(new BoardingRouteSnapshot.Occurrence(3L, "same", 30, "반복"),
+                new BoardingRouteSnapshot.Occurrence(1L, "same", 10, "반복"),
+                new BoardingRouteSnapshot.Occurrence(2L, "turn", 20, "회차"));
+        for (var pair : List.of(List.of(2L, 2L), List.of(1L, 3L))) {
+            var snapshot = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "r", "31010",
+                    pair.getFirst(), pair.getLast(), stops, "1");
+            when(metadata.read(1L, pair.getFirst(), pair.getLast())).thenReturn(snapshot);
+            assertThatThrownBy(() -> service.find(1L, 1L, pair.getFirst(), pair.getLast()))
+                    .isInstanceOf(ApiException.class);
+        }
+        verifyNoInteractions(tago, seoul, detailClient);
+        new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "r", "31010", 3L, 1L, stops, "1")
+                .validateSelectionOrder();
+    }
+
+    @Test
     @DisplayName("TAGO 정상 후보는 원본 시각 없이 번호 확인과 진행 간격을 제공하고 하차 추적은 보류한다")
     void tago_number_checking_without_provider_time() {
         when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기70바5770", "s3", 30)));
@@ -93,22 +110,22 @@ class BoardingCandidateServiceTest {
         var visits = List.of(new BoardingRouteSnapshot.Occurrence(11L, "s27", 27, "경유"),
                 new BoardingRouteSnapshot.Occurrence(12L, "s28", 28, "경유"),
                 new BoardingRouteSnapshot.Occurrence(14L, "s29", 29, "목적지"));
-        var m2352 = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "GGB222000209", "31130", 14L, 14L, visits, "M2352");
-        when(metadata.read(1L, 14L, 14L)).thenReturn(m2352);
+        var m2352 = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "GGB222000209", "31130", 14L, 12L, visits, "M2352");
+        when(metadata.read(1L, 14L, 12L)).thenReturn(m2352);
         when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3417", null, 27),
                 tago("B", null, 99), tago("C", "wrong", 28), tago("D", null, null)));
-        var candidates = find(14L).candidates();
+        var candidates = find(12L).candidates();
         var selected = candidates.stream().filter(c -> "경기74아3417".equals(c.vehicleNumber())).findFirst().orElseThrow();
         assertThat(selected.trackingSupport()).isEqualTo(TrackingSupport.CONDITIONAL);
-        assertThat(selected.boardingOccurrenceGap()).isEqualTo(2);
+        assertThat(selected.boardingOccurrenceGap()).isEqualTo(1);
         assertThat(selected.reasonCode()).isNull();
         assertThat(candidates.stream().filter(c -> !"경기74아3417".equals(c.vehicleNumber())))
                 .allMatch(c -> c.trackingSupport() == TrackingSupport.HELD);
-        var duplicate = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "GGB222000209", "31130", 14L, 14L,
-                List.of(visits.getFirst(), new BoardingRouteSnapshot.Occurrence(15L, "duplicate", 27, "중복"), visits.getLast()), "M2352");
-        when(metadata.read(1L, 14L, 14L)).thenReturn(duplicate);
+        var duplicate = new BoardingRouteSnapshot(1L, TransitProvider.TAGO, "GGB222000209", "31130", 14L, 12L,
+                List.of(visits.getFirst(), new BoardingRouteSnapshot.Occurrence(12L, "duplicate", 27, "중복"), visits.getLast()), "M2352");
+        when(metadata.read(1L, 14L, 12L)).thenReturn(duplicate);
         when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3417", null, 27)));
-        assertThat(find(14L).candidates().getFirst().trackingSupport()).isEqualTo(TrackingSupport.HELD);
+        assertThat(find(12L).candidates().getFirst().trackingSupport()).isEqualTo(TrackingSupport.HELD);
     }
 
     @Test

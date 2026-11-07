@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
 import 'package:stopbell/features/boarding/boarding_candidates.dart';
+import 'package:stopbell/features/boarding/boarding_candidate_client.dart';
 import 'package:stopbell/features/boarding/boarding_confirmation_view.dart';
 import 'package:stopbell/features/boarding/boarding_home.dart';
 import 'package:stopbell/features/boarding/boarding_session.dart';
@@ -47,6 +48,7 @@ void main() {
   late FakeBoardingSessions api;
   late MemoryBoardingIntents storage;
   late List<Map<String, dynamic>> candidateValues;
+  var rejectLegacyBoarding = false;
   final contexts = <(int, int, int?)>[];
   setUp(() async {
     final transport = MockClient((_) async => boardingJson({}, 204));
@@ -56,6 +58,7 @@ void main() {
     api = FakeBoardingSessions();
     storage = MemoryBoardingIntents();
     contexts.clear();
+    rejectLegacyBoarding = false;
     candidateValues = [freshCandidate()];
   });
   Future<void> pump(WidgetTester tester) async {
@@ -83,6 +86,14 @@ void main() {
                     targetStopOccurrenceId,
                     boardingStopOccurrenceId,
                   ));
+                  if (rejectLegacyBoarding &&
+                      boardingStopOccurrenceId != null) {
+                    throw const BoardingCandidateException(
+                      CandidateFailure.http,
+                      statusCode: 400,
+                      code: 'INVALID_REQUEST',
+                    );
+                  }
                   return BoardingCandidates.fromJson({
                     ...candidatesJson(candidates: candidateValues),
                     'observedAt': DateTime.now().toUtc().toIso8601String(),
@@ -112,6 +123,8 @@ void main() {
     await tap(tester, '검색');
     await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('occurrence-11')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('occurrence-22')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('find-candidates')));
@@ -167,6 +180,8 @@ void main() {
       await tap(tester, '다른 후보 선택 · 다시 조회');
       await tester.tap(find.byKey(const ValueKey('occurrence-11')));
       await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('occurrence-22')));
+      await tester.pump();
       candidateValues = [
         {...freshCandidate(), 'candidateRef': 'second-reference'},
       ];
@@ -174,7 +189,7 @@ void main() {
       await tester.pumpAndSettle();
       await select(tester);
       expect(find.byType(TextField), findsNothing);
-      expect(contexts.last, (754, 11, null));
+      expect(contexts.last, (754, 22, 11));
       expect(api.creations, isEmpty);
     },
   );
@@ -442,8 +457,12 @@ void main() {
       candidateValues = [
         {...freshCandidate(), 'candidateRef': 'fresh-reconfirmation-reference'},
       ];
+      rejectLegacyBoarding = true;
       await tap(tester, '동일 차량 다시 확인');
-      expect(contexts.last, (754, 22, null));
+      expect(contexts.sublist(contexts.length - 2), [
+        (754, 22, 11),
+        (754, 22, null),
+      ]);
       await select(tester);
       expect(find.byType(TextField), findsNothing);
       await confirm(tester, reconfirm: true);

@@ -50,13 +50,27 @@ class _BoardingReconfirmationScreenState
     });
     final selection = widget.selectionContext;
     try {
-      final result = await widget.findCandidates(
+      Future<BoardingCandidates> find(int? boardingId) => widget.findCandidates(
         routeId: selection.routeId,
         targetStopOccurrenceId: selection.targetId,
-        boardingStopOccurrenceId: selection.boardingId,
+        boardingStopOccurrenceId: boardingId,
         expectedGeneration: widget.controller.generation,
         isRequestCurrent: current,
       );
+      BoardingCandidates result;
+      try {
+        result = await find(selection.boardingId);
+      } on BoardingCandidateException catch (error) {
+        if (!current() ||
+            selection.boardingId == null ||
+            error.statusCode != 400 ||
+            error.code != 'INVALID_REQUEST') {
+          rethrow;
+        }
+        // Legacy sessions can have a boarding occurrence after the target.
+        // Reconfirmation still checks the original route, target and vehicle.
+        result = await find(null);
+      }
       if (current()) {
         setState(() {
           _result = result;

@@ -44,7 +44,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   List<BusRouteStopOccurrence> _stops = const [];
   BusRouteStopOccurrence? _target;
   BusRouteStopOccurrence? _boarding;
-  _Picker _picker = _Picker.target;
+  _Picker _picker = _Picker.boarding;
   _Picker? _returnTo;
   BoardingCandidates? _result;
   DateTime? _receivedAt;
@@ -107,7 +107,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       _invalidateCandidates();
       _target = null;
       _boarding = null;
-      _picker = _Picker.target;
+      _picker = _Picker.boarding;
       _returnTo = null;
       _stops = const [];
       _state = _StopsState.loading;
@@ -126,16 +126,19 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     }
   }
 
-  void _select(BusRouteStopOccurrence? stop) {
+  bool _validTarget(BusRouteStopOccurrence stop) =>
+      _boarding != null && stop.order > _boarding!.order;
+
+  void _select(BusRouteStopOccurrence stop) {
     if (!_current || _staleStops || _result != null) return;
-    if (stop == null && _picker == _Picker.target) return;
+    if (_picker == _Picker.target && !_validTarget(stop)) return;
     setState(() {
-      if (_picker == _Picker.target) {
-        if (_target?.id != stop!.id) _boarding = null;
-        _target = stop;
-        _picker = _Picker.boarding;
-      } else {
+      if (_picker != _Picker.target) {
         _boarding = stop;
+        if (_target != null && !_validTarget(_target!)) _target = null;
+        _picker = _target == null ? _Picker.target : _Picker.review;
+      } else {
+        _target = stop;
         _picker = _Picker.review;
       }
       _returnTo = null;
@@ -145,7 +148,12 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
 
   Future<void> _findCandidates() async {
     final target = _target;
-    if (!_current || target == null || _loadingCandidates || _staleStops) {
+    if (!_current ||
+        target == null ||
+        _boarding == null ||
+        !_validTarget(target) ||
+        _loadingCandidates ||
+        _staleStops) {
       return;
     }
     _invalidateCandidates();
@@ -220,7 +228,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   String get _backLabel {
     if (_showingCandidates) return '정류장 선택으로';
     if (_returnTo != null) return '정류장 변경 취소';
-    if (_picker == _Picker.boarding) return '목표 정류장 선택으로';
+    if (_picker == _Picker.target) return '승차 정류장 선택으로';
     return '노선 다시 선택';
   }
 
@@ -233,8 +241,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         _picker = _returnTo!;
         _returnTo = null;
       });
-    } else if (_picker == _Picker.boarding) {
-      setState(() => _picker = _Picker.target);
+    } else if (_picker == _Picker.target) {
+      setState(() => _picker = _Picker.boarding);
     } else {
       widget.onBack();
     }
@@ -293,6 +301,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         stops: _stops,
         targetId: _target?.id,
         boardingId: _boarding?.id,
+        isSelectable: _picker == _Picker.target ? _validTarget : null,
         rowKey: (id) => ValueKey('occurrence-$id'),
         onSelect: _staleStops || _result != null ? null : _select,
       ),
@@ -345,21 +354,20 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     children: [
       if (!_staleStops && _result == null && !_loadingCandidates)
         Text(switch (_picker) {
-          _Picker.target => '노선도에서 목표 정류장을 선택하세요.',
+          _Picker.target => '승차 정류장 이후의 정류장을 선택해 주세요',
           _Picker.boarding => '노선도에서 승차 정류장을 선택하세요.',
-          _Picker.review => '노선도에서 승차 정류장을 바꾸거나 차량 후보를 조회하세요.',
+          _Picker.review => '정류장을 변경하거나 차량 후보를 조회하세요.',
         }, style: Theme.of(context).textTheme.titleSmall),
-      _modeButton(_Picker.target, _target),
       _modeButton(_Picker.boarding, _boarding),
-      if (_picker == _Picker.boarding && !_staleStops)
-        TextButton(
-          key: const ValueKey('no-boarding'),
-          onPressed: () => _select(null),
-          child: const Text('선택 안 함'),
-        ),
+      _modeButton(_Picker.target, _target),
       FilledButton(
         key: const ValueKey('find-candidates'),
-        onPressed: _target == null || _loadingCandidates || _staleStops
+        onPressed:
+            _target == null ||
+                _boarding == null ||
+                !_validTarget(_target!) ||
+                _loadingCandidates ||
+                _staleStops
             ? null
             : _findCandidates,
         child: Text(
@@ -384,13 +392,13 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     final active = picker == _picker;
     final role = target ? '목표 정류장' : '승차 정류장';
     final details = stop == null ? null : selectedStopContext(stop, _stops);
-    final name = stop?.name ?? (target ? '선택해 주세요' : '선택 안 함');
+    final name = stop?.name ?? '선택해 주세요';
     final colors = Theme.of(context).colorScheme;
     return Semantics(
       selected: active,
       child: TextButton(
         key: ValueKey(target ? 'pick-target' : 'pick-boarding'),
-        onPressed: _staleStops || (!target && _target == null)
+        onPressed: _staleStops || (target && _boarding == null)
             ? null
             : () => _pick(picker),
         style: TextButton.styleFrom(

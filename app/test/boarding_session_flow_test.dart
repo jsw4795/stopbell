@@ -129,6 +129,8 @@ void main() {
     await tap(tester, '검색');
     await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('occurrence-11')));
+    await tester.pump();
     await tester.tap(find.byKey(const ValueKey('occurrence-22')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('find-candidates')));

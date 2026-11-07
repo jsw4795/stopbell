@@ -410,7 +410,7 @@ TASK-816/AUD-13은 ALARM PASSED의 표시 Body만 보강하며 위 네 string da
 GET /api/v1/bus-routes/{routeId}/boarding-candidates?targetStopOccurrenceId={id}&boardingStopOccurrenceId={optionalId}
 ```
 
-routeId/occurrence ID는 기존 선택 API의 양의 내부 ID다. 목적 occurrence는 필수이며 같은 Route 소속이어야 한다. 승차 occurrence는 선택이며 후보 정렬 보조 용도다. 후보 조회는 session/Alarm/Event를 만들지 않는다. 목적지는 후보 조회 문맥에 포함하므로 화면 흐름에서 차량 선택과 목적 선택 순서를 바꾸더라도 등록 전 이 문맥의 후보 검증이 필요하다.
+routeId/occurrence ID는 기존 선택 API의 양의 내부 ID다. 목적 occurrence는 필수이며 같은 Route 소속이어야 한다. 승차 occurrence가 있으면 같은 Route에서 목적 occurrence보다 order가 작아야 하며 위반 시 400 INVALID_REQUEST다. 신규 세션 생성은 승차 occurrence를 필수로 요구한다. 승차 미지정 후보 조회는 기존 세션 재확인 호환성을 위해 유지하며 신규 세션을 만들 수 없다. 후보 조회는 session/Alarm/Event를 만들지 않는다. 목적지는 후보 조회 문맥에 포함하므로 화면 흐름에서 차량 선택과 목적 선택 순서를 바꾸더라도 등록 전 이 문맥의 후보 검증이 필요하다.
 
 정상 200 response는 `observedAt`, `providerDataTime`(nullable), `candidateSetStatus`(AVAILABLE/EMPTY/PARTIAL), `candidates`를 갖는다. 각 항목은 `candidateRef`, `selectionKey`(nullable), 전체 `vehicleNumber`, `confirmationStatus`(AVAILABLE/HELD), `reasonCode`(nullable), 검증된 진행 설명/occurrence 간격(nullable), 준비 추적 지원 여부·보류 사유를 제공한다. 세부 추천 순서는 ADR-011을 따른다. partial은 item/detail 검증의 불확실 범위를 드러내고 유일성을 주장하지 않는다. 전체 목록 실패/불완전은 정상 empty/AVAILABLE로 반환하지 않는다.
 

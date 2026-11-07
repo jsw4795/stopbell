@@ -132,7 +132,7 @@ class BoardingSessionApiIntegrationTest {
             route = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "GGB222000209", "M2352", "31130"));
             occurrence("t26", 26);
             occurrence("t27", 27);
-            occurrence("t28", 28);
+            var boarding = occurrence("t28", 28);
             target = occurrence("t29", 29);
             var position = new java.util.concurrent.atomic.AtomicInteger(27);
             when(tago.fetchVehicleLocations(any())).thenAnswer(invocation -> new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse(
@@ -142,9 +142,9 @@ class BoardingSessionApiIntegrationTest {
                                     new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Items(List.of(
                                             new com.stopbell.transit.dto.tago.TagoVehicleLocationItem("경기74아3417", null,
                                                     position.get(), null, null))), 1, 1, 1000))));
-            var candidate = candidates.find(owner.getId(), route.getId(), target.getId(), target.getId()).candidates().getFirst();
+            var candidate = candidates.find(owner.getId(), route.getId(), target.getId(), boarding.getId()).candidates().getFirst();
             assertThat(candidate.trackingSupport()).isEqualTo(com.stopbell.transit.dto.BoardingCandidatesResponse.TrackingSupport.CONDITIONAL);
-            assertThat(candidate.boardingOccurrenceGap()).isEqualTo(2);
+            assertThat(candidate.boardingOccurrenceGap()).isEqualTo(1);
             var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, candidate.candidateRef(), null, 2));
             var initial = sessions.findById(created.response().id()).orElseThrow().getCheckpoint();
             assertThat(initial.getEvidence()).isEqualTo(BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE);
@@ -200,6 +200,18 @@ class BoardingSessionApiIntegrationTest {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
             return progress("s1", 10, 1);
         });
+    }
+
+    @Test
+    void new_session_rejects_missing_or_invalid_boarding_in_older_reference() {
+        for (Long boardingId : java.util.Arrays.asList(null, target.getId())) {
+            var snapshot = metadata.read(route.getId(), target.getId(), boardingId);
+            doReturn(verified(snapshot)).when(validator).validate(anyLong(), anyString(), anyString());
+            assertThatThrownBy(() -> service.create(owner.getId(), request(UUID.randomUUID().toString(), "ref")))
+                    .isInstanceOfSatisfying(ApiException.class,
+                            exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_REQUEST));
+            assertThat(sessions.count()).isZero();
+        }
     }
 
     @Test
@@ -726,6 +738,16 @@ class BoardingSessionApiIntegrationTest {
         mvc.perform(auth(reconfirmRequest(id, 1, candidateRef()), owner)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("TRACKING"));
         assertThat(sessions.findById(id).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.TRACKING);
+    }
+
+    @Test
+    void reconfirm_accepts_legacy_candidate_without_boarding() throws Exception {
+        long id = suspendedFixture();
+        doCallRealMethod().when(validator).validate(anyLong(), anyString(), anyString());
+        String reference = candidates.find(owner.getId(), route.getId(), target.getId(), null)
+                .candidates().getFirst().candidateRef();
+        mvc.perform(auth(reconfirmRequest(id, 1, reference), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("TRACKING"));
     }
 
     @Test
@@ -1412,9 +1434,10 @@ class BoardingSessionApiIntegrationTest {
     @DisplayName("버스가 승차 정류장 이전에서 이동 중이어도 번호 입력 없이 알림을 사전 등록한다")
     void register_before_boarding_stop_arrival() {
         when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress("s1", 10, 0));
-        var candidate = candidates.find(owner.getId(), route.getId(), target.getId(), target.getId())
+        var middle = occurrences.findAllByRouteOrderByStopOrderAsc(route).get(1);
+        var candidate = candidates.find(owner.getId(), route.getId(), target.getId(), middle.getId())
                 .candidates().getFirst();
-        assertThat(candidate.boardingOccurrenceGap()).isEqualTo(2);
+        assertThat(candidate.boardingOccurrenceGap()).isEqualTo(1);
         assertThat(candidate.progress().kind()).isEqualTo(
                 com.stopbell.transit.dto.BoardingCandidatesResponse.ProgressKind.MOVING_REFERENCE);
         assertThat(candidate.selectionKey()).isNotBlank().doesNotContain("vehicle-id", NUMBER);
