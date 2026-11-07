@@ -1,15 +1,20 @@
 package com.stopbell.transit.metadata;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
+
+import com.stopbell.transit.domain.TransitSourceDataKind;
+import com.stopbell.transit.domain.TransitSourceSystem;
 
 /** Validated GBIS bulk data. IDs here are lookup candidates, never StopBell identities. */
 public record GbisBulkMetadata(Map<String, Route> routes) {
@@ -24,19 +29,32 @@ public record GbisBulkMetadata(Map<String, Route> routes) {
 
     public static GbisBulkMetadata parse(byte[] routeBytes, byte[] stationBytes,
             String routeVersion, String stationVersion) {
+        return collect(routeBytes, stationBytes, routeVersion, stationVersion, false).normalized();
+    }
+
+    static GbisCollectedSnapshot parseWithRaw(byte[] routeBytes, byte[] stationBytes,
+            String routeVersion, String stationVersion) {
+        return collect(routeBytes, stationBytes, routeVersion, stationVersion, true);
+    }
+
+    private static GbisCollectedSnapshot collect(byte[] routeBytes, byte[] stationBytes,
+            String routeVersion, String stationVersion, boolean preserveRaw) {
         if (routeVersion == null || routeVersion.isBlank() || !routeVersion.equals(stationVersion)) {
             throw new IllegalArgumentException("GBIS bulk versions do not match");
         }
         Map<String, Route> routes = new HashMap<>();
-        for (Row row : rows(routeBytes, ROUTE_COLUMNS)) {
+        List<GbisCollectedSnapshot.RawRow> rawRows = new ArrayList<>();
+        rows(routeBytes, ROUTE_COLUMNS, row -> {
             String id = row.required("routeId");
             Route route = new Route(id, row.required("routeName"), row.positive("turnSeq"), new ArrayList<>());
             if (routes.putIfAbsent(id, route) != null) {
                 throw new IllegalArgumentException("GBIS duplicate route identity");
             }
-        }
+            if (preserveRaw) rawRows.add(new GbisCollectedSnapshot.RawRow(TransitSourceSystem.GBIS,
+                    TransitSourceDataKind.ROUTE, id, id, null, row.rawFields()));
+        });
         Map<String, Set<Integer>> orders = new HashMap<>();
-        for (Row row : rows(stationBytes, STATION_COLUMNS)) {
+        rows(stationBytes, STATION_COLUMNS, row -> {
             String routeId = row.required("routeId");
             Route route = routes.get(routeId);
             if (route == null) throw new IllegalArgumentException("GBIS RouteStation has no route");
@@ -48,7 +66,10 @@ public record GbisBulkMetadata(Map<String, Route> routes) {
                 throw new IllegalArgumentException("GBIS duplicate route station order");
             }
             route.stations().add(new Station(order, row.required("stationId"), row.required("stationName")));
-        }
+            if (preserveRaw) rawRows.add(new GbisCollectedSnapshot.RawRow(TransitSourceSystem.GBIS,
+                    TransitSourceDataKind.OCCURRENCE, routeId.length() + ":" + routeId + ":" + order,
+                    routeId, order, row.rawFields()));
+        });
         Map<String, Route> validated = new HashMap<>();
         for (Route route : routes.values()) {
             route.stations().sort(java.util.Comparator.comparingInt(Station::order));
@@ -59,10 +80,10 @@ public record GbisBulkMetadata(Map<String, Route> routes) {
             validated.put(route.routeId(), new Route(route.routeId(), route.routeName(),
                     route.turnSeq(), List.copyOf(route.stations())));
         }
-        return new GbisBulkMetadata(validated);
+        return new GbisCollectedSnapshot(new GbisBulkMetadata(validated), rawRows, routeVersion);
     }
 
-    private static List<Row> rows(byte[] bytes, List<String> requiredColumns) {
+    private static void rows(byte[] bytes, List<String> requiredColumns, Consumer<Row> consumer) {
         if (bytes == null || bytes.length == 0) throw new IllegalArgumentException("GBIS bulk source is empty");
         String source;
         try {
@@ -86,19 +107,24 @@ public record GbisBulkMetadata(Map<String, Route> routes) {
         if (!columns.keySet().containsAll(requiredColumns)) {
             throw new IllegalArgumentException("GBIS required header missing");
         }
-        List<Row> rows = new ArrayList<>();
+        int count = 0;
         for (int i = 1; i < records.length; i++) {
             if (i == records.length - 1 && records[i].isEmpty()) continue;
             if (records[i].isBlank()) throw new IllegalArgumentException("GBIS blank record");
             String[] fields = records[i].split("\\|", -1);
             if (fields.length != header.length) throw new IllegalArgumentException("GBIS corrupt record");
-            rows.add(new Row(columns, fields));
+            consumer.accept(new Row(columns, fields));
+            count++;
         }
-        if (rows.isEmpty()) throw new IllegalArgumentException("GBIS bulk has no records");
-        return rows;
+        if (count == 0) throw new IllegalArgumentException("GBIS bulk has no records");
     }
 
     private record Row(Map<String, Integer> columns, String[] fields) {
+        Map<String, String> rawFields() {
+            Map<String, String> raw = new LinkedHashMap<>();
+            columns.forEach((name, index) -> raw.put(name, fields[index]));
+            return raw;
+        }
         String required(String name) {
             String value = fields[columns.get(name)].trim();
             if (value.isEmpty()) throw new IllegalArgumentException("GBIS required value missing: " + name);

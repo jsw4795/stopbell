@@ -7,8 +7,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.transit.domain.TransitSourceDataKind;
+import com.stopbell.transit.domain.TransitSourceSystem;
 import com.stopbell.transit.service.BusRouteMetadataSnapshot;
 import com.stopbell.transit.service.BusStopOccurrenceMetadataSnapshot;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 class GbisBulkMetadataTest {
@@ -88,6 +91,51 @@ class GbisBulkMetadataTest {
         assertThat(result.routes()).singleElement()
                 .satisfies(route -> assertThat(route.externalRouteId()).isEqualTo("GGB200"));
         assertThat(bulk.routes()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("원본 전체 필드와 문자열을 보존하고 반복 정류장을 순번으로 식별한다")
+    void preserves_raw_fields_and_occurrence_identity() {
+        String routes = "routeId|routeName|turnSeq|routeTypeCd|extra|empty^ 0200 | 300 |02|014|  value  |";
+        String stations = "routeId|routeName|upDown|staOrder|stationId|stationName|x|y|extra^"
+                + " 0200 | 300 | 상행 |01|10|출발|127|37|  x  ^"
+                + "0200|300|하행|02|10|종착|127|37|";
+        var snapshot = GbisBulkMetadata.parseWithRaw(bytes(routes), bytes(stations), "20261001", "20261001");
+        assertThat(snapshot.sourceVersion()).isEqualTo("20261001");
+        assertThat(snapshot.normalized()).isEqualTo(GbisBulkMetadata.parse(bytes(routes), bytes(stations), "20261001", "20261001"));
+        assertThat(snapshot.rawRows()).hasSize(3);
+        var route = snapshot.rawRows().get(0);
+        assertThat(route.sourceSystem()).isEqualTo(TransitSourceSystem.GBIS);
+        assertThat(route.dataKind()).isEqualTo(TransitSourceDataKind.ROUTE);
+        assertThat(route.sourceKey()).isEqualTo("0200");
+        assertThat(route.fields()).containsOnlyKeys("routeId", "routeName", "turnSeq", "routeTypeCd", "extra", "empty")
+                .containsEntry("routeId", " 0200 ").containsEntry("turnSeq", "02")
+                .containsEntry("routeTypeCd", "014").containsEntry("extra", "  value  ").containsEntry("empty", "");
+        var first = snapshot.rawRows().get(1);
+        var second = snapshot.rawRows().get(2);
+        assertThat(first.dataKind()).isEqualTo(TransitSourceDataKind.OCCURRENCE);
+        assertThat(first.sourceKey()).isEqualTo("4:0200:1");
+        assertThat(second.sourceKey()).isEqualTo("4:0200:2");
+        assertThat(first.fields()).containsOnlyKeys("routeId", "routeName", "upDown", "staOrder", "stationId", "stationName", "x", "y", "extra")
+                .containsEntry("staOrder", "01").containsEntry("extra", "  x  ");
+        assertThat(second.fields()).containsEntry("stationId", "10").containsEntry("extra", "");
+        assertThatThrownBy(() -> GbisBulkMetadata.parseWithRaw(bytes(routes), bytes(stations + "^0200|300|하행|01|10|중복|127|37|"), "1", "1"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("원본 수집에서도 중복 헤더와 빈 행 및 잘못된 버전을 거부한다")
+    void raw_collection_rejects_invalid_input() {
+        for (String version : List.of("", " ")) {
+            assertThatThrownBy(() -> GbisBulkMetadata.parseWithRaw(bytes(ROUTES), bytes(STATIONS), version, version))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThatThrownBy(() -> GbisBulkMetadata.parseWithRaw(bytes(ROUTES), bytes(STATIONS), null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        for (String route : List.of("routeId|routeName|turnSeq|routeId^200|300|2|200", ROUTES + "^^bad", ROUTES + "^201|300|x|a")) {
+            assertThatThrownBy(() -> GbisBulkMetadata.parseWithRaw(bytes(route), bytes(STATIONS), "1", "1"))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
     }
 
     private static BusRouteMetadataSnapshot tago(String routeId, String name, String... stopIds) {

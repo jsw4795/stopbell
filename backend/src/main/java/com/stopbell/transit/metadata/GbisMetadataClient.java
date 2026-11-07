@@ -20,6 +20,14 @@ public class GbisMetadataClient {
     }
 
     public GbisBulkMetadata fetch() {
+        return collect(false).normalized();
+    }
+
+    public GbisCollectedSnapshot fetchWithRaw() {
+        return collect(true);
+    }
+
+    private GbisCollectedSnapshot collect(boolean preserveRaw) {
         try {
             URI uri = UriComponentsBuilder.fromUriString(baseUrl)
                     .queryParam("format", "json").queryParam("serviceKey", serviceKey).build(true).toUri();
@@ -37,7 +45,12 @@ public class GbisMetadataClient {
             }
             byte[] routes = download(item.routeDownloadUrl());
             byte[] stations = download(item.routeStationDownloadUrl());
-            return GbisBulkMetadata.parse(routes, stations, item.routeVersion(), item.routeStationVersion());
+            if (preserveRaw) {
+                return GbisBulkMetadata.parseWithRaw(routes, stations, item.routeVersion(), item.routeStationVersion());
+            }
+            return new GbisCollectedSnapshot(
+                    GbisBulkMetadata.parse(routes, stations, item.routeVersion(), item.routeStationVersion()),
+                    java.util.List.of(), item.routeVersion());
         } catch (Exception e) {
             // Provider exceptions may contain a request URI, including the service key.
             throw new IllegalStateException("GBIS base-info snapshot could not be validated: "
