@@ -386,7 +386,7 @@ Stop identity는 `(provider, externalStopId)`다. Route 안의 Stop order, name,
 
 `route`와 `stop`은 같은 provider여야 하고 `stopOrder`는 양수다. Route 안에서 `(route, stopOrder)`는 유일하지만 `(route, stop)`은 유일하지 않다.
 
-`destinationName`은 경기 TAGO traversal 전체가 GBIS route/routeStation과 검증되어 일치할 때만 붙는 표시 metadata다. occurrence identity가 아니며 서울 또는 검증 실패 Route에서는 `null`이다. GBIS raw ID, `upDown`, `turnSeq`는 이 Entity의 영속 identity가 아니다.
+`destinationName`은 경기 TAGO traversal 전체가 GBIS route/routeStation과 검증되어 일치할 때만 붙는 표시 metadata다. occurrence identity가 아니며 서울의 신규 값 또는 검증 실패 경기 Route에서는 `null`이다. 서울 원본 동기화에서 이미 존재하는 행선지 값은 지우지 않는다. GBIS raw ID, `upDown`, `turnSeq`는 이 Entity의 영속 identity가 아니다.
 
 ## Persistence
 

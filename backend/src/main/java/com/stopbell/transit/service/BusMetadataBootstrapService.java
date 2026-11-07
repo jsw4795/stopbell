@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -41,7 +42,11 @@ public class BusMetadataBootstrapService {
         }
         try {
             log.info("Metadata bootstrap started: provider={}", provider);
-            syncService.syncCompleteProviderSnapshot(source.fetchCompleteSnapshot());
+            if (source instanceof SeoulCsvMetadataSource seoulSource) {
+                syncService.syncSeoulSource(seoulSource);
+            } else {
+                syncService.syncCompleteProviderSnapshot(source.fetchCompleteSnapshot());
+            }
             log.info("Metadata bootstrap completed: provider={}", provider);
         } finally {
             providerRunning.set(false);

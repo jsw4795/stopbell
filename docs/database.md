@@ -439,7 +439,7 @@ Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, 
 
 Route snapshot sync는 동일 Route/Stop identity의 display·operational metadata를 UPDATE해 내부 ID를 유지한다. occurrence는 `(route, stop, stopOrder)`가 완전히 같을 때만 내부 ID를 유지하며 Stop 또는 order가 바뀌면 기존 row를 삭제하고 새 row를 만든다. Route snapshot에서 사라진 occurrence는 제거한다. 검증된 complete provider snapshot만 typed boundary, completeness token/result, destructive method visibility 제한 또는 동등한 구조적 보호를 거쳐 provider-level cleanup에 들어간다. Partial fetch, pagination incomplete, parser failure, required source 누락, provider request 일부 실패와 검증되지 않은 empty result는 cleanup 근거가 아니다.
 
-`destination_name`은 V12 nullable migration으로 추가한 사용자 표시 metadata다. 동일 occurrence의 목적지만 변경되거나 검증 실패로 null이 되면 기존 내부 ID를 유지하며 current snapshot 값으로 갱신한다. GBIS ID나 방향 raw field는 영속하지 않는다.
+`destination_name`은 V12 nullable migration으로 추가한 사용자 표시 metadata다. 동일 occurrence의 목적지만 변경되거나 경기 검증 실패로 null이 되면 기존 내부 ID를 유지하며 current snapshot 값으로 갱신한다. 서울 원본 동기화는 입력 행선지가 없을 때 기존 값을 보존한다. GBIS ID나 방향 raw field는 영속하지 않는다.
 
 TASK-513은 V10의 `bus_metadata_sync_states`에 `provider VARCHAR(20)` PK와 `last_complete_sync_at DATETIME(6) NOT NULL`을 저장한다. `BusMetadataSyncState`는 Java `Instant`로 매핑하며 complete sync 성공 뒤에만 갱신한다. fresh DB bootstrap 완료와 마지막 complete sync 성공 age의 근거이며 readiness 연계의 최종 검증은 TASK-807에 남는다. sync/checksum history, staging table, error journal은 추가하지 않았다.
 
@@ -449,7 +449,7 @@ V33은 기존 `bus_routes`에 nullable `route_type VARCHAR(24)`를 추가하고 
 
 원본 행은 `source_system`(SEOUL_TDATA/TAGO/GBIS), `data_kind`(ROUTE/STOP/OCCURRENCE), `source_key` 복합 UNIQUE로 식별한다. JSON 객체, nullable 원본 버전, 수집 시각과 갱신 시각을 저장한다. 기존 Route/Stop/Occurrence 중 같은 종류의 nullable FK 하나로 연결하며 FK 삭제 시 연결만 NULL이 되고 원본은 보존된다. 경유 source key는 제공기관의 노선과 순번을 모호하지 않게 인코딩해야 하며 내부 occurrence ID로 취급하지 않는다. 서울 서비스 범위 밖의 원본은 연결 없이 저장할 수 있다.
 
-저장 서비스는 단일 DB upsert로 동일 키의 행 ID를 유지하며 목록 전체를 하나의 트랜잭션에서 처리한다. 같은 입력의 재처리는 갱신 시각도 유지하고, 새 수집 시각이나 값이 바뀌면 갱신한다. 출처 간 충돌은 독립 행으로 보존한다. JSON은 원본의 필드와 JSON 값을 보존하며 원문 바이트 및 키 순서는 보장하지 않는다. 서울 CSV 파서는 정규화 snapshot과 별도로 서비스 범위 밖을 포함한 원본 행을 반환한다. 경유 키는 `노선ID 길이:노선ID:정류장순번`이며 순번은 검증된 양의 정수다. 저장 서비스 연결, 원본 파일 보관과 수집 이력은 후속 단계다. 일반 Route/Stop 조회는 원본 테이블을 읽지 않는다.
+저장 서비스는 단일 DB upsert로 동일 키의 행 ID를 유지하며 목록 전체를 하나의 트랜잭션에서 처리한다. 같은 입력의 재처리는 갱신 시각도 유지하고, 새 수집 시각이나 값이 바뀌면 갱신한다. 출처 간 충돌은 독립 행으로 보존한다. JSON은 원본의 필드와 JSON 값을 보존하며 원문 바이트 및 키 순서는 보장하지 않는다. 서울 CSV 파서는 정규화 snapshot과 별도로 서비스 범위 밖을 포함한 원본 행을 반환한다. 경유 키는 `노선ID 길이:노선ID:정류장순번`이며 순번은 검증된 양의 정수다. 서울 서비스 노선과 해당 정류장·경유 원본은 정규화 데이터와 같은 노선 transaction에서 내부 ID에 연결해 저장한다. 서비스 범위 밖 원본 저장, 원본 파일 보관과 수집 이력은 후속 단계다. 일반 Route/Stop 조회는 원본 테이블을 읽지 않는다.
 
 ### Phase 9 Boarding persistence contract (TASK-903)
 

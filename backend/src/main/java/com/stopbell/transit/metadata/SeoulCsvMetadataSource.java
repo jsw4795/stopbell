@@ -68,7 +68,10 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
 
     @Override
     public CompleteBusMetadataSnapshot fetchCompleteSnapshot() {
-        CompleteSourceSnapshot sourceSnapshot = fetchCompleteSourceSnapshot();
+        return toCompleteSnapshot(fetchCompleteSourceSnapshot());
+    }
+
+    public CompleteBusMetadataSnapshot toCompleteSnapshot(CompleteSourceSnapshot sourceSnapshot) {
         List<SourceRouteSnapshot> includedRoutes = sourceSnapshot.routes().stream()
                 .filter(route -> scope(route) == Scope.INCLUDE)
                 .toList();
@@ -174,13 +177,17 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
                     String routeId = row.get("노선ID").trim();
                     int order = positiveInteger(row.get("정류장순번").trim(), "정류장순번");
                     rawRows.add(new RawSourceRow(TransitSourceDataKind.OCCURRENCE,
-                            routeId.length() + ":" + routeId + ":" + order, row));
+                            occurrenceSourceKey(routeId, order), row));
                 }
             }
             return new SeoulCsvSnapshot(new CompleteSourceSnapshot(snapshots), rawRows);
         } catch (IOException | NumberFormatException exception) {
             throw new IllegalStateException("Unable to parse Seoul metadata CSV", exception);
         }
+    }
+
+    public static String occurrenceSourceKey(String routeId, int order) {
+        return routeId.length() + ":" + routeId + ":" + order;
     }
 
     private static List<Map<String, String>> normalizeRows(List<Map<String, String>> rows) {

@@ -1,14 +1,25 @@
 package com.stopbell.transit.service;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
+import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.transit.domain.TransitSourceDataKind;
+import com.stopbell.transit.domain.TransitSourceSystem;
+import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
 import com.stopbell.transit.entity.BusStop;
 import com.stopbell.transit.repository.BusRouteRepository;
 import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
 import com.stopbell.transit.repository.BusStopRepository;
+import com.stopbell.transit.service.TransitSourceMetadataService.SourceRecord;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,19 +29,34 @@ public class BusRouteMetadataSyncService {
     private final BusRouteRepository busRouteRepository;
     private final BusStopRepository busStopRepository;
     private final BusRouteStopOccurrenceRepository occurrenceRepository;
+    private final TransitSourceMetadataService sourceMetadataService;
 
     public BusRouteMetadataSyncService(
             BusRouteRepository busRouteRepository,
             BusStopRepository busStopRepository,
-            BusRouteStopOccurrenceRepository occurrenceRepository
+            BusRouteStopOccurrenceRepository occurrenceRepository,
+            TransitSourceMetadataService sourceMetadataService
     ) {
         this.busRouteRepository = busRouteRepository;
         this.busStopRepository = busStopRepository;
         this.occurrenceRepository = occurrenceRepository;
+        this.sourceMetadataService = sourceMetadataService;
     }
 
     @Transactional
     public BusRoute syncRoute(BusRouteMetadataSnapshot snapshot) {
+        return reconcile(snapshot, null);
+    }
+
+    @Transactional
+    public BusRoute syncSeoulRoute(BusRouteMetadataSnapshot snapshot, SeoulRouteRawData raw) {
+        if (snapshot.provider() != TransitProvider.SEOUL_BUS) {
+            throw new IllegalArgumentException("Raw Seoul metadata requires a Seoul route");
+        }
+        return reconcile(snapshot, Objects.requireNonNull(raw, "Seoul raw data must not be null"));
+    }
+
+    private BusRoute reconcile(BusRouteMetadataSnapshot snapshot, SeoulRouteRawData raw) {
         BusRoute route = busRouteRepository
                 .findByProviderAndExternalRouteId(snapshot.provider(), snapshot.externalRouteId())
                 .orElseGet(() -> busRouteRepository.save(new BusRoute(
@@ -72,21 +98,54 @@ public class BusRouteMetadataSyncService {
                 .forEach(occurrenceRepository::delete);
         occurrenceRepository.flush();
 
+        List<SourceRecord> records = new ArrayList<>();
+        if (raw != null) {
+            records.add(record(TransitSourceDataKind.ROUTE, snapshot.externalRouteId(), route.getId(),
+                    raw.routePayload(), raw.collectedAt()));
+        }
+        Set<String> processedStops = new HashSet<>();
         for (Map.Entry<OccurrenceKey, IncomingOccurrence> incomingOccurrence : incomingOccurrences.entrySet()) {
             IncomingOccurrence incoming = incomingOccurrence.getValue();
             BusRouteStopOccurrence existing = existingOccurrences.get(incomingOccurrence.getKey());
             if (existing != null) {
-                existing.updateDestinationName(incoming.destinationName());
+                if (raw == null || incoming.destinationName() != null) {
+                    existing.updateDestinationName(incoming.destinationName());
+                }
             } else {
-                occurrenceRepository.save(new BusRouteStopOccurrence(
+                existing = occurrenceRepository.save(new BusRouteStopOccurrence(
                         route,
                         incoming.stop(),
                         incomingOccurrence.getKey().stopOrder(),
                         incoming.destinationName()
                 ));
             }
+            if (raw != null) {
+                String stopId = incomingOccurrence.getKey().externalStopId();
+                if (processedStops.add(stopId) && raw.stopPayloads().containsKey(stopId)) {
+                    records.add(record(TransitSourceDataKind.STOP, stopId, incoming.stop().getId(),
+                            raw.stopPayloads().get(stopId), raw.collectedAt()));
+                }
+                String key = SeoulCsvMetadataSource.occurrenceSourceKey(
+                        snapshot.externalRouteId(), incomingOccurrence.getKey().stopOrder());
+                records.add(record(TransitSourceDataKind.OCCURRENCE, key, existing.getId(),
+                        raw.occurrencePayloads().get(key), raw.collectedAt()));
+            }
+        }
+        if (raw != null) {
+            sourceMetadataService.saveAll(records);
         }
         return route;
+    }
+
+    private static SourceRecord record(TransitSourceDataKind kind, String key, Long id, String payload, Instant collectedAt) {
+        if (id == null || payload == null) {
+            throw new IllegalStateException("Missing normalized ID or Seoul raw row: " + key);
+        }
+        return new SourceRecord(TransitSourceSystem.SEOUL_TDATA, kind, key, id, payload, null, collectedAt);
+    }
+
+    public record SeoulRouteRawData(String routePayload, Map<String, String> stopPayloads,
+            Map<String, String> occurrencePayloads, Instant collectedAt) {
     }
 
     private record OccurrenceKey(String externalStopId, int stopOrder) {

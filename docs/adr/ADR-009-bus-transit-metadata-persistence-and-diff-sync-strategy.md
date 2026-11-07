@@ -47,7 +47,7 @@ V1 Bus Route/Stop 선택과 Alarm 생성이 Provider metadata API를 매번 다�
 
 서울 metadata는 T Data CSV full import, 경기 metadata는 TAGO throttled full sync를 source로 한다. `BusRoute`, `BusStop`, `BusRouteStopOccurrence` JPA Entity와 MySQL Schema를 사용하며 identity는 각각 `(provider, externalRouteId)`, `(provider, externalStopId)`다. occurrence는 Route, Stop, positive stopOrder로 특정하고 `(route_id, stop_order)`만 unique하게 둔다. 같은 Route에서 Stop 재방문을 허용하므로 `(route_id, stop_id)` unique는 두지 않는다.
 
-각 source adapter는 raw DTO 대신 normalized route snapshot을 전달하고 service가 한 Route 단위로 reconciliation한다. 같은 Route/Stop identity의 display·operational metadata는 UPDATE해 internal ID를 유지한다. occurrence는 `(route, stop, stopOrder)`가 완전히 같을 때만 ID를 유지하며 Stop 또는 order가 바뀌면 기존 row를 삭제하고 새 row를 만든다. Route snapshot에서 사라진 occurrence는 제거한다.
+각 source adapter는 normalized route snapshot을 전달하고 service가 한 Route 단위로 reconciliation한다. 서울은 원본 행도 별도로 전달한다. 같은 Route/Stop identity의 display·operational metadata는 UPDATE해 internal ID를 유지한다. occurrence는 `(route, stop, stopOrder)`가 완전히 같을 때만 ID를 유지하며 Stop 또는 order가 바뀌면 기존 row를 삭제하고 새 row를 만든다. Route snapshot에서 사라진 occurrence는 제거한다.
 
 Provider 전체 fetch가 완전히 성공한 경우에만 source에 없는 Route를 제거하며 Route FK는 occurrence cascade delete를 가진다. Stop은 여러 Route에서 공유될 수 있으므로 모든 occurrence에서 더 이상 참조되지 않는 provider Stop만 cleanup한다. fetch 실패·부분 snapshot에서는 provider-level 삭제를 실행하지 않는다. Complete provider snapshot은 adapter가 required source 존재, parsing/validation 성공, pagination 완료 및 provider request 성공을 확인한 결과여야 하며, 검증되지 않은 empty collection은 complete가 아니다. Typed complete snapshot boundary, explicit completeness token/result, destructive method visibility 제한 또는 동등한 구조적 보호로 검증된 snapshot만 cleanup 경로에 들어가게 하고 구체 type은 TASK-513에서 정한다.
 
@@ -59,7 +59,7 @@ metadata CRUD와 reconciliation은 JPA Entity 상태 관리와 단순 관계 CRU
 
 ## 후속 구현 경계: TASK-513
 
-TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TASK-513은 source adapter와 production ingestion을 담당한다. 서울은 노선마스터·정류장마스터·노선-정류장마스터 T Data CSV를 parsing·validation해 normalized metadata snapshot을 만들고, 경기는 TAGO city별 Route와 Route Stop을 pagination 완료까지 수집해 snapshot을 만든다. 2026-09-22 실제 서울 T Data source는 UTF-8 BOM CSV이며 노선은 `노선ID`/`노선명`, 노선-노드는 `노선ID`/`노드ID`/`정류장순번`, 정류장은 `정류장ID`/`정류장명`/`좌표X`(longitude)/`좌표Y`(latitude)를 사용한다. Parser는 세 파일의 정확한 header, 필수 값, 양의·Route 내 unique stop order, master join 및 GPS 범위를 검증하며 같은 Route의 동일 Stop 재등장은 허용한다. `노선유형`, `거리`, `링크거리누계`, `정류장유형`, `정류장번호`, `BIT설치여부`는 현재 persistence에 넣지 않는다.
+TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TASK-513은 source adapter와 production ingestion을 담당한다. 서울은 노선마스터·정류장마스터·노선-정류장마스터 T Data CSV를 parsing·validation해 normalized metadata snapshot을 만들고, 경기는 TAGO city별 Route와 Route Stop을 pagination 완료까지 수집해 snapshot을 만든다. 2026-09-22 실제 서울 T Data source는 UTF-8 BOM CSV이며 노선은 `노선ID`/`노선명`, 노선-노드는 `노선ID`/`노드ID`/`정류장순번`, 정류장은 `정류장ID`/`정류장명`/`좌표X`(longitude)/`좌표Y`(latitude)를 사용한다. Parser는 세 파일의 정확한 header, 필수 값, 양의·Route 내 unique stop order, master join 및 GPS 범위를 검증하며 같은 Route의 동일 Stop 재등장은 허용한다. 당시 `노선유형`, `거리`, `링크거리누계`, `정류장유형`, `정류장번호`, `BIT설치여부`는 persistence에 넣지 않았다.
 
 서울 T Data의 공식 노선유형 중 `공항`, `마을`, `간선`, `지선`, `순환`, `광역`, `관광`은 `SEOUL_BUS` complete snapshot에 포함하고 `경기`, `인천`은 TAGO provider routing과 충돌하지 않도록 제외한다. 이는 Route ID prefix나 이름이 아닌 source의 공식 노선유형 semantic에 따른 provider scope다. 노선유형이 null이면 occurrence가 모두 확인된 일반 버스 정류장유형(`일반차로`, `중앙차로`, `일반중앙차로`, `가로변전일`, `가로변시간`, `마을버스`, `가상정류장`)일 때만 포함하고, 모두 `선착장`이면 한강버스 등 수상교통 Route로 제외한다. null Route의 occurrence 없음, 일반 버스/선착장 혼재, 미확인 정류장유형 또는 안전하게 판정할 수 없는 구조는 complete snapshot 실패이며 provider cleanup과 `lastCompleteSyncAt` 갱신으로 진행하지 않는다.
 
@@ -98,4 +98,8 @@ TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TAS
 
 ## Phase 3-A-1 원본 저장 기반 (2026-11-07)
 
-사용자 결정에 따라 기존 정규화 metadata 및 Route 단위 동기화 정책을 유지하면서 출처별 원본 JSON의 별도 저장 기반을 추가한다. 원본 파일 수집 및 parser 연결은 후속 단계다. 공통 노선유형은 nullable 필드로 준비하며 원본 유형이나 미확인 값을 임의로 변환하지 않는다. Schema와 저장 서비스의 구체 계약은 [Database](../database.md#transit-원본-메타데이터-저장-phase-3-a-1)를 따른다.
+사용자 결정에 따라 기존 정규화 metadata 및 Route 단위 동기화 정책을 유지하면서 출처별 원본 JSON의 별도 저장 기반을 추가한다. 당시 원본 파일 수집 및 parser 연결은 후속 단계였다. 공통 노선유형은 nullable 필드로 준비하며 원본 유형이나 미확인 값을 임의로 변환하지 않는다. Schema와 저장 서비스의 구체 계약은 [Database](../database.md#transit-원본-메타데이터-저장-phase-3-a-1)를 따른다.
+
+## Phase 3-A-2A-2 서울 원본 연결 (2026-11-07)
+
+서울 서비스 범위의 원본 행을 기존 정규화 데이터와 같은 Route transaction에 저장하고 내부 ID에 연결한다. 서비스 범위 밖 원본 저장은 후속 단계다. 상세 실행 경계는 [Architecture](../architecture.md)를 따른다.

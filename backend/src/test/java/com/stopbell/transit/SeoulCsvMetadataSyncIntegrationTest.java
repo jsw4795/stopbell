@@ -69,6 +69,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
 
     @BeforeEach
     void clear_test_metadata() {
+        jdbc.update("DELETE FROM transit_source_metadata");
         jdbc.update("DELETE FROM bus_route_stop_occurrences");
         jdbc.update("DELETE FROM bus_routes");
         jdbc.update("DELETE FROM bus_stops");
@@ -150,6 +151,11 @@ class SeoulCsvMetadataSyncIntegrationTest {
                 routeId);
         Object stopId = jdbc.queryForObject(
                 "SELECT id FROM bus_stops WHERE external_stop_id = 'stop-1'", Long.class);
+        jdbc.update("UPDATE bus_route_stop_occurrences SET destination_name='기존 행선지' WHERE route_id=? AND stop_order=1",
+                routeId);
+        retainedOccurrences = jdbc.queryForList(
+                "SELECT * FROM bus_route_stop_occurrences WHERE route_id = ? AND stop_order IN (1, 3) ORDER BY id",
+                routeId);
 
         bootstrap(source(ROUTES.replace("7016", "7016변경"),
                 ROUTE_STOPS.replace("100100447,stop-2,1.0,2", "100100447,stop-2,1.0,4"),
@@ -265,6 +271,127 @@ class SeoulCsvMetadataSyncIntegrationTest {
             assertThat(databaseSnapshot()).isEqualTo(before);
         } finally {
             jdbc.execute("DROP TRIGGER reject_test_stop_update");
+        }
+    }
+
+    @Test
+    @DisplayName("서울 서비스 범위 원본을 FK와 함께 저장하고 동일 수집 재처리 시 ID와 원본 행을 유지한다")
+    void save_raw_rows_with_ids_and_replay_same_collection() {
+        String routes = ROUTES.replace("7016,지선,50.0", " 7016 ,지선,050.00")
+                + "outside,경기 노선,경기,9.0\n";
+        String stops = STOPS + "outside-stop,범위 밖,일반차로,00999,127.0,37.0,설치\n";
+        String routeStops = ROUTE_STOPS + "100100586,stop-1,000.50,2\noutside,outside-stop,0,1\n";
+        SeoulCsvMetadataSource source = source(routes, routeStops, stops);
+        var collected = source.fetchSnapshotWithRawRows();
+        Instant collectedAt = Instant.parse("2026-11-07T00:00:00Z");
+        syncService.syncSeoulSnapshot(source, collected, collectedAt);
+        List<Map<String, Object>> before = jdbc.queryForList("SELECT * FROM transit_source_metadata ORDER BY id");
+        DatabaseSnapshot normalized = databaseSnapshot();
+
+        assertThat(before).hasSize(2 + 3 + 5);
+        var json = tools.jackson.databind.json.JsonMapper.builder().build();
+        for (Map<String, Object> stored : before) {
+            var original = collected.rawRows().stream()
+                    .filter(row -> row.dataKind().name().equals(stored.get("data_kind"))
+                            && row.sourceKey().equals(stored.get("source_key")))
+                    .findFirst().orElseThrow();
+            assertThat(json.readTree(stored.get("raw_payload").toString()))
+                    .isEqualTo(json.valueToTree(original.fields()));
+        }
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata WHERE source_key IN "
+                + "('outside','outside-stop','7:outside:1')", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata WHERE data_kind='STOP' "
+                + "AND source_key='stop-1'", Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata m "
+                + "LEFT JOIN bus_routes r ON m.route_id=r.id LEFT JOIN bus_stops s ON m.stop_id=s.id "
+                + "LEFT JOIN bus_route_stop_occurrences o ON m.occurrence_id=o.id "
+                + "WHERE (m.data_kind='ROUTE' AND r.external_route_id=m.source_key) "
+                + "OR (m.data_kind='STOP' AND s.external_stop_id=m.source_key) "
+                + "OR (m.data_kind='OCCURRENCE' AND o.id IS NOT NULL)", Integer.class)).isEqualTo(10);
+        assertThat(jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(raw_payload, '$.\"노선명\"')) "
+                + "FROM transit_source_metadata WHERE data_kind='ROUTE' AND source_key=?", String.class, ROUTE_A))
+                .isEqualTo(" 7016 ");
+        assertThat(jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(raw_payload, '$.\"거리\"')) "
+                + "FROM transit_source_metadata WHERE data_kind='ROUTE' AND source_key=?", String.class, ROUTE_A))
+                .isEqualTo("050.00");
+        assertThat(jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(raw_payload, '$.\"정류장번호\"')) "
+                + "FROM transit_source_metadata WHERE data_kind='STOP' AND source_key='stop-1'", String.class))
+                .isEqualTo("00001");
+        assertThat(jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(raw_payload, '$.\"링크거리누계\"')) "
+                + "FROM transit_source_metadata WHERE data_kind='OCCURRENCE' AND source_key='9:100100586:2'", String.class))
+                .isEqualTo("000.50");
+
+        syncService.syncSeoulSnapshot(source, collected, collectedAt);
+        assertThat(jdbc.queryForList("SELECT * FROM transit_source_metadata ORDER BY id")).isEqualTo(before);
+        DatabaseSnapshot after = databaseSnapshot();
+        assertThat(after.routes()).isEqualTo(normalized.routes());
+        assertThat(after.stops()).isEqualTo(normalized.stops());
+        assertThat(after.occurrences()).isEqualTo(normalized.occurrences());
+
+        Instant newCollection = collectedAt.plusSeconds(60);
+        syncService.syncSeoulSnapshot(source, source.fetchSnapshotWithRawRows(), newCollection);
+        assertThat(jdbc.queryForObject("SELECT collected_at FROM transit_source_metadata "
+                + "WHERE data_kind='ROUTE' AND source_key=?", java.time.LocalDateTime.class, ROUTE_A))
+                .isEqualTo(java.time.LocalDateTime.ofInstant(newCollection, java.time.ZoneOffset.UTC));
+        assertThat(jdbc.queryForList("SELECT id FROM transit_source_metadata ORDER BY id", Long.class))
+                .containsExactlyElementsOf(before.stream().map(row -> ((Number) row.get("id")).longValue()).toList());
+    }
+
+    @Test
+    @DisplayName("원본 일부 저장 후 실패하면 해당 노선 전체 rollback하고 cleanup과 완료 시각을 보존한다")
+    void roll_back_raw_and_normalized_data_when_raw_insert_fails() {
+        seedMetadata();
+        DatabaseSnapshot before = databaseSnapshot();
+        List<Map<String, Object>> rawBefore = jdbc.queryForList("SELECT * FROM transit_source_metadata ORDER BY id");
+        BusMetadataBootstrapService bootstrap = bootstrap(source(ROUTES.replace("7016", "변경 노선"), ROUTE_STOPS,
+                STOPS.replace("첫 정류장", "변경 정류장")));
+        jdbc.execute("""
+                CREATE TRIGGER reject_raw_occurrence BEFORE INSERT ON transit_source_metadata
+                FOR EACH ROW BEGIN
+                  IF NEW.data_kind = 'OCCURRENCE' THEN
+                    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'test raw occurrence failure';
+                  END IF;
+                END
+                """);
+        try {
+            assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.SEOUL_BUS))
+                    .isInstanceOf(DataAccessException.class);
+            assertThat(databaseSnapshot()).isEqualTo(before);
+            assertThat(jdbc.queryForList("SELECT * FROM transit_source_metadata ORDER BY id")).isEqualTo(rawBefore);
+        } finally {
+            jdbc.execute("DROP TRIGGER reject_raw_occurrence");
+        }
+        bootstrap.bootstrap(TransitProvider.SEOUL_BUS);
+        assertThat(lastCompleteSyncAt()).isAfter(PREVIOUS_COMPLETION);
+        assertThat(jdbc.queryForObject("SELECT route_number FROM bus_routes WHERE external_route_id=?",
+                String.class, ROUTE_A)).isEqualTo("변경 노선");
+    }
+
+    @Test
+    @DisplayName("나중 노선 원본 저장 실패는 앞서 성공한 노선은 유지하고 cleanup을 생략한다")
+    void retain_earlier_route_commit_when_later_raw_write_fails() {
+        seedMetadata();
+        jdbc.execute("""
+                CREATE TRIGGER reject_second_route_raw BEFORE INSERT ON transit_source_metadata
+                FOR EACH ROW BEGIN
+                  IF NEW.data_kind = 'OCCURRENCE' AND NEW.source_key = '9:100100586:1' THEN
+                    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'second route raw failure';
+                  END IF;
+                END
+                """);
+        try {
+            assertThatThrownBy(() -> bootstrap(source(ROUTES.replace("7016", "앞 노선 변경")
+                    .replace("N26", "뒤 노선 변경"), ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS))
+                    .isInstanceOf(DataAccessException.class);
+            assertThat(jdbc.queryForObject("SELECT route_number FROM bus_routes WHERE external_route_id=?",
+                    String.class, ROUTE_A)).isEqualTo("앞 노선 변경");
+            assertThat(jdbc.queryForObject("SELECT route_number FROM bus_routes WHERE external_route_id=?",
+                    String.class, ROUTE_B)).isEqualTo("N26");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='stale-route'",
+                    Integer.class)).isEqualTo(1);
+            assertThat(lastCompleteSyncAt()).isEqualTo(PREVIOUS_COMPLETION);
+        } finally {
+            jdbc.execute("DROP TRIGGER reject_second_route_raw");
         }
     }
 
