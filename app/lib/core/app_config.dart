@@ -4,7 +4,7 @@ class AppConfig {
     required this.googleIosClientId,
     required this.googleServerClientId,
     this.requireHttps = false,
-    this.appleLoginEnabled = false,
+    this.appleLoginEnabled = true,
   });
 
   factory AppConfig.fromEnvironment() => const AppConfig(
@@ -12,7 +12,10 @@ class AppConfig {
     googleIosClientId: String.fromEnvironment('GOOGLE_IOS_CLIENT_ID'),
     googleServerClientId: String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID'),
     requireHttps: bool.fromEnvironment('dart.vm.product'),
-    appleLoginEnabled: bool.fromEnvironment('APPLE_LOGIN_ENABLED'),
+    appleLoginEnabled: bool.fromEnvironment(
+      'APPLE_LOGIN_ENABLED',
+      defaultValue: true,
+    ),
   );
 
   final String apiBaseUrl;

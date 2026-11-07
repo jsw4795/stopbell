@@ -80,7 +80,7 @@ StopBellApplication app(
   Future<List<BusRouteStopOccurrence>> Function(int)? findStops,
   AlarmClient? alarmClient,
   Authenticator? appleAuthenticator,
-  bool appleLoginEnabled = false,
+  bool appleLoginEnabled = true,
 }) => StopBellApplication(
   authSession: authSession,
   appleAuthenticator: appleAuthenticator,
@@ -146,6 +146,23 @@ class FlowAlarms extends Fake implements AlarmClient {
 }
 
 void main() {
+  testWidgets('기본 설정에서 iOS Apple 버튼을 표시한다', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.pumpWidget(
+      StopBellApplication(
+        authSession: session(FakeAuthenticator(), FakeStorage()),
+        appleAuthenticator: FakeAuthenticator(),
+        searchRoutes: (_) async => <BusRoute>[],
+        findStops: (_) async => <BusRouteStopOccurrence>[],
+        alarmClient: EmptyAlarmClient(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Apple로 계속하기'), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('Apple 버튼은 iOS와 활성화 조건을 모두 만족할 때만 표시한다', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -154,6 +171,7 @@ void main() {
       app(
         session(FakeAuthenticator(), FakeStorage()),
         appleAuthenticator: apple,
+        appleLoginEnabled: false,
       ),
     );
     await tester.pumpAndSettle();
@@ -179,6 +197,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Apple로 계속하기'), findsNothing);
+    expect(apple.calls, 0);
     debugDefaultTargetPlatformOverride = null;
   });
 

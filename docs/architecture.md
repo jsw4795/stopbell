@@ -671,7 +671,7 @@ Actuator가 제공하는 Micrometer registry를 사용한다. `stopbell.transit.
 
 ## Apple 인증 기반 (TASK-815-A)
 
-Apple 인증 Backend API는 기본 활성화되며 Flutter iOS 로그인은 별도 활성화가 필요하다. Flutter의 `APPLE_LOGIN_ENABLED` 기본값은 false이고 Backend 활성화 상태와 일치해야 한다. Flutter는 서버 challenge의 nonce 원본으로 네이티브 인증을 요청한 뒤 ID token·code·nonce를 Backend에 전달한다. Backend가 발급한 StopBell Token Pair만 기존 공통 AuthSession에 저장한다. 취소는 인증 실패로 표시하지 않으며 오류·timeout에서 code를 자동 재전송하지 않는다. 각 Provider는 별도 계정이며 화면에서 안내한다.
+Apple 인증 Backend API는 기본 활성화되며 Flutter iOS 로그인도 기본 활성화된다. Flutter의 `APPLE_LOGIN_ENABLED` 기본값은 true이며 명시적으로 false를 지정해 비활성화할 수 있고 Backend 활성화 상태와 일치해야 한다. Flutter는 서버 challenge의 nonce 원본으로 네이티브 인증을 요청한 뒤 ID token·code·nonce를 Backend에 전달한다. Backend가 발급한 StopBell Token Pair만 기존 공통 AuthSession에 저장한다. 취소는 인증 실패로 표시하지 않으며 오류·timeout에서 code를 자동 재전송하지 않는다. 각 Provider는 별도 계정이며 화면에서 안내한다.
 
 동일 TokenPairStorage 인스턴스를 공유하는 AuthSession의 복원·저장·삭제는 직렬화한다. 로그인 저장 중 세션이 종료되면 저장이 끝난 뒤 같은 직렬화 경계에서 그 Pair를 제거하고 다음 세션의 복원·저장으로 넘어간다. 저장소가 이 제거를 거부하면 예외를 전파하며 Pair가 남을 수 있다. 별개의 Storage 인스턴스나 별도 프로세스 사이의 원자적 조정은 이 계약에 포함되지 않는다. 정식 앱은 하나의 Storage 인스턴스를 공유한다.
 
