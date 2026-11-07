@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/features/transit/bus_route_timeline.dart';
+import 'package:stopbell/features/transit/stop_display_name.dart';
 
 const outbound = '회차 환승센터';
 const inbound = '차고지';
@@ -54,6 +55,95 @@ Widget timeline(List<BusRouteStopOccurrence> stops, {double scale = 1}) =>
     );
 
 void main() {
+  test('only the exact trimmed suffix is interpreted for display', () {
+    for (final (source, name, nonstop) in [
+      ('강남역', '강남역', false),
+      ('강남역(미정차)', '강남역', true),
+      ('  강남역 (미정차)  ', '강남역', true),
+      ('강남역(미정차) 이후', '강남역(미정차) 이후', false),
+      ('강남역(미정차중)', '강남역(미정차중)', false),
+      ('강남역( 미정차 )', '강남역( 미정차 )', false),
+    ]) {
+      final display = stopDisplayName(source);
+      expect(display.name, name);
+      expect(display.isNonstop, nonstop);
+    }
+  });
+
+  for (final brightness in Brightness.values) {
+    testWidgets('nonstop badge and selected marker in $brightness', (
+      tester,
+    ) async {
+      final stops = [stop(1, '강남역 (미정차)', null), stop(2, '강남역', null)];
+      BusRouteStopOccurrence? selected;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(brightness: brightness),
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) => BusRouteTimeline(
+                stops: stops,
+                targetId: selected?.id,
+                onSelect: (stop) => setState(() => selected = stop),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final firstLabel = tester.widget<Text>(
+        find.descendant(of: row(1), matching: find.byType(Text)).first,
+      );
+      expect(firstLabel.textSpan!.toPlainText(), contains('강남역  미정차'));
+      expect(firstLabel.textSpan!.toPlainText(), isNot(contains('(미정차)')));
+      expect(
+        find.descendant(of: row(2), matching: find.textContaining('미정차')),
+        findsNothing,
+      );
+      expect(firstLabel.textSpan!.toPlainText(), contains('노선 순서 2'));
+      final badge =
+          (firstLabel.textSpan! as TextSpan).children!.first as TextSpan;
+      expect(badge.text, '  미정차 ');
+      final badgeLight = badge.style!.color!.computeLuminance();
+      final backgroundLight = badge.style!.backgroundColor!.computeLuminance();
+      final contrast = (badgeLight > backgroundLight
+          ? (badgeLight + 0.05) / (backgroundLight + 0.05)
+          : (backgroundLight + 0.05) / (badgeLight + 0.05));
+      expect(contrast, greaterThanOrEqualTo(4.5));
+      expect(
+        find.descendant(
+          of: row(1),
+          matching: find.byWidgetPredicate(
+            (w) => w is Opacity && w.opacity == 0.7,
+          ),
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(row(1));
+      await tester.pumpAndSettle();
+      expect(selected?.name, '강남역 (미정차)');
+      final semantics = tester.widgetList<Semantics>(
+        find.descendant(of: row(1), matching: find.byType(Semantics)),
+      );
+      expect(semantics.any((item) => item.properties.selected == true), isTrue);
+      expect(
+        find.descendant(of: row(1), matching: find.byIcon(Icons.flag_outlined)),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: row(1),
+          matching: find.byWidgetPredicate(
+            (w) => w is Opacity && w.opacity == 0.7,
+          ),
+        ),
+        findsNothing,
+      );
+      expect(stops.first.name, '강남역 (미정차)');
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets(
     'single traversal preserves order and uses the first return occurrence even with a repeated turn name',
     (tester) async {
@@ -132,7 +222,7 @@ void main() {
                 ? outbound
                 : id == 449
                 ? inbound
-                : (id.isEven ? '환승센터 방면 아주 긴 정류장 이름 · $id' : '정류장 $id'),
+                : (id.isEven ? '환승센터 방면 아주 긴 정류장 이름 · $id (미정차)' : '정류장 $id'),
             id < 377 ? outbound : inbound,
           ),
       ];

@@ -176,6 +176,31 @@ void main() {
     });
   }
 
+  testWidgets('nonstop occurrences remain selectable as boarding and target', (
+    tester,
+  ) async {
+    await setup(tester);
+    final stops = [
+      for (final (id, name) in [(1, '승차(미정차)'), (2, '목표 (미정차)')])
+        BusRouteStopOccurrence(
+          id: id,
+          name: name,
+          order: id,
+          canNotifyOneStopBefore: true,
+          canNotifyOneStopAfter: true,
+        ),
+    ];
+    await tester.pumpWidget(screen(stops: (_) async => stops));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('승차  미정차'), findsOneWidget);
+    await tap(tester, 'occurrence-1');
+    await tap(tester, 'occurrence-2');
+    await tap(tester, 'find-candidates');
+    await tester.pumpAndSettle();
+    expect(queries.single, (754, 2, 1));
+    expect(stops.map((s) => s.name), ['승차(미정차)', '목표 (미정차)']);
+  });
+
   testWidgets(
     'system back restores the selected stops and scroll and ignores a late query',
     (tester) async {

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import 'bus_route_stop_occurrence.dart';
+import 'stop_display_name.dart';
 
 /// The stops API only supplies destinations for a verified GBIS traversal:
 /// stops before turnSeq point to the turn; turnSeq and later point to the end.
@@ -37,7 +38,11 @@ import 'bus_route_stop_occurrence.dart';
 Map<String, int> _nameCounts(List<BusRouteStopOccurrence> stops) {
   final counts = <String, int>{};
   for (final stop in stops) {
-    counts.update(stop.name, (count) => count + 1, ifAbsent: () => 1);
+    counts.update(
+      stopDisplayName(stop.name).name,
+      (count) => count + 1,
+      ifAbsent: () => 1,
+    );
   }
   return counts;
 }
@@ -47,7 +52,10 @@ String? selectedStopContext(
   BusRouteStopOccurrence stop,
   List<BusRouteStopOccurrence> stops,
 ) {
-  final sameName = stops.where((item) => item.name == stop.name);
+  final sameName = stops.where(
+    (item) =>
+        stopDisplayName(item.name).name == stopDisplayName(stop.name).name,
+  );
   final sameDestination = sameName.where(
     (item) => item.destinationName == stop.destinationName,
   );
@@ -149,7 +157,8 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
     final stop = widget.stops[index];
     final details = [
       if (index == _turn?.index) '회차지점',
-      if ((_counts[stop.name] ?? 0) > 1) '노선 순서 ${stop.order}',
+      if ((_counts[stopDisplayName(stop.name).name] ?? 0) > 1)
+        '노선 순서 ${stop.order}',
     ];
     return details.isEmpty ? null : details.join(' · ');
   }
@@ -197,6 +206,15 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                   color: theme.colorScheme.onSurface,
                   fontWeight: FontWeight.w600,
                 ),
+                mutedTitle: theme.textTheme.titleMedium!.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+                badge: theme.textTheme.labelSmall!.copyWith(
+                  color: theme.colorScheme.onSecondaryContainer,
+                  backgroundColor: theme.colorScheme.secondaryContainer,
+                  fontWeight: FontWeight.w600,
+                ),
                 detail: theme.textTheme.bodySmall!.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -206,7 +224,10 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
               if (_layout?.metrics != metrics) {
                 _layout = _TimelineLayout(metrics, [
                   for (var index = 0; index < widget.stops.length; index++)
-                    (widget.stops[index].name, _rowDetails(index)),
+                    (
+                      stopDisplayName(widget.stops[index].name),
+                      _rowDetails(index),
+                    ),
                 ]);
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted) _updateDirection();
@@ -233,6 +254,7 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                   return _StopRow(
                     key: widget.rowKey?.call(stop.id) ?? ValueKey(stop.id),
                     label: layout.labels[index],
+                    nonstop: stopDisplayName(stop.name).isNonstop,
                     first: index == 0,
                     last: index == widget.stops.length - 1,
                     turn: index == turn?.index,
@@ -264,6 +286,8 @@ typedef _TextMetrics = ({
   TextDirection direction,
   Locale? locale,
   TextStyle title,
+  TextStyle mutedTitle,
+  TextStyle badge,
   TextStyle detail,
   TextHeightBehavior? heightBehavior,
   bool bold,
@@ -272,21 +296,26 @@ typedef _TextMetrics = ({
 /// The exact extent used by the sliver is measured once per text layout.
 /// Index offsets and the viewport share these extents, including wrapped rows.
 class _TimelineLayout {
-  _TimelineLayout(this.metrics, List<(String, String?)> rows) {
+  _TimelineLayout(
+    this.metrics,
+    List<(({String name, bool isNonstop}), String?)> rows,
+  ) {
     final painter = TextPainter(
       textScaler: metrics.scaler,
       textDirection: metrics.direction,
       locale: metrics.locale,
       textHeightBehavior: metrics.heightBehavior,
     );
-    for (final (name, detail) in rows) {
+    for (final (display, detail) in rows) {
+      final baseTitle = display.isNonstop ? metrics.mutedTitle : metrics.title;
       final title = metrics.bold
-          ? metrics.title.copyWith(fontWeight: FontWeight.bold)
-          : metrics.title;
+          ? baseTitle.copyWith(fontWeight: FontWeight.bold)
+          : baseTitle;
       final span = TextSpan(
-        text: name,
+        text: display.name,
         style: title,
         children: [
+          if (display.isNonstop) TextSpan(text: '  미정차 ', style: metrics.badge),
           if (detail != null)
             TextSpan(
               text: '\n$detail',
@@ -350,6 +379,7 @@ class _StopRow extends StatelessWidget {
   const _StopRow({
     super.key,
     required this.label,
+    required this.nonstop,
     required this.first,
     required this.last,
     required this.turn,
@@ -361,6 +391,7 @@ class _StopRow extends StatelessWidget {
 
   static const gutters = 96.0;
   final TextSpan label;
+  final bool nonstop;
   final bool first;
   final bool last;
   final bool turn;
@@ -414,21 +445,24 @@ class _StopRow extends StatelessWidget {
                         ),
                       ),
                     Center(
-                      child: Container(
-                        width: turn ? 24 : 16,
-                        height: turn ? 24 : 16,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: selected || turn ? accent : colors.surface,
-                          border: Border.all(color: accent, width: 2),
+                      child: Opacity(
+                        opacity: nonstop && !selected ? 0.7 : 1,
+                        child: Container(
+                          width: turn ? 24 : 16,
+                          height: turn ? 24 : 16,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: selected || turn ? accent : colors.surface,
+                            border: Border.all(color: accent, width: 2),
+                          ),
+                          child: turn
+                              ? Icon(
+                                  Icons.turn_left,
+                                  size: 15,
+                                  color: colors.onPrimary,
+                                )
+                              : null,
                         ),
-                        child: turn
-                            ? Icon(
-                                Icons.turn_left,
-                                size: 15,
-                                color: colors.onPrimary,
-                              )
-                            : null,
                       ),
                     ),
                   ],

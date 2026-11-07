@@ -101,6 +101,7 @@ void main() {
         }),
       );
       await tester.pumpAndSettle();
+      expect(find.textContaining('교차로  미정차'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey(2)));
       await tester.pumpAndSettle();
       await tester.tap(find.text('한 정거장 전 알림'));
