@@ -16,6 +16,7 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -26,11 +27,26 @@ public class TagoMetadataClient {
     private final RestClient restClient; private final TransitClientProperties.Tago properties;
     private final ObjectMapper objectMapper = JsonMapper.builder()
             .enable(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
             .build();
     public TagoMetadataClient(RestClient restClient, TransitClientProperties.Tago properties) { this.restClient = restClient; this.properties = properties; }
     public List<City> cityCodes() { try { CityResponse r=objectMapper.readValue(get(CITY_CODES,null,null,null),CityResponse.class); return items(r.response, CITY_CODES); } catch(Exception e){throw protocol(CITY_CODES,e);} }
     public Page<Route> routes(String cityCode, int page) { try { RouteResponse r=objectMapper.readValue(get(ROUTES,cityCode,null,page),RouteResponse.class); return page(r.response, ROUTES); } catch(Exception e){throw protocol(ROUTES,e);} }
     public Page<Stop> routeStops(String cityCode, String routeId, int page) { try { StopResponse r=objectMapper.readValue(get(ROUTE_STOPS,cityCode,routeId,page),StopResponse.class); return page(r.response, ROUTE_STOPS); } catch(Exception e){throw protocol(ROUTE_STOPS,e);} }
+    public Page<RawItem<Route>> routesWithRaw(String cityCode, int page) { return rawPage(ROUTES, cityCode, null, page, Route.class); }
+    public Page<RawItem<Stop>> routeStopsWithRaw(String cityCode, String routeId, int page) { return rawPage(ROUTE_STOPS, cityCode, routeId, page, Stop.class); }
+    private <T> Page<RawItem<T>> rawPage(String operation, String cityCode, String routeId, int number, Class<T> type) {
+        try {
+            RawResponse response = objectMapper.readValue(get(operation, cityCode, routeId, number), RawResponse.class);
+            Page<JsonNode> page = page(response.response, operation);
+            List<RawItem<T>> items = page.items().stream().map(node -> {
+                if (!node.isObject()) throw TransitProviderClientException.protocol(TransitProvider.TAGO, operation, null);
+                return new RawItem<>(objectMapper.treeToValue(node, type), node);
+            }).toList();
+            return new Page<>(items, page.totalCount(), page.pageNo());
+        } catch (Exception e) { throw protocol(operation, e); }
+    }
     private String get(String operation, String cityCode, String routeId, Integer page) {
         try {
             return restClient.get().uri(uri(operation, cityCode, routeId, page)).accept(MediaType.APPLICATION_JSON).retrieve().body(String.class);
@@ -45,12 +61,14 @@ public class TagoMetadataClient {
     private <T> Body<T> body(Envelope<T> response, String operation) { if(response==null||response.header==null||response.body==null||response.header.resultCode==null)throw TransitProviderClientException.protocol(TransitProvider.TAGO,operation,null); if(!"00".equals(response.header.resultCode))throw TransitProviderClientException.provider(TransitProvider.TAGO,operation,response.header.resultCode); return response.body; }
     private TransitProviderClientException protocol(String operation, Exception e) { return e instanceof TransitProviderClientException x ? x : TransitProviderClientException.protocol(TransitProvider.TAGO, operation, e); }
     public record Page<T>(List<T> items, int totalCount, int pageNo) { }
+    public record RawItem<T>(T normalized, JsonNode fields) { }
     public record City(String citycode, String cityname) { }
     public record Route(String routeid, String routeno) { }
     public record Stop(String nodeid, String nodenm, Integer nodeord, BigDecimal gpslati, BigDecimal gpslong) { }
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true) record CityResponse(Envelope<City> response) { }
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true) record RouteResponse(Envelope<Route> response) { }
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true) record StopResponse(Envelope<Stop> response) { }
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true) record RawResponse(Envelope<JsonNode> response) { }
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true) record Envelope<T>(Header header, Body<T> body) { }
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true) record Header(String resultCode) { }
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true) record Body<T>(Items<T> items, Integer totalCount, Integer pageNo) { }

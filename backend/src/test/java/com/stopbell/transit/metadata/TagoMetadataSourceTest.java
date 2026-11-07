@@ -18,6 +18,43 @@ import org.mockito.Mockito;
 
 class TagoMetadataSourceTest {
     @Test
+    @DisplayName("원본을 수집해도 GBIS 목적지만 정규화 결과에 보강한다")
+    void raw_collection_keeps_gbis_enrichment_separate() {
+        TagoMetadataClient tago = Mockito.mock(TagoMetadataClient.class);
+        GbisMetadataClient gbis = Mockito.mock(GbisMetadataClient.class);
+        String routes = "routeId|routeName|turnSeq^200|300|2";
+        String stations = "routeId|routeName|upDown|staOrder|stationId|stationName|x|y^"
+                + "200|300|상행|1|10|출발|127|37^200|300|하행|2|20|종점|127|37";
+        when(gbis.fetch()).thenReturn(GbisBulkMetadata.parse(routes.getBytes(StandardCharsets.UTF_8), stations.getBytes(StandardCharsets.UTF_8), "1", "1"));
+        when(tago.cityCodes()).thenReturn(List.of(new TagoMetadataClient.City("31010", "수원시")));
+        var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
+        var routeFields = mapper.readTree("{\"routeid\":\"GGB200\",\"routeno\":\"300\"}");
+        var stopFields = mapper.readTree("{\"nodeid\":\"GGB10\",\"nodeord\":1}");
+        when(tago.routesWithRaw("31010", 1)).thenReturn(page(List.of(new TagoMetadataClient.RawItem<>(new TagoMetadataClient.Route("GGB200", "300"), routeFields)), 1, 1));
+        when(tago.routeStopsWithRaw("31010", "GGB200", 1)).thenReturn(page(List.of(
+                new TagoMetadataClient.RawItem<>(new TagoMetadataClient.Stop("GGB10", "출발", 1, null, null), stopFields),
+                new TagoMetadataClient.RawItem<>(new TagoMetadataClient.Stop("GGB20", "종점", 2, null, null), mapper.readTree("{\"nodeid\":\"GGB20\",\"nodeord\":2}"))), 2, 1));
+        var result = new TagoMetadataSource(tago, gbis, 0, Set.of("31010")).fetchSnapshotWithRawRows();
+        assertThat(result.normalized().routes().getFirst().occurrences().getFirst().destinationName()).isEqualTo("종점");
+        assertThat(result.rawRows().get(1).fields()).isEqualTo(stopFields);
+        verify(tago).routesWithRaw("31010", 1);
+        verify(tago).routeStopsWithRaw("31010", "GGB200", 1);
+        verify(tago, never()).routes(anyString(), anyInt());
+        verify(tago, never()).routeStops(anyString(), anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("원본 수집 중 페이지가 누락되면 부분 결과를 반환하지 않는다")
+    void raw_collection_rejects_incomplete_pages() {
+        TagoMetadataClient client = Mockito.mock(TagoMetadataClient.class);
+        when(client.cityCodes()).thenReturn(List.of(new TagoMetadataClient.City("31010", "수원시")));
+        var fields = tools.jackson.databind.json.JsonMapper.builder().build().readTree("{\"routeid\":\"r1\"}");
+        when(client.routesWithRaw("31010", 1)).thenReturn(page(List.of(new TagoMetadataClient.RawItem<>(new TagoMetadataClient.Route("r1", "1"), fields)), 1, 1));
+        when(client.routeStopsWithRaw("31010", "r1", 1)).thenReturn(page(List.of(), 1, 1));
+        assertThatThrownBy(() -> new TagoMetadataSource(client, 0, Set.of("31010")).fetchSnapshotWithRawRows())
+                .isInstanceOf(IllegalStateException.class);
+    }
+    @Test
     void invalid_gbis_bulk_prevents_complete_tago_snapshot() {
         TagoMetadataClient tago = Mockito.mock(TagoMetadataClient.class);
         GbisMetadataClient gbis = Mockito.mock(GbisMetadataClient.class);

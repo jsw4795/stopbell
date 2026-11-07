@@ -6,12 +6,15 @@ import java.util.List;
 import java.util.Set;
 
 import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.transit.domain.TransitSourceDataKind;
+import com.stopbell.transit.domain.TransitSourceSystem;
 import com.stopbell.transit.service.BusMetadataSource;
 import com.stopbell.transit.service.BusRouteMetadataSnapshot;
 import com.stopbell.transit.service.BusStopOccurrenceMetadataSnapshot;
 import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
 
 public final class TagoMetadataSource implements BusMetadataSource {
     // The 31 codes returned for Gyeonggi by the documented TAGO PoC; no prefix/name heuristic is used.
@@ -32,18 +35,40 @@ public final class TagoMetadataSource implements BusMetadataSource {
     }
     @Override public TransitProvider provider() { return TransitProvider.TAGO; }
     @Override public CompleteBusMetadataSnapshot fetchCompleteSnapshot() {
+        return collect(false).normalized();
+    }
+    public TagoSnapshot fetchSnapshotWithRawRows() {
+        return collect(true);
+    }
+    private TagoSnapshot collect(boolean preserveRaw) {
         // A failed bulk fetch is never treated as an empty, complete enrichment source.
         GbisBulkMetadata gbis = gbisClient == null ? null : gbisClient.fetch();
         pace(); Set<String> discovered = new HashSet<>(); for (TagoMetadataClient.City city : client.cityCodes()) { if (city.citycode()==null) throw new IllegalStateException("TAGO city code missing"); discovered.add(city.citycode()); }
         if (!discovered.containsAll(gyeonggiCodes)) throw new IllegalStateException("TAGO city discovery did not verify every Gyeonggi city code");
         log.info("TAGO city discovery complete: gyeonggiCities={}", gyeonggiCodes.size());
         List<BusRouteMetadataSnapshot> snapshots=new ArrayList<>(); Set<String> routeIds=new HashSet<>();
+        List<RawSourceRow> rawRows = new ArrayList<>();
         int routesProcessed = 0;
         for (String city : gyeonggiCodes) {
-            List<TagoMetadataClient.Route> routes = pages(page -> client.routes(city, page));
+            List<TagoMetadataClient.RawItem<TagoMetadataClient.Route>> routes = pages(page -> preserveRaw
+                    ? client.routesWithRaw(city, page) : wrap(client.routes(city, page)));
             log.info("TAGO route discovery complete: cityCode={}, routes={}", city, routes.size());
-            for (TagoMetadataClient.Route route : routes) {
-                required(route.routeid()); required(route.routeno()); if(!routeIds.add(route.routeid())) throw new IllegalStateException("TAGO duplicate route identity"); List<BusStopOccurrenceMetadataSnapshot> stops=new ArrayList<>(); for(TagoMetadataClient.Stop stop:pages(p->client.routeStops(city,route.routeid(),p))) stops.add(new BusStopOccurrenceMetadataSnapshot(required(stop.nodeid()),required(stop.nodenm()),stop.gpslati(),stop.gpslong(),required(stop.nodeord()))); if(stops.isEmpty()) throw new IllegalStateException("TAGO route has no stops"); snapshots.add(new BusRouteMetadataSnapshot(provider(),route.routeid(),route.routeno(),city,stops));
+            for (TagoMetadataClient.RawItem<TagoMetadataClient.Route> routeItem : routes) {
+                TagoMetadataClient.Route route = routeItem.normalized();
+                required(route.routeid()); required(route.routeno());
+                if(!routeIds.add(route.routeid())) throw new IllegalStateException("TAGO duplicate route identity");
+                if (preserveRaw) rawRows.add(new RawSourceRow(TransitSourceSystem.TAGO, TransitSourceDataKind.ROUTE, route.routeid(), route.routeid(), null, routeItem.fields()));
+                List<BusStopOccurrenceMetadataSnapshot> stops=new ArrayList<>();
+                for (TagoMetadataClient.RawItem<TagoMetadataClient.Stop> stopItem : pages(p -> preserveRaw
+                        ? client.routeStopsWithRaw(city, route.routeid(), p) : wrap(client.routeStops(city, route.routeid(), p)))) {
+                    TagoMetadataClient.Stop stop = stopItem.normalized();
+                    int order = required(stop.nodeord());
+                    stops.add(new BusStopOccurrenceMetadataSnapshot(required(stop.nodeid()),required(stop.nodenm()),stop.gpslati(),stop.gpslong(),order));
+                    if (preserveRaw) rawRows.add(new RawSourceRow(TransitSourceSystem.TAGO, TransitSourceDataKind.OCCURRENCE,
+                            occurrenceSourceKey(route.routeid(), order), route.routeid(), order, stopItem.fields()));
+                }
+                if(stops.isEmpty()) throw new IllegalStateException("TAGO route has no stops");
+                snapshots.add(new BusRouteMetadataSnapshot(provider(),route.routeid(),route.routeno(),city,stops));
                 routesProcessed++;
                 if (routesProcessed % PROGRESS_LOG_INTERVAL == 0) {
                     log.info("TAGO route stop collection progress: routesProcessed={}", routesProcessed);
@@ -59,8 +84,18 @@ public final class TagoMetadataSource implements BusMetadataSource {
                     snapshots.size() - enriched.enrichedRoutes(), enriched.destinationOccurrences(), enriched.skippedRoutes());
             snapshots = enriched.routes();
         }
-        return new CompleteBusMetadataSnapshot(provider(), snapshots);
+        return new TagoSnapshot(new CompleteBusMetadataSnapshot(provider(), snapshots), rawRows);
     }
+    private static <T> TagoMetadataClient.Page<TagoMetadataClient.RawItem<T>> wrap(TagoMetadataClient.Page<T> page) {
+        return new TagoMetadataClient.Page<>(page.items().stream().map(item -> new TagoMetadataClient.RawItem<>(item, null)).toList(), page.totalCount(), page.pageNo());
+    }
+    public static String occurrenceSourceKey(String routeId, int order) { return routeId.length() + ":" + routeId + ":" + order; }
+    public record TagoSnapshot(CompleteBusMetadataSnapshot normalized, List<RawSourceRow> rawRows) {
+        public TagoSnapshot { rawRows = List.copyOf(rawRows); }
+    }
+    /** Fields are the original TAGO item; route and order are external linking identifiers. */
+    public record RawSourceRow(TransitSourceSystem sourceSystem, TransitSourceDataKind dataKind, String sourceKey,
+                               String externalRouteId, Integer stopOrder, JsonNode fields) { }
     private <T> List<T> pages(java.util.function.IntFunction<TagoMetadataClient.Page<T>> fetch) { List<T> all=new ArrayList<>(); int page=1,total=-1; while(total<0||all.size()<total){ pace(); TagoMetadataClient.Page<T> result=fetch.apply(page++); if(result.totalCount()<0||result.pageNo()!=page-1||result.items()==null) throw new IllegalStateException("TAGO pagination protocol failure"); if(total<0)total=result.totalCount(); else if(total!=result.totalCount())throw new IllegalStateException("TAGO pagination total changed"); if(result.items().isEmpty()&&all.size()<total)throw new IllegalStateException("TAGO pagination incomplete"); all.addAll(result.items()); if(all.size()>total)throw new IllegalStateException("TAGO pagination overflow"); } return all; }
     private void pace(){ if(requestIntervalMillis<=0)return; try{Thread.sleep(requestIntervalMillis);}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException("TAGO sync interrupted",e);} }
     private static String required(String value){if(value==null||value.isBlank())throw new IllegalStateException("TAGO required field missing");return value;} private static int required(Integer value){if(value==null||value<=0)throw new IllegalStateException("TAGO stop order missing");return value;}

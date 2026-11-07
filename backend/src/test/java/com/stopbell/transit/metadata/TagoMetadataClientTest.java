@@ -83,6 +83,64 @@ class TagoMetadataClientTest {
     }
 
     @Test
+    @DisplayName("단일 TAGO 노선의 모든 원본 필드와 JSON 타입을 보존한다")
+    void raw_route_preserves_fields_and_types() {
+        expect(TagoMetadataClient.ROUTES, "serviceKey=test-service-key&pageNo=1&numOfRows=1000&_type=json&cityCode=31130")
+                .andRespond(json("""
+                        {"response":{"header":{"resultCode":"00"},"body":{"items":{"item":
+                        {"routeid":"r1","routeno":165,"routetp":"일반버스","extra":{"flag":true},"text":"123"}},
+                        "totalCount":1,"pageNo":1}}}
+                        """));
+        var item = client.routesWithRaw("31130", 1).items().getFirst();
+        assertThat(item.normalized()).isEqualTo(new TagoMetadataClient.Route("r1", "165"));
+        assertThat(item.fields().get("routeno").isNumber()).isTrue();
+        assertThat(item.fields().get("text").isString()).isTrue();
+        assertThat(item.fields().get("routetp").asString()).isEqualTo("일반버스");
+        assertThat(item.fields().get("extra").get("flag").asBoolean()).isTrue();
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("TAGO 경유 정류장 배열의 추가 원본 필드를 보존한다")
+    void raw_stops_preserve_array_fields() {
+        expect(TagoMetadataClient.ROUTE_STOPS, "serviceKey=test-service-key&pageNo=1&numOfRows=1000&_type=json&cityCode=31010&routeId=r1")
+                .andRespond(json("""
+                        {"response":{"header":{"resultCode":"00"},"body":{"items":{"item":[
+                        {"nodeid":"s1","nodenm":"A","nodeord":1,"extra":null},
+                        {"nodeid":"s1","nodenm":"A","nodeord":2,"extra":42}]},"totalCount":2,"pageNo":1}}}
+                        """));
+        var items = client.routeStopsWithRaw("31010", "r1", 1).items();
+        assertThat(items).hasSize(2);
+        assertThat(items.getFirst().fields().get("extra").isNull()).isTrue();
+        assertThat(items.get(1).fields().get("extra").asInt()).isEqualTo(42);
+        assertThat(items.get(1).normalized().nodeord()).isEqualTo(2);
+        server.verify();
+    }
+
+    @Test
+    @DisplayName("원본 수집은 추가 요청 없이 모든 페이지와 반복 정류장을 정규화 결과와 함께 반환한다")
+    void source_collects_raw_and_normalized_from_same_requests() {
+        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&_type=json")
+                .andRespond(json("{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"citycode\":\"31010\"}}}}}"));
+        expect(TagoMetadataClient.ROUTES, "serviceKey=test-service-key&pageNo=1&numOfRows=1000&_type=json&cityCode=31010")
+                .andRespond(json("{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"routeid\":\"r:1\",\"routeno\":123,\"routetp\":\"일반\"}},\"totalCount\":1,\"pageNo\":1}}}"));
+        expect(TagoMetadataClient.ROUTE_STOPS, "serviceKey=test-service-key&pageNo=1&numOfRows=1000&_type=json&cityCode=31010&routeId=r:1")
+                .andRespond(json("{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"nodeid\":\"s\",\"nodenm\":\"A\",\"nodeord\":1,\"extra\":true}},\"totalCount\":2,\"pageNo\":1}}}"));
+        expect(TagoMetadataClient.ROUTE_STOPS, "serviceKey=test-service-key&pageNo=2&numOfRows=1000&_type=json&cityCode=31010&routeId=r:1")
+                .andRespond(json("{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":[{\"nodeid\":\"s\",\"nodenm\":\"A\",\"nodeord\":2,\"extra\":2}]},\"totalCount\":2,\"pageNo\":2}}}"));
+        var result = new TagoMetadataSource(client, 0, java.util.Set.of("31010")).fetchSnapshotWithRawRows();
+        assertThat(result.normalized().routes()).singleElement().satisfies(route -> {
+            assertThat(route.routeNumber()).isEqualTo("123");
+            assertThat(route.occurrences()).extracting("externalStopId").containsExactly("s", "s");
+            assertThat(route.occurrences()).extracting("stopOrder").containsExactly(1, 2);
+        });
+        assertThat(result.rawRows()).extracting("sourceKey").containsExactly("r:1", "3:r:1:1", "3:r:1:2");
+        assertThat(result.rawRows().get(2).fields().get("extra").asInt()).isEqualTo(2);
+        assertThat(result.rawRows()).allSatisfy(row -> assertThat(row.sourceSystem()).isEqualTo(com.stopbell.transit.domain.TransitSourceSystem.TAGO));
+        server.verify();
+    }
+
+    @Test
     @DisplayName("TAGO Route Stop JSON 응답을 metadata page로 변환한다")
     void route_stops_with_valid_response_maps_page() {
         expect(TagoMetadataClient.ROUTE_STOPS,
