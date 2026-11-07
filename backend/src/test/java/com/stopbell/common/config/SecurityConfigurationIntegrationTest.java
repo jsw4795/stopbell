@@ -347,6 +347,11 @@ class SecurityConfigurationIntegrationTest {
         }
 
         @Bean
+        com.stopbell.transit.service.TransitSourceMetadataService transitSourceMetadataService() {
+            return mock(com.stopbell.transit.service.TransitSourceMetadataService.class);
+        }
+
+        @Bean
         BusMetadataSyncStateRepository busMetadataSyncStateRepository() {
             return mock(BusMetadataSyncStateRepository.class);
         }
