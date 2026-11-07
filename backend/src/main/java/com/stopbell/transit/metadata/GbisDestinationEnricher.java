@@ -43,6 +43,17 @@ public final class GbisDestinationEnricher {
         return new Result(List.copyOf(result), enriched, destinations, Map.copyOf(skipped));
     }
 
+    /** Reuses the enrichment checks without building another enriched snapshot. */
+    public static Map<String, String> verifiedMatches(List<BusRouteMetadataSnapshot> tagoRoutes, GbisBulkMetadata gbis) {
+        Map<String, String> matches = new HashMap<>();
+        for (BusRouteMetadataSnapshot tago : tagoRoutes) {
+            String id = candidate(tago.externalRouteId());
+            GbisBulkMetadata.Route route = id == null ? null : gbis.routes().get(id);
+            if (mismatch(tago, route) == null) matches.put(id, tago.externalRouteId());
+        }
+        return Map.copyOf(matches);
+    }
+
     private static String mismatch(BusRouteMetadataSnapshot tago, GbisBulkMetadata.Route gbis) {
         if (gbis == null) return "candidate_missing";
         if (!tago.routeNumber().equals(gbis.routeName())) return "route_name";

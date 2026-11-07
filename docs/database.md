@@ -439,7 +439,7 @@ Route identity는 `(provider, external_route_id)`, Stop identity는 `(provider, 
 
 Route snapshot sync는 동일 Route/Stop identity의 display·operational metadata를 UPDATE해 내부 ID를 유지한다. occurrence는 `(route, stop, stopOrder)`가 완전히 같을 때만 내부 ID를 유지하며 Stop 또는 order가 바뀌면 기존 row를 삭제하고 새 row를 만든다. Route snapshot에서 사라진 occurrence는 제거한다. 검증된 complete provider snapshot만 typed boundary, completeness token/result, destructive method visibility 제한 또는 동등한 구조적 보호를 거쳐 provider-level cleanup에 들어간다. Partial fetch, pagination incomplete, parser failure, required source 누락, provider request 일부 실패와 검증되지 않은 empty result는 cleanup 근거가 아니다.
 
-`destination_name`은 V12 nullable migration으로 추가한 사용자 표시 metadata다. 동일 occurrence의 목적지만 변경되거나 경기 검증 실패로 null이 되면 기존 내부 ID를 유지하며 current snapshot 값으로 갱신한다. 서울 원본 동기화는 입력 행선지가 없을 때 기존 값을 보존한다. GBIS ID나 방향 raw field는 영속하지 않는다.
+`destination_name`은 V12 nullable migration으로 추가한 사용자 표시 metadata다. 동일 occurrence의 목적지만 변경되거나 경기 검증 실패로 null이 되면 기존 내부 ID를 유지하며 current snapshot 값으로 갱신한다. 서울 원본 동기화는 입력 행선지가 없을 때 기존 값을 보존한다. GBIS ID와 방향 raw field는 정규화 occurrence의 identity가 아니며 별도의 원본 메타데이터에 보존한다.
 
 TASK-513은 V10의 `bus_metadata_sync_states`에 `provider VARCHAR(20)` PK와 `last_complete_sync_at DATETIME(6) NOT NULL`을 저장한다. `BusMetadataSyncState`는 Java `Instant`로 매핑하며 complete sync 성공 뒤에만 갱신한다. fresh DB bootstrap 완료와 마지막 complete sync 성공 age의 근거이며 readiness 연계의 최종 검증은 TASK-807에 남는다. sync/checksum history, staging table, error journal은 추가하지 않았다.
 
@@ -452,6 +452,8 @@ V33은 기존 `bus_routes`에 nullable `route_type VARCHAR(24)`를 추가하고 
 저장 서비스는 단일 DB upsert로 동일 키의 행 ID를 유지하며 목록 전체를 하나의 트랜잭션에서 처리한다. 같은 입력의 재처리는 갱신 시각도 유지하고, 새 수집 시각이나 값이 바뀌면 갱신한다. 출처 간 충돌은 독립 행으로 보존한다. JSON은 원본의 필드와 JSON 값을 보존하며 원문 바이트 및 키 순서는 보장하지 않는다. 서울 CSV 파서는 정규화 snapshot과 별도로 서비스 범위 밖을 포함한 원본 행을 반환한다. 경유 키는 `노선ID 길이:노선ID:정류장순번`이며 순번은 검증된 양의 정수다. 서울 서비스 노선과 해당 정류장·경유 원본은 정규화 데이터와 같은 노선 transaction에서 내부 ID에 연결해 저장한다. 서비스 범위 밖 원본과 미참조 정류장도 종류와 원본 키로 구분해 500건 단위 transaction의 JDBC batch UPSERT로 저장하며 기존 FK를 보존한다. 모든 원본 저장 성공 후에만 cleanup과 완료 시각 갱신을 수행한다. 원본 파일 보관과 수집 이력은 후속 단계다. 일반 Route/Stop 조회는 원본 테이블을 읽지 않는다.
 
 TAGO는 정규화 snapshot과 같은 집합으로 검증된 ROUTE와 OCCURRENCE 원본을 노선별 transaction의 JDBC batch UPSERT로 저장하고 각각 route_id와 occurrence_id에 연결한다. 같은 원본 키의 행 ID는 유지하며 occurrence가 교체되면 새 내부 ID에 연결한다. TAGO STOP 원본은 생성하지 않고 source_version은 NULL이다. 전체 노선 성공 후에만 cleanup과 완료 시각 갱신을 수행한다.
+
+GBIS ROUTE와 OCCURRENCE 원본은 전체 수집 결과를 출처별 키와 공식 source version으로 UPSERT한다. 검증된 TAGO traversal에만 각각 route_id와 occurrence_id를 연결하며, 현재 일치하지 않는 수집 행은 기존 연결도 NULL로 갱신한다. GBIS 전용 원본도 보존하고 STOP을 합성하지 않는다. TAGO 노선 저장 후 500건씩 별도 transaction으로 저장하며 실패 시 cleanup과 완료 시각 갱신을 차단한다. 동일 수집과 시각의 재처리는 원본 ID와 변경되지 않은 updated_at을 유지하고, 미수집 원본은 삭제하지 않는다.
 
 ### Phase 9 Boarding persistence contract (TASK-903)
 
@@ -546,7 +548,7 @@ Session due JPQL은 Event·Session·Delivery를 join하고 위 두 Event 분기�
 
 ## 7. 외부 교통 데이터
 
-서울은 T Data CSV full import, 경기는 TAGO throttled full sync를 identity/traversal source로 사용한다. 경기는 GBIS route/routeStation bulk를 검증된 목적지 표시 metadata의 보강 source로만 사용하며 GBIS-only Route는 TAGO scope에 추가하지 않는다. static metadata를 DB에 보관하므로 사용자 Route/Stop 조회와 Alarm 생성이 외부 metadata 호출에 매번 의존하지 않는다.
+서울은 T Data CSV full import, 경기는 TAGO throttled full sync를 identity/traversal source로 사용한다. 경기는 GBIS route/routeStation bulk를 검증된 목적지 표시 metadata의 보강과 출처 원본 보존에 사용하며 GBIS-only Route는 TAGO scope에 추가하지 않는다. static metadata를 DB에 보관하므로 사용자 Route/Stop 조회와 Alarm 생성이 외부 metadata 호출에 매번 의존하지 않는다.
 
 ## 8. 인덱싱
 

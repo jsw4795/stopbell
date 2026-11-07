@@ -14,6 +14,8 @@ import java.util.Set;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.domain.TransitSourceDataKind;
 import com.stopbell.transit.domain.TransitSourceSystem;
+import com.stopbell.transit.metadata.GbisCollectedSnapshot;
+import com.stopbell.transit.metadata.GbisDestinationEnricher;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
 import com.stopbell.transit.metadata.TagoMetadataSource;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource.RawSourceRow;
@@ -120,6 +122,13 @@ public class BusMetadataSyncService {
         if (routes.size() != complete.routes().size() || occurrences.size() != expectedOccurrences) {
             throw new IllegalStateException("Unexpected TAGO raw rows");
         }
+        GbisCollectedSnapshot gbis = collected.gbis();
+        Map<String, String> matches = Map.of();
+        if (gbis != null) {
+            GbisRawValidation.validate(gbis);
+            matches = GbisDestinationEnricher.verifiedMatches(complete.routes(), gbis.normalized());
+        }
+        Map<String, String> verifiedMatches = matches;
         syncComplete(complete, route -> {
             Map<String, String> payloads = new HashMap<>();
             for (BusStopOccurrenceMetadataSnapshot stop : route.occurrences()) {
@@ -128,7 +137,28 @@ public class BusMetadataSyncService {
             }
             routeMetadataSyncService.syncTagoRoute(route, new TagoRouteRawData(
                     JSON.writeValueAsString(routes.get(route.externalRouteId()).fields()), payloads, collectedAt));
-        }, () -> {});
+        }, () -> {
+            if (gbis != null) saveGbis(gbis, verifiedMatches, collectedAt);
+        });
+    }
+
+    private void saveGbis(GbisCollectedSnapshot gbis, Map<String, String> matches, Instant collectedAt) {
+        Map<String, TransitSourceMetadataService.TagoEntityIds> ids = new HashMap<>();
+        matches.forEach((gbisId, tagoId) -> ids.put(gbisId, sourceMetadataService.findTagoEntityIds(tagoId)));
+        List<SourceRecord> batch = new ArrayList<>(RAW_BATCH_SIZE);
+        for (var row : gbis.rawRows()) {
+            var matched = ids.get(row.externalRouteId());
+            Long entityId = matched == null ? null : row.dataKind() == TransitSourceDataKind.ROUTE
+                    ? matched.routeId() : matched.occurrences().get(row.stopOrder());
+            if (matched != null && entityId == null) throw new IllegalStateException("Missing reconciled TAGO occurrence");
+            batch.add(new SourceRecord(TransitSourceSystem.GBIS, row.dataKind(), row.sourceKey(), entityId,
+                    JSON.writeValueAsString(row.fields()), gbis.sourceVersion(), collectedAt));
+            if (batch.size() == RAW_BATCH_SIZE) {
+                sourceMetadataService.saveGbisBatch(batch);
+                batch.clear();
+            }
+        }
+        if (!batch.isEmpty()) sourceMetadataService.saveGbisBatch(batch);
     }
 
     private static String rawText(JsonNode node) {

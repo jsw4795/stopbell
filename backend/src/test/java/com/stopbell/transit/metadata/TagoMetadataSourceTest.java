@@ -25,7 +25,7 @@ class TagoMetadataSourceTest {
         String routes = "routeId|routeName|turnSeq^200|300|2";
         String stations = "routeId|routeName|upDown|staOrder|stationId|stationName|x|y^"
                 + "200|300|상행|1|10|출발|127|37^200|300|하행|2|20|종점|127|37";
-        when(gbis.fetch()).thenReturn(GbisBulkMetadata.parse(routes.getBytes(StandardCharsets.UTF_8), stations.getBytes(StandardCharsets.UTF_8), "1", "1"));
+        when(gbis.fetchWithRaw()).thenReturn(GbisBulkMetadata.parseWithRaw(routes.getBytes(StandardCharsets.UTF_8), stations.getBytes(StandardCharsets.UTF_8), "1", "1"));
         when(tago.cityCodes()).thenReturn(List.of(new TagoMetadataClient.City("31010", "수원시")));
         var mapper = tools.jackson.databind.json.JsonMapper.builder().build();
         var routeFields = mapper.readTree("{\"routeid\":\"GGB200\",\"routeno\":\"300\"}");
@@ -37,6 +37,9 @@ class TagoMetadataSourceTest {
         var result = new TagoMetadataSource(tago, gbis, 0, Set.of("31010")).fetchSnapshotWithRawRows();
         assertThat(result.normalized().routes().getFirst().occurrences().getFirst().destinationName()).isEqualTo("종점");
         assertThat(result.rawRows().get(1).fields()).isEqualTo(stopFields);
+        assertThat(result.gbis().rawRows()).hasSize(3);
+        verify(gbis).fetchWithRaw();
+        verify(gbis, never()).fetch();
         verify(tago).routesWithRaw("31010", 1);
         verify(tago).routeStopsWithRaw("31010", "GGB200", 1);
         verify(tago, never()).routes(anyString(), anyInt());

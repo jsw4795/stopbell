@@ -42,7 +42,10 @@ public final class TagoMetadataSource implements BusMetadataSource {
     }
     private TagoSnapshot collect(boolean preserveRaw) {
         // A failed bulk fetch is never treated as an empty, complete enrichment source.
-        GbisBulkMetadata gbis = gbisClient == null ? null : gbisClient.fetch();
+        GbisCollectedSnapshot gbisCollected = gbisClient != null && preserveRaw
+                ? java.util.Objects.requireNonNull(gbisClient.fetchWithRaw(), "GBIS snapshot missing") : null;
+        GbisBulkMetadata gbis = gbisClient == null ? null
+                : preserveRaw ? gbisCollected.normalized() : gbisClient.fetch();
         pace(); Set<String> discovered = new HashSet<>(); for (TagoMetadataClient.City city : client.cityCodes()) { if (city.citycode()==null) throw new IllegalStateException("TAGO city code missing"); discovered.add(city.citycode()); }
         if (!discovered.containsAll(gyeonggiCodes)) throw new IllegalStateException("TAGO city discovery did not verify every Gyeonggi city code");
         log.info("TAGO city discovery complete: gyeonggiCities={}", gyeonggiCodes.size());
@@ -84,13 +87,14 @@ public final class TagoMetadataSource implements BusMetadataSource {
                     snapshots.size() - enriched.enrichedRoutes(), enriched.destinationOccurrences(), enriched.skippedRoutes());
             snapshots = enriched.routes();
         }
-        return new TagoSnapshot(new CompleteBusMetadataSnapshot(provider(), snapshots), rawRows);
+        return new TagoSnapshot(new CompleteBusMetadataSnapshot(provider(), snapshots), rawRows, gbisCollected);
     }
     private static <T> TagoMetadataClient.Page<TagoMetadataClient.RawItem<T>> wrap(TagoMetadataClient.Page<T> page) {
         return new TagoMetadataClient.Page<>(page.items().stream().map(item -> new TagoMetadataClient.RawItem<>(item, null)).toList(), page.totalCount(), page.pageNo());
     }
     public static String occurrenceSourceKey(String routeId, int order) { return routeId.length() + ":" + routeId + ":" + order; }
-    public record TagoSnapshot(CompleteBusMetadataSnapshot normalized, List<RawSourceRow> rawRows) {
+    public record TagoSnapshot(CompleteBusMetadataSnapshot normalized, List<RawSourceRow> rawRows, GbisCollectedSnapshot gbis) {
+        public TagoSnapshot(CompleteBusMetadataSnapshot normalized, List<RawSourceRow> rawRows) { this(normalized, rawRows, null); }
         public TagoSnapshot { rawRows = List.copyOf(rawRows); }
     }
     /** Fields are the original TAGO item; route and order are external linking identifiers. */
