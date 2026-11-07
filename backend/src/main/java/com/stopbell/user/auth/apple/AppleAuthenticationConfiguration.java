@@ -35,9 +35,9 @@ public class AppleAuthenticationConfiguration {
 
     @Bean
     AppleAuthentication appleAuthentication(AppleAuthenticationProperties properties, Clock jwtClock,
-            AppleClientSecret clientSecret) {
+            AppleClientSecret clientSecret, AppleIdentityBoundary boundary) {
         var verifier = new AppleIdentityTokenVerifier(new AppleJwksDecoder(), properties.clientId(), jwtClock);
         return new AppleAuthentication(new AppleNonceStore(jwtClock), verifier,
-                new AppleCodeExchange(properties.clientId(), clientSecret));
+                new AppleCodeExchange(properties.clientId(), clientSecret), boundary);
     }
 }

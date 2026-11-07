@@ -21,15 +21,27 @@ public class AppleIdentityBoundary {
 
     public AppleIdentityBoundary(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
-    public void acceptLogin(String subject, Instant issuedAt) {
+    public long challengeGeneration() {
+        return jdbc.queryForObject("select generation from apple_deletion_generation where singleton_id=1", Long.class);
+    }
+
+    /** Caller holds the subject boundary until this transaction completes. */
+    public void recordDeletion(String subject) {
+        byte[] key = lock(subject);
+        jdbc.update("update apple_deletion_generation set generation=generation+1 where singleton_id=1");
+        long generation = jdbc.queryForObject("select generation from apple_deletion_generation where singleton_id=1", Long.class);
+        jdbc.update("update apple_identity_boundaries set latest_deletion_generation=? where subject_hash=?", generation, key);
+    }
+
+    public void acceptLogin(String subject, Instant issuedAt, long challengeGeneration) {
         if (issuedAt == null) throw new InvalidSocialCredentialException();
         byte[] key = lock(subject);
-        var row = jdbc.queryForObject("select latest_identity_issued_at,latest_revocation_at from apple_identity_boundaries where subject_hash=? for update",
-                (rs, index) -> new Times(rs.getObject(1, LocalDateTime.class), rs.getObject(2, LocalDateTime.class)), key);
+        var row = jdbc.queryForObject("select latest_identity_issued_at,latest_revocation_at,latest_deletion_generation from apple_identity_boundaries where subject_hash=? for update",
+                (rs, index) -> new Times(rs.getObject(1, LocalDateTime.class), rs.getObject(2, LocalDateTime.class), rs.getLong(3)), key);
         LocalDateTime previous = row.identity();
         LocalDateTime revocation = row.revocation();
         LocalDateTime time = utc(issuedAt.truncatedTo(ChronoUnit.SECONDS));
-        if ((previous != null && !time.isAfter(previous))
+        if (challengeGeneration < row.deletionGeneration() || (previous != null && !time.isAfter(previous))
                 || (revocation != null && !time.isAfter(revocation.truncatedTo(ChronoUnit.SECONDS)))) {
             throw new InvalidSocialCredentialException();
         }
@@ -83,8 +95,8 @@ public class AppleIdentityBoundary {
                 (rs, index) -> rs.getObject(1, LocalDateTime.class), jtiHash, subject);
         if (eventTimes.isEmpty()) return null;
         LocalDateTime eventTime = eventTimes.getFirst().truncatedTo(ChronoUnit.SECONDS);
-        var times = jdbc.queryForObject("select latest_identity_issued_at,latest_revocation_at from apple_identity_boundaries where subject_hash=? for update",
-                (rs, index) -> new Times(rs.getObject(1, LocalDateTime.class), rs.getObject(2, LocalDateTime.class)), key);
+        var times = jdbc.queryForObject("select latest_identity_issued_at,latest_revocation_at,latest_deletion_generation from apple_identity_boundaries where subject_hash=? for update",
+                (rs, index) -> new Times(rs.getObject(1, LocalDateTime.class), rs.getObject(2, LocalDateTime.class), rs.getLong(3)), key);
         LocalDateTime issued = times.identity();
         TemporalDecision decision = issued == null || issued.truncatedTo(ChronoUnit.SECONDS).equals(eventTime)
                 ? TemporalDecision.REVIEW_REQUIRED
@@ -99,7 +111,7 @@ public class AppleIdentityBoundary {
 
     private record PendingTime(String subject, LocalDateTime time) { }
 
-    private record Times(LocalDateTime identity, LocalDateTime revocation) { }
+    private record Times(LocalDateTime identity, LocalDateTime revocation, long deletionGeneration) { }
 
     private static LocalDateTime utc(Instant instant) { return LocalDateTime.ofInstant(instant, ZoneOffset.UTC); }
     private static byte[] hash(String value) {

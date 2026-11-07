@@ -143,19 +143,19 @@ class AppleNotificationIntegrationTest {
         String jti = UUID.randomUUID().toString();
         Instant eventTime = Instant.now().minusSeconds(30).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
         var apple = new ExternalIdentity(AuthProvider.APPLE, subject);
-        login.loginApple(apple, eventTime.minusSeconds(20), (u, t) -> {});
+        loginAppleFresh(apple, eventTime.minusSeconds(20), (u, t) -> {});
         long oldId = jdbc.queryForObject("select id from users where auth_provider='APPLE' and provider_user_id=?", Long.class, subject);
         assertThat(send(sign(eventClaims("consent-revoked", jti, subject, eventTime), key, "key"))).isEqualTo(200);
         // Simulate a future worker's local deletion in this isolated database.
         jdbc.update("delete from refresh_tokens where user_id=?", oldId);
         jdbc.update("delete from users where id=?", oldId);
-        assertThatThrownBy(() -> login.loginApple(apple, eventTime.minusSeconds(1), (u, t) -> {}))
+        assertThatThrownBy(() -> loginAppleFresh(apple, eventTime.minusSeconds(1), (u, t) -> {}))
                 .isInstanceOf(InvalidSocialCredentialException.class);
-        assertThatThrownBy(() -> login.loginApple(apple, eventTime, (u, t) -> {}))
+        assertThatThrownBy(() -> loginAppleFresh(apple, eventTime, (u, t) -> {}))
                 .isInstanceOf(InvalidSocialCredentialException.class);
         assertThat(jdbc.queryForObject("select count(*) from users where auth_provider='APPLE' and provider_user_id=?", Integer.class, subject)).isZero();
         login.login(new ExternalIdentity(AuthProvider.GOOGLE, subject));
-        login.loginApple(apple, eventTime.plusSeconds(2), (u, t) -> {});
+        loginAppleFresh(apple, eventTime.plusSeconds(2), (u, t) -> {});
         var restartedBoundary = new AppleIdentityBoundary(jdbc);
         var assessment = new TransactionTemplate(manager).execute(status -> restartedBoundary.lockPendingEvent(jtiHashUnchecked(jti)));
         assertThat(assessment.decision()).isEqualTo(AppleIdentityBoundary.TemporalDecision.NEWER_AUTHENTICATION);
@@ -189,7 +189,7 @@ class AppleNotificationIntegrationTest {
             assertThat(written.await(10, TimeUnit.SECONDS)).isTrue();
             var loginTx = executor.submit(() -> {
                 started.countDown();
-                return login.loginApple(new ExternalIdentity(AuthProvider.APPLE, subject), eventTime.minusSeconds(1), (u, t) -> {});
+                return loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, subject), eventTime.minusSeconds(1), (u, t) -> {});
             });
             try { assertThat(started.await(10, TimeUnit.SECONDS)).isTrue(); }
             finally { release.countDown(); }
@@ -197,7 +197,7 @@ class AppleNotificationIntegrationTest {
             assertThatThrownBy(() -> loginTx.get(20, TimeUnit.SECONDS)).hasCauseInstanceOf(InvalidSocialCredentialException.class);
         }
         assertThat(jdbc.queryForObject("select count(*) from users where auth_provider='APPLE' and provider_user_id=?", Integer.class, subject)).isZero();
-        assertThatThrownBy(() -> login.loginApple(new ExternalIdentity(AuthProvider.APPLE, subject), eventTime, (u, t) -> {}))
+        assertThatThrownBy(() -> loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, subject), eventTime, (u, t) -> {}))
                 .isInstanceOf(InvalidSocialCredentialException.class);
     }
     @Test void signedEventPersistsThenDeletesOnlyItsAppleAccount() throws Exception {
@@ -205,7 +205,7 @@ class AppleNotificationIntegrationTest {
         String jti = UUID.randomUUID().toString();
         Instant eventTime = Instant.now().minusSeconds(10).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
         var apple = new ExternalIdentity(AuthProvider.APPLE, subject);
-        login.loginApple(apple, eventTime.minusSeconds(10), (u, t) -> {});
+        loginAppleFresh(apple, eventTime.minusSeconds(10), (u, t) -> {});
         login.login(new ExternalIdentity(AuthProvider.GOOGLE, subject));
         assertThat(send(sign(eventClaims("account-deleted", jti, subject, eventTime), key, "key"))).isEqualTo(200);
         assertThat(deletion.prepareAppleEvent(jtiHash(jti))).isEqualTo(AccountDeletionService.EventResult.READY);
@@ -226,7 +226,7 @@ class AppleNotificationIntegrationTest {
         try (var executor = Executors.newSingleThreadExecutor()) {
             transaction.execute(status -> {
                 jdbc.queryForObject("select count(*) from apple_notification_events", Integer.class);
-                var reauth = executor.submit(() -> login.loginApple(identity, eventTime.plusSeconds(5), (u, t) -> {}));
+                var reauth = executor.submit(() -> loginAppleFresh(identity, eventTime.plusSeconds(5), (u, t) -> {}));
                 try { assertThat(reauth.get(10, TimeUnit.SECONDS)).isNotNull(); }
                 catch (Exception ex) { throw new IllegalStateException(ex); }
                 assertThat(boundary.lockPendingEvent(jtiHashUnchecked(jti)).decision())
@@ -240,7 +240,7 @@ class AppleNotificationIntegrationTest {
         String jti = UUID.randomUUID().toString();
         Instant eventTime = Instant.now().minusSeconds(20).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
         var identity = new ExternalIdentity(AuthProvider.APPLE, subject);
-        login.loginApple(identity, eventTime.minusSeconds(10), (u, t) -> {});
+        loginAppleFresh(identity, eventTime.minusSeconds(10), (u, t) -> {});
         long id = jdbc.queryForObject("select id from users where auth_provider='APPLE' and provider_user_id=?", Long.class, subject);
         store.store(new AppleNotificationVerifier.Event(jti, "consent-revoked", subject, eventTime));
         var deleted = new CountDownLatch(1);
@@ -260,7 +260,7 @@ class AppleNotificationIntegrationTest {
             assertThat(deleted.await(10, TimeUnit.SECONDS)).isTrue();
             var delayed = executor.submit(() -> {
                 started.countDown();
-                return login.loginApple(identity, eventTime.minusSeconds(1), (u, t) -> {});
+                return loginAppleFresh(identity, eventTime.minusSeconds(1), (u, t) -> {});
             });
             try { assertThat(started.await(10, TimeUnit.SECONDS)).isTrue(); }
             finally { release.countDown(); }
@@ -268,7 +268,7 @@ class AppleNotificationIntegrationTest {
             assertThatThrownBy(() -> delayed.get(20, TimeUnit.SECONDS)).hasCauseInstanceOf(InvalidSocialCredentialException.class);
         }
         assertThat(jdbc.queryForObject("select count(*) from users where auth_provider='APPLE' and provider_user_id=?", Integer.class, subject)).isZero();
-        login.loginApple(identity, eventTime.plusSeconds(2), (u, t) -> {});
+        loginAppleFresh(identity, eventTime.plusSeconds(2), (u, t) -> {});
         assertThat(jdbc.queryForObject("select count(*) from users where auth_provider='APPLE' and provider_user_id=?", Integer.class, subject)).isOne();
     }
     @Test void differentAppleSubjectsDoNotBlockOneAnother() throws Exception {
@@ -287,7 +287,7 @@ class AppleNotificationIntegrationTest {
             }));
             try {
                 assertThat(holding.await(10, TimeUnit.SECONDS)).isTrue();
-                var independent = executor.submit(() -> login.loginApple(
+                var independent = executor.submit(() -> loginAppleFresh(
                         new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString()), Instant.now(), (u, t) -> {}));
                 assertThat(independent.get(5, TimeUnit.SECONDS)).isNotNull();
             } finally { release.countDown(); }
@@ -303,7 +303,7 @@ class AppleNotificationIntegrationTest {
             throw new IllegalStateException("rollback fixture");
         })).isInstanceOf(IllegalStateException.class);
         assertThat(jdbc.queryForObject("select count(*) from apple_notification_events where jti_hash=?", Integer.class, jtiHashUnchecked(jti))).isZero();
-        login.loginApple(new ExternalIdentity(AuthProvider.APPLE, subject), event.eventTime().minusSeconds(10), (u, t) -> {});
+        loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, subject), event.eventTime().minusSeconds(10), (u, t) -> {});
     }
     @Test void nullOrEqualAuthenticationRequiresReviewAndEarlierAuthenticationCanBeAssessed() {
         String subject = UUID.randomUUID().toString();
@@ -316,13 +316,13 @@ class AppleNotificationIntegrationTest {
                 .isEqualTo(AppleIdentityBoundary.TemporalDecision.REVIEW_REQUIRED);
         String subject2 = UUID.randomUUID().toString();
         String jti2 = UUID.randomUUID().toString();
-        login.loginApple(new ExternalIdentity(AuthProvider.APPLE, subject2), eventTime.minusSeconds(10), (u, t) -> {});
+        loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, subject2), eventTime.minusSeconds(10), (u, t) -> {});
         store.store(new AppleNotificationVerifier.Event(jti2, "consent-revoked", subject2, eventTime));
         assertThat(tx.execute(status -> boundary.lockPendingEvent(jtiHashUnchecked(jti2))).decision())
                 .isEqualTo(AppleIdentityBoundary.TemporalDecision.EVENT_AFTER_AUTHENTICATION);
         String subject3 = UUID.randomUUID().toString();
         String jti3 = UUID.randomUUID().toString();
-        login.loginApple(new ExternalIdentity(AuthProvider.APPLE, subject3), eventTime, (u, t) -> {});
+        loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, subject3), eventTime, (u, t) -> {});
         store.store(new AppleNotificationVerifier.Event(jti3, "account-deleted", subject3, eventTime.plusMillis(500)));
         assertThat(tx.execute(status -> boundary.lockPendingEvent(jtiHashUnchecked(jti3))).decision())
                 .isEqualTo(AppleIdentityBoundary.TemporalDecision.REVIEW_REQUIRED);
@@ -339,4 +339,11 @@ class AppleNotificationIntegrationTest {
         }
         assertThat(jdbc.queryForObject("select count(*) from apple_notification_events", Integer.class)).isEqualTo(1);
     }
+    private com.stopbell.user.auth.dto.TokenResponse loginAppleFresh(
+            com.stopbell.user.auth.identity.ExternalIdentity identity, java.time.Instant issuedAt,
+            java.util.function.BiConsumer<com.stopbell.user.entity.User, java.time.Instant> credential) {
+        long generation = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc).challengeGeneration();
+        return login.loginApple(identity, issuedAt, generation, credential);
+    }
+
 }

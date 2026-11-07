@@ -400,7 +400,7 @@ class LoginServiceConcurrencyIntegrationTest {
 
     private TokenResponse loginForProvider(ExternalIdentity identity) {
         if (identity.provider() == AuthProvider.APPLE) {
-            return loginService.loginApple(identity, java.time.Instant.now(), (user, issuedAt) -> {});
+            return loginAppleFresh(identity, java.time.Instant.now(), (user, issuedAt) -> {});
         }
         return loginService.login(identity);
     }
@@ -441,4 +441,11 @@ class LoginServiceConcurrencyIntegrationTest {
 
     private record LoginAttempt(TokenResponse response, RuntimeException failure) {
     }
+    private com.stopbell.user.auth.dto.TokenResponse loginAppleFresh(
+            com.stopbell.user.auth.identity.ExternalIdentity identity, java.time.Instant issuedAt,
+            java.util.function.BiConsumer<com.stopbell.user.entity.User, java.time.Instant> credential) {
+        long generation = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc).challengeGeneration();
+        return loginService.loginApple(identity, issuedAt, generation, credential);
+    }
+
 }

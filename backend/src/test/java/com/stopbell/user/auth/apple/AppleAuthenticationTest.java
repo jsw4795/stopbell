@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class AppleAuthenticationTest {
     private static final Instant NOW = Instant.parse("2026-11-01T00:00:00Z");
@@ -41,7 +42,7 @@ class AppleAuthenticationTest {
     @Test
     void rejectsExternalAuthenticationInsideTransaction() {
         var authentication = new AppleAuthentication(new AppleNonceStore(CLOCK),
-                mock(AppleIdentityTokenVerifier.class), mock(AppleCodeExchange.class));
+                mock(AppleIdentityTokenVerifier.class), mock(AppleCodeExchange.class), mock(AppleIdentityBoundary.class));
         org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
         try {
             assertThatThrownBy(() -> authentication.authenticate("token", "code", "nonce"))
@@ -123,13 +124,16 @@ class AppleAuthenticationTest {
             var decoder = new AppleJwksDecoder(URI.create(origin + "/keys"), 1000, 1000);
             var verifier = new AppleIdentityTokenVerifier(decoder, "app", CLOCK);
             var exchange = new AppleCodeExchange(URI.create(origin + "/token"), "app", secret, 1000, 1000);
-            var authentication = new AppleAuthentication(new AppleNonceStore(CLOCK), verifier, exchange);
+            var boundary = mock(AppleIdentityBoundary.class);
+            when(boundary.challengeGeneration()).thenReturn(41L, 42L);
+            var authentication = new AppleAuthentication(new AppleNonceStore(CLOCK), verifier, exchange, boundary);
             String nonce = authentication.issueNonce();
             String initial = sign(signingKey, "apple-user", nonce);
             var result = authentication.authenticate(initial, "once", nonce);
             assertThat(result.subject()).isEqualTo("apple-user");
             assertThat(result.refreshToken()).isEqualTo("fixture-refresh");
             assertThat(result.identityIssuedAt()).isEqualTo(NOW.minusSeconds(1));
+            assertThat(result.challengeGeneration()).isEqualTo(41);
             assertThat(result.toString()).doesNotContain("fixture-refresh", "apple-user");
             assertThatThrownBy(() -> authentication.authenticate(initial, "once", nonce))
                     .isInstanceOf(InvalidSocialCredentialException.class);

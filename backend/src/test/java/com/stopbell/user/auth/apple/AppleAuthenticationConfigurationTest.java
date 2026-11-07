@@ -16,7 +16,8 @@ class AppleAuthenticationConfigurationTest {
     private final ApplicationContextRunner context = new ApplicationContextRunner()
             .withUserConfiguration(AppleAuthenticationConfiguration.class)
             .withBean(Clock.class, Clock::systemUTC)
-            .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class));
+            .withBean(JdbcTemplate.class, () -> mock(JdbcTemplate.class))
+            .withBean(AppleIdentityBoundary.class, () -> mock(AppleIdentityBoundary.class));
 
     @Test
     void disabledByDefaultAndRequiresSecretsWhenEnabled() {

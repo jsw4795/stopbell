@@ -25,3 +25,30 @@
 - 복원 후 outbound를 계속 차단한 채 Flyway/schema → RefreshToken 복구 정책 → Device 소유권·재등록 → metadata 동기화·검증 → Alarm recovery baseline → 오래된 pending Notification expiry/cutoff 순서로 확인한다. 오래된 백업의 RefreshToken revoke/re-login 및 Device 처리 정책은 아직 결정되지 않았으므로 사용자 판단 없이 공개 서비스나 worker를 재개하지 않는다. 이후 worker/scheduler, readiness, public traffic을 순서대로 재개하고 관측한다.
 
 실제 운영 환경의 복원 drill, secret 주입, 종료 유예와 경보·traffic 차단 검증은 수행되지 않았다. 격리 DB 검증은 운영 백업의 복구 가능성을 보증하지 않는다.
+
+V32 적용 시에도 이전 Backend의 인증 요청과 삭제 작업을 종료한 뒤 새 버전을 시작한다. 이전 프로세스는 Challenge 세대 검사를 수행하지 않으므로 새 버전과 혼합 실행하면 삭제 경계가 보장되지 않는다.
+
+## Apple 알림 backlog 조사 (TASK-815)
+
+수신과 Worker는 기본 OFF다. 활성화 전 격리 환경에서 수신·복구 및 아래 조회를 검증하고, DB에는 최소 권한으로 접근한다. 다음 읽기 전용 집계는 UTC 기준이며 식별자와 자격 증명을 반환하지 않는다. 반복 실패의 기준은 운영자가 정한 횟수로 적용한다.
+
+```sql
+SELECT state, COUNT(*) AS event_count,
+       MAX(TIMESTAMPDIFF(SECOND, received_at, UTC_TIMESTAMP(6))) AS oldest_age_seconds,
+       SUM(attempt_count > 1) AS repeated_attempts
+FROM apple_notification_events
+WHERE state IN ('PENDING', 'REVIEW_REQUIRED')
+GROUP BY state;
+
+SELECT last_error, COUNT(*) AS event_count
+FROM apple_notification_events
+WHERE state = 'PENDING' AND last_error IS NOT NULL
+GROUP BY last_error;
+
+SELECT COUNT(*) AS account_count
+FROM account_deletions WHERE state = 'APPLE_NOTIFIED';
+```
+
+`attempt_count > 1`은 반복 시도 수이며 반드시 반복 실패를 뜻하지 않는다. `last_error`는 마지막 실패의 제한된 분류이고 전체 실패 이력이 아니다. 빈 상태는 결과 행이 없다. backlog 증가나 오래된 PENDING은 Worker 활성화 상태, 실행·DB 오류와 재시도 기한을 조사하고 원인을 복구한다. Worker는 1분 고정 지연으로 최대 10건을 순차 처리하므로 1분 이내 차단을 보장하지 않으며, 장애가 계속되면 차단 지연의 상한이 없다. PENDING 저장만으로 기존 Access Token이나 Alarm이 차단되지는 않는다. Worker가 `APPLE_NOTIFIED`와 source 중단을 commit하면 기존 보호 API와 후속 source 처리가 차단된다. 이미 외부 FCM에 전달 중이거나 접수된 요청은 회수할 수 없다.
+
+REVIEW_REQUIRED는 자동 처리하지 않는다. 권한이 제한된 DB 세션에서 `HEX(jti_hash)`, 이벤트 유형·시각·수신 시각과 상태로 대상을 식별하고, 원문 JWS·Token·Apple subject를 일반 로그나 티켓에 기록하지 않는다. 같은 제한된 세션에서 보존된 subject로 APPLE User만 정확히 연결하고 `users.apple_generation_issued_at`, `apple_credentials.identity_issued_at`, 이벤트 시각을 비교한다. User 부재가 현재 계정 삭제를 뜻할 수 있으나 삭제 원인이나 해당 이벤트 처리 성공의 증거는 아니다. 새 계정 세대가 이벤트 이후인지, 기존 생성 근거가 NULL이거나 동일 초인지 확인한다. 인증 근거가 없거나 순서·계정 세대를 증명할 수 없으면 검토 상태를 유지하고 필요한 추가 검증이나 사용자 조치를 요청한다. 검증되지 않은 이벤트를 DELETED 또는 SKIPPED로 직접 변경하거나 강제 삭제하지 않는다. 실제 운영 환경에서 이 조사·복구 절차와 Apple 알림 수신은 아직 검증하지 않았다.

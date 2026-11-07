@@ -50,21 +50,21 @@ public class LoginService {
 
     public TokenResponse login(ExternalIdentity identity) {
         if (identity != null && identity.provider() == AuthProvider.APPLE) throw new IllegalArgumentException("Apple login requires verified authentication");
-        return login(identity, null, null);
+        return login(identity, null, 0, null);
     }
 
-    public TokenResponse loginApple(ExternalIdentity identity, Instant issuedAt, BiConsumer<User, Instant> storeCredential) {
+    public TokenResponse loginApple(ExternalIdentity identity, Instant issuedAt, long challengeGeneration, BiConsumer<User, Instant> storeCredential) {
         if (identity == null || identity.provider() != AuthProvider.APPLE || issuedAt == null || storeCredential == null) {
             throw new IllegalArgumentException("Apple identity is required");
         }
-        return login(identity, issuedAt, storeCredential);
+        return login(identity, issuedAt, challengeGeneration, storeCredential);
     }
 
-    private TokenResponse login(ExternalIdentity identity, Instant issuedAt, BiConsumer<User, Instant> storeCredential) {
+    private TokenResponse login(ExternalIdentity identity, Instant issuedAt, long challengeGeneration, BiConsumer<User, Instant> storeCredential) {
         TransactionTemplate transaction = storeCredential == null ? loginTransaction : appleLoginTransaction;
         try {
             return transaction.execute(status -> {
-                if (storeCredential != null) appleBoundary.acceptLogin(identity.providerUserId(), issuedAt);
+                if (storeCredential != null) appleBoundary.acceptLogin(identity.providerUserId(), issuedAt, challengeGeneration);
                 User user = userRepository.findByAuthProviderAndProviderUserId(
                         identity.provider(),
                         identity.providerUserId()
@@ -75,7 +75,7 @@ public class LoginService {
         } catch (IdentityConflict conflict) {
             // execute() has completed rollback and discarded the failed persistence context.
             return transaction.execute(status -> {
-                if (storeCredential != null) appleBoundary.acceptLogin(identity.providerUserId(), issuedAt);
+                if (storeCredential != null) appleBoundary.acceptLogin(identity.providerUserId(), issuedAt, challengeGeneration);
                 User user = userRepository.findByAuthProviderAndProviderUserId(
                         identity.provider(), identity.providerUserId()
                 ).filter(existing -> existing.getAuthProvider() == identity.provider()

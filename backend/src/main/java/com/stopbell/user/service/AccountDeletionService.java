@@ -131,6 +131,8 @@ public class AccountDeletionService {
             }
         }
 
+        if (user.getAuthProvider() == AuthProvider.APPLE) appleBoundary.recordDeletion(user.getProviderUserId());
+
         // Stop source decisions before collecting their durable Events and Deliveries.
         for (Long id : jdbc.queryForList("select id from alarms where user_id=? order by id", Long.class, userId)) {
             jdbc.queryForList("select id from alarms where id=? and user_id=? for update", Long.class, id, userId);

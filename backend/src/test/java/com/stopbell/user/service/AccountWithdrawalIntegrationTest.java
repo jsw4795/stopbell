@@ -419,7 +419,7 @@ class AccountWithdrawalIntegrationTest {
             var deleting = executor.submit(() -> withdrawal.withdraw(owner.getId()));
             try {
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-                assertDeletionInProgress(() -> login.loginApple(new ExternalIdentity(AuthProvider.APPLE, owner.getProviderUserId()), java.time.Instant.now(),
+                assertDeletionInProgress(() -> loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, owner.getProviderUserId()), java.time.Instant.now(),
                         (ignored, issuedAt) -> { throw new AssertionError("credential must not be replaced"); }));
                 assertDeletionInProgress(() -> refresh.refresh(token));
                 assertDeletionInProgress(() -> alarmService.activate(owner.getId(), alarm.getId()));
@@ -456,7 +456,7 @@ class AccountWithdrawalIntegrationTest {
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
             var loggingIn = executor.submit(() -> {
                 loginThread.set(Thread.currentThread());
-                return login.loginApple(new ExternalIdentity(AuthProvider.APPLE, owner.getProviderUserId()), java.time.Instant.now(), (ignored, issuedAt) -> {});
+                return loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, owner.getProviderUserId()), java.time.Instant.now(), (ignored, issuedAt) -> {});
             });
             assertThat(read.await(5, TimeUnit.SECONDS)).isTrue();
             var deleting = executor.submit(() -> withdrawal.withdraw(owner.getId()));
@@ -680,7 +680,7 @@ class AccountWithdrawalIntegrationTest {
     void verifiedAppleEventDeletesDataWithoutCallingRevoke(String type) throws Exception {
         var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
         var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
-        var pair = login.loginApple(identity, issued, (u, t) -> jdbc.update(
+        var pair = loginAppleFresh(identity, issued, (u, t) -> jdbc.update(
                 "insert into apple_credentials (user_id,encrypted_refresh_token,identity_issued_at) values (?,?,?)",
                 u.getId(), cipher.encrypt(u.getId(), "synthetic-refresh"), LocalDateTime.ofInstant(t, ZoneOffset.UTC)));
         var owner = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow();
@@ -721,36 +721,36 @@ class AccountWithdrawalIntegrationTest {
     @Test void pendingDeletionBlocksReloginAndOldEventCannotDeleteNewAccount() {
         var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
         var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
-        login.loginApple(identity, issued, (u,t) -> {});
+        loginAppleFresh(identity, issued, (u,t) -> {});
         long oldId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
         var eventTime = issued.plusSeconds(20);
         var hash = appleEvent("consent-revoked", identity.providerUserId(), eventTime);
-        assertThatThrownBy(() -> login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {}))
+        assertThatThrownBy(() -> loginAppleFresh(identity, eventTime.plusSeconds(10), (u,t) -> {}))
                 .isInstanceOf(com.stopbell.user.auth.exception.InvalidSocialCredentialException.class);
         assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.DELETED);
-        login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {});
+        loginAppleFresh(identity, eventTime.plusSeconds(10), (u,t) -> {});
         long newId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
         assertThat(newId).isNotEqualTo(oldId);
         var delayed = appleEvent("consent-revoked", identity.providerUserId(), eventTime.minusSeconds(1));
         assertThat(processAppleEvent(delayed)).isEqualTo(AccountDeletionService.EventResult.SKIPPED);
         assertThat(users.existsById(newId)).isTrue();
         assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.ALREADY_FINISHED);
-        assertThatThrownBy(() -> login.loginApple(identity, eventTime.minusSeconds(1), (u,t) -> {}))
+        assertThatThrownBy(() -> loginAppleFresh(identity, eventTime.minusSeconds(1), (u,t) -> {}))
                 .isInstanceOf(com.stopbell.user.auth.exception.InvalidSocialCredentialException.class);
     }
 
     @Test void lateRevocationStillDeletesOldAccountEvenAfterRelogin() {
         var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
         var initial = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
-        login.loginApple(identity, initial, (u,t) -> {});
+        loginAppleFresh(identity, initial, (u,t) -> {});
         long oldId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
         var eventTime = initial.plusSeconds(30);
-        login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {});
+        loginAppleFresh(identity, eventTime.plusSeconds(10), (u,t) -> {});
         assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId()).isEqualTo(oldId);
         var hash = appleEvent("consent-revoked", identity.providerUserId(), eventTime);
         assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.DELETED);
         assertThat(users.existsById(oldId)).isFalse();
-        login.loginApple(identity, eventTime.plusSeconds(20), (u,t) -> {});
+        loginAppleFresh(identity, eventTime.plusSeconds(20), (u,t) -> {});
         long newId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
         assertThat(newId).isNotEqualTo(oldId);
         assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.ALREADY_FINISHED);
@@ -779,7 +779,7 @@ class AccountWithdrawalIntegrationTest {
         var eventTime = java.time.Instant.now().minusSeconds(60).truncatedTo(ChronoUnit.SECONDS);
         var hash = appleEvent("consent-revoked", identity.providerUserId(), eventTime);
         assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.SKIPPED);
-        login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {});
+        loginAppleFresh(identity, eventTime.plusSeconds(10), (u,t) -> {});
         long userId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
         assertThat(processAppleEvent(hash)).isEqualTo(AccountDeletionService.EventResult.ALREADY_FINISHED);
         assertThat(users.existsById(userId)).isTrue();
@@ -858,11 +858,12 @@ class AccountWithdrawalIntegrationTest {
     @Test void eventWorkerAndNewLoginSerializeAcrossDeletion() throws Exception {
         var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
         var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
-        login.loginApple(identity, issued, (u,t) -> {});
+        loginAppleFresh(identity, issued, (u,t) -> {});
         var owner = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow();
         var priorAlarm = alarm(owner);
         var eventTime = issued.plusSeconds(20);
         var hash = appleEvent("consent-revoked", identity.providerUserId(), eventTime);
+        long generation = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc).challengeGeneration();
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var workerThread = new java.util.concurrent.atomic.AtomicReference<Thread>();
@@ -877,15 +878,15 @@ class AccountWithdrawalIntegrationTest {
             var deleting = executor.submit(() -> { workerThread.set(Thread.currentThread()); return processAppleEvent(hash); });
             assertThat(entered.await(10, TimeUnit.SECONDS)).isTrue();
             var started = new CountDownLatch(1);
-            var loggingIn = executor.submit(() -> { started.countDown(); return login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {}); });
+            var loggingIn = executor.submit(() -> { started.countDown(); return login.loginApple(identity, eventTime.plusSeconds(10), generation, (u,t) -> {}); });
             try { assertThat(started.await(10, TimeUnit.SECONDS)).isTrue(); }
             finally { release.countDown(); }
             assertThat(deleting.get(10, TimeUnit.SECONDS)).isEqualTo(AccountDeletionService.EventResult.DELETED);
-            try { assertThat(loggingIn.get(10, TimeUnit.SECONDS)).isNotNull(); }
-            catch (java.util.concurrent.ExecutionException failure) {
-                assertThat(failure.getCause()).isInstanceOf(ApiException.class);
-                login.loginApple(identity, eventTime.plusSeconds(10), (u,t) -> {});
-            }
+            assertThatThrownBy(() -> loggingIn.get(10, TimeUnit.SECONDS)).satisfies(failure -> {
+                assertThat(failure.getCause()).isInstanceOfAny(ApiException.class,
+                        com.stopbell.user.auth.exception.InvalidSocialCredentialException.class);
+            });
+            loginAppleFresh(identity, eventTime.plusSeconds(10), (u,t) -> {});
         } finally {
             release.countDown();
             doAnswer(call -> mockingDetails(users).getMockCreationSettings().getDefaultAnswer().answer(call))
@@ -950,14 +951,111 @@ class AccountWithdrawalIntegrationTest {
     @Test void distinctEventsForSameUserNeverDeleteRecreatedUser() {
         var issued = java.time.Instant.now().minusSeconds(120).truncatedTo(ChronoUnit.SECONDS);
         var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
-        login.loginApple(identity, issued, (u,t) -> {});
+        loginAppleFresh(identity, issued, (u,t) -> {});
         var first = appleEvent("consent-revoked", identity.providerUserId(), issued.plusSeconds(20));
         var second = appleEvent("account-deleted", identity.providerUserId(), issued.plusSeconds(21));
         assertThat(processAppleEvent(first)).isEqualTo(AccountDeletionService.EventResult.DELETED);
-        login.loginApple(identity, issued.plusSeconds(30), (u,t) -> {});
+        loginAppleFresh(identity, issued.plusSeconds(30), (u,t) -> {});
         long current = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
         assertThat(processAppleEvent(second)).isEqualTo(AccountDeletionService.EventResult.SKIPPED);
         assertThat(users.existsById(current)).isTrue();
+    }
+
+    @Test void delayedAppleAuthenticationCannotRecreateAccountAfterLocalWithdrawal() throws Exception {
+        var issued = java.time.Instant.now().minusSeconds(60).truncatedTo(ChronoUnit.SECONDS);
+        var owner = users.saveAndFlush(new User(AuthProvider.APPLE, UUID.randomUUID().toString(), issued));
+        jdbc.update("insert into apple_credentials (user_id,encrypted_refresh_token,identity_issued_at) values (?,?,?)",
+                owner.getId(), cipher.encrypt(owner.getId(), "synthetic-refresh"), LocalDateTime.ofInstant(issued, ZoneOffset.UTC));
+        var identity = new ExternalIdentity(AuthProvider.APPLE, owner.getProviderUserId());
+        long delayedGeneration = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc).challengeGeneration();
+        var authenticated = new CountDownLatch(1);
+        var resume = new CountDownLatch(1);
+        var credentialStored = new java.util.concurrent.atomic.AtomicBoolean();
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var delayed = executor.submit(() -> {
+                authenticated.countDown();
+                if (!resume.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("timeout");
+                return login.loginApple(identity, issued.plusSeconds(10), delayedGeneration, (u, t) -> credentialStored.set(true));
+            });
+            try {
+                assertThat(authenticated.await(10, TimeUnit.SECONDS)).isTrue();
+                assertThat(withdrawal.withdraw(owner.getId(), "c".repeat(64))).isEqualTo(AccountWithdrawalService.Result.DELETED);
+            } finally { resume.countDown(); }
+            assertThatThrownBy(() -> delayed.get(10, TimeUnit.SECONDS))
+                    .hasCauseInstanceOf(com.stopbell.user.auth.exception.InvalidSocialCredentialException.class);
+        }
+        assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId())).isEmpty();
+        assertThat(credentialStored).isFalse();
+        assertThat(jdbc.queryForObject("select count(*) from apple_credentials where user_id=?", Integer.class, owner.getId())).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class, owner.getId())).isZero();
+        var restartedBoundary = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc);
+        assertThatThrownBy(() -> new TransactionTemplate(manager).executeWithoutResult(status ->
+                restartedBoundary.acceptLogin(identity.providerUserId(), issued.plusSeconds(10), delayedGeneration)))
+                .isInstanceOf(com.stopbell.user.auth.exception.InvalidSocialCredentialException.class);
+        loginAppleFresh(identity, issued.plusSeconds(20), (u, t) -> {});
+        assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId())
+                .isNotEqualTo(owner.getId());
+    }
+
+    @Test void appleEventDeletionRejectsEarlierChallengeEvenWhenTokenIsNewerThanEvent() {
+        var issued = java.time.Instant.now().minusSeconds(100).truncatedTo(ChronoUnit.SECONDS);
+        var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
+        loginAppleFresh(identity, issued, (u, t) -> {});
+        long previousId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
+        long oldGeneration = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc).challengeGeneration();
+        var event = appleEvent("account-deleted", identity.providerUserId(), issued.plusSeconds(20));
+        assertThat(processAppleEvent(event)).isEqualTo(AccountDeletionService.EventResult.DELETED);
+        assertThatThrownBy(() -> login.loginApple(identity, issued.plusSeconds(30), oldGeneration, (u, t) -> {}))
+                .isInstanceOf(com.stopbell.user.auth.exception.InvalidSocialCredentialException.class);
+        assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId())).isEmpty();
+        loginAppleFresh(identity, issued.plusSeconds(40), (u, t) -> {});
+        assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId())
+                .isNotEqualTo(previousId);
+    }
+
+    @Test void rolledBackDeletionDoesNotInvalidateChallenge() {
+        var issued = java.time.Instant.now().minusSeconds(100).truncatedTo(ChronoUnit.SECONDS);
+        var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
+        loginAppleFresh(identity, issued, (u, t) -> {});
+        long id = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
+        jdbc.update("insert into account_deletions (user_id,state,requested_at,next_attempt_at) values (?,'REVOKED',now(),now())", id);
+        var boundary = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc);
+        long generation = boundary.challengeGeneration();
+        new TransactionTemplate(manager).executeWithoutResult(status -> {
+            assertThat(deletion.delete(id)).isTrue();
+            status.setRollbackOnly();
+        });
+        assertThat(boundary.challengeGeneration()).isEqualTo(generation);
+        jdbc.update("delete from account_deletions where user_id=?", id);
+        assertThat(login.loginApple(identity, issued.plusSeconds(10), generation, (u, t) -> {})).isNotNull();
+        assertThat(users.existsById(id)).isTrue();
+    }
+
+    @Test void challengeDuringDeletionCannotRecreateAccountAfterCommit() throws Exception {
+        var issued = java.time.Instant.now().minusSeconds(100).truncatedTo(ChronoUnit.SECONDS);
+        var identity = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
+        loginAppleFresh(identity, issued, (u, t) -> {});
+        long id = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, identity.providerUserId()).orElseThrow().getId();
+        jdbc.update("insert into account_deletions (user_id,state,requested_at,next_attempt_at) values (?,'REVOKED',now(),now())", id);
+        var deleted = new CountDownLatch(1);
+        var commit = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var deleting = executor.submit(() -> new TransactionTemplate(manager).execute(status -> {
+                assertThat(deletion.delete(id)).isTrue();
+                deleted.countDown();
+                try { if (!commit.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("timeout"); }
+                catch (InterruptedException e) { throw new IllegalStateException(e); }
+                return true;
+            }));
+            long generation;
+            try {
+                assertThat(deleted.await(10, TimeUnit.SECONDS)).isTrue();
+                generation = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc).challengeGeneration();
+            } finally { commit.countDown(); }
+            assertThat(deleting.get(10, TimeUnit.SECONDS)).isTrue();
+            assertThatThrownBy(() -> login.loginApple(identity, issued.plusSeconds(10), generation, (u, t) -> {}))
+                    .isInstanceOf(com.stopbell.user.auth.exception.InvalidSocialCredentialException.class);
+        }
     }
 
     @Test void appleEventAndInAppWithdrawalShareReceiptAndDoNotDoubleDelete() throws Exception {
@@ -1021,4 +1119,11 @@ class AccountWithdrawalIntegrationTest {
         assertThatThrownBy(action).isInstanceOfSatisfying(ApiException.class,
                 failure -> assertThat(failure.getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_DELETION_IN_PROGRESS));
     }
+    private com.stopbell.user.auth.dto.TokenResponse loginAppleFresh(
+            com.stopbell.user.auth.identity.ExternalIdentity identity, java.time.Instant issuedAt,
+            java.util.function.BiConsumer<com.stopbell.user.entity.User, java.time.Instant> credential) {
+        long generation = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc).challengeGeneration();
+        return login.loginApple(identity, issuedAt, generation, credential);
+    }
+
 }

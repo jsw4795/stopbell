@@ -9,6 +9,7 @@ import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
 
 class AppleNonceStoreTest {
     @Test
@@ -22,11 +23,11 @@ class AppleNonceStoreTest {
         }
         var clock = new MutableClock();
         var store = new AppleNonceStore(clock);
-        String nonce = store.issue();
-        store.consume(nonce);
+        String nonce = store.issue(7);
+        assertThat(store.consume(nonce)).isEqualTo(7);
         assertThatThrownBy(() -> store.consume(nonce)).isInstanceOf(InvalidSocialCredentialException.class);
         assertThatThrownBy(() -> store.consume("a".repeat(43))).isInstanceOf(InvalidSocialCredentialException.class);
-        String expired = store.issue();
+        String expired = store.issue(7);
         clock.instant = now.plus(Duration.ofMinutes(5));
         assertThatThrownBy(() -> store.consume(expired)).isInstanceOf(InvalidSocialCredentialException.class);
     }

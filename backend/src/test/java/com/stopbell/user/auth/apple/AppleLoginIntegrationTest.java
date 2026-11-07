@@ -142,7 +142,7 @@ class AppleLoginIntegrationTest {
             var real = new AppleAuthentication(new AppleNonceStore(clock),
                     new AppleIdentityTokenVerifier(new AppleJwksDecoder(URI.create(origin + "/keys"), 1000, 1000), "app", clock),
                     new AppleCodeExchange(URI.create(origin + "/token"), "app",
-                            new AppleClientSecret("app", "team", "key", pem, clock), 1000, 1000));
+                            new AppleClientSecret("app", "team", "key", pem, clock), 1000, 1000), new AppleIdentityBoundary(jdbc));
             var http = MockMvcBuilders.standaloneSetup(new AppleLoginController(real, credentials, login))
                     .setControllerAdvice(new GlobalExceptionHandler()).build();
             var json = JsonMapper.builder().build();
@@ -175,7 +175,7 @@ class AppleLoginIntegrationTest {
         String subject = UUID.randomUUID().toString();
         when(authentication.issueNonce()).thenReturn("nonce");
         when(authentication.authenticate("id", "code", "nonce"))
-                .thenReturn(new AppleAuthentication.Result(subject, "apple-secret", Instant.now().minusSeconds(10)));
+                .thenReturn(new AppleAuthentication.Result(subject, "apple-secret", Instant.now().minusSeconds(10), new AppleIdentityBoundary(jdbc).challengeGeneration()));
         mvc.perform(post("/auth/apple/challenge")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.nonce").value("nonce"))
                 .andExpect(header().string("Cache-Control", "no-store"));
@@ -193,7 +193,7 @@ class AppleLoginIntegrationTest {
         assertThat(response).doesNotContain("apple-secret");
         assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class, user.getId()))
                 .isEqualTo(1);
-        login.loginApple(new ExternalIdentity(AuthProvider.APPLE, subject), java.time.Instant.now(), (u, issuedAt) -> credentials.store(u, "new-secret", issuedAt));
+        loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, subject), java.time.Instant.now(), (u, issuedAt) -> credentials.store(u, "new-secret", issuedAt));
         String updated = jdbc.queryForObject("select encrypted_refresh_token from apple_credentials where user_id=?",
                 String.class, user.getId());
         assertThat(cipher.decrypt(user.getId(), updated)).isEqualTo("new-secret");
@@ -209,25 +209,25 @@ class AppleLoginIntegrationTest {
         var identity = new ExternalIdentity(AuthProvider.APPLE, subject);
         Instant first = Instant.parse("2026-01-01T00:00:00Z");
         Instant second = first.plusSeconds(120);
-        login.loginApple(identity, first, (user, issuedAt) -> credentials.store(user, "first", issuedAt));
+        loginAppleFresh(identity, first, (user, issuedAt) -> credentials.store(user, "first", issuedAt));
         long id = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, subject).orElseThrow().getId();
-        login.loginApple(identity, second, (user, issuedAt) -> credentials.store(user, "second", issuedAt));
+        loginAppleFresh(identity, second, (user, issuedAt) -> credentials.store(user, "second", issuedAt));
         String credentialBefore = jdbc.queryForObject("select encrypted_refresh_token from apple_credentials where user_id=?", String.class, id);
         Integer tokensBefore = jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class, id);
-        assertThatThrownBy(() -> login.loginApple(identity, first, (user, issuedAt) -> credentials.store(user, "older", issuedAt)))
+        assertThatThrownBy(() -> loginAppleFresh(identity, first, (user, issuedAt) -> credentials.store(user, "older", issuedAt)))
                 .isInstanceOf(InvalidSocialCredentialException.class);
         assertThat(jdbc.queryForObject("select encrypted_refresh_token from apple_credentials where user_id=?", String.class, id)).isEqualTo(credentialBefore);
         assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class, id)).isEqualTo(tokensBefore);
         var expected = java.time.LocalDateTime.ofInstant(second, java.time.ZoneOffset.UTC);
         assertThat(jdbc.queryForObject("select identity_issued_at from apple_credentials where user_id=?",
                 java.time.LocalDateTime.class, id)).isEqualTo(expected);
-        assertThatThrownBy(() -> login.loginApple(identity, second.plusSeconds(120), (user, issuedAt) -> {
+        assertThatThrownBy(() -> loginAppleFresh(identity, second.plusSeconds(120), (user, issuedAt) -> {
             credentials.store(user, "rollback", issuedAt);
             throw new IllegalStateException("fixture");
         })).isInstanceOf(IllegalStateException.class);
         assertThat(jdbc.queryForObject("select identity_issued_at from apple_credentials where user_id=?",
                 java.time.LocalDateTime.class, id)).isEqualTo(expected);
-        login.loginApple(identity, second.plusSeconds(120), (user, issuedAt) -> credentials.store(user, "retry", issuedAt));
+        loginAppleFresh(identity, second.plusSeconds(120), (user, issuedAt) -> credentials.store(user, "retry", issuedAt));
         assertThat(cipher.decrypt(id, jdbc.queryForObject("select encrypted_refresh_token from apple_credentials where user_id=?", String.class, id))).isEqualTo("retry");
     }
 
@@ -251,18 +251,18 @@ class AppleLoginIntegrationTest {
     void rollsBackUserAndCredentialOnFailures() {
         String first = UUID.randomUUID().toString();
         var identity = new ExternalIdentity(AuthProvider.APPLE, first);
-        assertThatThrownBy(() -> login.loginApple(identity, java.time.Instant.now(), (user, issuedAt) -> {
+        assertThatThrownBy(() -> loginAppleFresh(identity, java.time.Instant.now(), (user, issuedAt) -> {
             credentials.store(user, "secret", issuedAt);
             throw new IllegalStateException("fixture");
         })).isInstanceOf(IllegalStateException.class);
         assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, first)).isEmpty();
         String invalidCredential = UUID.randomUUID().toString();
-        assertThatThrownBy(() -> login.loginApple(new ExternalIdentity(AuthProvider.APPLE, invalidCredential), java.time.Instant.now(),
+        assertThatThrownBy(() -> loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, invalidCredential), java.time.Instant.now(),
                 (user, issuedAt) -> credentials.store(user, "x".repeat(8193), issuedAt)))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, invalidCredential)).isEmpty();
         String dbFailure = UUID.randomUUID().toString();
-        assertThatThrownBy(() -> login.loginApple(new ExternalIdentity(AuthProvider.APPLE, dbFailure), java.time.Instant.now(), (user, issuedAt) -> {
+        assertThatThrownBy(() -> loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, dbFailure), java.time.Instant.now(), (user, issuedAt) -> {
             credentials.store(user, "secret", issuedAt);
             jdbc.update("insert into apple_credentials (user_id, encrypted_refresh_token) values (?, ?)",
                     user.getId(), "duplicate");
@@ -270,7 +270,7 @@ class AppleLoginIntegrationTest {
         assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, dbFailure)).isEmpty();
         String second = UUID.randomUUID().toString();
         doThrow(new IllegalStateException("fixture")).when(refresh).issue(any());
-        assertThatThrownBy(() -> login.loginApple(new ExternalIdentity(AuthProvider.APPLE, second), java.time.Instant.now(),
+        assertThatThrownBy(() -> loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, second), java.time.Instant.now(),
                 (user, issuedAt) -> credentials.store(user, "secret", issuedAt))).isInstanceOf(IllegalStateException.class);
         assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, second)).isEmpty();
     }
@@ -283,7 +283,7 @@ class AppleLoginIntegrationTest {
         jdbc.execute("CREATE TRIGGER apple_fixture_reject BEFORE INSERT ON apple_credentials "
                 + "FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'fixture failure'");
         try {
-            assertThatThrownBy(() -> login.loginApple(new ExternalIdentity(AuthProvider.APPLE, subject), java.time.Instant.now(),
+            assertThatThrownBy(() -> loginAppleFresh(new ExternalIdentity(AuthProvider.APPLE, subject), java.time.Instant.now(),
                     (user, issuedAt) -> credentials.store(user, "fixture-secret", issuedAt))).isInstanceOf(RuntimeException.class);
             assertThat(users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, subject)).isEmpty();
             assertThat(jdbc.queryForObject("select count(*) from users", Long.class)).isEqualTo(usersBefore);
@@ -297,14 +297,14 @@ class AppleLoginIntegrationTest {
     void refreshIssuanceFailureRestoresExistingCredentialAndOtherUserData() {
         var first = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
         var other = new ExternalIdentity(AuthProvider.APPLE, UUID.randomUUID().toString());
-        login.loginApple(first, java.time.Instant.now(), (user, issuedAt) -> credentials.store(user, "first-before", issuedAt));
-        login.loginApple(other, java.time.Instant.now(), (user, issuedAt) -> credentials.store(user, "other-before", issuedAt));
+        loginAppleFresh(first, java.time.Instant.now(), (user, issuedAt) -> credentials.store(user, "first-before", issuedAt));
+        loginAppleFresh(other, java.time.Instant.now(), (user, issuedAt) -> credentials.store(user, "other-before", issuedAt));
         long firstId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, first.providerUserId()).orElseThrow().getId();
         long otherId = users.findByAuthProviderAndProviderUserId(AuthProvider.APPLE, other.providerUserId()).orElseThrow().getId();
         String firstBefore = jdbc.queryForObject("select encrypted_refresh_token from apple_credentials where user_id=?", String.class, firstId);
         String otherBefore = jdbc.queryForObject("select encrypted_refresh_token from apple_credentials where user_id=?", String.class, otherId);
         doThrow(new IllegalStateException("fixture")).when(refresh).issue(any());
-        assertThatThrownBy(() -> login.loginApple(first, java.time.Instant.now().plusSeconds(2), (user, issuedAt) -> credentials.store(user, "replacement", issuedAt)))
+        assertThatThrownBy(() -> loginAppleFresh(first, java.time.Instant.now().plusSeconds(2), (user, issuedAt) -> credentials.store(user, "replacement", issuedAt)))
                 .isInstanceOf(IllegalStateException.class);
         assertThat(jdbc.queryForObject("select encrypted_refresh_token from apple_credentials where user_id=?", String.class, firstId))
                 .isEqualTo(firstBefore);
@@ -326,12 +326,12 @@ class AppleLoginIntegrationTest {
             return mockingDetails(users).getMockCreationSettings().getDefaultAnswer().answer(call);
         }).when(users).findByAuthProviderAndProviderUserId(AuthProvider.APPLE, subject);
         try (var executor = Executors.newFixedThreadPool(2)) {
-            var first = executor.submit(() -> login.loginApple(identity, newer,
+            var first = executor.submit(() -> loginAppleFresh(identity, newer,
                     (user, issuedAt) -> credentials.store(user, "newer", issuedAt)));
             assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
             var second = executor.submit(() -> {
                 secondStarted.countDown();
-                return login.loginApple(identity, newer.minusSeconds(1),
+                return loginAppleFresh(identity, newer.minusSeconds(1),
                         (user, issuedAt) -> credentials.store(user, "older", issuedAt));
             });
             try { assertThat(secondStarted.await(10, TimeUnit.SECONDS)).isTrue(); }
@@ -341,6 +341,13 @@ class AppleLoginIntegrationTest {
                     .hasCauseInstanceOf(InvalidSocialCredentialException.class);
             assertThat(jdbc.queryForObject("select count(*) from refresh_tokens where user_id=?", Integer.class, id)).isEqualTo(1);
         }
+    }
+
+    private com.stopbell.user.auth.dto.TokenResponse loginAppleFresh(
+            com.stopbell.user.auth.identity.ExternalIdentity identity, java.time.Instant issuedAt,
+            java.util.function.BiConsumer<com.stopbell.user.entity.User, java.time.Instant> credential) {
+        long generation = new com.stopbell.user.auth.apple.AppleIdentityBoundary(jdbc).challengeGeneration();
+        return login.loginApple(identity, issuedAt, generation, credential);
     }
 
 }
