@@ -16,13 +16,17 @@ import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.util.UriUtils;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 public class TagoMetadataClient {
     static final String CITY_CODES = "getCtyCodeList";
     static final String ROUTES = "getRouteNoList";
     static final String ROUTE_STOPS = "getRouteAcctoThrghSttnList";
     private final RestClient restClient; private final TransitClientProperties.Tago properties;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = JsonMapper.builder()
+            .enable(DeserializationFeature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
+            .build();
     public TagoMetadataClient(RestClient restClient, TransitClientProperties.Tago properties) { this.restClient = restClient; this.properties = properties; }
     public List<City> cityCodes() { try { CityResponse r=objectMapper.readValue(get(CITY_CODES,null,null,null),CityResponse.class); return items(r.response, CITY_CODES); } catch(Exception e){throw protocol(CITY_CODES,e);} }
     public Page<Route> routes(String cityCode, int page) { try { RouteResponse r=objectMapper.readValue(get(ROUTES,cityCode,null,page),RouteResponse.class); return page(r.response, ROUTES); } catch(Exception e){throw protocol(ROUTES,e);} }

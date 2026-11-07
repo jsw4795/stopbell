@@ -64,6 +64,25 @@ class TagoMetadataClientTest {
     }
 
     @Test
+    @DisplayName("TAGO 단일 노선 객체를 metadata page로 변환한다")
+    void routes_with_single_item_maps_page() {
+        expect(TagoMetadataClient.ROUTES,
+                "serviceKey=test-service-key&pageNo=1&numOfRows=1000&_type=json&cityCode=31130")
+                .andRespond(json("""
+                        {"response":{"header":{"resultCode":"00"},"body":{"items":{"item":
+                        {"routeid":"GGB222000028","routeno":165,"routetp":"일반버스"}},
+                        "totalCount":1,"pageNo":1}}}
+                        """));
+
+        TagoMetadataClient.Page<TagoMetadataClient.Route> page = client.routes("31130", 1);
+
+        assertThat(page.items()).containsExactly(new TagoMetadataClient.Route("GGB222000028", "165"));
+        assertThat(page.totalCount()).isEqualTo(1);
+        assertThat(page.pageNo()).isEqualTo(1);
+        server.verify();
+    }
+
+    @Test
     @DisplayName("TAGO Route Stop JSON 응답을 metadata page로 변환한다")
     void route_stops_with_valid_response_maps_page() {
         expect(TagoMetadataClient.ROUTE_STOPS,
