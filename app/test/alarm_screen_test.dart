@@ -267,7 +267,14 @@ void main() {
           isTrue,
         );
         expect(
-          tester.widget<ListTile>(find.byKey(const ValueKey(54321))).onTap,
+          tester
+              .widget<InkWell>(
+                find.descendant(
+                  of: find.byKey(const ValueKey(54321)),
+                  matching: find.byType(InkWell),
+                ),
+              )
+              .onTap,
           isNull,
         );
         expect(
@@ -396,7 +403,14 @@ void main() {
         await tester.pump(const Duration(seconds: 30));
         expect(client.createCalls, 1);
         expect(
-          tester.widget<ListTile>(find.byKey(const ValueKey(12345))).onTap,
+          tester
+              .widget<InkWell>(
+                find.descendant(
+                  of: find.byKey(const ValueKey(12345)),
+                  matching: find.byType(InkWell),
+                ),
+              )
+              .onTap,
           isNull,
         );
         await tester.tap(find.text('알람 목록 보기'));

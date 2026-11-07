@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../auth/auth_session.dart';
 import '../transit/bus_route.dart';
 import '../transit/bus_route_stop_occurrence.dart';
+import '../transit/bus_route_timeline.dart';
+import '../transit/bus_stop_selection_layout.dart';
 import 'boarding_candidate_client.dart';
 import 'boarding_candidates.dart';
 import 'boarding_candidates_view.dart';
@@ -123,7 +125,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   }
 
   void _select(BusRouteStopOccurrence? stop) {
-    if (!_current) return;
+    if (!_current || _picker == null || _staleStops) return;
     setState(() {
       if (_picker == _Picker.target) {
         _target = stop;
@@ -150,7 +152,10 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         routeId == widget.route.id &&
         target.id == _target?.id &&
         boardingId == _boarding?.id;
-    setState(() => _loadingCandidates = true);
+    setState(() {
+      _picker = null;
+      _loadingCandidates = true;
+    });
     try {
       final result = await widget.findCandidates(
         routeId: routeId,
@@ -194,123 +199,170 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       '${stop.destinationName == null ? '방면 정보 없음' : '${stop.destinationName} 방면'}\n'
       '이전: ${stop.previousStopName ?? '없음'} · 다음: ${stop.nextStopName ?? '없음'}';
 
+  void _pick(_Picker picker) => setState(() => _picker = picker);
+
   @override
   Widget build(BuildContext context) {
     if (!_current) return const SizedBox.shrink();
-    return ListView(
+    return BusStopSelectionLayout(
+      route: widget.route,
+      title: '하차 알림',
+      onBack: widget.onBack,
+      body: _state == _StopsState.success ? _routeAndCandidates() : _status(),
+      summary: _state == _StopsState.success ? _summary() : null,
+    );
+  }
+
+  Widget _status() => Center(
+    child: Padding(
       padding: const EdgeInsets.all(16),
-      children: [
-        TextButton(onPressed: widget.onBack, child: const Text('노선 다시 선택')),
-        Text(
-          '하차 알림 · ${widget.route.routeNumber}',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        Text(widget.route.regionName),
-        const Text(
-          "목적지 2정거장 전(기본) 또는 1정거장 전(선택)에 하차 준비 알림을 받을 수 있어요. 목록에서 차량을 직접 선택해 등록하세요. 등록 후 바로 추적을 시작하며, 위치를 확인하는 동안에는 '차량 위치 확인 중'으로 표시해요.",
-        ),
-        const SizedBox(height: 12),
-        if (_state == _StopsState.loading) ...[
-          const Center(child: CircularProgressIndicator()),
-          const Text('정류장 조회 중...'),
-        ],
-        if (_state == _StopsState.error) const Text('정류장 정보를 불러오지 못했습니다.'),
-        if (_state == _StopsState.empty) const Text('정류장 정보가 없습니다.'),
-        if (_state == _StopsState.error || _state == _StopsState.empty)
-          OutlinedButton(onPressed: _loadStops, child: const Text('정류장 다시 조회')),
-        if (_state == _StopsState.success) ...[
-          TextButton(
-            key: const ValueKey('pick-target'),
-            onPressed: _staleStops
-                ? null
-                : () => setState(() => _picker = _Picker.target),
-            child: Text(
-              '목적 정류장 (필수): ${_target == null ? '선택해 주세요' : _stopLabel(_target!)}',
-            ),
-          ),
-          TextButton(
-            key: const ValueKey('pick-boarding'),
-            onPressed: _staleStops
-                ? null
-                : () => setState(() => _picker = _Picker.boarding),
-            child: Text(
-              '승차 정류장 (선택): ${_boarding == null ? '선택 안 함' : _stopLabel(_boarding!)}',
-            ),
-          ),
-          if (_picker != null && !_staleStops) ...[
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_state == _StopsState.loading) ...[
+            const CircularProgressIndicator(),
+            const SizedBox(height: 12),
+            const Text('정류장 조회 중...'),
+          ] else ...[
             Text(
-              _picker == _Picker.target
-                  ? '목적 정류장을 선택하세요'
-                  : '승차 정류장을 선택하세요 (선택 사항)',
+              _state == _StopsState.empty
+                  ? '정류장 정보가 없습니다.'
+                  : '정류장 정보를 불러오지 못했습니다.',
             ),
-            if (_picker == _Picker.boarding)
-              ListTile(
-                key: const ValueKey('no-boarding'),
-                title: const Text('선택 안 함'),
-                onTap: () => _select(null),
-              ),
-            for (final stop in _stops)
-              ListTile(
-                key: ValueKey('occurrence-${stop.id}'),
-                title: Text(stop.name),
-                subtitle: Text(_stopLabel(stop)),
-                selected:
-                    stop.id ==
-                    (_picker == _Picker.target ? _target?.id : _boarding?.id),
-                trailing:
-                    stop.id ==
-                        (_picker == _Picker.target
-                            ? _target?.id
-                            : _boarding?.id)
-                    ? const Icon(Icons.check)
-                    : null,
-                onTap: () => _select(stop),
-              ),
-          ],
-          FilledButton(
-            key: const ValueKey('find-candidates'),
-            onPressed: _target == null || _loadingCandidates || _staleStops
-                ? null
-                : _findCandidates,
-            child: Text(
-              _result == null && _error == null ? '차량 후보 조회' : '차량 후보 다시 조회',
-            ),
-          ),
-          if (_loadingCandidates) ...[
-            const Center(child: CircularProgressIndicator()),
-            const Text('차량 후보를 조회하고 있어요.'),
-          ],
-          if (_error != null) Text(_error!),
-          if (_staleStops)
             OutlinedButton(
               onPressed: _loadStops,
-              child: const Text('정류장 목록 다시 선택'),
+              child: const Text('정류장 다시 조회'),
             ),
-          if (_result != null)
-            BoardingCandidatesView(
-              result: _result!,
-              receivedAt: _receivedAt!,
-              onSelect: widget.onSelectCandidate == null
-                  ? null
-                  : (candidate) {
-                      if (!_current ||
-                          _target == null ||
-                          !_result!.candidates.contains(candidate)) {
-                        return;
-                      }
-                      widget.onSelectCandidate!(
-                        candidate,
-                        BoardingSelectionContext(
-                          routeId: widget.route.id,
-                          targetId: _target!.id,
-                          boardingId: _boarding?.id,
-                        ),
-                        _stopLabel(_target!),
-                      );
-                    },
-            ),
+          ],
         ],
+      ),
+    ),
+  );
+
+  Widget _routeAndCandidates() => IndexedStack(
+    index: _result != null && _picker == null ? 1 : 0,
+    sizing: StackFit.expand,
+    children: [
+      BusRouteTimeline(
+        stops: _stops,
+        targetId: _target?.id,
+        boardingId: _boarding?.id,
+        rowKey: (id) => ValueKey('occurrence-$id'),
+        onSelect: _picker == null || _staleStops ? null : _select,
+      ),
+      if (_result == null)
+        const SizedBox.shrink()
+      else
+        SingleChildScrollView(
+          key: const ValueKey('boarding-candidate-results'),
+          primary: false,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              BoardingCandidatesView(
+                result: _result!,
+                receivedAt: _receivedAt!,
+                onSelect: widget.onSelectCandidate == null
+                    ? null
+                    : (candidate) {
+                        if (!_current ||
+                            _target == null ||
+                            !(_result?.candidates.contains(candidate) ??
+                                false)) {
+                          return;
+                        }
+                        widget.onSelectCandidate!(
+                          candidate,
+                          BoardingSelectionContext(
+                            routeId: widget.route.id,
+                            targetId: _target!.id,
+                            boardingId: _boarding?.id,
+                          ),
+                          _stopLabel(_target!),
+                        );
+                      },
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                '목적지 2정거장 전(기본) 또는 1정거장 전(선택)에 하차 준비 알림을 받을 수 있어요. 목록에서 차량을 직접 선택해 등록하세요. '
+                "등록 후 바로 추적을 시작하며, 위치를 확인하는 동안에는 '차량 위치 확인 중'으로 표시해요.",
+              ),
+            ],
+          ),
+        ),
+    ],
+  );
+
+  Widget _summary() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _modeButton(_Picker.target, _target),
+      _modeButton(_Picker.boarding, _boarding),
+      if (_picker == _Picker.boarding && !_staleStops)
+        TextButton(
+          key: const ValueKey('no-boarding'),
+          onPressed: () => _select(null),
+          child: const Text('선택 안 함'),
+        ),
+      FilledButton(
+        key: const ValueKey('find-candidates'),
+        onPressed: _target == null || _loadingCandidates || _staleStops
+            ? null
+            : _findCandidates,
+        child: Text(
+          _result == null && _error == null ? '차량 후보 조회' : '차량 후보 다시 조회',
+        ),
+      ),
+      if (_loadingCandidates) ...[
+        const Center(child: CircularProgressIndicator()),
+        const Text('차량 후보를 조회하고 있어요.'),
       ],
+      if (_error != null) Text(_error!),
+      if (_staleStops)
+        OutlinedButton(
+          onPressed: _loadStops,
+          child: const Text('정류장 목록 다시 선택'),
+        ),
+    ],
+  );
+
+  Widget _modeButton(_Picker picker, BusRouteStopOccurrence? stop) {
+    final target = picker == _Picker.target;
+    final active = picker == _picker;
+    final role = target ? '목표' : '승차';
+    final details = stop == null ? null : selectedStopContext(stop, _stops);
+    final name = stop?.name ?? (target ? '선택해 주세요' : '선택 안 함');
+    final colors = Theme.of(context).colorScheme;
+    return Semantics(
+      selected: active,
+      child: TextButton(
+        key: ValueKey(target ? 'pick-target' : 'pick-boarding'),
+        onPressed: _staleStops ? null : () => _pick(picker),
+        style: TextButton.styleFrom(
+          alignment: Alignment.centerLeft,
+          backgroundColor: active ? colors.primaryContainer : null,
+          foregroundColor: active
+              ? colors.onPrimaryContainer
+              : colors.onSurface,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              target ? Icons.flag_outlined : Icons.directions_bus_outlined,
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                '$role · $name${details == null ? '' : '\n$details'}',
+              ),
+            ),
+            if (active) const Icon(Icons.edit_outlined, size: 16),
+          ],
+        ),
+      ),
     );
   }
 }

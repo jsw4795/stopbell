@@ -250,7 +250,14 @@ void main() {
       expect(preparations, 1);
       expectNoMutation();
       expect(
-        tester.widget<ListTile>(find.byKey(ValueKey(stop.id))).onTap,
+        tester
+            .widget<InkWell>(
+              find.descendant(
+                of: find.byKey(ValueKey(stop.id)),
+                matching: find.byType(InkWell),
+              ),
+            )
+            .onTap,
         isNull,
       );
       expect(

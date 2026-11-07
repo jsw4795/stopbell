@@ -92,9 +92,10 @@ void main() {
       );
       expect(find.textContaining('노선 순서 3'), findsOneWidget);
       expect(find.textContaining('노선 순서 9'), findsOneWidget);
-      expect(find.textContaining('이전: 이전 · 다음: 다음'), findsNWidgets(2));
+      expect(find.textContaining('이전: 이전 · 다음: 다음'), findsNothing);
       expect(find.byType(SwitchListTile), findsNothing);
       await query(tester);
+      expect(find.textContaining('이전: 이전 · 다음: 다음'), findsOneWidget);
       expect(queries, [(754, 22, null)]);
       expect(find.byType(BoardingCandidatesView), findsOneWidget);
       await tap(tester, 'pick-boarding');
@@ -317,6 +318,8 @@ void main() {
     (tester) async {
       await setup(tester);
       tester.view.physicalSize = const Size(320, 568);
+      tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+      addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
       await tester.pumpWidget(
         MaterialApp(
           builder: (context, child) => MediaQuery(
@@ -345,18 +348,12 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('occurrence-22')),
-        250,
-      );
       await tap(tester, 'occurrence-22');
-      await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('find-candidates')),
-        250,
-      );
+      await tap(tester, 'pick-boarding');
+      await tap(tester, 'occurrence-11');
       await tap(tester, 'find-candidates');
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('현재 확인 가능한 차량 후보가 없어요.'), 250);
+      await tester.ensureVisible(find.text('현재 확인 가능한 차량 후보가 없어요.'));
       expect(find.text('현재 확인 가능한 차량 후보가 없어요.').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
     },

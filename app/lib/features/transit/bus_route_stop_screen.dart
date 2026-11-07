@@ -5,6 +5,8 @@ import '../alarm/alarm_api_client.dart';
 import '../alarm/alarm_creation_controller.dart';
 import 'bus_route.dart';
 import 'bus_route_stop_occurrence.dart';
+import 'bus_route_timeline.dart';
+import 'bus_stop_selection_layout.dart';
 
 enum _StopState { loading, success, empty, error }
 
@@ -207,103 +209,67 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
     }
   }
 
-  String? _context(BusRouteStopOccurrence stop) {
-    final sameName = _stops.where((item) => item.name == stop.name).toList();
-    final details = <String>[];
-    if (stop.destinationName != null) {
-      details.add('${stop.destinationName} 방면');
-    }
-    final sameDestination = sameName
-        .where((item) => item.destinationName == stop.destinationName)
-        .toList();
-    if (sameName.length > 1 &&
-        (stop.destinationName == null || sameDestination.length > 1)) {
-      details.add(
-        '이전: ${stop.previousStopName ?? '없음'} · 다음: ${stop.nextStopName ?? '없음'}',
-      );
-    }
-    if (sameDestination.length > 1 &&
-        sameDestination
-                .where(
-                  (item) =>
-                      item.previousStopName == stop.previousStopName &&
-                      item.nextStopName == stop.nextStopName,
-                )
-                .length >
-            1) {
-      details.add('노선 순서 ${stop.order}');
-    }
-    return details.isEmpty ? null : details.join('\n');
-  }
-
   @override
   Widget build(BuildContext context) {
-    final selected = _stops.where((stop) => stop.id == _selectedOccurrenceId);
-    final target = selected.isEmpty ? null : selected.first;
-    final selectedContext = target == null ? null : _context(target);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ListTile(
-          leading: IconButton(
-            tooltip: '노선 다시 선택',
-            icon: const Icon(Icons.arrow_back),
-            onPressed: _creating ? null : widget.onBack,
-          ),
-          title: Text(widget.route.routeNumber),
-          subtitle: Text(widget.route.regionName),
-        ),
-        Expanded(child: _buildStops()),
-        if (target != null) ...[
-          const Divider(),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              '선택한 정류장: ${target.name}${selectedContext == null ? '' : '\n$selectedContext'}',
+    final target = _stops
+        .where((stop) => stop.id == _selectedOccurrenceId)
+        .firstOrNull;
+    final details = target == null ? null : selectedStopContext(target, _stops);
+    final canChange = !_creating && !_outcomeUnknown;
+    return BusStopSelectionLayout(
+      route: widget.route,
+      title: '도착 알람',
+      onBack: _creating ? null : widget.onBack,
+      body: _buildStops(),
+      summary: target == null && _createMessage == null
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (target != null) ...[
+                  Text(
+                    '선택한 정류장: ${target.name}${details == null ? '' : '\n$details'}',
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('한 정거장 전 알림'),
+                    value: _notifyOneStopBefore,
+                    onChanged: canChange && target.canNotifyOneStopBefore
+                        ? (value) =>
+                              setState(() => _notifyOneStopBefore = value)
+                        : null,
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('한 정거장 후 알림'),
+                    value: _notifyOneStopAfter,
+                    onChanged: canChange && target.canNotifyOneStopAfter
+                        ? (value) => setState(() => _notifyOneStopAfter = value)
+                        : null,
+                  ),
+                  if (!_outcomeUnknown)
+                    FilledButton(
+                      onPressed: _creating ? null : _create,
+                      child: const Text('알람 시작'),
+                    ),
+                ],
+                if (_creating) const Center(child: CircularProgressIndicator()),
+                if (_createMessage != null)
+                  Text(_createMessage!, textAlign: TextAlign.center),
+                if (_outcomeUnknown)
+                  OutlinedButton(
+                    onPressed: widget.onShowAlarms,
+                    child: const Text('알람 목록 보기'),
+                  ),
+                if (canChange &&
+                    _createMessage != null &&
+                    _state == _StopState.success)
+                  OutlinedButton(
+                    onPressed: _load,
+                    child: const Text('정류장 목록 새로고침'),
+                  ),
+              ],
             ),
-          ),
-          SwitchListTile(
-            title: const Text('한 정거장 전 알림'),
-            value: _notifyOneStopBefore,
-            onChanged:
-                !_creating && !_outcomeUnknown && target.canNotifyOneStopBefore
-                ? (value) => setState(() => _notifyOneStopBefore = value)
-                : null,
-          ),
-          SwitchListTile(
-            title: const Text('한 정거장 후 알림'),
-            value: _notifyOneStopAfter,
-            onChanged:
-                !_creating && !_outcomeUnknown && target.canNotifyOneStopAfter
-                ? (value) => setState(() => _notifyOneStopAfter = value)
-                : null,
-          ),
-        ],
-        if (target != null && !_outcomeUnknown)
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: FilledButton(
-              onPressed: _creating ? null : _create,
-              child: const Text('알람 시작'),
-            ),
-          ),
-        if (_creating) const Center(child: CircularProgressIndicator()),
-        if (_createMessage != null)
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(_createMessage!, textAlign: TextAlign.center),
-          ),
-        if (_outcomeUnknown)
-          OutlinedButton(
-            onPressed: widget.onShowAlarms,
-            child: const Text('알람 목록 보기'),
-          ),
-        if (!_creating &&
-            !_outcomeUnknown &&
-            _createMessage != null &&
-            _state == _StopState.success)
-          OutlinedButton(onPressed: _load, child: const Text('정류장 목록 새로고침')),
-      ],
     );
   }
 
@@ -337,21 +303,10 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           ),
         );
       case _StopState.success:
-        return ListView.builder(
-          itemCount: _stops.length,
-          itemBuilder: (context, index) {
-            final stop = _stops[index];
-            final isSelected = stop.id == _selectedOccurrenceId;
-            final context = _context(stop);
-            return ListTile(
-              key: ValueKey(stop.id),
-              title: Text(stop.name),
-              subtitle: context == null ? null : Text(context),
-              selected: isSelected,
-              trailing: isSelected ? const Icon(Icons.check) : null,
-              onTap: _creating || _outcomeUnknown ? null : () => _select(stop),
-            );
-          },
+        return BusRouteTimeline(
+          stops: _stops,
+          targetId: _selectedOccurrenceId,
+          onSelect: _creating || _outcomeUnknown ? null : _select,
         );
     }
   }

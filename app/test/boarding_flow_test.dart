@@ -160,8 +160,8 @@ void main() {
         ),
         isEmpty,
       );
-      await tester.ensureVisible(find.text('노선 다시 선택'));
-      await tester.tap(find.text('노선 다시 선택'));
+      await tester.ensureVisible(find.byTooltip('노선 다시 선택'));
+      await tester.tap(find.byTooltip('노선 다시 선택'));
       await tester.pumpAndSettle();
       await search(tester, 754);
       expect(find.text('서울70사1234'), findsNothing);

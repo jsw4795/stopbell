@@ -56,6 +56,72 @@ Widget screen(Future<List<BusRouteStopOccurrence>> Function(int) findStops) =>
     );
 
 void main() {
+  testWidgets(
+    'direction buttons preserve a selected pass-through occurrence without reloading',
+    (tester) async {
+      const stops = [
+        BusRouteStopOccurrence(
+          id: 1,
+          name: '출발',
+          order: 1,
+          destinationName: '회차',
+          canNotifyOneStopBefore: false,
+          canNotifyOneStopAfter: true,
+        ),
+        BusRouteStopOccurrence(
+          id: 2,
+          name: '교차로(미정차)',
+          order: 2,
+          destinationName: '회차',
+          canNotifyOneStopBefore: true,
+          canNotifyOneStopAfter: true,
+        ),
+        BusRouteStopOccurrence(
+          id: 3,
+          name: '회차',
+          order: 3,
+          destinationName: '종착',
+          canNotifyOneStopBefore: true,
+          canNotifyOneStopAfter: true,
+        ),
+        BusRouteStopOccurrence(
+          id: 4,
+          name: '종착',
+          order: 4,
+          destinationName: '종착',
+          canNotifyOneStopBefore: true,
+          canNotifyOneStopAfter: false,
+        ),
+      ];
+      var requests = 0;
+      await tester.pumpWidget(
+        screen((_) async {
+          requests++;
+          return stops;
+        }),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey(2)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('한 정거장 전 알림'));
+      await tester.tap(find.text('종착 방면'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('선택한 정류장: 교차로(미정차)'), findsOneWidget);
+      expect(
+        tester
+            .widget<SwitchListTile>(
+              find.widgetWithText(SwitchListTile, '한 정거장 전 알림'),
+            )
+            .value,
+        isTrue,
+      );
+      await tester.tap(find.text('회차 방면'));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.flag_outlined).hitTestable(), findsOneWidget);
+      expect(requests, 1);
+    },
+  );
+
   testWidgets('loading then empty response is distinct from failure', (
     tester,
   ) async {
@@ -93,13 +159,12 @@ void main() {
   ) async {
     await tester.pumpWidget(screen((_) async => [first, middle, last]));
     await tester.pumpAndSettle();
-    expect(find.text('재방문 정류장'), findsNWidgets(2));
-    expect(find.text('이전: 없음 · 다음: 중간 정류장'), findsOneWidget);
-    expect(find.text('종점 방면'), findsOneWidget);
-    expect(find.text('이전: 중간 정류장 · 다음: 없음'), findsOneWidget);
+    expect(find.textContaining('재방문 정류장'), findsNWidgets(2));
+    expect(find.textContaining('이전:'), findsNothing);
 
     await tester.tap(find.byKey(const ValueKey(22)));
     await tester.pump();
+    expect(find.textContaining('종점 방면'), findsOneWidget);
     var switches = tester
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))
         .toList();
@@ -120,14 +185,36 @@ void main() {
     expect(switches.map((item) => item.value), [false, false]);
     expect(switches.map((item) => item.onChanged != null), [false, true]);
     expect(
-      tester.widget<ListTile>(find.byKey(const ValueKey(11))).selected,
+      tester
+          .widget<Semantics>(
+            find
+                .descendant(
+                  of: find.byKey(const ValueKey(11)),
+                  matching: find.byType(Semantics),
+                )
+                .first,
+          )
+          .properties
+          .selected,
       isTrue,
     );
     expect(
-      tester.widget<ListTile>(find.byKey(const ValueKey(33))).selected,
+      tester
+          .widget<Semantics>(
+            find
+                .descendant(
+                  of: find.byKey(const ValueKey(33)),
+                  matching: find.byType(Semantics),
+                )
+                .first,
+          )
+          .properties
+          .selected,
       isFalse,
     );
 
+    expect(find.textContaining('이전: 없음 · 다음: 중간 정류장'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey(33)));
     await tester.tap(find.byKey(const ValueKey(33)));
     await tester.pump();
     switches = tester
@@ -135,8 +222,19 @@ void main() {
         .toList();
     expect(switches.map((item) => item.value), [false, false]);
     expect(switches.map((item) => item.onChanged != null), [true, false]);
+    expect(find.textContaining('이전: 중간 정류장 · 다음: 없음'), findsOneWidget);
     expect(
-      tester.widget<ListTile>(find.byKey(const ValueKey(33))).selected,
+      tester
+          .widget<Semantics>(
+            find
+                .descendant(
+                  of: find.byKey(const ValueKey(33)),
+                  matching: find.byType(Semantics),
+                )
+                .first,
+          )
+          .properties
+          .selected,
       isTrue,
     );
   });
