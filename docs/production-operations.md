@@ -33,6 +33,10 @@ V32 적용 시에도 이전 Backend의 인증 요청과 삭제 작업을 종료�
 수신과 Worker는 기본 OFF다. 활성화 전 격리 환경에서 수신·복구 및 아래 조회를 검증하고, DB에는 최소 권한으로 접근한다. 다음 읽기 전용 집계는 UTC 기준이며 식별자와 자격 증명을 반환하지 않는다. 반복 실패의 기준은 운영자가 정한 횟수로 적용한다.
 
 ```sql
+SELECT state, COUNT(*) AS event_count
+FROM apple_notification_events
+GROUP BY state;
+
 SELECT state, COUNT(*) AS event_count,
        MAX(TIMESTAMPDIFF(SECOND, received_at, UTC_TIMESTAMP(6))) AS oldest_age_seconds,
        SUM(attempt_count > 1) AS repeated_attempts
@@ -52,3 +56,16 @@ FROM account_deletions WHERE state = 'APPLE_NOTIFIED';
 `attempt_count > 1`은 반복 시도 수이며 반드시 반복 실패를 뜻하지 않는다. `last_error`는 마지막 실패의 제한된 분류이고 전체 실패 이력이 아니다. 빈 상태는 결과 행이 없다. backlog 증가나 오래된 PENDING은 Worker 활성화 상태, 실행·DB 오류와 재시도 기한을 조사하고 원인을 복구한다. Worker는 1분 고정 지연으로 최대 10건을 순차 처리하므로 1분 이내 차단을 보장하지 않으며, 장애가 계속되면 차단 지연의 상한이 없다. PENDING 저장만으로 기존 Access Token이나 Alarm이 차단되지는 않는다. Worker가 `APPLE_NOTIFIED`와 source 중단을 commit하면 기존 보호 API와 후속 source 처리가 차단된다. 이미 외부 FCM에 전달 중이거나 접수된 요청은 회수할 수 없다.
 
 REVIEW_REQUIRED는 자동 처리하지 않는다. 권한이 제한된 DB 세션에서 `HEX(jti_hash)`, 이벤트 유형·시각·수신 시각과 상태로 대상을 식별하고, 원문 JWS·Token·Apple subject를 일반 로그나 티켓에 기록하지 않는다. 같은 제한된 세션에서 보존된 subject로 APPLE User만 정확히 연결하고 `users.apple_generation_issued_at`, `apple_credentials.identity_issued_at`, 이벤트 시각을 비교한다. User 부재가 현재 계정 삭제를 뜻할 수 있으나 삭제 원인이나 해당 이벤트 처리 성공의 증거는 아니다. 새 계정 세대가 이벤트 이후인지, 기존 생성 근거가 NULL이거나 동일 초인지 확인한다. 인증 근거가 없거나 순서·계정 세대를 증명할 수 없으면 검토 상태를 유지하고 필요한 추가 검증이나 사용자 조치를 요청한다. 검증되지 않은 이벤트를 DELETED 또는 SKIPPED로 직접 변경하거나 강제 삭제하지 않는다. 실제 운영 환경에서 이 조사·복구 절차와 Apple 알림 수신은 아직 검증하지 않았다.
+
+## Apple 알림 실기기 검증 준비 (TASK-815)
+
+이 절차는 사용자가 직접 수행하는 향후 검증이다. Apple 계정을 영구 삭제하지 않는다. `account-deleted`는 합성 이벤트로 검증하고 실기기에서는 `consent-revoked`부터 확인한다. Apple Developer 설정이나 운영 데이터 변경을 이 문서의 작성·검토만으로 승인한 것으로 간주하지 않는다.
+
+1. 테스트 대상 Apple 계정과 StopBell 환경을 분리하고 삭제 대상과 복구 방법을 확인한다. 테스트용 계정에 Apple 로그인으로 가입해 User ID를 안전하게 기록하고 Alarm을 만든다. 실제 사용자 데이터나 운영 DB를 테스트에 사용하지 않는다.
+2. 지속 실행과 재시작 복구가 가능한 Backend와 고정 도메인을 준비한다. 유효한 인증서와 TLS 1.2 이상을 사용하고 외부에서 로그인 페이지 또는 접근 인증 없이 `POST https://<고정 도메인>/auth/apple/notifications`에 도달하는지 검증한다. JWS 검증은 Backend에서 수행한다. 기존 로컬 개발의 임시 `trycloudflare.com` URL은 등록하지 않는다. Named Cloudflare Tunnel은 선택 가능하지만 고정 도메인, 터널·Backend의 지속 가용성과 장애 복구를 별도로 검증해야 한다. 실제 공개 URL은 아직 확정되지 않았다.
+3. Backend에 Spring 환경변수 `APPLE_NOTIFICATIONS_ENABLED=true`, `APPLE_NOTIFICATIONS_WORKER_ENABLED=true`, `APPLE_NOTIFICATIONS_CLIENT_ID=<Apple App ID>`를 주입한다. 두 기능은 기본 OFF이며 Worker 활성화는 검증된 알림 대상의 실제 데이터를 삭제할 수 있다. 대상 DB와 환경을 확인한 뒤 순차적으로 활성화하고, 앞 절의 backlog 조회 및 경보를 준비한다.
+4. Apple Developer의 Certificates, Identifiers & Profiles → Identifiers에서 해당 Primary App ID와 그룹을 확인한다. Sign in with Apple의 Configure에서 Server-to-Server Notification Endpoint URL에 위의 고정 절대 HTTPS URL을 입력하고 Done 및 Save한다. 그룹당 URL은 하나이므로 기존 App ID 설정 변경이 다른 앱이나 서비스에 영향을 줄 수 있다면 변경 전에 사용자 확인을 받는다. [Apple 등록 안내](https://developer.apple.com/help/account/capabilities/enabling-server-to-server-notifications/)
+5. 테스트 iPhone 설정에서 Apple 계정의 Sign in with Apple 목록을 열고 대상 앱의 Apple 로그인 사용을 중단한다. 기기 및 OS 버전에 따라 메뉴 이름이 다를 수 있다. Apple 계정 자체는 삭제하지 않는다.
+6. 제한된 DB 세션에서 앞 절의 상태 집계와 대상 이벤트를 확인한다. 200은 저장 완료이지 삭제 완료가 아니다. PENDING에서 DELETED로 처리되고 해당 User와 Alarm 등 관련 데이터가 삭제됐는지, 기존 Access/Refresh Token이 거부되는지 확인한다. 이메일 설정 이벤트는 IGNORED이며 삭제하지 않는다. Apple 전달 시간과 성공은 사전 보장되지 않는다.
+7. 새 Apple 인증으로 재가입하고 이전과 다른 User ID를 확인한다. 오래된 이벤트가 새 계정을 삭제하지 않는지 격리 합성 테스트 결과와 함께 확인한다.
+8. 수신이 없으면 Primary App ID·그룹·등록 URL, 외부 HTTPS/TLS, 인증 차단, Backend 활성화 및 공개키 접근을 조사한다. 잘못된 서명·claim은 401, 공개키 장애는 503, 저장 장애는 서버 오류다. PENDING이 계속되면 Worker 활성화, DB 및 재시도 기한을 확인한다. REVIEW_REQUIRED는 앞 절의 수동 조사 절차를 따른다. 원문 JWS, 토큰과 식별자를 일반 로그나 티켓에 남기지 않고 상태를 임의 수정하거나 삭제를 강제하지 않는다. Apple의 실제 재전송 동작과 운영 복구는 별도 검증이 필요하다.

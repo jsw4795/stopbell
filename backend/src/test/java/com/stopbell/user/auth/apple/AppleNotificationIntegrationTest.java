@@ -2,6 +2,9 @@ package com.stopbell.user.auth.apple;
 
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
@@ -23,6 +26,7 @@ import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.user.auth.identity.ExternalIdentity;
 import com.stopbell.user.auth.service.LoginService;
 import com.stopbell.user.service.AccountDeletionService;
+import com.stopbell.user.service.AppleNotificationRecovery;
 import com.stopbell.user.auth.exception.InvalidSocialCredentialException;
 import com.stopbell.user.entity.AuthProvider;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -34,30 +38,25 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.http.MediaType;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @ExtendWith(SharedMySqlExtension.class)
-@SpringBootTest(properties = {"apple.notifications.enabled=true", "apple.notifications.client-id=test.app", "account.deletion.recovery-enabled=false"})
-@AutoConfigureMockMvc
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"apple.notifications.enabled=true", "apple.notifications.client-id=test.app", "account.deletion.recovery-enabled=false"})
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 class AppleNotificationIntegrationTest {
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) { SharedMySqlExtension.database(registry, "apple_notification"); }
-    @Autowired MockMvc mvc;
+    @LocalServerPort int port;
     @Autowired JdbcTemplate jdbc;
     @Autowired LoginService login;
     @Autowired AppleNotificationStore store;
@@ -96,8 +95,11 @@ class AppleNotificationIntegrationTest {
         return token.serialize();
     }
     int send(String token) throws Exception {
-        return mvc.perform(post("/auth/apple/notifications").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"payload\":\"" + token + "\"}")).andReturn().getResponse().getStatus();
+        var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/auth/apple/notifications"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString("{\"payload\":\"" + token + "\"}"))
+                .build();
+        return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
     }
     @Test void fourTypesAndDuplicateAreDurable() throws Exception {
         for (String type : java.util.List.of("consent-revoked", "account-deleted", "email-enabled", "email-disabled")) {
@@ -116,6 +118,7 @@ class AppleNotificationIntegrationTest {
         assertThat(send(sign(claims("consent-revoked", "id").build(), key, "missing"))).isNotEqualTo(200);
         assertThat(send(sign(claims("consent-revoked", "id").issuer("wrong").build(), key, "key"))).isNotEqualTo(200);
         assertThat(send(sign(claims("consent-revoked", "id").audience("wrong").build(), key, "key"))).isNotEqualTo(200);
+        assertThat(send(sign(claims("unknown-event", "id").build(), key, "key"))).isNotEqualTo(200);
         assertThat(send(sign(claims("consent-revoked", null).build(), key, "key"))).isNotEqualTo(200);
         assertThat(send(sign(claims("consent-revoked", "id").claim("events", Map.of("type", "consent-revoked")).build(), key, "key"))).isNotEqualTo(200);
         assertThat(jdbc.queryForObject("select count(*) from apple_notification_events", Integer.class)).isZero();
@@ -206,11 +209,14 @@ class AppleNotificationIntegrationTest {
         Instant eventTime = Instant.now().minusSeconds(10).truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
         var apple = new ExternalIdentity(AuthProvider.APPLE, subject);
         loginAppleFresh(apple, eventTime.minusSeconds(10), (u, t) -> {});
+        long userId = jdbc.queryForObject("select id from users where auth_provider='APPLE' and provider_user_id=?", Long.class, subject);
+        jdbc.update("insert into alarms (user_id, transit_type, status, created_at, updated_at) values (?, 'SUBWAY', 'INACTIVE', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))", userId);
         login.login(new ExternalIdentity(AuthProvider.GOOGLE, subject));
         assertThat(send(sign(eventClaims("account-deleted", jti, subject, eventTime), key, "key"))).isEqualTo(200);
-        assertThat(deletion.prepareAppleEvent(jtiHash(jti))).isEqualTo(AccountDeletionService.EventResult.READY);
-        assertThat(deletion.deleteForAppleEvent(jtiHash(jti))).isEqualTo(AccountDeletionService.EventResult.DELETED);
+        assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, jtiHash(jti))).isEqualTo("PENDING");
+        new AppleNotificationRecovery(jdbc, deletion, Clock.systemUTC(), true, true).recover();
         assertThat(jdbc.queryForObject("select count(*) from users where auth_provider='APPLE' and provider_user_id=?", Integer.class, subject)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from alarms where user_id=?", Integer.class, userId)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from users where auth_provider='GOOGLE' and provider_user_id=?", Integer.class, subject)).isOne();
         assertThat(send(sign(eventClaims("account-deleted", jti, subject, eventTime), key, "key"))).isEqualTo(200);
         assertThat(jdbc.queryForObject("select state from apple_notification_events where jti_hash=?", String.class, jtiHash(jti))).isEqualTo("DELETED");
