@@ -605,4 +605,6 @@ V36 `transit_metadata_diff_analyses`는 `collection_run_id`를 PK 및 수집 이
 
 JSON에는 정규화 항목별 건수와 출처별 원본 신규·수정·동일·이번 수집에 없음·버전 변경 건수 및 비교 실시 여부만 포함한다. 원본 JSON과 변경 상세는 복제하지 않으며 전체 상세는 이력에 남지 않는다. 분석 시의 세부 정규화 결과는 호출자에게만 반환한다. 같은 실행의 동일 지문은 기존 결과를 반환하고 다른 지문은 거부한다. 실행 행 잠금과 PK가 동시 요청을 보호한다. 지문은 비교 입력을 구조적으로 정렬해 계산하며 원본 내용을 로그에 기록하지 않는다.
 
-Bootstrap은 같은 수집 실행이 `COLLECTED`인 동안 분석 결과를 commit한 뒤 `SYNCING`으로 전이한다. 분석 또는 저장이 실패하면 교통 메타데이터 동기화를 시작하지 않는다. 이후 동기화 실패 또는 완료 이력 기록의 불확실성은 이미 저장된 분석을 삭제하거나 적용 결과로 변경하지 않는다.
+Bootstrap은 같은 수집 실행이 `COLLECTED`인 동안 분석 결과를 commit하고 안전 정책을 통과한 뒤 `SYNCING`으로 전이한다. 분석 또는 저장이 실패하면 교통 메타데이터 동기화를 시작하지 않는다. 이후 동기화 실패 또는 완료 이력 기록의 불확실성은 이미 저장된 분석을 삭제하거나 적용 결과로 변경하지 않는다.
+
+명시적 Bootstrap의 안전 정책 차단은 분석 commit 후 `SYNCING` 이전에 `VALIDATION / UNSAFE_CHANGE`, 고정 메시지 `Unsafe metadata change blocked`로 기록한다. 실행 ID와 Provider로 V36 요약의 `routes.removed`, `occurrences.removed`, `stops.removed`, `stops.conflicts`를 조회해 사유를 확인한다. `stops.removed`는 새 Snapshot에서 참조되지 않아 cleanup 대상이 될 수 있는 기존 Stop이며 기존 고아도 포함한다. 요약은 분석 시점 예상치이고 적용 결과나 마지막 성공 Snapshot과의 비교가 아니다. V34의 코드 열은 VARCHAR(32)이며 코드별 CHECK는 없다.

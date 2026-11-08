@@ -37,6 +37,15 @@ class BusMetadataBootstrapServiceTest {
     private void valid() {
         doReturn(snapshot).when(source).fetchSnapshotWithRawRows(42L, archive);
         when(sync.prepareSeoulSnapshot(eq(source), eq(snapshot), any())).thenReturn(() -> {});
+        var diff = new BusMetadataDiffService.Result(TransitProvider.SEOUL_BUS, List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        when(analysis.analyzeAndStore(42L, source, snapshot)).thenReturn(new TransitMetadataDiffAnalysisService.Analysis(null, diff));
+    }
+
+    private void validTago(TagoMetadataSource.TagoSnapshot snapshot) {
+        var diff = new BusMetadataDiffService.Result(TransitProvider.TAGO, List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        when(analysis.analyzeAndStore(42L, snapshot)).thenReturn(new TransitMetadataDiffAnalysisService.Analysis(null, diff));
     }
 
     @Test @DisplayName("수집과 검증 뒤 동기화하고 완료 이력을 기록한다")
@@ -67,13 +76,32 @@ class BusMetadataBootstrapServiceTest {
     @Test @DisplayName("분석 장애는 동기화를 막고 원문 없이 기록하며 재시도할 수 있다")
     void analysis_failure_blocks_sync_and_releases_guard() {
         var service = bootstrap(); valid();
-        doThrow(new IllegalStateException("secret")).doReturn(null).when(analysis).analyzeAndStore(42L, source, snapshot);
+        var safe = analysis.analyzeAndStore(42L, source, snapshot);
+        clearInvocations(analysis);
+        doThrow(new IllegalStateException("secret")).doReturn(safe).when(analysis).analyzeAndStore(42L, source, snapshot);
         assertThatThrownBy(() -> service.bootstrap(TransitProvider.SEOUL_BUS))
                 .hasMessageContaining("VALIDATION").hasMessageContaining("UNEXPECTED_FAILURE").hasMessageNotContaining("secret");
         verify(history).fail(42L, TransitCollectionFailureStage.VALIDATION, TransitCollectionFailureCode.UNEXPECTED_FAILURE);
         verify(history, never()).syncing(anyLong()); verify(history, never()).complete(anyLong());
         service.bootstrap(TransitProvider.SEOUL_BUS);
         verify(history, times(2)).start(TransitProvider.SEOUL_BUS);
+    }
+
+    @Test @DisplayName("위험 변경은 동기화 상태 진입 전에 차단하고 다음 실행을 허용한다")
+    void unsafe_change_blocks_before_syncing_and_releases_guard() {
+        var service = bootstrap(); valid();
+        var safe = analysis.analyzeAndStore(42L, source, snapshot);
+        clearInvocations(analysis);
+        var unsafe = new BusMetadataDiffService.Result(TransitProvider.SEOUL_BUS, List.of(), List.of(), List.of("old"), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+        when(analysis.analyzeAndStore(42L, source, snapshot)).thenReturn(new TransitMetadataDiffAnalysisService.Analysis(null, unsafe), safe);
+        assertThatThrownBy(() -> service.bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("code=UNSAFE_CHANGE");
+        verify(history).fail(42L, TransitCollectionFailureStage.VALIDATION, TransitCollectionFailureCode.UNSAFE_CHANGE);
+        verify(history, never()).syncing(anyLong());
+        verify(history, never()).complete(anyLong());
+        service.bootstrap(TransitProvider.SEOUL_BUS);
+        verify(history).syncing(42L);
+        verify(history).complete(42L);
     }
 
     @Test @DisplayName("분석 단계에서 발견한 불완전 Snapshot은 원본 검증 실패로 기록한다")
@@ -189,6 +217,7 @@ class BusMetadataBootstrapServiceTest {
         when(history.start(TransitProvider.TAGO)).thenReturn(run);
         when(tago.fetchSnapshotWithRawRows(42L, archive)).thenReturn(tagoSnapshot);
         when(sync.prepareTagoSnapshot(eq(tagoSnapshot), any())).thenReturn(() -> {});
+        validTago(tagoSnapshot);
         new BusMetadataBootstrapService(List.of(tago), sync, history, archive, analysis, Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
         verify(tago).fetchSnapshotWithRawRows(42L, archive);
         verify(analysis).analyzeAndStore(42L, tagoSnapshot);
@@ -207,6 +236,7 @@ class BusMetadataBootstrapServiceTest {
         when(history.start(any())).thenReturn(run);
         when(tago.fetchSnapshotWithRawRows(42L, archive)).thenReturn(tagoSnapshot);
         when(sync.prepareTagoSnapshot(eq(tagoSnapshot), any())).thenReturn(() -> {});
+        validTago(tagoSnapshot);
         valid();
         var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
         doAnswer(invocation -> { entered.countDown(); release.await(); return snapshot; }).when(seoul).fetchSnapshotWithRawRows(42L, archive);

@@ -6,6 +6,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 import com.stopbell.transit.client.TransitProviderClientException;
 import com.stopbell.transit.client.TransitProviderClientFailureKind;
@@ -64,7 +65,7 @@ public class BusMetadataBootstrapService {
                 archive.validateStorage();
                 Instant collectedAt = clock.instant();
                 Runnable sync;
-                Runnable analyze;
+                Supplier<TransitMetadataDiffAnalysisService.Analysis> analyze;
                 if (source instanceof SeoulCsvMetadataSource seoul) {
                     var snapshot = seoul.fetchSnapshotWithRawRows(runId, archive);
                     stage = TransitCollectionFailureStage.VALIDATION;
@@ -79,8 +80,14 @@ public class BusMetadataBootstrapService {
                 checkInterrupted();
                 try { history.collected(runId); } catch (RuntimeException e) { throw new HistoryFailure(); }
                 checkInterrupted();
-                try { analyze.run(); } catch (RuntimeException e) { throw new AnalysisFailure(e); }
+                TransitMetadataDiffAnalysisService.Analysis result;
+                try { result = analyze.get(); } catch (RuntimeException e) { throw new AnalysisFailure(e); }
                 checkInterrupted();
+                var safety = new BusMetadataSafetyGuard().evaluate(result);
+                if (safety.decision() == BusMetadataSafetyGuard.Decision.BLOCK) {
+                    log.warn("Unsafe metadata change blocked: provider={}, runId={}, reasons={}", provider, runId, safety.reasons());
+                    throw new UnsafeChange();
+                }
                 try { history.syncing(runId); } catch (RuntimeException e) { throw new HistoryFailure(); }
                 stage = TransitCollectionFailureStage.SYNC;
                 checkInterrupted();
@@ -121,6 +128,7 @@ public class BusMetadataBootstrapService {
     }
 
     private static TransitCollectionFailureCode classify(RuntimeException failure, TransitCollectionFailureStage stage) {
+        if (failure instanceof UnsafeChange) return TransitCollectionFailureCode.UNSAFE_CHANGE;
         if (failure instanceof AnalysisFailure && failure.getCause() instanceof TransitMetadataDiffAnalysisService.InvalidSnapshotException)
             return TransitCollectionFailureCode.INVALID_SOURCE;
         if (failure instanceof HistoryFailure || failure instanceof AnalysisFailure) return TransitCollectionFailureCode.UNEXPECTED_FAILURE;
@@ -140,6 +148,7 @@ public class BusMetadataBootstrapService {
     }
 
     private static final class HistoryFailure extends IllegalStateException { }
+    private static final class UnsafeChange extends IllegalStateException { }
 
     private static void checkInterrupted() {
         if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("Bootstrap interrupted");

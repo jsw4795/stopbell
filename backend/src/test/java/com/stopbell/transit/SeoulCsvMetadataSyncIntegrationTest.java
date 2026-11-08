@@ -160,9 +160,9 @@ class SeoulCsvMetadataSyncIntegrationTest {
                 "SELECT * FROM bus_route_stop_occurrences WHERE route_id = ? AND stop_order IN (1, 3) ORDER BY id",
                 routeId);
 
-        bootstrap(source(ROUTES.replace("7016", "7016변경"),
+        syncDirect(source(ROUTES.replace("7016", "7016변경"),
                 ROUTE_STOPS.replace("100100447,stop-2,1.0,2", "100100447,stop-2,1.0,4"),
-                STOPS.replace("첫 정류장", "변경 정류장"))).bootstrap(TransitProvider.SEOUL_BUS);
+                STOPS.replace("첫 정류장", "변경 정류장")));
 
         assertThat(jdbc.queryForList(
                 "SELECT * FROM bus_route_stop_occurrences WHERE route_id = ? AND stop_order IN (1, 3) ORDER BY id",
@@ -186,7 +186,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
     @Test
     @DisplayName("불완전 CSV 실패 뒤 동일 bootstrap과 source에 정상 임시 CSV를 넣으면 복구한다")
     void recover_with_valid_csv_after_validation_failure() throws IOException {
-        seedMetadata();
+        seedSafeMetadata();
         DatabaseSnapshot before = databaseSnapshot();
         Path routeStopsPath = temporaryDirectory.resolve("route-stops.csv");
         Files.writeString(routeStopsPath, withoutRoute(ROUTE_STOPS, ROUTE_A), StandardCharsets.UTF_8);
@@ -239,30 +239,29 @@ class SeoulCsvMetadataSyncIntegrationTest {
     void roll_back_route_replacement_when_database_insert_fails() {
         seedMetadata();
         DatabaseSnapshot before = databaseSnapshot();
-        BusMetadataBootstrapService bootstrap = bootstrap(source(ROUTES.replace("7016", "7016변경"),
+        SeoulCsvMetadataSource directSource = source(ROUTES.replace("7016", "7016변경"),
                 ROUTE_STOPS.replace(
-                        "100100447,stop-2,1.0,2", "100100447,stop-2,1.0,4"), STOPS));
+                        "100100447,stop-2,1.0,2", "100100447,stop-2,1.0,4"), STOPS);
         jdbc.execute("""
                 CREATE TRIGGER reject_test_occurrence BEFORE INSERT ON bus_route_stop_occurrences
                 FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'test occurrence insert failure'
                 """);
         try {
-            assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.SEOUL_BUS))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("stage=SYNC");
-            assertLastSyncFailed();
+            assertThatThrownBy(() -> syncDirect(directSource))
+                    .isInstanceOf(DataAccessException.class);
             assertThat(databaseSnapshot()).isEqualTo(before);
         } finally {
             jdbc.execute("DROP TRIGGER reject_test_occurrence");
         }
 
-        bootstrap.bootstrap(TransitProvider.SEOUL_BUS);
+        syncDirect(directSource);
         assertThat(lastCompleteSyncAt()).isAfter(PREVIOUS_COMPLETION);
     }
 
     @Test
     @DisplayName("DB 정류장 UPDATE 실패 시 노선 변경도 rollback하고 cleanup과 완료 시각 갱신을 차단한다")
     void roll_back_route_when_database_update_fails() {
-        seedMetadata();
+        seedSafeMetadata();
         DatabaseSnapshot before = databaseSnapshot();
         jdbc.execute("""
                 CREATE TRIGGER reject_test_stop_update BEFORE UPDATE ON bus_stops
@@ -348,7 +347,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
     @Test
     @DisplayName("원본 일부 저장 후 실패하면 해당 노선 전체 rollback하고 cleanup과 완료 시각을 보존한다")
     void roll_back_raw_and_normalized_data_when_raw_insert_fails() {
-        seedMetadata();
+        seedSafeMetadata();
         DatabaseSnapshot before = databaseSnapshot();
         List<Map<String, Object>> rawBefore = jdbc.queryForList("SELECT * FROM transit_source_metadata ORDER BY id");
         BusMetadataBootstrapService bootstrap = bootstrap(source(ROUTES.replace("7016", "변경 노선"), ROUTE_STOPS,
@@ -389,10 +388,9 @@ class SeoulCsvMetadataSyncIntegrationTest {
                 END
                 """);
         try {
-            assertThatThrownBy(() -> bootstrap(source(ROUTES.replace("7016", "앞 노선 변경")
-                    .replace("N26", "뒤 노선 변경"), ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("stage=SYNC");
-            assertLastSyncFailed();
+            assertThatThrownBy(() -> syncDirect(source(ROUTES.replace("7016", "앞 노선 변경")
+                    .replace("N26", "뒤 노선 변경"), ROUTE_STOPS, STOPS)))
+                    .isInstanceOf(DataAccessException.class);
             assertThat(jdbc.queryForObject("SELECT route_number FROM bus_routes WHERE external_route_id=?",
                     String.class, ROUTE_A)).isEqualTo("앞 노선 변경");
             assertThat(jdbc.queryForObject("SELECT route_number FROM bus_routes WHERE external_route_id=?",
@@ -452,9 +450,8 @@ class SeoulCsvMetadataSyncIntegrationTest {
                 FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'stop cleanup'
                 """);
         try {
-            assertThatThrownBy(() -> bootstrap(source(ROUTES + "stale-route,이전 노선,경기,1.0\n",
-                    ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS)).isInstanceOf(IllegalStateException.class).hasMessageContaining("stage=SYNC");
-            assertLastSyncFailed();
+            assertThatThrownBy(() -> syncDirect(source(ROUTES + "stale-route,이전 노선,경기,1.0\n",
+                    ROUTE_STOPS, STOPS))).isInstanceOf(DataAccessException.class);
             assertThat(jdbc.queryForObject("SELECT route_id FROM transit_source_metadata WHERE id=?", Long.class, id))
                     .isEqualTo(routeId);
         } finally {
@@ -495,14 +492,13 @@ class SeoulCsvMetadataSyncIntegrationTest {
     }
 
     @Test
-    @DisplayName("cleanup 실패는 이전 완료 시각을 보존하고 실패 이력을 남긴다")
+    @DisplayName("직접 동기화 cleanup 실패는 이전 완료 시각을 보존한다")
     void records_cleanup_failure() {
         seedMetadata();
         jdbc.execute("CREATE TRIGGER reject_cleanup BEFORE DELETE ON bus_routes FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'cleanup failure'");
         try {
-            assertThatThrownBy(() -> bootstrap(source(ROUTES, ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS))
-                    .hasMessageContaining("stage=SYNC");
-            assertLastSyncFailed();
+            assertThatThrownBy(() -> syncDirect(source(ROUTES, ROUTE_STOPS, STOPS)))
+                    .isInstanceOf(DataAccessException.class);
             assertThat(lastCompleteSyncAt()).isEqualTo(PREVIOUS_COMPLETION);
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='stale-route'", Integer.class)).isEqualTo(1);
         } finally { jdbc.execute("DROP TRIGGER reject_cleanup"); }
@@ -511,7 +507,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
     @Test
     @DisplayName("완료 시각 저장 실패는 완료 이력을 만들지 않고 이전 시각을 보존한다")
     void records_completion_timestamp_failure() {
-        seedMetadata();
+        seedSafeMetadata();
         jdbc.execute("CREATE TRIGGER reject_completion BEFORE UPDATE ON bus_metadata_sync_states FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'completion failure'");
         try {
             assertThatThrownBy(() -> bootstrap(source(ROUTES, ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS))
@@ -529,6 +525,16 @@ class SeoulCsvMetadataSyncIntegrationTest {
         assertThat(rows.getFirst().get("finished_at")).isNotNull();
         Long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='SEOUL_BUS'", Long.class);
         assertThat(analysis.find(id)).isNotNull();
+    }
+
+    private void syncDirect(SeoulCsvMetadataSource source) {
+        syncService.syncSeoulSnapshot(source, source.fetchSnapshotWithRawRows(), Instant.now());
+    }
+
+    private void seedSafeMetadata() {
+        seedMetadata();
+        syncDirect(source(ROUTES, ROUTE_STOPS, STOPS));
+        syncStateRepository.saveAndFlush(new BusMetadataSyncState(TransitProvider.SEOUL_BUS, PREVIOUS_COMPLETION));
     }
 
     private void seedMetadata() {

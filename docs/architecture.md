@@ -748,3 +748,7 @@ Apple 인증은 검증 성공한 ID 토큰의 서명된 발급 시각을 credent
 
 
 명시적 Bootstrap은 원본 아카이브와 Snapshot 검증 후 `COLLECTED`를 기록하고 동일 Snapshot으로 분석한다. 독립 분석 트랜잭션의 commit 성공 후에만 `SYNCING`과 기존 Route 단위 동기화를 시작한다. 검증 실패는 `VALIDATION / INVALID_SOURCE`, 분석 인프라 오류는 `VALIDATION / UNEXPECTED_FAILURE`, 동기화 개시 후 오류는 `SYNC / SYNC_FAILED`로 기록한다. 분석 결과는 적용 전 예상치로 남으며 후속 동기화 실패와 부분 commit으로 수정하거나 삭제하지 않는다. 동기화 성공 뒤 완료 이력 기록이 불확실하면 기존과 같이 완료 기록만 동일 실행으로 한 번 재시도한다.
+
+Phase 3-B-1A의 명시적 Bootstrap은 분석 commit 이후 `SYNCING` 이전에 같은 분석 결과를 평가한다. Route 삭제, occurrence 제거, Stop cleanup 후보 또는 공유 Stop 충돌이 하나라도 있으면 `VALIDATION / UNSAFE_CHANGE`로 차단하고 동기화를 시작하지 않는다. 그 외 추가·수정은 허용한다. 판단은 분석 시점 현재 DB 기준이며 분석과 적용 사이 다른 writer의 변경까지 보호하지 않는다. Provider별 single-flight는 같은 인스턴스의 Bootstrap만 제한한다.
+
+Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncRoute`, `syncSeoulSource`, `syncTagoSource`, `syncSeoulSnapshot`, `syncTagoSnapshot`, `syncCompleteProviderSnapshot` 및 실행 가능한 작업을 반환하는 `prepareSeoulSnapshot`, `prepareTagoSnapshot`, `BusRouteMetadataSyncService`의 `syncRoute`, `syncSeoulRoute`, `syncTagoRoute`, `BusProviderMetadataCleanupService.cleanupProvider`다. 이 경로와 다른 인스턴스·직접 DB writer를 포함하는 보호, 검토·승인 정책은 후속 작업이다.

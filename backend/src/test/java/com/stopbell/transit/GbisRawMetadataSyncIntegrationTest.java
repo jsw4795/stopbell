@@ -147,7 +147,6 @@ class GbisRawMetadataSyncIntegrationTest {
         org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
         org.mockito.Mockito.when(source.fetchSnapshotWithRawRows(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(archive)))
                 .thenReturn(snapshot(2, "GGB10", "1", "014"));
-        sync.syncRoute(new BusRouteMetadataSnapshot(TransitProvider.TAGO, "stale", "stale", "31010", List.of(new BusStopOccurrenceMetadataSnapshot("stale", "stale", null, null, 1))));
         jdbc.execute("CREATE TRIGGER fail_gbis_bootstrap BEFORE INSERT ON transit_source_metadata FOR EACH ROW BEGIN IF NEW.source_system = 'GBIS' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'failure'; END IF; END");
         try {
             var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, java.time.Clock.systemUTC());
@@ -159,9 +158,60 @@ class GbisRawMetadataSyncIntegrationTest {
             assertThat(failed.getFailureCode()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureCode.SYNC_FAILED);
             assertThat(analysis.find(id)).isNotNull();
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_metadata_sync_states WHERE provider='TAGO'", Integer.class)).isZero();
-            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='stale'", Integer.class)).isEqualTo(1);
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='GGB200'", Integer.class)).isEqualTo(1);
         } finally { jdbc.execute("DROP TRIGGER fail_gbis_bootstrap"); }
+    }
+
+    @Test
+    @DisplayName("TAGO 삭제 위험은 GBIS를 포함한 분석을 보존하고 모든 메타데이터 쓰기를 차단한다")
+    void blocks_tago_removal_before_gbis_or_cleanup() {
+        var initial = snapshot(2, "GGB10", "1", "014");
+        sync.syncTagoSnapshot(initial, TIME);
+        sync.syncRoute(new BusRouteMetadataSnapshot(TransitProvider.TAGO, "stale", "stale", "31010", List.of(new BusStopOccurrenceMetadataSnapshot("stale", "stale", null, null, 1))));
+        var routes = jdbc.queryForList("select * from bus_routes order by id");
+        var stops = jdbc.queryForList("select * from bus_stops order by id");
+        var occurrences = jdbc.queryForList("select * from bus_route_stop_occurrences order by id");
+        var raw = jdbc.queryForList("select * from transit_source_metadata order by id");
+        var state = jdbc.queryForList("select * from bus_metadata_sync_states order by provider");
+        var archive = org.mockito.Mockito.mock(com.stopbell.transit.service.TransitMetadataArchiveService.class);
+        var source = org.mockito.Mockito.mock(TagoMetadataSource.class);
+        org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
+        org.mockito.Mockito.when(source.fetchSnapshotWithRawRows(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(archive)))
+                .thenReturn(snapshot(2, "GGB10", "2", "015"));
+        var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, java.time.Clock.systemUTC());
+        assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.TAGO)).hasMessageContaining("stage=VALIDATION").hasMessageContaining("code=UNSAFE_CHANGE");
+        long run = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs where provider='TAGO'", Long.class);
+        var summary = com.stopbell.transit.service.TransitRawMetadataDiff.parse(analysis.find(run).summaryJson());
+        assertThat(summary.path("routes").path("removed").asInt()).isEqualTo(1);
+        assertThat(summary.path("sources").path("GBIS").path("compared").asBoolean()).isTrue();
+        assertThat(jdbc.queryForList("select * from bus_routes order by id")).isEqualTo(routes);
+        assertThat(jdbc.queryForList("select * from bus_stops order by id")).isEqualTo(stops);
+        assertThat(jdbc.queryForList("select * from bus_route_stop_occurrences order by id")).isEqualTo(occurrences);
+        assertThat(jdbc.queryForList("select * from transit_source_metadata order by id")).isEqualTo(raw);
+        assertThat(jdbc.queryForList("select * from bus_metadata_sync_states order by provider")).isEqualTo(state);
+    }
+
+    @Test
+    @DisplayName("GBIS 행선지 변경은 TAGO 원본 필드를 유지하며 정상 적용한다")
+    void permits_gbis_destination_change() {
+        var initial = snapshot(2, "GGB10", "1", "014");
+        sync.syncTagoSnapshot(initial, TIME);
+        var beforeTago = jdbc.queryForList("select source_key, raw_payload from transit_source_metadata where source_system='TAGO' order by source_key");
+        var oldRoute = initial.normalized().routes().getFirst();
+        var occurrences = oldRoute.occurrences().stream().map(o -> new BusStopOccurrenceMetadataSnapshot(
+                o.externalStopId(), o.stopName(), o.latitude(), o.longitude(), o.stopOrder(), "새 행선지")).toList();
+        var changedRoute = new BusRouteMetadataSnapshot(TransitProvider.TAGO, oldRoute.externalRouteId(), oldRoute.routeNumber(), oldRoute.cityCode(), occurrences);
+        var changed = new TagoMetadataSource.TagoSnapshot(new CompleteBusMetadataSnapshot(TransitProvider.TAGO, List.of(changedRoute)), initial.rawRows(), initial.gbis());
+        var archive = org.mockito.Mockito.mock(com.stopbell.transit.service.TransitMetadataArchiveService.class);
+        var source = org.mockito.Mockito.mock(TagoMetadataSource.class);
+        org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
+        org.mockito.Mockito.when(source.fetchSnapshotWithRawRows(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(archive))).thenReturn(changed);
+        new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, java.time.Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
+        long run = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs where provider='TAGO'", Long.class);
+        assertThat(history.find(run).getStatus().name()).isEqualTo("COMPLETED");
+        assertThat(analysis.find(run)).isNotNull();
+        assertThat(jdbc.queryForList("select source_key, raw_payload from transit_source_metadata where source_system='TAGO' order by source_key")).isEqualTo(beforeTago);
+        assertThat(jdbc.queryForList("select destination_name from bus_route_stop_occurrences", String.class)).containsOnly("새 행선지");
     }
 
     @Test
@@ -181,7 +231,7 @@ class GbisRawMetadataSyncIntegrationTest {
     }
 
     private TagoMetadataSource.TagoSnapshot snapshot(int extraStations, String tagoStop, String version, String type) {
-        var stops = List.of(new BusStopOccurrenceMetadataSnapshot(tagoStop, "A", null, null, 1), new BusStopOccurrenceMetadataSnapshot(tagoStop, "B", null, null, 2));
+        var stops = List.of(new BusStopOccurrenceMetadataSnapshot(tagoStop, "A", null, null, 1), new BusStopOccurrenceMetadataSnapshot(tagoStop, "A", null, null, 2));
         var tago = new CompleteBusMetadataSnapshot(TransitProvider.TAGO, List.of(new BusRouteMetadataSnapshot(TransitProvider.TAGO, "GGB200", "300", "31010", stops)));
         var raw = List.of(tagoRaw(TransitSourceDataKind.ROUTE, "GGB200", null, "{\"routeid\":\"GGB200\"}"),
                 tagoRaw(TransitSourceDataKind.OCCURRENCE, "6:GGB200:1", 1, "{\"nodeid\":\"" + tagoStop + "\",\"nodeord\":1}"),

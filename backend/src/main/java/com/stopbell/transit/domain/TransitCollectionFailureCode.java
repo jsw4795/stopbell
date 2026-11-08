@@ -4,6 +4,7 @@ package com.stopbell.transit.domain;
 public enum TransitCollectionFailureCode {
     SOURCE_UNAVAILABLE("Source unavailable"),
     INVALID_SOURCE("Source validation failed"),
+    UNSAFE_CHANGE("Unsafe metadata change blocked"),
     SYNC_FAILED("Database synchronization failed"),
     UNEXPECTED_FAILURE("Unexpected collection failure");
 

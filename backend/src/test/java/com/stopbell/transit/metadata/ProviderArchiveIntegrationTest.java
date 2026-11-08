@@ -289,9 +289,9 @@ class ProviderArchiveIntegrationTest {
     }
 
     @Test void analysis_is_committed_before_first_route_write() {
-        String routes = SEOUL_ROUTES.replace("r1,1", "diff-proof,1");
-        String routeStops = SEOUL_ROUTE_STOPS.replace("r1,s1", "diff-proof,diff-stop");
-        String stops = SEOUL_STOPS.replace("s1,출발", "diff-stop,출발");
+        String routes = SEOUL_ROUTES + "diff-proof,1,지선,1\r\n";
+        String routeStops = SEOUL_ROUTE_STOPS + "diff-proof,diff-stop,1,1\r\n";
+        String stops = SEOUL_STOPS + "diff-stop,출발,일반차로,1,127,37,미설치\r\n";
         var source = new SeoulCsvMetadataSource(resource(routes), resource(routeStops), resource(stops));
         jdbc.execute("""
                 create trigger verify_diff_before_route before insert on bus_routes for each row
@@ -316,6 +316,7 @@ class ProviderArchiveIntegrationTest {
         assertThat(summary.path("occurrences").path("added").asInt()).isEqualTo(1);
         assertThat(countArchives(run)).isEqualTo(3);
         assertThat(runs.find(run).getStatus()).isEqualTo(com.stopbell.transit.domain.TransitCollectionStatus.COMPLETED);
+        sync.syncSeoulSource(new SeoulCsvMetadataSource(resource(SEOUL_ROUTES), resource(SEOUL_ROUTE_STOPS), resource(SEOUL_STOPS)));
     }
 
     @Test void interruption_during_analysis_records_interrupted_and_releases_guard() throws Exception {
