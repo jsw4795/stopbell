@@ -617,3 +617,12 @@ V37은 V36 분석 행에 `review_fingerprint`를 추가하고 실행별 항목 `
 Route 제거, occurrence 제거(이전 Stop·순번과 같은 위치의 대체 Stop), Stop cleanup 후보 및 공유 Stop 충돌을 구분한다. 충돌 후보의 노선·순번별 이름과 좌표는 자식 행에 저장한다. cleanup 대상은 기존 고아를 포함할 수 있다. 원본 응답, URL, 자격 증명은 복제하지 않는다. 항목별 저장과 실행별 순번 정렬 및 페이지 조회를 제공하며 임의 개수 절단은 없다. 크기·DB 오류 등 저장 실패는 전체 상세 트랜잭션을 롤백하고 검토 준비 성공으로 기록하지 않는다.
 
 저장 서비스는 실행 행을 잠그고 Provider, V36 지문, 상세 지문 및 BLOCK 결과를 검증한다. 같은 실행의 같은 상세는 멱등이며 다른 상세는 거부한다. Java `TransitMetadataUnsafeChangeReviewService.find(runId, page, size)`는 0부터 시작하는 페이지, 총 건수, Provider 및 분석 지문을 제공한다. 결과는 분석 당시의 예정 근거이며 실제 적용이나 승인을 뜻하지 않는다.
+
+
+### Transit metadata 일회성 변경 승인 (Phase 3-B-1B-2)
+
+V38 `transit_metadata_change_approvals`는 원본 실행 및 적용 실행 FK, Provider, V36·V37 지문, 승인 사유, 승인·만료 시각, 상태, 선점·최종 시각을 보관한다. 원본 실행은 한 승인에만 연결되고 적용 실행도 한 승인에만 연결된다. CHECK는 상태와 선점·종료 필드의 형태를 제한한다. 서비스는 원본 `FAILED / UNSAFE_CHANGE`, Provider와 두 지문을 확인하고 위험 종류별 V36 집계와 V37 전체 상세의 건수 및 상세 SHA-256을 재검증한다. 상세가 없거나 변경됐으면 승인하지 않는다. 만료 시각과 비어 있지 않은 사유는 필수다.
+
+`APPROVED`만 만료 전 선점하거나 취소할 수 있다. 선점은 행 잠금과 새 `COLLECTED` 실행의 동일 근거 확인 후 `CLAIMED`를 commit한다. `CLAIMED` 이후 결과는 `APPLIED`, `FAILED`, `UNCERTAIN` 중 하나이며 승인 가능 상태로 되돌리지 않는다. 완료 이력 확인이 있을 때만 `APPLIED`다. 결과 기록의 commit이 불확실하면 남은 행과 수집 이력·실제 DB를 수동 확인한다. 재적용은 새 수집·검토·승인을 거친다.
+
+V38의 분석 `fingerprint_version`은 기존 V36 행을 1, 새 분석을 2로 표시한다. 공유 Stop 충돌에서는 Route 및 occurrence 처리 순서가 최종 Stop 값을 바꾸므로 버전 2 지문에 그 순서를 추가한다. 버전 1의 공유 Stop 충돌은 순서를 증명할 수 없어 승인할 수 없다. 새로 수집해 검토해야 한다. 충돌이 없는 기존 분석은 원래 지문 계산을 유지한다.

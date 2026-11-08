@@ -753,4 +753,8 @@ Phase 3-B-1A의 명시적 Bootstrap은 분석 commit 이후 `SYNCING` 이전에 
 
 Phase 3-B-1B-1에서 차단 시 분석 결과와 동일 Snapshot으로 만든 상세 근거를 별도 `REQUIRES_NEW` 트랜잭션에 저장하고 commit한 뒤 `UNSAFE_CHANGE`를 기록한다. 상세 저장이 실패하면 `VALIDATION / REVIEW_SAVE_FAILED`로 기록하고 동기화를 시작하지 않는다. 허용된 실행은 상세 행을 만들지 않는다. 분석 트랜잭션이 상세 지문을 확정하며 저장 서비스는 실행·Provider·분석 지문과 상세 지문 및 Guard 결과를 검증한다. 근거는 승인이나 적용이 아니며 승인·적용 경로는 아직 없다.
 
+Phase 3-B-1B-2의 승인 적용은 별도 명시적 진입점에서 새 실행을 생성하고 새 Snapshot을 수집·검증·분석한다. Guard가 BLOCK이면 새 상세를 저장하고 같은 Snapshot을 현재 DB 기준으로 한 번 더 분석한 뒤, 짧은 독립 트랜잭션에서 승인과 원본·새 실행의 근거를 검증하여 `CLAIMED`로 선점한다. 선점 commit 후에만 `SYNCING`과 기존 Route 단위 동기화를 실행한다. 승인이 지정된 실행이 ALLOW이면 승인 소비 없이 고정 오류로 종료한다. 지문 불일치·만료·취소·사용 완료는 동기화를 차단한다. 동기화 실패는 승인을 `FAILED`, 완료 이력 확정 불가는 `UNCERTAIN`, 완료 확인은 `APPLIED`로 남기며 자동 재사용하지 않는다. 결과 기록 자체가 불확실하면 `CLAIMED` 또는 최종 상태를 운영자가 확인해야 한다.
+
+분석 직전부터 마지막 Route commit까지 단일 잠금으로 보호하지 않는다. 재분석과 첫 쓰기 사이에 다른 인스턴스 또는 직접 writer가 개입할 수 있으며 동일 인스턴스 Provider single-flight만 보장한다. 로컬 관리 명령은 별도 `metadata-admin` 프로필에서 스케줄·다른 one-shot 실행과 시작 시 자동 스키마 변경을 비활성화하고 명시적으로 호출할 때만 동작한다.
+
 Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncRoute`, `syncSeoulSource`, `syncTagoSource`, `syncSeoulSnapshot`, `syncTagoSnapshot`, `syncCompleteProviderSnapshot` 및 실행 가능한 작업을 반환하는 `prepareSeoulSnapshot`, `prepareTagoSnapshot`, `BusRouteMetadataSyncService`의 `syncRoute`, `syncSeoulRoute`, `syncTagoRoute`, `BusProviderMetadataCleanupService.cleanupProvider`다. 이 경로와 다른 인스턴스·직접 DB writer를 포함하는 보호, 검토·승인 정책은 후속 작업이다.

@@ -57,6 +57,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
 
     @Autowired private com.stopbell.transit.service.TransitMetadataDiffAnalysisService analysis;
     @org.springframework.beans.factory.annotation.Autowired private com.stopbell.transit.service.TransitMetadataUnsafeChangeReviewService review;
+    @org.springframework.beans.factory.annotation.Autowired private com.stopbell.transit.service.TransitMetadataChangeApprovalService approvals;
     @Autowired
     private BusMetadataSyncService syncService;
 
@@ -554,7 +555,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
         var clock = java.time.Clock.systemUTC();
         var archive = new com.stopbell.transit.service.TransitMetadataArchiveService(
                 jdbc, clock, temporaryDirectory.toAbsolutePath().normalize().toString(), transactionManager);
-        return new BusMetadataBootstrapService(List.of(source), syncService, history, archive, analysis, review, clock);
+        return new BusMetadataBootstrapService(List.of(source), syncService, history, archive, analysis, review, approvals, clock);
     }
 
     private SeoulCsvMetadataSource source(String routes, String routeStops, String stops) {

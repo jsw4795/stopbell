@@ -24,6 +24,7 @@ class BusMetadataBootstrapServiceTest {
     private final TransitMetadataCollectionHistoryService history = mock(TransitMetadataCollectionHistoryService.class);
     private final TransitMetadataDiffAnalysisService analysis = mock(TransitMetadataDiffAnalysisService.class);
     private final TransitMetadataUnsafeChangeReviewService review = mock(TransitMetadataUnsafeChangeReviewService.class);
+    private final TransitMetadataChangeApprovalService approvals = mock(TransitMetadataChangeApprovalService.class);
     private final TransitMetadataArchiveService archive = mock(TransitMetadataArchiveService.class);
     private final TransitMetadataCollectionRun run = mock(TransitMetadataCollectionRun.class);
     private final SeoulCsvMetadataSource.SeoulCsvSnapshot snapshot = mock(SeoulCsvMetadataSource.SeoulCsvSnapshot.class);
@@ -32,7 +33,7 @@ class BusMetadataBootstrapServiceTest {
         when(source.provider()).thenReturn(TransitProvider.SEOUL_BUS);
         when(run.getId()).thenReturn(42L);
         when(history.start(TransitProvider.SEOUL_BUS)).thenReturn(run);
-        return new BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, review, Clock.systemUTC());
+        return new BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, review, approvals, Clock.systemUTC());
     }
 
     private void valid() {
@@ -219,7 +220,7 @@ class BusMetadataBootstrapServiceTest {
         when(tago.fetchSnapshotWithRawRows(42L, archive)).thenReturn(tagoSnapshot);
         when(sync.prepareTagoSnapshot(eq(tagoSnapshot), any())).thenReturn(() -> {});
         validTago(tagoSnapshot);
-        new BusMetadataBootstrapService(List.of(tago), sync, history, archive, analysis, review, Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
+        new BusMetadataBootstrapService(List.of(tago), sync, history, archive, analysis, review, approvals, Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
         verify(tago).fetchSnapshotWithRawRows(42L, archive);
         verify(analysis).analyzeAndStore(42L, tagoSnapshot);
         verify(history).complete(42L);
@@ -241,7 +242,7 @@ class BusMetadataBootstrapServiceTest {
         valid();
         var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
         doAnswer(invocation -> { entered.countDown(); release.await(); return snapshot; }).when(seoul).fetchSnapshotWithRawRows(42L, archive);
-        var service = new BusMetadataBootstrapService(List.of(seoul, tago), sync, history, archive, analysis, review, Clock.systemUTC());
+        var service = new BusMetadataBootstrapService(List.of(seoul, tago), sync, history, archive, analysis, review, approvals, Clock.systemUTC());
         try (var executor = Executors.newSingleThreadExecutor()) {
             var first = executor.submit(() -> service.bootstrap(TransitProvider.SEOUL_BUS));
             try {

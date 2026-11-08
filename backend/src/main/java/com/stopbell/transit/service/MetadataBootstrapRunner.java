@@ -5,9 +5,11 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Profile;
 
 /** Enabled only by an explicit --transit.metadata.bootstrap.provider command-line property. */
 @Component
+@Profile("!metadata-admin")
 @ConditionalOnProperty(name = "transit.metadata.bootstrap.provider")
 public class MetadataBootstrapRunner implements ApplicationRunner {
     private final BusMetadataBootstrapService bootstrapService;

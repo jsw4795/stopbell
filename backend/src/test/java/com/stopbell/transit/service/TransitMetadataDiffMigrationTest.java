@@ -22,11 +22,17 @@ class TransitMetadataDiffMigrationTest {
         jdbc.update(insert, 1, "a".repeat(64));
         assertThatThrownBy(() -> jdbc.update(insert, 1, "b".repeat(64))).isInstanceOf(DataAccessException.class);
         assertThat(jdbc.queryForObject("select count(*) from transit_metadata_collection_runs", Integer.class)).isOne();
-        assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isOne();
+        assertThat(Flyway.configure().dataSource(ds).target("37").load().migrate().migrationsExecuted).isOne();
         String detail = "insert into transit_metadata_unsafe_change_details (collection_run_id,sequence_number,reason,route_id) values (?, 0, 'ROUTE_REMOVAL', 'route')";
         assertThatThrownBy(() -> jdbc.update(detail, 99)).isInstanceOf(DataAccessException.class);
         jdbc.update(detail, 1);
         assertThatThrownBy(() -> jdbc.update(detail, 1)).isInstanceOf(DataAccessException.class);
+        assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isOne();
+        String approval = "insert into transit_metadata_change_approvals (source_run_id,provider,result_fingerprint,review_fingerprint,approved_at,expires_at,approval_note,status) values (?, 'TAGO', ?, ?, now(6), now(6) + interval 1 hour, 'reviewed', ?)";
+        assertThatThrownBy(() -> jdbc.update(approval, 99, "a".repeat(64), "b".repeat(64), "APPROVED")).isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> jdbc.update(approval, 1, "a".repeat(64), "b".repeat(64), "INVALID")).isInstanceOf(DataAccessException.class);
+        jdbc.update(approval, 1, "a".repeat(64), "b".repeat(64), "APPROVED");
+        assertThatThrownBy(() -> jdbc.update(approval, 1, "a".repeat(64), "b".repeat(64), "APPROVED")).isInstanceOf(DataAccessException.class);
         assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isZero();
     }
 }

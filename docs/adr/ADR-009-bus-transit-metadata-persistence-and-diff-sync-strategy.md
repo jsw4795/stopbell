@@ -113,3 +113,8 @@ TASK-507은 이 ADR의 Schema와 route-level reconciliation을 구현했고, TAS
 기존 최소 sync state 결정 이후 수집 실행의 성공·실패·중단을 추적해야 한다는 사용자 요구에 따라 별도 이력 기반을 추가한다. 기존 `lastCompleteSyncAt`과 최신 원본 UPSERT의 책임은 유지한다. 이력 상태와 저장 계약은 [Database](../database.md#transit-metadata-수집-이력-phase-3-a-3a-1)를 따른다. 당시 단계는 독립 서비스만 제공했으며 이후 명시적 Bootstrap 연결과 아카이브 계약은 [Architecture](../architecture.md)를 따른다.
 
 Phase 3-B-1A에서 명시적 Bootstrap은 구조적 삭제 후보와 공유 Stop 충돌의 자동 적용을 차단한다. 정상 노선 개편일 수 있어도 승인 절차가 정해지기 전까지 보수적으로 차단하며 임의의 비율 임계값은 두지 않는다. 분석 시점과 직접 동기화 우회 경계는 [Architecture](../architecture.md#교통-메타데이터-사전-분석-db-연동-phase-3-a-4-2차)를 따른다. 검토·승인 절차는 후속 결정이다.
+
+
+## Phase 3-B-1B-2 명시적 일회성 승인 (2026-11-08)
+
+사용자 결정에 따라 검토한 차단 실행의 분석·상세 지문에 한정한 일회성 승인과 새 수집의 재검증을 추가한다. 기존 FAILED 실행은 재활성화하지 않는다. 단일 인스턴스 single-flight와 Route 단위 transaction을 유지하므로 재분석 이후 직접 writer나 다른 인스턴스의 개입을 완전히 차단하지 못한다. 영구적인 Guard 비활성화나 분산 잠금은 도입하지 않는다. 운영 계약은 [Architecture](../architecture.md#교통-메타데이터-사전-분석-db-연동-phase-3-a-4-2차), 저장과 과거 충돌 분석의 제한은 [Database](../database.md#transit-metadata-일회성-변경-승인-phase-3-b-1b-2)를 따른다.

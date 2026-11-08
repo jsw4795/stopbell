@@ -20,7 +20,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 /** Explicit local CLI smoke only; reads existing rows and never creates Event/Delivery records. */
 @Component
-@Profile("local")
+@Profile("local & !metadata-admin")
 @ConditionalOnProperty(name = "notification.fcm.smoke", havingValue = "true")
 public class FcmSmokeRunner implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(FcmSmokeRunner.class);

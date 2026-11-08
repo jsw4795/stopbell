@@ -650,3 +650,18 @@ SELECT COUNT(*) AS total FROM transit_metadata_unsafe_change_details WHERE colle
 ```
 
 이전 완전 Snapshot과 현재 DB의 일치는 보장되지 않으며 실패한 동기화의 분석도 예정치로 보존된다.
+
+
+### 위험 변경 로컬 검토·승인 명령
+
+이 명령은 로컬 운영자용이며 사용자 인증을 제공하지 않는다. DB 접속 권한으로 접근을 제한한다. `metadata-admin` 프로필은 예약 작업과 자동 Flyway·스키마 초기화를 비활성화하며 명시적인 비웹 one-shot 명령에만 사용한다. 실행 전에 별도 절차로 V38까지 적용된 DB가 필요하다. 일반 서버 실행은 기존 프로필을 사용한다. 아래 값은 예시이며 실행 ID와 두 지문 전체를 실제 검토 결과로 교체한다.
+
+```bash
+./gradlew bootRun --args='--spring.profiles.active=local,metadata-admin --spring.main.web-application-type=none --transit.metadata.admin.enabled=true --notification.dispatch.enabled=false --transit.monitoring.enabled=false --metadata.command=review --run=123 --page=0 --size=50'
+./gradlew bootRun --args='--spring.profiles.active=local,metadata-admin --spring.main.web-application-type=none --transit.metadata.admin.enabled=true --notification.dispatch.enabled=false --transit.monitoring.enabled=false --metadata.command=approve --run=123 --size=50 --result-fingerprint=전체분석지문 --review-fingerprint=전체상세지문 --expires-at=2027-01-01T00:00:00Z --note=검토사유 --confirm=APPROVE'
+./gradlew bootRun --args='--spring.profiles.active=local,metadata-admin --spring.main.web-application-type=none --transit.metadata.admin.enabled=true --notification.dispatch.enabled=false --transit.monitoring.enabled=false --metadata.command=status --approval=456'
+./gradlew bootRun --args='--spring.profiles.active=local,metadata-admin --spring.main.web-application-type=none --transit.metadata.admin.enabled=true --notification.dispatch.enabled=false --transit.monitoring.enabled=false --metadata.command=revoke --approval=456 --confirm=REVOKE'
+./gradlew bootRun --args='--spring.profiles.active=local,metadata-admin --spring.main.web-application-type=none --transit.metadata.admin.enabled=true --notification.dispatch.enabled=false --transit.monitoring.enabled=false --metadata.command=apply --approval=456 --provider=SEOUL_BUS --confirm=APPLY'
+```
+
+승인 전에 모든 상세 페이지를 검토한다. `apply`는 실제 Provider 수집과 DB 변경을 수행할 수 있으므로 환경을 확인하고 별도 결정 후 실행한다. 이미 선점된 승인은 실패해도 재사용하지 않는다. 실제 최신 Provider 데이터와 운영 적용은 아직 검증되지 않았다. 분석과 실제 쓰기 사이의 다른 writer 제한 및 직접 동기화 우회 경계는 [Architecture](architecture.md#교통-메타데이터-사전-분석-db-연동-phase-3-a-4-2차)를 따른다.

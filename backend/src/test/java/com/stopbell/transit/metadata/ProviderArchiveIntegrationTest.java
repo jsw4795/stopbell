@@ -56,6 +56,7 @@ class ProviderArchiveIntegrationTest {
     }
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean private com.stopbell.transit.service.TransitMetadataDiffAnalysisService analysis;
     @org.springframework.beans.factory.annotation.Autowired private com.stopbell.transit.service.TransitMetadataUnsafeChangeReviewService review;
+    @org.springframework.beans.factory.annotation.Autowired private com.stopbell.transit.service.TransitMetadataChangeApprovalService approvals;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean private com.stopbell.transit.service.BusMetadataCurrentStateReader stateReader;
     @Autowired TransitMetadataArchiveService archives;
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean TransitMetadataCollectionHistoryService runs;
@@ -77,7 +78,7 @@ class ProviderArchiveIntegrationTest {
 
     @Test void seoul_files_are_identical_and_sync_only_after_archiving() throws Exception {
         SeoulCsvMetadataSource source = new SeoulCsvMetadataSource(resource(SEOUL_ROUTES), resource(SEOUL_ROUTE_STOPS), resource(SEOUL_STOPS));
-        new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC()).bootstrap(TransitProvider.SEOUL_BUS);
+        new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC()).bootstrap(TransitProvider.SEOUL_BUS);
         long run = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='SEOUL_BUS'", Long.class);
         assertThat(runs.find(run).getStatus()).isEqualTo(com.stopbell.transit.domain.TransitCollectionStatus.COMPLETED);
         assertThat(runs.find(run).getFinishedAt()).isNotNull();
@@ -109,7 +110,7 @@ class ProviderArchiveIntegrationTest {
         var tago = new TagoMetadataClient(rest, new TransitClientProperties.Tago("https://provider.test/unused", "https://provider.test/tago", "fake-service-key"));
         var gbis = new GbisMetadataClient(rest, "https://provider.test/base", "fake-service-key");
         var source = new TagoMetadataSource(tago, gbis, 0, Set.of("31010"));
-        new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
+        new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
         long run = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
         assertThat(runs.find(run).getStatus()).isEqualTo(com.stopbell.transit.domain.TransitCollectionStatus.COMPLETED);
         assertThat(runs.find(run).getFinishedAt()).isNotNull();
@@ -141,7 +142,7 @@ class ProviderArchiveIntegrationTest {
                 "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":[]},\"totalCount\":2,\"pageNo\":1}}}");
         var tago = new TagoMetadataClient(builder.build(), new TransitClientProperties.Tago("https://provider.test/unused", "https://provider.test/tago", "fake-service-key"));
         var source = new TagoMetadataSource(tago, 0, Set.of("31010"));
-        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC())
+        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC())
                 .bootstrap(TransitProvider.TAGO)).isInstanceOf(IllegalStateException.class).hasMessageContaining("stage=VALIDATION");
         long run = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
         assertThat(runs.find(run).getStatus()).isEqualTo(com.stopbell.transit.domain.TransitCollectionStatus.FAILED);
@@ -158,7 +159,7 @@ class ProviderArchiveIntegrationTest {
         Files.deleteIfExists(input);
         var source = new SeoulCsvMetadataSource(new org.springframework.core.io.FileSystemResource(input),
                 resource(SEOUL_ROUTE_STOPS), resource(SEOUL_STOPS));
-        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC());
+        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC());
         assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("code=SOURCE_UNAVAILABLE");
         long failedId = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='SEOUL_BUS'", Long.class);
         var failed = runs.find(failedId);
@@ -181,7 +182,7 @@ class ProviderArchiveIntegrationTest {
     @org.junit.jupiter.api.DisplayName("잘못된 서울 CSV는 검증 실패로 기록하고 동기화하지 않는다")
     void invalid_seoul_source_is_validation_failure() {
         var source = new SeoulCsvMetadataSource(resource("invalid,header\n"), resource(SEOUL_ROUTE_STOPS), resource(SEOUL_STOPS));
-        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC())
+        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC())
                 .bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("code=INVALID_SOURCE");
         long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='SEOUL_BUS'", Long.class);
         var failed = runs.find(id);
@@ -196,7 +197,7 @@ class ProviderArchiveIntegrationTest {
     void missing_archive_records_failure() {
         var missing = new TransitMetadataArchiveService(jdbc, Clock.systemUTC(), "", manager);
         var source = new SeoulCsvMetadataSource(resource(SEOUL_ROUTES), resource(SEOUL_ROUTE_STOPS), resource(SEOUL_STOPS));
-        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, missing, analysis, review, Clock.systemUTC())
+        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, missing, analysis, review, approvals, Clock.systemUTC())
                 .bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("code=UNEXPECTED_FAILURE");
         long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='SEOUL_BUS'", Long.class);
         var failed = runs.find(id);
@@ -214,7 +215,7 @@ class ProviderArchiveIntegrationTest {
                 .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withServerError());
         var client = new TagoMetadataClient(builder.build(), new TransitClientProperties.Tago("https://provider.test/unused", "https://provider.test/tago", "fake-service-key"));
         var source = new TagoMetadataSource(client, 0, Set.of("31010"));
-        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC())
+        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC())
                 .bootstrap(TransitProvider.TAGO)).hasMessageContaining("code=SOURCE_UNAVAILABLE").hasMessageNotContaining("fake-service-key");
         long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
         var failed = runs.find(id);
@@ -233,7 +234,7 @@ class ProviderArchiveIntegrationTest {
         var client = new TagoMetadataClient(rest, new TransitClientProperties.Tago("https://provider.test/unused", "https://provider.test/tago", "fake-service-key"));
         var gbis = new GbisMetadataClient(rest, "https://provider.test/base", "fake-service-key");
         var source = new TagoMetadataSource(client, gbis, 0, Set.of("31010"));
-        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC())
+        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC())
                 .bootstrap(TransitProvider.TAGO)).hasMessageContaining("code=INVALID_SOURCE");
         long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
         var failed = runs.find(id);
@@ -248,7 +249,7 @@ class ProviderArchiveIntegrationTest {
     void interrupted_tago_wait_records_interrupted() throws Exception {
         var client = org.mockito.Mockito.mock(TagoMetadataClient.class);
         var source = new TagoMetadataSource(client, 60_000, Set.of("31010"));
-        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC());
+        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC());
         var interrupted = new java.util.concurrent.atomic.AtomicBoolean();
         var caught = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         var thread = new Thread(() -> {
@@ -276,7 +277,7 @@ class ProviderArchiveIntegrationTest {
     void completion_record_failure_preserves_sync_result() {
         org.mockito.Mockito.doThrow(new IllegalStateException("db secret")).when(runs).complete(org.mockito.ArgumentMatchers.anyLong());
         var source = new SeoulCsvMetadataSource(resource(SEOUL_ROUTES), resource(SEOUL_ROUTE_STOPS), resource(SEOUL_STOPS));
-        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC())
+        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC())
                 .bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("completion history is uncertain").hasMessageNotContaining("db secret");
         long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='SEOUL_BUS'", Long.class);
         var run = runs.find(id);
@@ -306,7 +307,7 @@ class ProviderArchiveIntegrationTest {
                 end
                 """);
         try {
-            new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC()).bootstrap(TransitProvider.SEOUL_BUS);
+            new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC()).bootstrap(TransitProvider.SEOUL_BUS);
         } finally { jdbc.execute("drop trigger verify_diff_before_route"); }
         long run = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs where provider='SEOUL_BUS'", Long.class);
         var result = analysis.find(run);
@@ -331,7 +332,7 @@ class ProviderArchiveIntegrationTest {
                 org.mockito.ArgumentMatchers.any(SeoulCsvMetadataSource.class),
                 org.mockito.ArgumentMatchers.any(SeoulCsvMetadataSource.SeoulCsvSnapshot.class));
         var source = new SeoulCsvMetadataSource(resource(SEOUL_ROUTES), resource(SEOUL_ROUTE_STOPS), resource(SEOUL_STOPS));
-        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC());
+        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC());
         var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         var flag = new java.util.concurrent.atomic.AtomicBoolean();
         var thread = new Thread(() -> { try { bootstrap.bootstrap(TransitProvider.SEOUL_BUS); }
@@ -358,7 +359,7 @@ class ProviderArchiveIntegrationTest {
         com.stopbell.transit.service.BusMetadataCurrentStateReader target = org.springframework.test.util.AopTestUtils.getTargetObject(stateReader);
         org.mockito.Mockito.doThrow(new org.springframework.dao.DataAccessResourceFailureException("private database error"))
                 .when(target).read(TransitProvider.SEOUL_BUS);
-        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC())
+        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC())
                 .bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("code=UNEXPECTED_FAILURE").hasMessageNotContaining("private database error");
         long run = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs where provider='SEOUL_BUS'", Long.class);
         assertThat(runs.find(run).getStatus()).isEqualTo(com.stopbell.transit.domain.TransitCollectionStatus.FAILED);
@@ -371,7 +372,7 @@ class ProviderArchiveIntegrationTest {
         var before = jdbc.queryForList("select * from bus_routes order by id");
         jdbc.update("insert into transit_source_metadata (source_system,data_kind,source_key,raw_payload,collected_at,updated_at) values ('SEOUL_TDATA','ROUTE','bad-diff-test',cast('[1]' as json),now(6),now(6))");
         try {
-            assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC())
+            assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC())
                     .bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("code=UNEXPECTED_FAILURE");
             long run = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs where provider='SEOUL_BUS'", Long.class);
             assertThat(runs.find(run).getStatus()).isEqualTo(com.stopbell.transit.domain.TransitCollectionStatus.FAILED);
@@ -386,7 +387,7 @@ class ProviderArchiveIntegrationTest {
         var beforeStops = jdbc.queryForList("select * from bus_stops order by id");
         var beforeOccurrences = jdbc.queryForList("select * from bus_route_stop_occurrences order by id");
         var beforeState = jdbc.queryForList("select * from bus_metadata_sync_states order by provider");
-        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, Clock.systemUTC());
+        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC());
         jdbc.execute("create trigger reject_bootstrap_diff before insert on transit_metadata_diff_analyses for each row signal sqlstate '45000' set message_text = 'private error'");
         try {
             assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.SEOUL_BUS))

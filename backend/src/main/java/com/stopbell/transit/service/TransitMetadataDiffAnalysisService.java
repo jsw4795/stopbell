@@ -112,7 +112,7 @@ public class TransitMetadataDiffAnalysisService {
         }
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         String summaryJson = JSON.writeValueAsString(summary);
-        jdbc.update("insert into transit_metadata_diff_analyses (collection_run_id, provider, baseline_type, previous_complete_sync_at, analyzed_at, result_fingerprint, summary, review_fingerprint) values (?, ?, 'CURRENT_DB_BEFORE_APPLY', ?, ?, ?, cast(? as json), ?)",
+        jdbc.update("insert into transit_metadata_diff_analyses (collection_run_id, provider, baseline_type, previous_complete_sync_at, analyzed_at, result_fingerprint, summary, review_fingerprint, fingerprint_version) values (?, ?, 'CURRENT_DB_BEFORE_APPLY', ?, ?, ?, cast(? as json), ?, 2)",
                 runId, complete.provider().name(), last == null ? null : Timestamp.from(last), Timestamp.from(now), fingerprint, summaryJson, reviewFingerprint);
         return new Analysis(find(runId), normalized, details);
     }
@@ -133,6 +133,9 @@ public class TransitMetadataDiffAnalysisService {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             update(digest, JSON.writeValueAsString(result)); update(digest, last == null ? null : last.toString());
             appendRoutes(digest, current.routes()); appendRoutes(digest, complete.routes());
+            // Conflicting shared stops are overwritten in snapshot iteration order.
+            // Bind that order only for conflicts so unaffected historical digests remain valid.
+            if (!result.conflictingStops().isEmpty()) appendApplyOrder(digest, complete.routes());
             var stops = new ArrayList<>(current.stops()); stops.sort(Comparator.comparing(BusMetadataDiffService.Stop::externalStopId));
             for (var stop : stops) { update(digest, stop.externalStopId()); update(digest, stop.name());
                 update(digest, decimal(stop.latitude())); update(digest, decimal(stop.longitude())); }
@@ -155,6 +158,18 @@ public class TransitMetadataDiffAnalysisService {
                 update(digest, occurrence.externalStopId()); update(digest, occurrence.stopName());
                 update(digest, decimal(occurrence.latitude())); update(digest, decimal(occurrence.longitude()));
                 update(digest, Integer.toString(occurrence.stopOrder())); update(digest, occurrence.destinationName());
+            }
+        }
+    }
+    private static void appendApplyOrder(MessageDigest digest, List<BusRouteMetadataSnapshot> routes) {
+        update(digest, "conflicting-stop-apply-order-v2");
+        update(digest, Integer.toString(routes.size()));
+        for (var route : routes) {
+            update(digest, route.externalRouteId());
+            update(digest, Integer.toString(route.occurrences().size()));
+            for (var occurrence : route.occurrences()) {
+                update(digest, occurrence.externalStopId());
+                update(digest, Integer.toString(occurrence.stopOrder()));
             }
         }
     }

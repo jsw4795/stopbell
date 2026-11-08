@@ -7,7 +7,9 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class StopBellApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(StopBellApplication.class, args);
+        SpringApplication application = new SpringApplication(StopBellApplication.class);
+        application.addInitializers(new com.stopbell.common.config.MetadataAdminSafetyInitializer());
+        application.run(args);
     }
 }
 

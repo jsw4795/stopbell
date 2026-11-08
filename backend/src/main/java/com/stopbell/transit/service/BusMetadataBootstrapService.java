@@ -31,11 +31,12 @@ public class BusMetadataBootstrapService {
     private final TransitMetadataArchiveService archive;
     private final TransitMetadataDiffAnalysisService analysis;
     private final TransitMetadataUnsafeChangeReviewService review;
+    private final TransitMetadataChangeApprovalService approvals;
     private final Clock clock;
 
     public BusMetadataBootstrapService(List<BusMetadataSource> sources, BusMetadataSyncService syncService,
             TransitMetadataCollectionHistoryService history, TransitMetadataArchiveService archive,
-            TransitMetadataDiffAnalysisService analysis, TransitMetadataUnsafeChangeReviewService review, @Qualifier("transitMetadataClock") Clock clock) {
+            TransitMetadataDiffAnalysisService analysis, TransitMetadataUnsafeChangeReviewService review, TransitMetadataChangeApprovalService approvals, @Qualifier("transitMetadataClock") Clock clock) {
         for (BusMetadataSource source : sources) {
             if (this.sources.put(source.provider(), source) != null) {
                 throw new IllegalStateException("Duplicate metadata source for " + source.provider());
@@ -47,11 +48,22 @@ public class BusMetadataBootstrapService {
         this.archive = archive;
         this.analysis = analysis;
         this.review = review;
+        this.approvals = approvals;
         this.clock = clock;
     }
 
     @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void bootstrap(TransitProvider provider) {
+        execute(provider, null);
+    }
+
+    @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public void bootstrapWithApproval(TransitProvider provider, long approvalId) {
+        if (approvalId <= 0) throw new IllegalArgumentException("Approval ID must be positive");
+        execute(provider, approvalId);
+    }
+
+    private void execute(TransitProvider provider, Long approvalId) {
         BusMetadataSource source = sources.get(provider);
         if (source == null) throw new IllegalArgumentException("No metadata source configured for " + provider);
         if (!(source instanceof SeoulCsvMetadataSource) && !(source instanceof TagoMetadataSource)) {
@@ -62,6 +74,7 @@ public class BusMetadataBootstrapService {
         try {
             long runId = history.start(provider).getId();
             TransitCollectionFailureStage stage = TransitCollectionFailureStage.COLLECTION;
+            boolean claimed = false;
             try {
                 checkInterrupted();
                 archive.validateStorage();
@@ -89,8 +102,19 @@ public class BusMetadataBootstrapService {
                 if (safety.decision() == BusMetadataSafetyGuard.Decision.BLOCK) {
                     try { review.save(runId, result, safety); } catch (RuntimeException e) { throw new ReviewFailure(e); }
                     checkInterrupted();
-                    log.warn("Unsafe metadata change blocked: provider={}, runId={}, reasons={}", provider, runId, safety.reasons());
-                    throw new UnsafeChange();
+                    if (approvalId == null) {
+                        log.warn("Unsafe metadata change blocked: provider={}, runId={}, reasons={}", provider, runId, safety.reasons());
+                        throw new UnsafeChange();
+                    }
+                    // Re-read the current baseline with the already collected snapshot immediately before claim.
+                    try {
+                        analyze.get();
+                        checkInterrupted();
+                        approvals.claim(approvalId, runId, provider);
+                        claimed = true;
+                    } catch (RuntimeException e) { throw new ApprovalFailure(e); }
+                } else if (approvalId != null) {
+                    throw new ApprovalFailure(new IllegalStateException("Approval supplied for a safe change"));
                 }
                 try { history.syncing(runId); } catch (RuntimeException e) { throw new HistoryFailure(); }
                 stage = TransitCollectionFailureStage.SYNC;
@@ -103,6 +127,7 @@ public class BusMetadataBootstrapService {
                 if (stage == TransitCollectionFailureStage.COLLECTION && code == TransitCollectionFailureCode.INVALID_SOURCE) {
                     failureStage = TransitCollectionFailureStage.VALIDATION;
                 }
+                if (claimed) finishApproval(approvalId, runId, TransitMetadataChangeApprovalService.Status.FAILED);
                 try {
                     if (interrupted) history.interrupt(runId);
                     else history.fail(runId, failureStage, code);
@@ -122,7 +147,15 @@ public class BusMetadataBootstrapService {
             } catch (RuntimeException first) {
                 try { history.complete(runId); }
                 catch (RuntimeException second) {
+                    if (claimed) finishApproval(approvalId, runId, TransitMetadataChangeApprovalService.Status.UNCERTAIN);
                     throw new IllegalStateException("Provider sync succeeded but completion history is uncertain: runId=" + runId);
+                }
+            }
+            if (claimed) {
+                try { approvals.finish(approvalId, runId, TransitMetadataChangeApprovalService.Status.APPLIED); }
+                catch (RuntimeException e) {
+                    finishApproval(approvalId, runId, TransitMetadataChangeApprovalService.Status.UNCERTAIN);
+                    throw new IllegalStateException("Provider sync completed but approval outcome is uncertain: runId=" + runId);
                 }
             }
             log.info("Metadata bootstrap completed: provider={}, runId={}", provider, runId);
@@ -131,7 +164,16 @@ public class BusMetadataBootstrapService {
         }
     }
 
+    private void finishApproval(long approvalId, long runId, TransitMetadataChangeApprovalService.Status status) {
+        try { approvals.finish(approvalId, runId, status); }
+        catch (RuntimeException e) {
+            // A claimed approval must never be returned to the available state, even if outcome recording fails.
+            log.error("Approval outcome recording uncertain: approvalId={}, runId={}", approvalId, runId);
+        }
+    }
+
     private static TransitCollectionFailureCode classify(RuntimeException failure, TransitCollectionFailureStage stage) {
+        if (failure instanceof ApprovalFailure) return TransitCollectionFailureCode.APPROVAL_MISMATCH;
         if (failure instanceof ReviewFailure) return TransitCollectionFailureCode.REVIEW_SAVE_FAILED;
         if (failure instanceof UnsafeChange) return TransitCollectionFailureCode.UNSAFE_CHANGE;
         if (failure instanceof AnalysisFailure && failure.getCause() instanceof TransitMetadataDiffAnalysisService.InvalidSnapshotException)
@@ -154,6 +196,10 @@ public class BusMetadataBootstrapService {
 
     private static final class ReviewFailure extends IllegalStateException {
         private ReviewFailure(RuntimeException cause) { super(cause); }
+    }
+
+    private static final class ApprovalFailure extends IllegalStateException {
+        private ApprovalFailure(RuntimeException cause) { super(cause); }
     }
 
     private static final class HistoryFailure extends IllegalStateException { }

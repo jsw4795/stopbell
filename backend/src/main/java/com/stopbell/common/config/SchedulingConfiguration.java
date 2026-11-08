@@ -2,12 +2,17 @@ package com.stopbell.common.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @Configuration(proxyBeanMethods = false)
-@EnableScheduling
 public class SchedulingConfiguration {
+
+    @Configuration(proxyBeanMethods = false)
+    @Profile("!metadata-admin")
+    @EnableScheduling
+    static class SchedulingActivation { }
 
     @Bean
     ThreadPoolTaskScheduler transitMonitoringScheduler() {

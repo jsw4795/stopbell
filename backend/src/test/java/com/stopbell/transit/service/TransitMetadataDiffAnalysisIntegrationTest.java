@@ -39,8 +39,10 @@ class TransitMetadataDiffAnalysisIntegrationTest {
     @Autowired BusMetadataSyncService sync;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransitMetadataUnsafeChangeReviewService review;
+    @Autowired TransitMetadataChangeApprovalService approvals;
 
     @BeforeEach void clear() {
+        jdbc.update("delete from transit_metadata_change_approvals");
         jdbc.update("delete from transit_metadata_unsafe_change_variants");
         jdbc.update("delete from transit_metadata_unsafe_change_details");
         jdbc.update("delete from transit_metadata_diff_analyses");
@@ -261,6 +263,254 @@ class TransitMetadataDiffAnalysisIntegrationTest {
         assertThat(detail.variants()).extracting(TransitMetadataUnsafeChangeDetails.Variant::routeId).containsExactly("r", "x");
         assertThat(detail.variants()).extracting(TransitMetadataUnsafeChangeDetails.Variant::stopName).containsExactly("First", "Second");
         assertThat(detail.variants().getFirst().latitude()).isEqualByComparingTo("37.1");
+        history.fail(run, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, run);
+        jdbc.update("update transit_metadata_diff_analyses set fingerprint_version=1 where collection_run_id=?", run);
+        assertThatThrownBy(() -> approvals.approve(run, TAGO, result.stored().fingerprint(), hash, Instant.now().plusSeconds(300), "reviewed"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("apply-order");
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("공유 정류장 충돌 시 노선 처리 순서가 달라지면 분석 지문이 달라야 한다")
+    void conflicting_stop_order_must_change_analysis_fingerprint() {
+        var first = new BusRouteMetadataSnapshot(TAGO, "r", "1", "31010", List.of(
+                new BusStopOccurrenceMetadataSnapshot("s", "First", null, null, 1)));
+        var second = new BusRouteMetadataSnapshot(TAGO, "x", "2", "31010", List.of(
+                new BusStopOccurrenceMetadataSnapshot("s", "Second", null, null, 1)));
+        var rows = List.of(raw(ROUTE, "r", null, "{\"routeid\":\"r\"}"),
+                raw(OCCURRENCE, "1:r:1", 1, "{\"nodeid\":\"s\",\"nodeord\":1}"),
+                new TagoMetadataSource.RawSourceRow(TransitSourceSystem.TAGO, ROUTE, "x", "x", null, TransitRawMetadataDiff.parse("{\"routeid\":\"x\"}")),
+                new TagoMetadataSource.RawSourceRow(TransitSourceSystem.TAGO, OCCURRENCE, "1:x:1", "x", 1, TransitRawMetadataDiff.parse("{\"nodeid\":\"s\",\"nodeord\":1}")));
+        var ordered = new TagoMetadataSource.TagoSnapshot(new CompleteBusMetadataSnapshot(TAGO, List.of(first, second)), rows);
+        var reversed = new TagoMetadataSource.TagoSnapshot(new CompleteBusMetadataSnapshot(TAGO, List.of(second, first)), rows);
+        var analysisA = analysis.analyzeAndStore(collected(), ordered);
+        var analysisB = analysis.analyzeAndStore(collected(), reversed);
+        sync.syncTagoSnapshot(ordered, Instant.parse("2026-01-01T00:00:00Z"));
+        var nameA = jdbc.queryForObject("select stop_name from bus_stops where provider='TAGO' and external_stop_id='s'", String.class);
+        sync.syncTagoSnapshot(reversed, Instant.parse("2026-01-01T00:00:00Z"));
+        var nameB = jdbc.queryForObject("select stop_name from bus_stops where provider='TAGO' and external_stop_id='s'", String.class);
+        assertThat(nameA).isEqualTo("Second");
+        assertThat(nameB).isEqualTo("First");
+        assertThat(analysisA.stored().fingerprint()).isNotEqualTo(analysisB.stored().fingerprint());
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("승인 생성과 선점은 완전한 동일 근거를 검증하고 일회성으로 사용한다")
+    void approves_and_claims_complete_evidence_once() {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long source = collected(); var a = analysis.analyzeAndStore(source, snapshot("1", "A"));
+        review.save(source, a, new BusMetadataSafetyGuard().evaluate(a));
+        history.fail(source, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String reviewHash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, source);
+        var expiry = Instant.now().plusSeconds(3600);
+        assertThatThrownBy(() -> approvals.approve(source, SEOUL_BUS, a.stored().fingerprint(), reviewHash, expiry, "reviewed")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> approvals.approve(source, TAGO, "a", reviewHash, expiry, "reviewed")).isInstanceOf(IllegalArgumentException.class);
+        var approved = approvals.approve(source, TAGO, a.stored().fingerprint(), reviewHash, expiry, "reviewed");
+        assertThat(approved.status()).isEqualTo(TransitMetadataChangeApprovalService.Status.APPROVED);
+        assertThatThrownBy(() -> approvals.approve(source, TAGO, a.stored().fingerprint(), reviewHash, expiry, "reviewed")).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        long target = collected(); var b = analysis.analyzeAndStore(target, snapshot("1", "A"));
+        review.save(target, b, new BusMetadataSafetyGuard().evaluate(b));
+        assertThatThrownBy(() -> approvals.claim(approved.id(), target, SEOUL_BUS)).isInstanceOf(IllegalArgumentException.class);
+        jdbc.update("update transit_metadata_unsafe_change_details set stop_id='tampered' where collection_run_id=?", target);
+        assertThatThrownBy(() -> approvals.claim(approved.id(), target, TAGO)).isInstanceOf(IllegalStateException.class);
+        jdbc.update("update transit_metadata_unsafe_change_details set stop_id='orphan' where collection_run_id=?", target);
+        approvals.claim(approved.id(), target, TAGO);
+        assertThat(approvals.find(approved.id()).status()).isEqualTo(TransitMetadataChangeApprovalService.Status.CLAIMED);
+        assertThatThrownBy(() -> approvals.claim(approved.id(), target, TAGO)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> approvals.revoke(approved.id())).isInstanceOf(IllegalStateException.class);
+        approvals.finish(approved.id(), target, TransitMetadataChangeApprovalService.Status.FAILED);
+        assertThat(approvals.find(approved.id()).status()).isEqualTo(TransitMetadataChangeApprovalService.Status.FAILED);
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("훼손된 검토 상세는 승인할 수 없다")
+    void rejects_tampered_evidence() {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long run = collected(); var a = analysis.analyzeAndStore(run, snapshot("1", "A"));
+        review.save(run, a, new BusMetadataSafetyGuard().evaluate(a));
+        history.fail(run, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, run);
+        jdbc.update("update transit_metadata_unsafe_change_details set stop_id='tampered' where collection_run_id=?", run);
+        assertThatThrownBy(() -> approvals.approve(run, TAGO, a.stored().fingerprint(), hash, Instant.now().plusSeconds(3600), "reviewed"))
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("같은 승인의 동시 선점은 한 실행만 성공한다")
+    void only_one_concurrent_claim_succeeds() throws Exception {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long source = collected(); var initial = analysis.analyzeAndStore(source, snapshot("1", "A"));
+        review.save(source, initial, new BusMetadataSafetyGuard().evaluate(initial));
+        history.fail(source, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, source);
+        var approval = approvals.approve(source, TAGO, initial.stored().fingerprint(), hash, Instant.now().plusSeconds(3600), "reviewed");
+        long one = collected(), two = collected();
+        var a = analysis.analyzeAndStore(one, snapshot("1", "A")); var b = analysis.analyzeAndStore(two, snapshot("1", "A"));
+        review.save(one, a, new BusMetadataSafetyGuard().evaluate(a)); review.save(two, b, new BusMetadataSafetyGuard().evaluate(b));
+        CountDownLatch start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            Callable<Boolean> claimOne = () -> { start.await(); try { approvals.claim(approval.id(), one, TAGO); return true; } catch (RuntimeException e) { return false; } };
+            Callable<Boolean> claimTwo = () -> { start.await(); try { approvals.claim(approval.id(), two, TAGO); return true; } catch (RuntimeException e) { return false; } };
+            var x = pool.submit(claimOne); var y = pool.submit(claimTwo); start.countDown();
+            assertThat(List.of(x.get(30, TimeUnit.SECONDS), y.get(30, TimeUnit.SECONDS))).containsExactlyInAnyOrder(true, false);
+        }
+        assertThat(approvals.find(approval.id()).status()).isEqualTo(TransitMetadataChangeApprovalService.Status.CLAIMED);
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("상세는 같고 원본만 달라진 재수집은 승인 사용을 차단한다")
+    void rejects_changed_raw_even_if_review_is_identical() {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long source = collected(); var initial = analysis.analyzeAndStore(source, snapshot("1", "A"));
+        review.save(source, initial, new BusMetadataSafetyGuard().evaluate(initial));
+        history.fail(source, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, source);
+        var approval = approvals.approve(source, TAGO, initial.stored().fingerprint(), hash, Instant.now().plusSeconds(3600), "reviewed");
+        long target = collected(); var changed = analysis.analyzeAndStore(target, snapshot("1", "B"));
+        review.save(target, changed, new BusMetadataSafetyGuard().evaluate(changed));
+        assertThat(changed.details()).isEqualTo(initial.details());
+        assertThat(changed.stored().fingerprint()).isNotEqualTo(initial.stored().fingerprint());
+        assertThatThrownBy(() -> approvals.claim(approval.id(), target, TAGO)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(approvals.find(approval.id()).status()).isEqualTo(TransitMetadataChangeApprovalService.Status.APPROVED);
+        approvals.revoke(approval.id());
+        assertThatThrownBy(() -> approvals.claim(approval.id(), target, TAGO)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("승인 취소와 선점이 경쟁해도 하나의 상태 전이만 성공한다")
+    void revoke_and_claim_are_mutually_exclusive() throws Exception {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long source = collected(); var initial = analysis.analyzeAndStore(source, snapshot("1", "A"));
+        review.save(source, initial, new BusMetadataSafetyGuard().evaluate(initial));
+        history.fail(source, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, source);
+        var approval = approvals.approve(source, TAGO, initial.stored().fingerprint(), hash, Instant.now().plusSeconds(3600), "reviewed");
+        long target = collected(); var next = analysis.analyzeAndStore(target, snapshot("1", "A"));
+        review.save(target, next, new BusMetadataSafetyGuard().evaluate(next));
+        CountDownLatch start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var claim = pool.submit((Callable<Boolean>) () -> { start.await(); try { approvals.claim(approval.id(), target, TAGO); return true; } catch (RuntimeException e) { return false; } });
+            var revoke = pool.submit((Callable<Boolean>) () -> { start.await(); try { approvals.revoke(approval.id()); return true; } catch (RuntimeException e) { return false; } });
+            start.countDown(); assertThat(List.of(claim.get(30, TimeUnit.SECONDS), revoke.get(30, TimeUnit.SECONDS))).containsExactlyInAnyOrder(true, false);
+        }
+        assertThat(approvals.find(approval.id()).status()).isIn(TransitMetadataChangeApprovalService.Status.CLAIMED, TransitMetadataChangeApprovalService.Status.REVOKED);
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("상세 저장 실패 실행과 만료된 승인 요청은 거부한다")
+    void rejects_failed_evidence_and_past_expiry() {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long run = collected(); var a = analysis.analyzeAndStore(run, snapshot("1", "A"));
+        history.fail(run, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.REVIEW_SAVE_FAILED);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, run);
+        assertThatThrownBy(() -> approvals.approve(run, TAGO, a.stored().fingerprint(), hash, Instant.now().plusSeconds(300), "reviewed")).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> approvals.approve(run, TAGO, a.stored().fingerprint(), hash, Instant.now().minusSeconds(1), "reviewed")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest(name = "{0}")
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"route", "stop_id", "stop_name", "coordinates", "order", "destination", "raw", "database", "route_count"})
+    @org.junit.jupiter.api.DisplayName("승인 이후 비교 입력이 바뀌면 새 실행의 선점을 거부한다")
+    void rejects_each_changed_analysis_input(String change) {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long source = collected(); var initial = analysis.analyzeAndStore(source, snapshot("1", "A"));
+        review.save(source, initial, new BusMetadataSafetyGuard().evaluate(initial));
+        history.fail(source, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, source);
+        var approval = approvals.approve(source, TAGO, initial.stored().fingerprint(), hash, Instant.now().plusSeconds(3600), "reviewed");
+        if (change.equals("database")) jdbc.update("update bus_stops set stop_name='changed' where provider='TAGO' and external_stop_id='orphan'");
+        String stop = change.equals("stop_id") ? "b" : "a";
+        String name = change.equals("stop_name") ? "Changed" : "A";
+        java.math.BigDecimal lat = change.equals("coordinates") ? new java.math.BigDecimal("37") : null;
+        java.math.BigDecimal lon = change.equals("coordinates") ? new java.math.BigDecimal("127") : null;
+        int order = change.equals("order") ? 3 : 2;
+        var occurrences = List.of(new BusStopOccurrenceMetadataSnapshot(stop, name, lat, lon, 1, change.equals("destination") ? "Changed" : "Destination"),
+                new BusStopOccurrenceMetadataSnapshot(stop, name, lat, lon, order, null));
+        var routes = new java.util.ArrayList<BusRouteMetadataSnapshot>();
+        routes.add(new BusRouteMetadataSnapshot(TAGO, "r", change.equals("route") ? "2" : "1", "31010", occurrences));
+        var rows = new java.util.ArrayList<TagoMetadataSource.RawSourceRow>();
+        rows.add(raw(ROUTE, "r", null, "{\"routeid\":\"r\",\"extra\":\"" + (change.equals("raw") ? "B" : "A") + "\"}"));
+        rows.add(raw(OCCURRENCE, "1:r:1", 1, "{\"nodeid\":\"" + stop + "\",\"nodeord\":1}"));
+        rows.add(raw(OCCURRENCE, "1:r:" + order, order, "{\"nodeid\":\"" + stop + "\",\"nodeord\":" + order + "}"));
+        if (change.equals("route_count")) {
+            routes.add(new BusRouteMetadataSnapshot(TAGO, "x", "2", "31010", List.of(new BusStopOccurrenceMetadataSnapshot("a", "A", null, null, 1))));
+            rows.add(new TagoMetadataSource.RawSourceRow(TransitSourceSystem.TAGO, ROUTE, "x", "x", null, TransitRawMetadataDiff.parse("{\"routeid\":\"x\"}")));
+            rows.add(new TagoMetadataSource.RawSourceRow(TransitSourceSystem.TAGO, OCCURRENCE, "1:x:1", "x", 1, TransitRawMetadataDiff.parse("{\"nodeid\":\"a\",\"nodeord\":1}")));
+        }
+        long target = collected();
+        var next = analysis.analyzeAndStore(target, new TagoMetadataSource.TagoSnapshot(new CompleteBusMetadataSnapshot(TAGO, routes), rows));
+        review.save(target, next, new BusMetadataSafetyGuard().evaluate(next));
+        assertThat(next.stored().fingerprint()).isNotEqualTo(initial.stored().fingerprint());
+        assertThatThrownBy(() -> approvals.claim(approval.id(), target, TAGO)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(approvals.find(approval.id()).status()).isEqualTo(TransitMetadataChangeApprovalService.Status.APPROVED);
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("같은 실행의 동시 승인 요청은 하나의 승인만 만든다")
+    void concurrent_approval_requests_create_one_row() throws Exception {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long run = collected(); var result = analysis.analyzeAndStore(run, snapshot("1", "A"));
+        review.save(run, result, new BusMetadataSafetyGuard().evaluate(result));
+        history.fail(run, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, run);
+        CountDownLatch start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            Callable<Boolean> task = () -> { start.await(); try { approvals.approve(run, TAGO, result.stored().fingerprint(), hash, Instant.now().plusSeconds(300), "reviewed"); return true; } catch (RuntimeException e) { return false; } };
+            var a = pool.submit(task); var b = pool.submit(task); start.countDown();
+            assertThat(List.of(a.get(30, TimeUnit.SECONDS), b.get(30, TimeUnit.SECONDS))).containsExactlyInAnyOrder(true, false);
+        }
+        assertThat(jdbc.queryForObject("select count(*) from transit_metadata_change_approvals where source_run_id=?", Integer.class, run)).isOne();
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("상세가 없거나 일부 누락된 실행은 승인할 수 없다")
+    void rejects_missing_or_partial_review() {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan'),('TAGO','other','other')");
+        long run = collected(); var result = analysis.analyzeAndStore(run, snapshot("1", "A"));
+        review.save(run, result, new BusMetadataSafetyGuard().evaluate(result));
+        history.fail(run, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, run);
+        jdbc.update("delete from transit_metadata_unsafe_change_details where collection_run_id=? and sequence_number=0", run);
+        assertThatThrownBy(() -> approvals.approve(run, TAGO, result.stored().fingerprint(), hash, Instant.now().plusSeconds(300), "reviewed")).isInstanceOf(IllegalStateException.class);
+        jdbc.update("delete from transit_metadata_unsafe_change_details where collection_run_id=?", run);
+        assertThatThrownBy(() -> approvals.approve(run, TAGO, result.stored().fingerprint(), hash, Instant.now().plusSeconds(300), "reviewed")).isInstanceOf(IllegalStateException.class);
+        jdbc.update("update transit_metadata_diff_analyses set review_fingerprint=null where collection_run_id=?", run);
+        assertThatThrownBy(() -> approvals.approve(run, TAGO, result.stored().fingerprint(), hash, Instant.now().plusSeconds(300), "reviewed")).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("만료된 승인은 새 실행에서 선점할 수 없다")
+    void rejects_claim_of_expired_approval() {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long source = collected(); var result = analysis.analyzeAndStore(source, snapshot("1", "A"));
+        review.save(source, result, new BusMetadataSafetyGuard().evaluate(result));
+        history.fail(source, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, source);
+        var approval = approvals.approve(source, TAGO, result.stored().fingerprint(), hash, Instant.now().plusSeconds(300), "reviewed");
+        long target = collected(); var next = analysis.analyzeAndStore(target, snapshot("1", "A")); review.save(target, next, new BusMetadataSafetyGuard().evaluate(next));
+        jdbc.update("update transit_metadata_change_approvals set approved_at=utc_timestamp(6)-interval 10 minute, expires_at=utc_timestamp(6)-interval 5 minute where id=?", approval.id());
+        assertThatThrownBy(() -> approvals.claim(approval.id(), target, TAGO)).isInstanceOf(IllegalStateException.class);
+        assertThat(approvals.find(approval.id()).status()).isEqualTo(TransitMetadataChangeApprovalService.Status.APPROVED);
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("같은 수집 실행의 재분석에서 DB 변경을 감지한다")
+    void detects_database_change_during_reanalysis() {
+        long run = collected();
+        analysis.analyzeAndStore(run, snapshot("1", "A"));
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','new_orphan','new_orphan')");
+        assertThatThrownBy(() -> analysis.analyzeAndStore(run, snapshot("1", "A")))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("Conflicting analysis");
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("관리 명령의 검토와 승인 생성은 교통 메타데이터를 변경하지 않는다")
+    void cli_review_and_approval_leave_metadata_unchanged() {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long run = collected(); var result = analysis.analyzeAndStore(run, snapshot("1", "A"));
+        review.save(run, result, new BusMetadataSafetyGuard().evaluate(result));
+        history.fail(run, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
+        String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, run);
+        var before = jdbc.queryForList("select * from bus_stops order by id");
+        var environment = org.mockito.Mockito.mock(org.springframework.core.env.Environment.class);
+        org.mockito.Mockito.when(environment.acceptsProfiles(org.mockito.ArgumentMatchers.any(org.springframework.core.env.Profiles.class))).thenReturn(true);
+        var context = org.mockito.Mockito.mock(org.springframework.context.ConfigurableApplicationContext.class);
+        var runner = new com.stopbell.transit.cli.TransitMetadataAdminRunner(approvals, review,
+                org.mockito.Mockito.mock(BusMetadataBootstrapService.class), jdbc, environment, context);
+        runner.run(new org.springframework.boot.DefaultApplicationArguments("--spring.main.web-application-type=none", "--transit.metadata.admin.enabled=true", "--metadata.command=review", "--run=" + run, "--page=0", "--size=10"));
+        assertThat(jdbc.queryForObject("select count(*) from transit_metadata_change_approvals", Integer.class)).isZero();
+        runner.run(new org.springframework.boot.DefaultApplicationArguments("--spring.main.web-application-type=none", "--transit.metadata.admin.enabled=true", "--metadata.command=approve", "--run=" + run, "--size=10", "--result-fingerprint=" + result.stored().fingerprint(), "--review-fingerprint=" + hash, "--expires-at=" + Instant.now().plusSeconds(300), "--note=reviewed", "--confirm=APPROVE"));
+        assertThat(jdbc.queryForObject("select count(*) from transit_metadata_change_approvals", Integer.class)).isOne();
+        assertThat(jdbc.queryForList("select * from bus_stops order by id")).isEqualTo(before);
+        assertThat(jdbc.queryForObject("select count(*) from bus_routes", Integer.class)).isZero();
+        assertThat(jdbc.queryForObject("select count(*) from transit_source_metadata", Integer.class)).isZero();
     }
 
 }
