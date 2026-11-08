@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.function.Consumer;
 
 import com.stopbell.transit.client.TransitClientProperties;
 import com.stopbell.transit.client.TransitProviderClientException;
@@ -36,30 +37,59 @@ public class TagoMetadataClient {
     public Page<Stop> routeStops(String cityCode, String routeId, int page) { try { StopResponse r=objectMapper.readValue(get(ROUTE_STOPS,cityCode,routeId,page),StopResponse.class); return page(r.response, ROUTE_STOPS); } catch(Exception e){throw protocol(ROUTE_STOPS,e);} }
     public Page<RawItem<Route>> routesWithRaw(String cityCode, int page) { return rawPage(ROUTES, cityCode, null, page, Route.class); }
     public Page<RawItem<Stop>> routeStopsWithRaw(String cityCode, String routeId, int page) { return rawPage(ROUTE_STOPS, cityCode, routeId, page, Stop.class); }
+    public List<City> cityCodes(Consumer<byte[]> archive) {
+        byte[] bytes = get(CITY_CODES, null, null, null);
+        List<City> result;
+        try { result = items(objectMapper.readValue(bytes, CityResponse.class).response, CITY_CODES); }
+        catch (Exception e) { throw protocol(CITY_CODES, e); }
+        archiveSafe(bytes, archive);
+        return result;
+    }
+    public Page<RawItem<Route>> routesWithRaw(String cityCode, int page, Consumer<byte[]> archive) {
+        return rawPage(ROUTES, cityCode, null, page, Route.class, archive);
+    }
+    public Page<RawItem<Stop>> routeStopsWithRaw(String cityCode, String routeId, int page, Consumer<byte[]> archive) {
+        return rawPage(ROUTE_STOPS, cityCode, routeId, page, Stop.class, archive);
+    }
     private <T> Page<RawItem<T>> rawPage(String operation, String cityCode, String routeId, int number, Class<T> type) {
+        return rawPage(operation, cityCode, routeId, number, type, null);
+    }
+    private <T> Page<RawItem<T>> rawPage(String operation, String cityCode, String routeId, int number, Class<T> type, Consumer<byte[]> archive) {
+        byte[] bytes = get(operation, cityCode, routeId, number);
+        Page<RawItem<T>> result;
         try {
-            RawResponse response = objectMapper.readValue(get(operation, cityCode, routeId, number), RawResponse.class);
+            RawResponse response = objectMapper.readValue(bytes, RawResponse.class);
             Page<JsonNode> page = page(response.response, operation);
             List<RawItem<T>> items = page.items().stream().map(node -> {
                 if (!node.isObject()) throw TransitProviderClientException.protocol(TransitProvider.TAGO, operation, null);
                 return new RawItem<>(objectMapper.treeToValue(node, type), node);
             }).toList();
-            return new Page<>(items, page.totalCount(), page.pageNo());
+            result = new Page<>(items, page.totalCount(), page.pageNo());
         } catch (Exception e) { throw protocol(operation, e); }
+        if (archive != null) archiveSafe(bytes, archive);
+        return result;
     }
-    private String get(String operation, String cityCode, String routeId, Integer page) {
+    private void archiveSafe(byte[] bytes, Consumer<byte[]> archive) {
+        JsonNode tree;
+        try { tree = objectMapper.readTree(bytes); }
+        catch (Exception e) { throw new IllegalStateException("TAGO archive content could not be inspected"); }
+        new ArchiveContentSafety(properties.serviceKey()).checkJson(tree);
+        archive.accept(bytes);
+    }
+    private byte[] get(String operation, String cityCode, String routeId, Integer page) {
         try {
-            return restClient.get().uri(uri(operation, cityCode, routeId, page)).accept(MediaType.APPLICATION_JSON).retrieve().body(String.class);
+            return restClient.get().uri(uri(operation, cityCode, routeId, page)).accept(MediaType.APPLICATION_JSON).retrieve().body(byte[].class);
         } catch (TransitProviderClientException e) { throw e;
-        } catch (RestClientResponseException e) { throw TransitProviderClientException.http(TransitProvider.TAGO, operation, e.getStatusCode().value(), e);
-        } catch (ResourceAccessException e) { throw TransitProviderClientException.transport(TransitProvider.TAGO, operation, e);
-        } catch (RestClientException e) { throw TransitProviderClientException.protocol(TransitProvider.TAGO, operation, e); }
+        } catch (RestClientResponseException e) { throw TransitProviderClientException.http(TransitProvider.TAGO, operation, e.getStatusCode().value(), null);
+        } catch (ResourceAccessException e) { throw TransitProviderClientException.transport(TransitProvider.TAGO, operation, null);
+        } catch (IllegalArgumentException e) { throw TransitProviderClientException.protocol(TransitProvider.TAGO, operation, null);
+        } catch (RestClientException e) { throw TransitProviderClientException.protocol(TransitProvider.TAGO, operation, null); }
     }
     private URI uri(String operation, String cityCode, String routeId, Integer page) { var b=UriComponentsBuilder.fromUriString(properties.metadataBaseUrl()).pathSegment(operation).queryParam("serviceKey", properties.serviceKey()); if(page!=null)b.queryParam("pageNo", page).queryParam("numOfRows", 1000); b.queryParam("_type", "json"); if(cityCode!=null)b.queryParam("cityCode", UriUtils.encodeQueryParam(cityCode, StandardCharsets.UTF_8)); if(routeId!=null)b.queryParam("routeId", UriUtils.encodeQueryParam(routeId, StandardCharsets.UTF_8)); return b.build(true).toUri(); }
     private <T> List<T> items(Envelope<T> response, String operation) { Body<T> body=body(response,operation); if(body.items==null||body.items.item==null)throw TransitProviderClientException.protocol(TransitProvider.TAGO,operation,null); return body.items.item; }
     private <T> Page<T> page(Envelope<T> response, String operation) { Body<T> body=body(response,operation); if(body.totalCount==null||body.pageNo==null||body.items==null||body.items.item==null)throw TransitProviderClientException.protocol(TransitProvider.TAGO,operation,null); return new Page<>(body.items.item,body.totalCount,body.pageNo); }
     private <T> Body<T> body(Envelope<T> response, String operation) { if(response==null||response.header==null||response.body==null||response.header.resultCode==null)throw TransitProviderClientException.protocol(TransitProvider.TAGO,operation,null); if(!"00".equals(response.header.resultCode))throw TransitProviderClientException.provider(TransitProvider.TAGO,operation,response.header.resultCode); return response.body; }
-    private TransitProviderClientException protocol(String operation, Exception e) { return e instanceof TransitProviderClientException x ? x : TransitProviderClientException.protocol(TransitProvider.TAGO, operation, e); }
+    private TransitProviderClientException protocol(String operation, Exception e) { return e instanceof TransitProviderClientException x ? x : TransitProviderClientException.protocol(TransitProvider.TAGO, operation, null); }
     public record Page<T>(List<T> items, int totalCount, int pageNo) { }
     public record RawItem<T>(T normalized, JsonNode fields) { }
     public record City(String citycode, String cityname) { }

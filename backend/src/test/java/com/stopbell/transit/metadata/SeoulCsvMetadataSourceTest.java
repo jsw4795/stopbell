@@ -2,13 +2,21 @@ package com.stopbell.transit.metadata;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
 import com.stopbell.transit.domain.TransitSourceDataKind;
+import com.stopbell.transit.domain.TransitSourceSystem;
 import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
+import com.stopbell.transit.service.TransitMetadataArchiveService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ByteArrayResource;
@@ -16,6 +24,57 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 
 class SeoulCsvMetadataSourceTest {
+
+    @Test
+    void archive_exact_source_bytes_and_keep_snapshot() {
+        String routes = SCOPED_ROUTES.replace("\n", "\r\n");
+        String stops = SCOPED_STOPS.replace("\n", "\r\n");
+        String routeStops = SCOPED_ROUTE_STOPS.replace("\n", "\r\n");
+        SeoulCsvMetadataSource source = source(routes, routeStops, stops);
+        TransitMetadataArchiveService archive = mock(TransitMetadataArchiveService.class);
+
+        var snapshot = source.fetchSnapshotWithRawRows(42L, archive);
+
+        assertThat(snapshot).isEqualTo(source.fetchSnapshotWithRawRows());
+        verify(archive).store(42L, TransitSourceSystem.SEOUL_TDATA, "seoul_route_master", routes.getBytes(StandardCharsets.UTF_8));
+        verify(archive).store(42L, TransitSourceSystem.SEOUL_TDATA, "seoul_stop_master", stops.getBytes(StandardCharsets.UTF_8));
+        verify(archive).store(42L, TransitSourceSystem.SEOUL_TDATA, "seoul_route_stop_master", routeStops.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void archive_failure_prevents_returning_snapshot() {
+        TransitMetadataArchiveService archive = mock(TransitMetadataArchiveService.class);
+        doThrow(new IllegalStateException("storage failed")).when(archive).store(anyLong(), any(), anyString(), any());
+
+        assertThatThrownBy(() -> source(SCOPED_ROUTES, SCOPED_ROUTE_STOPS, SCOPED_STOPS)
+                .fetchSnapshotWithRawRows(42L, archive))
+                .isInstanceOf(IllegalStateException.class).hasMessage("storage failed");
+    }
+
+    @Test
+    void archive_reads_each_resource_once_and_rejects_invalid_csv_before_store() {
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        Resource routes = countingResource(SCOPED_ROUTES, reads);
+        Resource routeStops = countingResource(SCOPED_ROUTE_STOPS, reads);
+        Resource stops = countingResource(SCOPED_STOPS, reads);
+        TransitMetadataArchiveService archive = mock(TransitMetadataArchiveService.class);
+        new SeoulCsvMetadataSource(routes, routeStops, stops).fetchSnapshotWithRawRows(42, archive);
+        assertThat(reads.get()).isEqualTo(3);
+
+        TransitMetadataArchiveService unused = mock(TransitMetadataArchiveService.class);
+        assertThatThrownBy(() -> source(SCOPED_ROUTES.replace("노선명", "bad"), SCOPED_ROUTE_STOPS, SCOPED_STOPS)
+                .fetchSnapshotWithRawRows(42, unused)).isInstanceOf(IllegalStateException.class);
+        org.mockito.Mockito.verifyNoInteractions(unused);
+    }
+
+    private static Resource countingResource(String value, java.util.concurrent.atomic.AtomicInteger reads) {
+        return new ByteArrayResource(value.getBytes(StandardCharsets.UTF_8)) {
+            @Override public java.io.InputStream getInputStream() throws java.io.IOException {
+                reads.incrementAndGet();
+                return super.getInputStream();
+            }
+        };
+    }
 
     @Test
     @DisplayName("UTF-8 BOM 서울 T Data fixture를 실제 한글 header와 join 계약으로 파싱한다")

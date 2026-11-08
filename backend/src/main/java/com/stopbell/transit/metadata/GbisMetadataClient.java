@@ -2,6 +2,9 @@ package com.stopbell.transit.metadata;
 
 import java.net.URI;
 
+import com.stopbell.transit.domain.TransitSourceSystem;
+import com.stopbell.transit.service.TransitMetadataArchiveService;
+
 import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 import tools.jackson.databind.ObjectMapper;
@@ -20,14 +23,18 @@ public class GbisMetadataClient {
     }
 
     public GbisBulkMetadata fetch() {
-        return collect(false).normalized();
+        return collect(false, null, null).normalized();
     }
 
     public GbisCollectedSnapshot fetchWithRaw() {
-        return collect(true);
+        return collect(true, null, null);
     }
 
-    private GbisCollectedSnapshot collect(boolean preserveRaw) {
+    public GbisCollectedSnapshot fetchWithRaw(long runId, TransitMetadataArchiveService archive) {
+        return collect(true, runId, java.util.Objects.requireNonNull(archive));
+    }
+
+    private GbisCollectedSnapshot collect(boolean preserveRaw, Long runId, TransitMetadataArchiveService archive) {
         try {
             URI uri = UriComponentsBuilder.fromUriString(baseUrl)
                     .queryParam("format", "json").queryParam("serviceKey", serviceKey).build(true).toUri();
@@ -46,7 +53,18 @@ public class GbisMetadataClient {
             byte[] routes = download(item.routeDownloadUrl());
             byte[] stations = download(item.routeStationDownloadUrl());
             if (preserveRaw) {
-                return GbisBulkMetadata.parseWithRaw(routes, stations, item.routeVersion(), item.routeStationVersion());
+                GbisCollectedSnapshot snapshot = GbisBulkMetadata.parseWithRaw(routes, stations, item.routeVersion(), item.routeStationVersion());
+                if (archive != null) {
+                    ArchiveContentSafety safety = new ArchiveContentSafety(serviceKey);
+                    java.util.Set<String> checkedFields = new java.util.HashSet<>();
+                    snapshot.rawRows().forEach(row -> row.fields().forEach((name, value) -> {
+                        if (checkedFields.add(name)) ArchiveContentSafety.checkField(name);
+                        safety.checkText(value);
+                    }));
+                    archive.store(runId, TransitSourceSystem.GBIS, "gbis_route", routes);
+                    archive.store(runId, TransitSourceSystem.GBIS, "gbis_route_station", stations);
+                }
+                return snapshot;
             }
             return new GbisCollectedSnapshot(
                     GbisBulkMetadata.parse(routes, stations, item.routeVersion(), item.routeStationVersion()),

@@ -69,9 +69,19 @@ public class BusMetadataSyncService {
         syncSeoulSnapshot(source, source.fetchSnapshotWithRawRows(), collectedAt);
     }
 
+    public void syncSeoulSource(SeoulCsvMetadataSource source, long runId, TransitMetadataArchiveService archive) {
+        Instant collectedAt = clock.instant();
+        syncSeoulSnapshot(source, source.fetchSnapshotWithRawRows(runId, archive), collectedAt);
+    }
+
     public void syncTagoSource(TagoMetadataSource source) {
         Instant collectedAt = clock.instant();
         syncTagoSnapshot(source.fetchSnapshotWithRawRows(), collectedAt);
+    }
+
+    public void syncTagoSource(TagoMetadataSource source, long runId, TransitMetadataArchiveService archive) {
+        Instant collectedAt = clock.instant();
+        syncTagoSnapshot(source.fetchSnapshotWithRawRows(runId, archive), collectedAt);
     }
 
     /** Reuse both the snapshot and collection time when retrying a partial database sync. */

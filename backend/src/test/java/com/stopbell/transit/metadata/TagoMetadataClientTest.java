@@ -18,6 +18,102 @@ import org.springframework.web.client.RestClient;
 
 class TagoMetadataClientTest {
 
+    @Test
+    void archive_receives_exact_page_bytes_and_failure_propagates() {
+        String body = " {\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"citycode\":\"31010\"}}}}}\r\n";
+        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&_type=json").andRespond(json(body));
+        var captured = new java.util.ArrayList<byte[]>();
+        assertThat(client.cityCodes(captured::add)).hasSize(1);
+        assertThat(captured).singleElement().isEqualTo(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        server.verify();
+    }
+
+    @Test
+    void rejects_reflected_credentials_without_storing_content() {
+        String body = "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"citycode\":\"31010\",\"serviceKey\":\"test-service-key\"}}}}}";
+        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&_type=json").andRespond(json(body));
+        var captured = new java.util.ArrayList<byte[]>();
+        assertThatThrownBy(() -> client.cityCodes(captured::add)).isInstanceOf(IllegalStateException.class)
+                .hasMessageNotContaining("test-service-key");
+        assertThat(captured).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    void archive_callback_failure_is_not_swallowed() {
+        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&_type=json")
+                .andRespond(json("{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"citycode\":\"31010\"}}}}}"));
+        assertThatThrownBy(() -> client.cityCodes(bytes -> { throw new IllegalStateException("archive failed"); }))
+                .isInstanceOf(IllegalStateException.class).hasMessage("archive failed");
+        server.verify();
+    }
+
+    @Test
+    void http_failure_does_not_expose_request_uri_or_response_body() {
+        expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&_type=json")
+                .andRespond(org.springframework.test.web.client.response.MockRestResponseCreators.withServerError()
+                        .body("test-service-key https://provider.test/secret"));
+        assertThatThrownBy(() -> client.cityCodes(bytes -> { }))
+                .isInstanceOf(TransitProviderClientException.class).hasNoCause()
+                .hasMessageNotContaining("test-service-key").hasMessageNotContaining("provider.test");
+        server.verify();
+    }
+
+    @Test
+    void invalid_credential_uri_does_not_expose_key() {
+        var invalid = new TagoMetadataClient(RestClient.create(), new TransitClientProperties.Tago(
+                "https://provider.test/tago", "https://provider.test/tago-metadata", "fake%invalid-key"));
+        assertThatThrownBy(invalid::cityCodes).isInstanceOf(TransitProviderClientException.class)
+                .hasNoCause().hasMessageNotContaining("fake%invalid-key");
+    }
+
+    @Test
+    void identifiers_distinguish_cities_routes_and_pages_without_exposing_them() {
+        String special = "../../route/" + "x".repeat(500);
+        String key = TagoMetadataSource.archiveKey("stops", "31010", special, 1);
+        assertThat(key).matches("tago_[0-9a-f]{64}");
+        assertThat(key).isEqualTo(TagoMetadataSource.archiveKey("stops", "31010", special, 1));
+        assertThat(key).isNotEqualTo(TagoMetadataSource.archiveKey("stops", "31020", special, 1))
+                .isNotEqualTo(TagoMetadataSource.archiveKey("stops", "31010", special, 2))
+                .isNotEqualTo(TagoMetadataSource.archiveKey("stops", "31010", special + "x", 1));
+        assertThatThrownBy(() -> TagoMetadataSource.archiveKey("stops", "31010", "\uD800", 1))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void source_archives_distinct_cities_and_route_pages_without_extra_requests() {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer multi = MockRestServiceServer.bindTo(builder).ignoreExpectOrder(true).build();
+        String base = "https://provider.test/tago/";
+        multi.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(base + "getCtyCodeList?serviceKey=test-service-key&_type=json"))
+                .andRespond(json("{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":[{\"citycode\":\"31010\"},{\"citycode\":\"31020\"}]}}}}"));
+        for (String city : java.util.List.of("31010", "31020")) {
+            int pages = city.equals("31010") ? 2 : 1;
+            for (int p = 1; p <= pages; p++) {
+                String routeId = city + "r" + p;
+                String routeUrl = base + "getRouteNoList?serviceKey=test-service-key&pageNo=" + p + "&numOfRows=1000&_type=json&cityCode=" + city;
+                String stopUrl = base + "getRouteAcctoThrghSttnList?serviceKey=test-service-key&pageNo=1&numOfRows=1000&_type=json&cityCode=" + city + "&routeId=" + routeId;
+                multi.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(routeUrl))
+                        .andRespond(json(pageJson("{\"routeid\":\"" + routeId + "\",\"routeno\":\"1\"}", pages, p)));
+                multi.expect(org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo(stopUrl))
+                        .andRespond(json(pageJson("{\"nodeid\":\"s1\",\"nodenm\":\"A\",\"nodeord\":1}", 1, 1)));
+            }
+        }
+        var client = new TagoMetadataClient(builder.build(), new TransitClientProperties.Tago("https://provider.test/unused", base.substring(0, base.length() - 1), "test-service-key"));
+        var archive = org.mockito.Mockito.mock(com.stopbell.transit.service.TransitMetadataArchiveService.class);
+        var snapshot = new TagoMetadataSource(client, 0, java.util.Set.of("31010", "31020")).fetchSnapshotWithRawRows(7, archive);
+        assertThat(snapshot.normalized().routes()).hasSize(3);
+        var keys = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.Mockito.verify(archive, org.mockito.Mockito.times(7)).store(org.mockito.ArgumentMatchers.eq(7L),
+                org.mockito.ArgumentMatchers.eq(com.stopbell.transit.domain.TransitSourceSystem.TAGO), keys.capture(), org.mockito.ArgumentMatchers.any());
+        assertThat(keys.getAllValues()).doesNotHaveDuplicates().hasSize(7);
+        multi.verify();
+    }
+
+    private static String pageJson(String item, int total, int page) {
+        return "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":" + item + "},\"totalCount\":" + total + ",\"pageNo\":" + page + "}}}";
+    }
+
     private MockRestServiceServer server;
     private TagoMetadataClient client;
 

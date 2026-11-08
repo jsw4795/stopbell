@@ -19,13 +19,16 @@ import java.util.Set;
 
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.domain.TransitSourceDataKind;
+import com.stopbell.transit.domain.TransitSourceSystem;
 import com.stopbell.transit.service.BusMetadataSource;
+import com.stopbell.transit.service.TransitMetadataArchiveService;
 import com.stopbell.transit.service.BusRouteMetadataSnapshot;
 import com.stopbell.transit.service.BusStopOccurrenceMetadataSnapshot;
 import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.Resource;
+import org.springframework.core.io.ByteArrayResource;
 
 /**
  * Parser for the 2026-09-22 Seoul T Data CSV contract.
@@ -107,6 +110,35 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
     /** Returns validated, unfiltered CSV rows alongside the existing normalized source snapshot. */
     public SeoulCsvSnapshot fetchSnapshotWithRawRows() {
         return parseSnapshot(true);
+    }
+
+    /** Reads each source once and uses those same bytes for the archive and parser. */
+    public SeoulCsvSnapshot fetchSnapshotWithRawRows(long runId, TransitMetadataArchiveService archive) {
+        Objects.requireNonNull(archive, "Archive service must not be null");
+        try {
+            byte[] routes = readSource("route master", routeMaster);
+            byte[] stops = readSource("stop master", stopMaster);
+            byte[] routeStops = readSource("route-stop master", routeStopMaster);
+            SeoulCsvMetadataSource captured = new SeoulCsvMetadataSource(
+                    new ByteArrayResource(routes), new ByteArrayResource(routeStops), new ByteArrayResource(stops));
+            SeoulCsvSnapshot snapshot = captured.fetchSnapshotWithRawRows();
+            captured.toCompleteSnapshot(snapshot.normalized());
+            archive.store(runId, TransitSourceSystem.SEOUL_TDATA, "seoul_route_master", routes);
+            archive.store(runId, TransitSourceSystem.SEOUL_TDATA, "seoul_stop_master", stops);
+            archive.store(runId, TransitSourceSystem.SEOUL_TDATA, "seoul_route_stop_master", routeStops);
+            return snapshot;
+        } catch (IOException exception) {
+            throw new IllegalStateException("Unable to read Seoul metadata CSV", exception);
+        }
+    }
+
+    private static byte[] readSource(String name, Resource resource) throws IOException {
+        if (resource == null || !resource.exists()) {
+            throw new IllegalStateException("Required Seoul CSV source is missing: " + name);
+        }
+        try (InputStream input = resource.getInputStream()) {
+            return input.readAllBytes();
+        }
     }
 
     private SeoulCsvSnapshot parseSnapshot(boolean preserveRaw) {

@@ -12,6 +12,7 @@ import com.stopbell.transit.service.BusMetadataSource;
 import com.stopbell.transit.service.BusRouteMetadataSnapshot;
 import com.stopbell.transit.service.BusStopOccurrenceMetadataSnapshot;
 import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
+import com.stopbell.transit.service.TransitMetadataArchiveService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
@@ -38,15 +39,23 @@ public final class TagoMetadataSource implements BusMetadataSource {
         return collect(false).normalized();
     }
     public TagoSnapshot fetchSnapshotWithRawRows() {
-        return collect(true);
+        return collect(true, null, null);
     }
     private TagoSnapshot collect(boolean preserveRaw) {
+        return collect(preserveRaw, null, null);
+    }
+    public TagoSnapshot fetchSnapshotWithRawRows(long runId, TransitMetadataArchiveService archive) {
+        return collect(true, runId, java.util.Objects.requireNonNull(archive));
+    }
+    private TagoSnapshot collect(boolean preserveRaw, Long runId, TransitMetadataArchiveService archive) {
         // A failed bulk fetch is never treated as an empty, complete enrichment source.
         GbisCollectedSnapshot gbisCollected = gbisClient != null && preserveRaw
-                ? java.util.Objects.requireNonNull(gbisClient.fetchWithRaw(), "GBIS snapshot missing") : null;
+                ? java.util.Objects.requireNonNull(archive == null ? gbisClient.fetchWithRaw()
+                        : gbisClient.fetchWithRaw(runId, archive), "GBIS snapshot missing") : null;
         GbisBulkMetadata gbis = gbisClient == null ? null
                 : preserveRaw ? gbisCollected.normalized() : gbisClient.fetch();
-        pace(); Set<String> discovered = new HashSet<>(); for (TagoMetadataClient.City city : client.cityCodes()) { if (city.citycode()==null) throw new IllegalStateException("TAGO city code missing"); discovered.add(city.citycode()); }
+        pace(); Set<String> discovered = new HashSet<>(); for (TagoMetadataClient.City city : archive == null ? client.cityCodes()
+                : client.cityCodes(bytes -> archive.store(runId, TransitSourceSystem.TAGO, "tago_city_codes", bytes))) { if (city.citycode()==null) throw new IllegalStateException("TAGO city code missing"); discovered.add(city.citycode()); }
         if (!discovered.containsAll(gyeonggiCodes)) throw new IllegalStateException("TAGO city discovery did not verify every Gyeonggi city code");
         log.info("TAGO city discovery complete: gyeonggiCities={}", gyeonggiCodes.size());
         List<BusRouteMetadataSnapshot> snapshots=new ArrayList<>(); Set<String> routeIds=new HashSet<>();
@@ -54,7 +63,9 @@ public final class TagoMetadataSource implements BusMetadataSource {
         int routesProcessed = 0;
         for (String city : gyeonggiCodes) {
             List<TagoMetadataClient.RawItem<TagoMetadataClient.Route>> routes = pages(page -> preserveRaw
-                    ? client.routesWithRaw(city, page) : wrap(client.routes(city, page)));
+                    ? archive == null ? client.routesWithRaw(city, page) : client.routesWithRaw(city, page,
+                            bytes -> archive.store(runId, TransitSourceSystem.TAGO, archiveKey("route", city, "", page), bytes))
+                    : wrap(client.routes(city, page)));
             log.info("TAGO route discovery complete: cityCode={}, routes={}", city, routes.size());
             for (TagoMetadataClient.RawItem<TagoMetadataClient.Route> routeItem : routes) {
                 TagoMetadataClient.Route route = routeItem.normalized();
@@ -63,7 +74,9 @@ public final class TagoMetadataSource implements BusMetadataSource {
                 if (preserveRaw) rawRows.add(new RawSourceRow(TransitSourceSystem.TAGO, TransitSourceDataKind.ROUTE, route.routeid(), route.routeid(), null, routeItem.fields()));
                 List<BusStopOccurrenceMetadataSnapshot> stops=new ArrayList<>();
                 for (TagoMetadataClient.RawItem<TagoMetadataClient.Stop> stopItem : pages(p -> preserveRaw
-                        ? client.routeStopsWithRaw(city, route.routeid(), p) : wrap(client.routeStops(city, route.routeid(), p)))) {
+                        ? archive == null ? client.routeStopsWithRaw(city, route.routeid(), p) : client.routeStopsWithRaw(city, route.routeid(), p,
+                                bytes -> archive.store(runId, TransitSourceSystem.TAGO, archiveKey("stops", city, route.routeid(), p), bytes))
+                        : wrap(client.routeStops(city, route.routeid(), p)))) {
                     TagoMetadataClient.Stop stop = stopItem.normalized();
                     int order = required(stop.nodeord());
                     stops.add(new BusStopOccurrenceMetadataSnapshot(required(stop.nodeid()),required(stop.nodenm()),stop.gpslati(),stop.gpslong(),order));
@@ -93,6 +106,21 @@ public final class TagoMetadataSource implements BusMetadataSource {
         return new TagoMetadataClient.Page<>(page.items().stream().map(item -> new TagoMetadataClient.RawItem<>(item, null)).toList(), page.totalCount(), page.pageNo());
     }
     public static String occurrenceSourceKey(String routeId, int order) { return routeId.length() + ":" + routeId + ":" + order; }
+    static String archiveKey(String operation, String city, String route, int page) {
+        String identity = operation.length() + ":" + operation + city.length() + ":" + city
+                + route.length() + ":" + route + ":" + page;
+        try {
+            var encoded = java.nio.charset.StandardCharsets.UTF_8.newEncoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .encode(java.nio.CharBuffer.wrap(identity));
+            var digest = java.security.MessageDigest.getInstance("SHA-256");
+            digest.update(encoded);
+            byte[] hash = digest.digest();
+            return "tago_" + java.util.HexFormat.of().formatHex(hash);
+        } catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException("SHA-256 unavailable");
+        } catch (java.nio.charset.CharacterCodingException e) { throw new IllegalArgumentException("Invalid archive identity"); }
+    }
     public record TagoSnapshot(CompleteBusMetadataSnapshot normalized, List<RawSourceRow> rawRows, GbisCollectedSnapshot gbis) {
         public TagoSnapshot(CompleteBusMetadataSnapshot normalized, List<RawSourceRow> rawRows) { this(normalized, rawRows, null); }
         public TagoSnapshot { rawRows = List.copyOf(rawRows); }
