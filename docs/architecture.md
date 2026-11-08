@@ -739,3 +739,9 @@ Apple 인증은 검증 성공한 ID 토큰의 서명된 발급 시각을 credent
 삭제 후보는 첫 transaction에서 `account_deletions.APPLE_NOTIFIED`와 Alarm 비활성화·열린 BoardingSession 취소·미처리 Delivery 종료를 함께 commit한다. 이는 Apple 알림이라는 근거를 표시하며 실제 호출하지 않은 `/auth/revoke` 성공이나 수동 연결 해제를 기록하지 않는다. 일반 인증 및 사용자 작업은 이 진행 행을 통해 차단된다. 두 번째 transaction에서 같은 식별자·이벤트·User를 다시 잠그고 확인한 뒤 기존 `AccountDeletionService`의 데이터 삭제·Receipt 정책을 재사용하며 이벤트 DELETED와 원자적으로 commit한다. 실패하면 PENDING과 차단 상태가 유지되며 재시도한다. 이미 시작된 외부 FCM 전송은 취소할 수 없다. 앱 내 탈퇴와 알림 Worker는 같은 Apple 식별자 경계와 기존 User → Alarm → Session → Delivery 잠금 순서를 공유한다.
 
 `apple.notifications.enabled`와 `apple.notifications.worker-enabled`는 모두 기본 true이고 둘 다 true일 때만 Worker가 1분 간격으로 기한이 된 최대 10개를 처리한다. 각 시도 전에 재시도 기한을 미뤄 지속 실패가 다른 이벤트를 가로막지 않게 하며 단일 Backend 재시작 후에도 PENDING을 재개한다. DB 오류가 준비 transaction보다 먼저 발생하면 차단을 commit할 수 없으므로 복구 후 재시도해야 한다. 이메일 이벤트는 사용자 데이터를 변경하지 않는다. 완료·검토 상태의 보존은 [Database](database.md#apple_notification_events-task-815-알림-1단계)를 따른다. Apple 발급·이벤트 시각 사이의 별도 시계 오차 상한은 검증되지 않았으며 초 단위 비교만으로 그 오차를 증명하지 않는다. 실제 Apple 알림 수신과 운영 복구 검증은 남았다.
+
+### 교통 메타데이터 사전 분석 DB 연동 (Phase 3-A-4 2차)
+
+명시적 분석 서비스는 검증된 서울 또는 TAGO 수집 Snapshot을 받아 기존 준비 검증을 다시 수행하되 반환된 동기화 작업은 실행하지 않는다. `COLLECTED` 실행 행을 잠근 후 독립 MySQL REPEATABLE READ 트랜잭션에서 Provider별 Route·Stop·occurrence를 일괄 조회해 순수 Diff 엔진에 전달하고, 서울·TAGO·GBIS 원본 JSON을 출처별로 구조 비교한다. GBIS 미수집은 비교 미실시이며 이번 수집에 없는 원본은 삭제 확정이 아니다. `unchangedRoutes`는 Route 자체 필드 기준이며 occurrence는 별도 결과다. 원본과 정규화 결과는 출처별 집계로 제공하며 GBIS-only나 서울 범위 밖 원본을 정규화 Route에 강제로 연결하지 않는다.
+
+분석 결과는 현재 DB를 기준으로 한 예정치다. 마지막 complete 시각이 있어도 이후 실패한 Route 단위 commit이 존재할 수 있으므로 이전 성공 Snapshot과의 동일성을 보장하지 않는다. 읽기 쿼리는 Provider별 고정 횟수이며 행별 Route 조회를 하지 않는다. 분석은 같은 트랜잭션의 일관된 읽기이지만 다른 writer가 분석 직후 개입할 수 있고 단일 프로세스 guard는 분산 잠금이 아니다. 이 단계는 Bootstrap에 연결되지 않으며 실제 동기화 상태를 변경하지 않는다.

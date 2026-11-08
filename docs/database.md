@@ -598,3 +598,9 @@ V28은 검증된 알림의 `jti` SHA-256을 PK로 저장해 중복을 방지한�
 V30은 Apple subject의 SHA-256을 PK로 하는 경계 행과 마지막으로 성공해 commit된 ID token 발급 시각·검증된 삭제 이벤트의 최신 발생 시각을 보존한다. 사용자 삭제와 별도로 유지되어 이전 로그인의 재생을 막으며 원문 subject나 token은 저장하지 않는다. V29의 기존 Apple credential 시각과 V28의 PENDING 삭제 이벤트를 backfill하고 NULL 인증 이력은 추측하지 않는다. 로그인·이벤트는 경계 행을 먼저 잠근 뒤 같은 transaction에서 나머지 변경을 commit한다. 재시작 후에도 유효하며 현재 자동 정리는 없다. 이 해시와 시각은 연결 가능한 개인정보이므로 DB 접근을 제한하고, 오래된 인증 차단을 위해 자동 정리하지 않으며 운영 보존 기간과 삭제 경계는 별도로 결정해야 한다.
 
 V32는 이 행에 `latest_deletion_generation`을 추가하고 단일 행 `apple_deletion_generation`의 증가하는 세대와 연결한다. 기존 행과 전역 값은 0으로 시작하며 기존 사용자·이벤트·credential·receipt를 변경하지 않는다. 두 삭제 경로의 최종 삭제와 세대 변경은 한 transaction이다. 식별자 해시와 삭제 세대는 오래된 Challenge 차단을 위해 User 삭제 후에도 자동 정리하지 않는다. 인증 순서 및 rollback 의미는 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다.
+
+### Transit metadata 변경분 분석 저장 (Phase 3-A-4 2차)
+
+V36 `transit_metadata_diff_analyses`는 `collection_run_id`를 PK 및 수집 이력 FK로 두고 Provider, `CURRENT_DB_BEFORE_APPLY` 기준, 이전 complete 시각, 분석 시각, SHA-256 결과 지문 및 요약 JSON을 보관한다. 저장 서비스는 실행 행을 잠가 Provider와 `COLLECTED` 상태를 확인한다. 결과는 예상 집계이며 실제 반영을 뜻하지 않는다. 이전 complete 시각 유무와 관계없이 과거 완전 Snapshot과의 정확한 일치는 보장하지 않는다.
+
+JSON에는 정규화 항목별 건수와 출처별 원본 신규·수정·동일·이번 수집에 없음·버전 변경 건수 및 비교 실시 여부만 포함한다. 원본 JSON과 변경 상세는 복제하지 않으며 전체 상세는 이력에 남지 않는다. 분석 시의 세부 정규화 결과는 호출자에게만 반환한다. 같은 실행의 동일 지문은 기존 결과를 반환하고 다른 지문은 거부한다. 실행 행 잠금과 PK가 동시 요청을 보호한다. 지문은 비교 입력을 구조적으로 정렬해 계산하며 원본 내용을 로그에 기록하지 않는다.
