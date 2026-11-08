@@ -758,3 +758,9 @@ Phase 3-B-1B-2의 승인 적용은 별도 명시적 진입점에서 새 실행�
 분석 직전부터 마지막 Route commit까지 단일 잠금으로 보호하지 않는다. 재분석과 첫 쓰기 사이에 다른 인스턴스 또는 직접 writer가 개입할 수 있으며 동일 인스턴스 Provider single-flight만 보장한다. 로컬 관리 명령은 별도 `metadata-admin` 프로필에서 스케줄·다른 one-shot 실행과 시작 시 자동 스키마 변경을 비활성화하고 명시적으로 호출할 때만 동작한다.
 
 Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncRoute`, `syncSeoulSource`, `syncTagoSource`, `syncSeoulSnapshot`, `syncTagoSnapshot`, `syncCompleteProviderSnapshot` 및 실행 가능한 작업을 반환하는 `prepareSeoulSnapshot`, `prepareTagoSnapshot`, `BusRouteMetadataSyncService`의 `syncRoute`, `syncSeoulRoute`, `syncTagoRoute`, `BusProviderMetadataCleanupService.cleanupProvider`다. 이 경로와 다른 인스턴스·직접 DB writer를 포함하는 보호, 검토·승인 정책은 후속 작업이다.
+
+### 교통 메타데이터 로컬 사전 점검 (Phase 3-B-2A)
+
+`preflight`는 기존 로컬 관리 명령의 실행 경계를 사용하며 읽기 전용 트랜잭션에서 정규화 데이터, 출처별 원본, 수집 이력, 아카이브 파일 상태와 위험 변경·승인을 조회한다. 출처 원본의 연결은 해당 종류의 FK 존재를 뜻하며 GBIS 원본을 TAGO 정규화 행으로 간주하지 않는다. 파일 검사는 존재·접근 가능 여부와 크기만 확인하며 해시 검증은 수행하지 않는다. 여러 조회는 DB의 트랜잭션 격리 수준에 따르고 파일은 DB와 원자적인 Snapshot이 아니다. 다른 writer를 차단하지 않는다.
+
+`READY`는 확인한 로컬 조건에 경고가 없음을 뜻한다. 정규화 Route·이력·아카이브 부재, 접근 불가 또는 크기 불일치, 고아·좌표 누락, 위험 변경 상세 저장 실패, 미승인 위험 변경 또는 기존 승인 상태는 `WARNING`으로 보고한다. `COLLECTING`·`COLLECTED`·`SYNCING` 실행이 남아 있으면 동시 실행 또는 미정리 상태를 확인할 때까지 `BLOCKED`로 보고한다. 이 상태만으로 실제 프로세스가 살아 있다고 단정하지 않는다. DB 조회 실패는 성공 결과로 바꾸지 않고 오류로 전파한다. Provider의 최신성·API 가용성·대량 수집 메모리·공식 유형 매핑은 확인하지 않는다. 마지막 성공 시각은 현재 DB가 당시 Snapshot과 같다는 보장이 아니며 실패 시 일부 Route가 이미 저장됐을 수 있다.

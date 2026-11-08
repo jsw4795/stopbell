@@ -8,6 +8,7 @@ import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.service.BusMetadataBootstrapService;
 import com.stopbell.transit.service.TransitMetadataChangeApprovalService;
 import com.stopbell.transit.service.TransitMetadataUnsafeChangeReviewService;
+import com.stopbell.transit.service.TransitMetadataPreflightService;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
@@ -21,10 +22,11 @@ class TransitMetadataAdminRunnerTest {
     private final TransitMetadataChangeApprovalService approvals = mock(TransitMetadataChangeApprovalService.class);
     private final TransitMetadataUnsafeChangeReviewService reviews = mock(TransitMetadataUnsafeChangeReviewService.class);
     private final BusMetadataBootstrapService bootstrap = mock(BusMetadataBootstrapService.class);
+    private final TransitMetadataPreflightService preflight = mock(TransitMetadataPreflightService.class);
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
     private final Environment environment = mock(Environment.class);
     private final ConfigurableApplicationContext context = mock(ConfigurableApplicationContext.class);
-    private final TransitMetadataAdminRunner runner = new TransitMetadataAdminRunner(approvals, reviews, bootstrap, jdbc, environment, context);
+    private final TransitMetadataAdminRunner runner = new TransitMetadataAdminRunner(approvals, reviews, bootstrap, preflight, jdbc, environment, context);
 
     @Test @DisplayName("적용 명령은 승인 ID와 명시적 확인 없이 실행되지 않는다")
     void apply_requires_explicit_confirmation_and_approval() {
@@ -53,6 +55,22 @@ class TransitMetadataAdminRunnerTest {
     void refuses_non_local_or_web_invocations() {
         assertThatThrownBy(() -> runner.run(new DefaultApplicationArguments("--metadata.command=status", "--approval=1"))).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(approvals, reviews, bootstrap, jdbc);
+    }
+    @Test void preflight_dispatches_without_mutating_commands() {
+        when(environment.acceptsProfiles(any(org.springframework.core.env.Profiles.class))).thenReturn(true);
+        when(preflight.inspect(TransitProvider.TAGO)).thenReturn(new TransitMetadataPreflightService.Result(
+                TransitProvider.TAGO, TransitMetadataPreflightService.Status.WARNING, Map.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), null, List.of(), Map.of(), List.of(), List.of(), List.of(), List.of()));
+        runner.run(args("--metadata.command=preflight", "--provider=TAGO"));
+        verify(preflight).inspect(TransitProvider.TAGO);
+        verifyNoInteractions(bootstrap, approvals, reviews, jdbc);
+    }
+    @Test void preflight_requires_a_single_supported_provider() {
+        when(environment.acceptsProfiles(any(org.springframework.core.env.Profiles.class))).thenReturn(true);
+        assertThatThrownBy(() -> runner.run(args("--metadata.command=preflight"))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> runner.run(args("--metadata.command=preflight", "--provider=GBIS"))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> runner.run(args("--metadata.command=preflight", "--provider=TAGO", "--provider=SEOUL_BUS"))).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(preflight, bootstrap, approvals, reviews);
     }
     private static DefaultApplicationArguments args(String... command) {
         var values = new java.util.ArrayList<>(List.of("--spring.main.web-application-type=none", "--transit.metadata.admin.enabled=true"));

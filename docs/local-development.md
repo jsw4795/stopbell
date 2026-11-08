@@ -665,3 +665,15 @@ SELECT COUNT(*) AS total FROM transit_metadata_unsafe_change_details WHERE colle
 ```
 
 승인 전에 모든 상세 페이지를 검토한다. `apply`는 실제 Provider 수집과 DB 변경을 수행할 수 있으므로 환경을 확인하고 별도 결정 후 실행한다. 이미 선점된 승인은 실패해도 재사용하지 않는다. 실제 최신 Provider 데이터와 운영 적용은 아직 검증되지 않았다. 분석과 실제 쓰기 사이의 다른 writer 제한 및 직접 동기화 우회 경계는 [Architecture](architecture.md#교통-메타데이터-사전-분석-db-연동-phase-3-a-4-2차)를 따른다.
+
+### 교통 메타데이터 최신화 사전 점검
+
+V38까지 적용된 로컬 DB에서 아래 명령을 명시적으로 실행한다. 이 명령은 실제 Provider를 호출하거나 메타데이터·승인을 변경하지 않는다. 아카이브를 확인하려면 기존 아카이브 디렉터리를 지정한다. `TAGO`를 선택하면 TAGO와 GBIS 원본을 각각 표시한다.
+
+```bash
+./gradlew bootRun --args='--spring.profiles.active=local,metadata-admin --spring.main.web-application-type=none --transit.metadata.admin.enabled=true --notification.dispatch.enabled=false --transit.monitoring.enabled=false --metadata.command=preflight --provider=SEOUL_BUS --transit.metadata.archive.directory=/absolute/path/to/archive'
+```
+
+Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여부와 상태를 확인하기 전까지 `BLOCKED`이며, 이력만으로 실제 프로세스가 살아 있다고 단정하지 않는다. `READY`는 로컬 조회 결과에만 적용되며 실제 최신성, API 가용성, 메모리 사용량 또는 공식 노선유형 매핑의 검증이 아니다. 파일은 내용 해시가 아니라 접근 여부와 크기를 확인한다. 실패했던 동기화가 일부 Route를 저장했을 수 있어 마지막 성공 시각만으로 현재 DB의 일치를 판단하지 않는다. 검토 대기는 승인 행이 아직 없는 위험 변경을 뜻한다. 다른 writer와 파일의 동시 변경을 막지 않는다.
+
+3-B-2B 수집 전에는 서울 CSV 최신 원본 확보 방법, TAGO 전체 범위, GBIS 기반정보와 버전, Provider별 호출량, 수집 메모리와 아카이브 저장 공간을 확인한다. 적용 전에 백업, 위험 변경 승인 필요성, 실패·부분 적용 복구 방법을 확인한다. 실제 최신성·호출량·메모리 사용량은 아직 측정하지 않았다.
