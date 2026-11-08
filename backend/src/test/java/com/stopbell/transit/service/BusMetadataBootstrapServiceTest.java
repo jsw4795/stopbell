@@ -22,6 +22,7 @@ class BusMetadataBootstrapServiceTest {
     private final SeoulCsvMetadataSource source = mock(SeoulCsvMetadataSource.class);
     private final BusMetadataSyncService sync = mock(BusMetadataSyncService.class);
     private final TransitMetadataCollectionHistoryService history = mock(TransitMetadataCollectionHistoryService.class);
+    private final TransitMetadataDiffAnalysisService analysis = mock(TransitMetadataDiffAnalysisService.class);
     private final TransitMetadataArchiveService archive = mock(TransitMetadataArchiveService.class);
     private final TransitMetadataCollectionRun run = mock(TransitMetadataCollectionRun.class);
     private final SeoulCsvMetadataSource.SeoulCsvSnapshot snapshot = mock(SeoulCsvMetadataSource.SeoulCsvSnapshot.class);
@@ -30,7 +31,7 @@ class BusMetadataBootstrapServiceTest {
         when(source.provider()).thenReturn(TransitProvider.SEOUL_BUS);
         when(run.getId()).thenReturn(42L);
         when(history.start(TransitProvider.SEOUL_BUS)).thenReturn(run);
-        return new BusMetadataBootstrapService(List.of(source), sync, history, archive, Clock.systemUTC());
+        return new BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, Clock.systemUTC());
     }
 
     private void valid() {
@@ -42,12 +43,13 @@ class BusMetadataBootstrapServiceTest {
     void transitions_after_actual_work() {
         var service = bootstrap(); valid();
         service.bootstrap(TransitProvider.SEOUL_BUS);
-        InOrder order = inOrder(history, archive, source, sync);
+        InOrder order = inOrder(history, archive, source, sync, analysis);
         order.verify(history).start(TransitProvider.SEOUL_BUS);
         order.verify(archive).validateStorage();
         order.verify(source).fetchSnapshotWithRawRows(42L, archive);
         order.verify(sync).prepareSeoulSnapshot(eq(source), eq(snapshot), any());
         order.verify(history).collected(42L);
+        order.verify(analysis).analyzeAndStore(42L, source, snapshot);
         order.verify(history).syncing(42L);
         order.verify(history).complete(42L);
     }
@@ -60,6 +62,40 @@ class BusMetadataBootstrapServiceTest {
         verify(history).fail(42L, TransitCollectionFailureStage.VALIDATION, TransitCollectionFailureCode.INVALID_SOURCE);
         valid(); service.bootstrap(TransitProvider.SEOUL_BUS);
         verify(history, times(2)).start(TransitProvider.SEOUL_BUS);
+    }
+
+    @Test @DisplayName("분석 장애는 동기화를 막고 원문 없이 기록하며 재시도할 수 있다")
+    void analysis_failure_blocks_sync_and_releases_guard() {
+        var service = bootstrap(); valid();
+        doThrow(new IllegalStateException("secret")).doReturn(null).when(analysis).analyzeAndStore(42L, source, snapshot);
+        assertThatThrownBy(() -> service.bootstrap(TransitProvider.SEOUL_BUS))
+                .hasMessageContaining("VALIDATION").hasMessageContaining("UNEXPECTED_FAILURE").hasMessageNotContaining("secret");
+        verify(history).fail(42L, TransitCollectionFailureStage.VALIDATION, TransitCollectionFailureCode.UNEXPECTED_FAILURE);
+        verify(history, never()).syncing(anyLong()); verify(history, never()).complete(anyLong());
+        service.bootstrap(TransitProvider.SEOUL_BUS);
+        verify(history, times(2)).start(TransitProvider.SEOUL_BUS);
+    }
+
+    @Test @DisplayName("분석 단계에서 발견한 불완전 Snapshot은 원본 검증 실패로 기록한다")
+    void invalid_snapshot_is_not_classified_as_infrastructure_failure() {
+        var service = bootstrap(); valid();
+        when(analysis.analyzeAndStore(42L, source, snapshot)).thenThrow(new TransitMetadataDiffAnalysisService.InvalidSnapshotException());
+        assertThatThrownBy(() -> service.bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("code=INVALID_SOURCE");
+        verify(history).fail(42L, TransitCollectionFailureStage.VALIDATION, TransitCollectionFailureCode.INVALID_SOURCE);
+        verify(history, never()).syncing(anyLong()); verify(history, never()).complete(anyLong());
+    }
+
+    @Test @DisplayName("분석 중 인터럽트는 플래그를 보존하고 동기화를 막는다")
+    void analysis_interruption_is_preserved() {
+        var service = bootstrap(); valid();
+        when(analysis.analyzeAndStore(42L, source, snapshot)).thenAnswer(invocation -> {
+            Thread.currentThread().interrupt(); throw new IllegalStateException();
+        });
+        try {
+            assertThatThrownBy(() -> service.bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("interrupted=true");
+            org.assertj.core.api.Assertions.assertThat(Thread.currentThread().isInterrupted()).isTrue();
+            verify(history).interrupt(42L); verify(history, never()).syncing(anyLong());
+        } finally { Thread.interrupted(); }
     }
 
     @Test @DisplayName("동기화 실패는 완료하지 않고 고정 오류 코드로 기록한다")
@@ -77,6 +113,8 @@ class BusMetadataBootstrapServiceTest {
         doThrow(new IllegalStateException()).when(history).complete(42L);
         assertThatThrownBy(() -> service.bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("completion history is uncertain");
         verify(history, times(2)).complete(42L);
+        verify(analysis, times(1)).analyzeAndStore(42L, source, snapshot);
+        verify(source, times(1)).fetchSnapshotWithRawRows(42L, archive);
         verify(history, never()).fail(anyLong(), any(), any());
     }
 
@@ -137,6 +175,8 @@ class BusMetadataBootstrapServiceTest {
         doThrow(new IllegalStateException()).doReturn(run).when(history).complete(42L);
         service.bootstrap(TransitProvider.SEOUL_BUS);
         verify(history, times(2)).complete(42L);
+        verify(analysis, times(1)).analyzeAndStore(42L, source, snapshot);
+        verify(source, times(1)).fetchSnapshotWithRawRows(42L, archive);
         verify(history, never()).fail(anyLong(), any(), any());
     }
 
@@ -149,8 +189,9 @@ class BusMetadataBootstrapServiceTest {
         when(history.start(TransitProvider.TAGO)).thenReturn(run);
         when(tago.fetchSnapshotWithRawRows(42L, archive)).thenReturn(tagoSnapshot);
         when(sync.prepareTagoSnapshot(eq(tagoSnapshot), any())).thenReturn(() -> {});
-        new BusMetadataBootstrapService(List.of(tago), sync, history, archive, Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
+        new BusMetadataBootstrapService(List.of(tago), sync, history, archive, analysis, Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
         verify(tago).fetchSnapshotWithRawRows(42L, archive);
+        verify(analysis).analyzeAndStore(42L, tagoSnapshot);
         verify(history).complete(42L);
         verify(history, times(1)).start(any());
     }
@@ -169,7 +210,7 @@ class BusMetadataBootstrapServiceTest {
         valid();
         var entered = new CountDownLatch(1); var release = new CountDownLatch(1);
         doAnswer(invocation -> { entered.countDown(); release.await(); return snapshot; }).when(seoul).fetchSnapshotWithRawRows(42L, archive);
-        var service = new BusMetadataBootstrapService(List.of(seoul, tago), sync, history, archive, Clock.systemUTC());
+        var service = new BusMetadataBootstrapService(List.of(seoul, tago), sync, history, archive, analysis, Clock.systemUTC());
         try (var executor = Executors.newSingleThreadExecutor()) {
             var first = executor.submit(() -> service.bootstrap(TransitProvider.SEOUL_BUS));
             try {

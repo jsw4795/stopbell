@@ -614,3 +614,18 @@ Monitoring, notification dispatch, FCM, TAGO 하차 추적 실험, Apple 인증,
 Apple 인증에는 Spring 설정 `apple.authentication.client-id`, `team-id`, `key-id`, `private-key-pem`, `credential-key-id`, `credential-keys`가 필요하다. 서버 알림은 `apple.notifications.client-id`도 요구하며 누락 시 시작이 실패한다. 비밀은 외부에서 주입한다. Apple Developer에 HTTPS server-to-server notification URL을 등록해야 실제 알림을 수신할 수 있다. Flutter의 Apple 로그인 버튼 설정은 별도다.
 
 필수 설정을 준비한 뒤 `backend`에서 `env -u JAVA_HOME ./gradlew bootRun --args='--server.address=127.0.0.1'`로 실행한다. 기존 `.env`나 환경변수의 명시적 false는 기본값보다 우선한다.
+
+
+### 교통 메타데이터 사전 분석 결과 조회
+
+명시적 Bootstrap 실행 후 MySQL에서 수집 실행과 예상 변경분 요약을 함께 확인한다. `summary`의 Route 변경 없음은 Route 자체 필드만 뜻하며 occurrence는 별도 집계다. 이 분석은 실제 적용 건수가 아니고, 실행 상태가 `COMPLETED`인지 별도로 확인해야 한다.
+
+```sql
+SELECT r.id, r.provider, r.status, r.failure_stage, r.failure_code,
+       d.baseline_type, d.previous_complete_sync_at, d.analyzed_at, d.summary
+FROM transit_metadata_collection_runs r
+LEFT JOIN transit_metadata_diff_analyses d ON d.collection_run_id = r.id
+ORDER BY r.id DESC;
+```
+
+상세 결과는 DB에 저장되지 않는다. 이전 완전 Snapshot과 현재 DB의 일치는 보장되지 않으며 실패한 동기화의 분석도 예정치로 보존된다.

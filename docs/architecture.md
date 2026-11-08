@@ -744,4 +744,7 @@ Apple 인증은 검증 성공한 ID 토큰의 서명된 발급 시각을 credent
 
 명시적 분석 서비스는 검증된 서울 또는 TAGO 수집 Snapshot을 받아 기존 준비 검증을 다시 수행하되 반환된 동기화 작업은 실행하지 않는다. `COLLECTED` 실행 행을 잠근 후 독립 MySQL REPEATABLE READ 트랜잭션에서 Provider별 Route·Stop·occurrence를 일괄 조회해 순수 Diff 엔진에 전달하고, 서울·TAGO·GBIS 원본 JSON을 출처별로 구조 비교한다. GBIS 미수집은 비교 미실시이며 이번 수집에 없는 원본은 삭제 확정이 아니다. `unchangedRoutes`는 Route 자체 필드 기준이며 occurrence는 별도 결과다. 원본과 정규화 결과는 출처별 집계로 제공하며 GBIS-only나 서울 범위 밖 원본을 정규화 Route에 강제로 연결하지 않는다.
 
-분석 결과는 현재 DB를 기준으로 한 예정치다. 마지막 complete 시각이 있어도 이후 실패한 Route 단위 commit이 존재할 수 있으므로 이전 성공 Snapshot과의 동일성을 보장하지 않는다. 읽기 쿼리는 Provider별 고정 횟수이며 행별 Route 조회를 하지 않는다. 분석은 같은 트랜잭션의 일관된 읽기이지만 다른 writer가 분석 직후 개입할 수 있고 단일 프로세스 guard는 분산 잠금이 아니다. 이 단계는 Bootstrap에 연결되지 않으며 실제 동기화 상태를 변경하지 않는다.
+분석 결과는 현재 DB를 기준으로 한 예정치다. 마지막 complete 시각이 있어도 이후 실패한 Route 단위 commit이 존재할 수 있으므로 이전 성공 Snapshot과의 동일성을 보장하지 않는다. 읽기 쿼리는 Provider별 고정 횟수이며 행별 Route 조회를 하지 않는다. 분석은 같은 트랜잭션의 일관된 읽기이지만 다른 writer가 분석 직후 개입할 수 있고 단일 프로세스 guard는 분산 잠금이 아니다. 분석 서비스 자체는 실제 동기화 상태를 변경하지 않는다.
+
+
+명시적 Bootstrap은 원본 아카이브와 Snapshot 검증 후 `COLLECTED`를 기록하고 동일 Snapshot으로 분석한다. 독립 분석 트랜잭션의 commit 성공 후에만 `SYNCING`과 기존 Route 단위 동기화를 시작한다. 검증 실패는 `VALIDATION / INVALID_SOURCE`, 분석 인프라 오류는 `VALIDATION / UNEXPECTED_FAILURE`, 동기화 개시 후 오류는 `SYNC / SYNC_FAILED`로 기록한다. 분석 결과는 적용 전 예상치로 남으며 후속 동기화 실패와 부분 commit으로 수정하거나 삭제하지 않는다. 동기화 성공 뒤 완료 이력 기록이 불확실하면 기존과 같이 완료 기록만 동일 실행으로 한 번 재시도한다.

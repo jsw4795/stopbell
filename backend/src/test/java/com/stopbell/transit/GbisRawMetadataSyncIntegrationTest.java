@@ -42,6 +42,7 @@ import tools.jackson.databind.json.JsonMapper;
 class GbisRawMetadataSyncIntegrationTest {
     private static final Instant TIME = Instant.parse("2026-11-07T00:00:00Z");
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    @Autowired private com.stopbell.transit.service.TransitMetadataDiffAnalysisService analysis;
     @Autowired BusMetadataSyncService sync;
     @Autowired JdbcTemplate jdbc;
     @Autowired com.stopbell.transit.service.TransitMetadataCollectionHistoryService history;
@@ -149,13 +150,14 @@ class GbisRawMetadataSyncIntegrationTest {
         sync.syncRoute(new BusRouteMetadataSnapshot(TransitProvider.TAGO, "stale", "stale", "31010", List.of(new BusStopOccurrenceMetadataSnapshot("stale", "stale", null, null, 1))));
         jdbc.execute("CREATE TRIGGER fail_gbis_bootstrap BEFORE INSERT ON transit_source_metadata FOR EACH ROW BEGIN IF NEW.source_system = 'GBIS' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'failure'; END IF; END");
         try {
-            var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, java.time.Clock.systemUTC());
+            var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, java.time.Clock.systemUTC());
             assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.TAGO)).hasMessageContaining("stage=SYNC");
             Long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
             var failed = history.find(id);
             assertThat(failed.getStatus()).isEqualTo(com.stopbell.transit.domain.TransitCollectionStatus.FAILED);
             assertThat(failed.getFailureStage()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureStage.SYNC);
             assertThat(failed.getFailureCode()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureCode.SYNC_FAILED);
+            assertThat(analysis.find(id)).isNotNull();
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_metadata_sync_states WHERE provider='TAGO'", Integer.class)).isZero();
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='stale'", Integer.class)).isEqualTo(1);
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='GGB200'", Integer.class)).isEqualTo(1);
@@ -171,7 +173,7 @@ class GbisRawMetadataSyncIntegrationTest {
         var invalid = new TagoMetadataSource.TagoSnapshot(valid.normalized(), List.of(), valid.gbis());
         org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
         org.mockito.Mockito.when(source.fetchSnapshotWithRawRows(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(archive))).thenReturn(invalid);
-        var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, java.time.Clock.systemUTC());
+        var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, java.time.Clock.systemUTC());
         assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.TAGO)).hasMessageContaining("stage=VALIDATION");
         Long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
         assertThat(history.find(id).getFailureCode()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureCode.INVALID_SOURCE);

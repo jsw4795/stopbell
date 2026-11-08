@@ -28,11 +28,12 @@ public class BusMetadataBootstrapService {
     private final BusMetadataSyncService syncService;
     private final TransitMetadataCollectionHistoryService history;
     private final TransitMetadataArchiveService archive;
+    private final TransitMetadataDiffAnalysisService analysis;
     private final Clock clock;
 
     public BusMetadataBootstrapService(List<BusMetadataSource> sources, BusMetadataSyncService syncService,
             TransitMetadataCollectionHistoryService history, TransitMetadataArchiveService archive,
-            @Qualifier("transitMetadataClock") Clock clock) {
+            TransitMetadataDiffAnalysisService analysis, @Qualifier("transitMetadataClock") Clock clock) {
         for (BusMetadataSource source : sources) {
             if (this.sources.put(source.provider(), source) != null) {
                 throw new IllegalStateException("Duplicate metadata source for " + source.provider());
@@ -42,6 +43,7 @@ public class BusMetadataBootstrapService {
         this.syncService = syncService;
         this.history = history;
         this.archive = archive;
+        this.analysis = analysis;
         this.clock = clock;
     }
 
@@ -62,17 +64,22 @@ public class BusMetadataBootstrapService {
                 archive.validateStorage();
                 Instant collectedAt = clock.instant();
                 Runnable sync;
+                Runnable analyze;
                 if (source instanceof SeoulCsvMetadataSource seoul) {
                     var snapshot = seoul.fetchSnapshotWithRawRows(runId, archive);
                     stage = TransitCollectionFailureStage.VALIDATION;
                     sync = syncService.prepareSeoulSnapshot(seoul, snapshot, collectedAt);
+                    analyze = () -> analysis.analyzeAndStore(runId, seoul, snapshot);
                 } else {
                     var snapshot = ((TagoMetadataSource) source).fetchSnapshotWithRawRows(runId, archive);
                     stage = TransitCollectionFailureStage.VALIDATION;
                     sync = syncService.prepareTagoSnapshot(snapshot, collectedAt);
+                    analyze = () -> analysis.analyzeAndStore(runId, snapshot);
                 }
                 checkInterrupted();
                 try { history.collected(runId); } catch (RuntimeException e) { throw new HistoryFailure(); }
+                checkInterrupted();
+                try { analyze.run(); } catch (RuntimeException e) { throw new AnalysisFailure(e); }
                 checkInterrupted();
                 try { history.syncing(runId); } catch (RuntimeException e) { throw new HistoryFailure(); }
                 stage = TransitCollectionFailureStage.SYNC;
@@ -114,7 +121,9 @@ public class BusMetadataBootstrapService {
     }
 
     private static TransitCollectionFailureCode classify(RuntimeException failure, TransitCollectionFailureStage stage) {
-        if (failure instanceof HistoryFailure) return TransitCollectionFailureCode.UNEXPECTED_FAILURE;
+        if (failure instanceof AnalysisFailure && failure.getCause() instanceof TransitMetadataDiffAnalysisService.InvalidSnapshotException)
+            return TransitCollectionFailureCode.INVALID_SOURCE;
+        if (failure instanceof HistoryFailure || failure instanceof AnalysisFailure) return TransitCollectionFailureCode.UNEXPECTED_FAILURE;
         if (stage == TransitCollectionFailureStage.SYNC) return TransitCollectionFailureCode.SYNC_FAILED;
         if (failure instanceof TransitMetadataArchiveService.ArchiveFailure) return TransitCollectionFailureCode.UNEXPECTED_FAILURE;
         if (failure instanceof SeoulCsvMetadataSource.SourceUnavailableException
@@ -124,6 +133,10 @@ public class BusMetadataBootstrapService {
                     ? TransitCollectionFailureCode.INVALID_SOURCE : TransitCollectionFailureCode.SOURCE_UNAVAILABLE;
         }
         return TransitCollectionFailureCode.INVALID_SOURCE;
+    }
+
+    private static final class AnalysisFailure extends IllegalStateException {
+        private AnalysisFailure(RuntimeException cause) { super(cause); }
     }
 
     private static final class HistoryFailure extends IllegalStateException { }

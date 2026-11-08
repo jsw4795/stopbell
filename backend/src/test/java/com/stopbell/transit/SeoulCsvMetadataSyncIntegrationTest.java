@@ -55,6 +55,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
     private static final String ROUTE_A = "100100447";
     private static final String ROUTE_B = "100100586";
 
+    @Autowired private com.stopbell.transit.service.TransitMetadataDiffAnalysisService analysis;
     @Autowired
     private BusMetadataSyncService syncService;
 
@@ -526,6 +527,8 @@ class SeoulCsvMetadataSyncIntegrationTest {
         assertThat(rows.getFirst()).containsEntry("status", "FAILED").containsEntry("failure_stage", "SYNC")
                 .containsEntry("failure_code", "SYNC_FAILED").containsEntry("failure_message", "Database synchronization failed");
         assertThat(rows.getFirst().get("finished_at")).isNotNull();
+        Long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='SEOUL_BUS'", Long.class);
+        assertThat(analysis.find(id)).isNotNull();
     }
 
     private void seedMetadata() {
@@ -544,7 +547,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
         var clock = java.time.Clock.systemUTC();
         var archive = new com.stopbell.transit.service.TransitMetadataArchiveService(
                 jdbc, clock, temporaryDirectory.toAbsolutePath().normalize().toString(), transactionManager);
-        return new BusMetadataBootstrapService(List.of(source), syncService, history, archive, clock);
+        return new BusMetadataBootstrapService(List.of(source), syncService, history, archive, analysis, clock);
     }
 
     private SeoulCsvMetadataSource source(String routes, String routeStops, String stops) {

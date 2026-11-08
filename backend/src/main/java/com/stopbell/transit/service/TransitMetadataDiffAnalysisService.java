@@ -41,6 +41,9 @@ public class TransitMetadataDiffAnalysisService {
             BusMetadataSyncService sync, @Qualifier("transitMetadataClock") Clock clock) {
         this.jdbc = jdbc; this.reader = reader; this.sync = sync; this.clock = clock;
     }
+    public static final class InvalidSnapshotException extends IllegalArgumentException {
+        InvalidSnapshotException() { super("Complete snapshot contains a route without occurrences"); }
+    }
     public record Counts(int added, int modified, int removed, int unchanged, int conflicts, int positions) { }
     public record Summary(Counts routes, Counts stops, Counts occurrences, Map<TransitSourceSystem, TransitRawMetadataDiff.Counts> sources) { }
     public record Stored(long runId, TransitProvider provider, Instant previousCompleteSyncAt, Instant analyzedAt,
@@ -80,7 +83,7 @@ public class TransitMetadataDiffAnalysisService {
     private Analysis analyze(long runId, CompleteBusMetadataSnapshot complete, List<TransitRawMetadataDiff.Row> incoming,
             Set<TransitSourceSystem> sources) {
         if (complete.routes().stream().anyMatch(route -> route.occurrences().isEmpty()))
-            throw new IllegalArgumentException("Complete snapshot contains a route without occurrences");
+            throw new InvalidSnapshotException();
         var current = reader.read(complete.provider());
         var normalized = new BusMetadataDiffService().analyze(current, complete);
         List<TransitRawMetadataDiff.Row> previous = new ArrayList<>();
