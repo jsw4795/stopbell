@@ -16,12 +16,17 @@ class TransitMetadataDiffMigrationTest {
         assertThat(Flyway.configure().dataSource(ds).target("35").load().migrate().migrationsExecuted).isEqualTo(35);
         var jdbc = new JdbcTemplate(ds);
         jdbc.update("insert into transit_metadata_collection_runs (id,provider,status,started_at,created_at,updated_at) values (1,'TAGO','COLLECTING',now(6),now(6),now(6))");
-        assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isOne();
+        assertThat(Flyway.configure().dataSource(ds).target("36").load().migrate().migrationsExecuted).isOne();
         String insert = "insert into transit_metadata_diff_analyses (collection_run_id,provider,baseline_type,analyzed_at,result_fingerprint,summary) values (?, 'TAGO', 'CURRENT_DB_BEFORE_APPLY', now(6), ?, '{}')";
         assertThatThrownBy(() -> jdbc.update(insert, 99, "a".repeat(64))).isInstanceOf(DataAccessException.class);
         jdbc.update(insert, 1, "a".repeat(64));
         assertThatThrownBy(() -> jdbc.update(insert, 1, "b".repeat(64))).isInstanceOf(DataAccessException.class);
         assertThat(jdbc.queryForObject("select count(*) from transit_metadata_collection_runs", Integer.class)).isOne();
+        assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isOne();
+        String detail = "insert into transit_metadata_unsafe_change_details (collection_run_id,sequence_number,reason,route_id) values (?, 0, 'ROUTE_REMOVAL', 'route')";
+        assertThatThrownBy(() -> jdbc.update(detail, 99)).isInstanceOf(DataAccessException.class);
+        jdbc.update(detail, 1);
+        assertThatThrownBy(() -> jdbc.update(detail, 1)).isInstanceOf(DataAccessException.class);
         assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isZero();
     }
 }

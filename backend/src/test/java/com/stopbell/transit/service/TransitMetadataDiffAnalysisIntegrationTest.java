@@ -38,8 +38,11 @@ class TransitMetadataDiffAnalysisIntegrationTest {
     @Autowired TransitMetadataCollectionHistoryService history;
     @Autowired BusMetadataSyncService sync;
     @Autowired JdbcTemplate jdbc;
+    @Autowired TransitMetadataUnsafeChangeReviewService review;
 
     @BeforeEach void clear() {
+        jdbc.update("delete from transit_metadata_unsafe_change_variants");
+        jdbc.update("delete from transit_metadata_unsafe_change_details");
         jdbc.update("delete from transit_metadata_diff_analyses");
         jdbc.update("delete from transit_source_metadata");
         jdbc.update("delete from bus_route_stop_occurrences");
@@ -187,4 +190,77 @@ class TransitMetadataDiffAnalysisIntegrationTest {
             assertThat(jdbc.queryForObject("select count(*) from transit_metadata_diff_analyses where collection_run_id = ?", Integer.class, run)).isOne();
         }
     }
+    @Test @org.junit.jupiter.api.DisplayName("차단 상세는 분석에 연결되어 페이지 조회와 멱등 재시도를 지원한다")
+    void stores_and_pages_blocked_review_evidence() {
+        sync.syncTagoSnapshot(snapshot("1", "A"), Instant.parse("2026-01-01T00:00:00Z"));
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
+        long run = collected();
+        var route = new BusRouteMetadataSnapshot(TAGO, "r", "1", "31010", List.of(
+                new BusStopOccurrenceMetadataSnapshot("b", "B", null, null, 1),
+                new BusStopOccurrenceMetadataSnapshot("a", "A", null, null, 2)));
+        var changed = new TagoMetadataSource.TagoSnapshot(new CompleteBusMetadataSnapshot(TAGO, List.of(route)), List.of(
+                raw(ROUTE, "r", null, "{\"routeid\":\"r\"}"),
+                raw(OCCURRENCE, "1:r:1", 1, "{\"nodeid\":\"b\",\"nodeord\":1}"),
+                raw(OCCURRENCE, "1:r:2", 2, "{\"nodeid\":\"a\",\"nodeord\":2}")));
+        var result = analysis.analyzeAndStore(run, changed);
+        var guard = new BusMetadataSafetyGuard().evaluate(result);
+        review.save(run, result, guard);
+        review.save(run, result, guard);
+        var page = review.find(run, 0, 1);
+        assertThat(page.provider()).isEqualTo(TAGO);
+        assertThat(page.fingerprint()).isEqualTo(result.stored().fingerprint());
+        assertThat(page.total()).isEqualTo(2);
+        assertThat(page.details()).hasSize(1);
+        assertThat(review.find(run, 1, 1).details()).hasSize(1);
+        assertThat(review.find(run, 0, 10).details()).isEqualTo(result.details());
+        assertThat(result.details()).anyMatch(d -> d.reason() == BusMetadataSafetyGuard.Reason.OCCURRENCE_REMOVAL
+                && "r".equals(d.routeId()) && "a".equals(d.stopId()) && d.stopOrder() == 1 && "b".equals(d.replacementStopId()));
+        assertThatThrownBy(() -> review.find(-1, 0, 10)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> review.save(-1, result, guard)).isInstanceOf(IllegalArgumentException.class);
+        var stored = result.stored();
+        var wrongFingerprint = new TransitMetadataDiffAnalysisService.Stored(run, TAGO, stored.previousCompleteSyncAt(), stored.analyzedAt(), stored.baselineType(), false, "f".repeat(64), stored.summaryJson());
+        assertThatThrownBy(() -> review.save(run, new TransitMetadataDiffAnalysisService.Analysis(wrongFingerprint, result.normalized(), result.details()), guard)).isInstanceOf(IllegalArgumentException.class);
+        var wrongProvider = new TransitMetadataDiffAnalysisService.Stored(run, SEOUL_BUS, stored.previousCompleteSyncAt(), stored.analyzedAt(), stored.baselineType(), false, stored.fingerprint(), stored.summaryJson());
+        assertThatThrownBy(() -> review.save(run, new TransitMetadataDiffAnalysisService.Analysis(wrongProvider, result.normalized(), result.details()), guard)).isInstanceOf(IllegalArgumentException.class);
+        var altered = new TransitMetadataDiffAnalysisService.Analysis(result.stored(), result.normalized(), List.of(result.details().getFirst()));
+        assertThatThrownBy(() -> review.save(run, altered, guard)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(analysis.find(run)).isEqualTo(result.stored());
+        assertThat(jdbc.queryForObject("select count(*) from bus_route_stop_occurrences", Integer.class)).isEqualTo(2);
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("상세 저장 오류는 전체 상세를 롤백한다")
+    void rolls_back_review_on_failure() {
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan'), ('TAGO','orphan2','orphan2')");
+        long run = collected(); var result = analysis.analyzeAndStore(run, snapshot("1", "A"));
+        jdbc.execute("create trigger reject_review before insert on transit_metadata_unsafe_change_details for each row begin if NEW.sequence_number = 1 then signal sqlstate '45000' set message_text = 'test failure'; end if; end");
+        try {
+            assertThatThrownBy(() -> review.save(run, result, new BusMetadataSafetyGuard().evaluate(result))).isInstanceOf(org.springframework.dao.DataAccessException.class);
+        } finally { jdbc.execute("drop trigger reject_review"); }
+        assertThat(review.find(run, 0, 10).total()).isZero();
+        assertThat(analysis.find(run)).isEqualTo(result.stored());
+    }
+
+    @Test @org.junit.jupiter.api.DisplayName("공유 정류장 충돌의 각 노선별 이름과 좌표를 저장한다")
+    void stores_conflicting_stop_variants() {
+        var a = new BusStopOccurrenceMetadataSnapshot("s", "First", new java.math.BigDecimal("37.1"), new java.math.BigDecimal("127.2"), 1);
+        var b = new BusStopOccurrenceMetadataSnapshot("s", "Second", new java.math.BigDecimal("37.2"), new java.math.BigDecimal("127.3"), 1);
+        var r = new BusRouteMetadataSnapshot(TAGO, "r", "1", "31010", List.of(a));
+        var x = new BusRouteMetadataSnapshot(TAGO, "x", "2", "31010", List.of(b));
+        var rawRows = List.of(raw(ROUTE, "r", null, "{\"routeid\":\"r\"}"),
+                raw(OCCURRENCE, "1:r:1", 1, "{\"nodeid\":\"s\",\"nodeord\":1}"),
+                new TagoMetadataSource.RawSourceRow(TransitSourceSystem.TAGO, ROUTE, "x", "x", null, TransitRawMetadataDiff.parse("{\"routeid\":\"x\"}")),
+                new TagoMetadataSource.RawSourceRow(TransitSourceSystem.TAGO, OCCURRENCE, "1:x:1", "x", 1, TransitRawMetadataDiff.parse("{\"nodeid\":\"s\",\"nodeord\":1}")));
+        long run = collected();
+        var result = analysis.analyzeAndStore(run, new TagoMetadataSource.TagoSnapshot(new CompleteBusMetadataSnapshot(TAGO, List.of(r, x)), rawRows));
+        review.save(run, result, new BusMetadataSafetyGuard().evaluate(result));
+        var page = review.find(run, 0, 10);
+        assertThat(page.details()).isEqualTo(result.details());
+        var detail = page.details().getFirst();
+        assertThat(detail.reason()).isEqualTo(BusMetadataSafetyGuard.Reason.SHARED_STOP_CONFLICT);
+        assertThat(detail.stopId()).isEqualTo("s");
+        assertThat(detail.variants()).extracting(TransitMetadataUnsafeChangeDetails.Variant::routeId).containsExactly("r", "x");
+        assertThat(detail.variants()).extracting(TransitMetadataUnsafeChangeDetails.Variant::stopName).containsExactly("First", "Second");
+        assertThat(detail.variants().getFirst().latitude()).isEqualByComparingTo("37.1");
+    }
+
 }

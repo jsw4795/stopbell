@@ -30,11 +30,12 @@ public class BusMetadataBootstrapService {
     private final TransitMetadataCollectionHistoryService history;
     private final TransitMetadataArchiveService archive;
     private final TransitMetadataDiffAnalysisService analysis;
+    private final TransitMetadataUnsafeChangeReviewService review;
     private final Clock clock;
 
     public BusMetadataBootstrapService(List<BusMetadataSource> sources, BusMetadataSyncService syncService,
             TransitMetadataCollectionHistoryService history, TransitMetadataArchiveService archive,
-            TransitMetadataDiffAnalysisService analysis, @Qualifier("transitMetadataClock") Clock clock) {
+            TransitMetadataDiffAnalysisService analysis, TransitMetadataUnsafeChangeReviewService review, @Qualifier("transitMetadataClock") Clock clock) {
         for (BusMetadataSource source : sources) {
             if (this.sources.put(source.provider(), source) != null) {
                 throw new IllegalStateException("Duplicate metadata source for " + source.provider());
@@ -45,6 +46,7 @@ public class BusMetadataBootstrapService {
         this.history = history;
         this.archive = archive;
         this.analysis = analysis;
+        this.review = review;
         this.clock = clock;
     }
 
@@ -85,6 +87,8 @@ public class BusMetadataBootstrapService {
                 checkInterrupted();
                 var safety = new BusMetadataSafetyGuard().evaluate(result);
                 if (safety.decision() == BusMetadataSafetyGuard.Decision.BLOCK) {
+                    try { review.save(runId, result, safety); } catch (RuntimeException e) { throw new ReviewFailure(e); }
+                    checkInterrupted();
                     log.warn("Unsafe metadata change blocked: provider={}, runId={}, reasons={}", provider, runId, safety.reasons());
                     throw new UnsafeChange();
                 }
@@ -128,6 +132,7 @@ public class BusMetadataBootstrapService {
     }
 
     private static TransitCollectionFailureCode classify(RuntimeException failure, TransitCollectionFailureStage stage) {
+        if (failure instanceof ReviewFailure) return TransitCollectionFailureCode.REVIEW_SAVE_FAILED;
         if (failure instanceof UnsafeChange) return TransitCollectionFailureCode.UNSAFE_CHANGE;
         if (failure instanceof AnalysisFailure && failure.getCause() instanceof TransitMetadataDiffAnalysisService.InvalidSnapshotException)
             return TransitCollectionFailureCode.INVALID_SOURCE;
@@ -145,6 +150,10 @@ public class BusMetadataBootstrapService {
 
     private static final class AnalysisFailure extends IllegalStateException {
         private AnalysisFailure(RuntimeException cause) { super(cause); }
+    }
+
+    private static final class ReviewFailure extends IllegalStateException {
+        private ReviewFailure(RuntimeException cause) { super(cause); }
     }
 
     private static final class HistoryFailure extends IllegalStateException { }

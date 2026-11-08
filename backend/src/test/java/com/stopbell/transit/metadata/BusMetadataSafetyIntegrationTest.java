@@ -41,6 +41,7 @@ class BusMetadataSafetyIntegrationTest {
     @Autowired TransitMetadataCollectionHistoryService history;
     @Autowired TransitMetadataArchiveService archive;
     @Autowired TransitMetadataDiffAnalysisService analysis;
+    @org.springframework.beans.factory.annotation.Autowired private com.stopbell.transit.service.TransitMetadataUnsafeChangeReviewService review;
     @Autowired JdbcTemplate jdbc;
 
     @Test @DisplayName("서울 위험 변경은 실제 DB를 보존하고 수정된 데이터로 새 실행을 허용한다")
@@ -53,7 +54,7 @@ class BusMetadataSafetyIntegrationTest {
         Files.writeString(stops, stopHeader + "s1,출발,일반차로,1,127,37,미설치\ns2,종점,일반차로,2,127,37,미설치\n");
         Files.writeString(routeStops, mappingHeader + "r1,s1,1,1\nr2,s2,1,1\n");
         var source = new SeoulCsvMetadataSource(new FileSystemResource(routes), new FileSystemResource(routeStops), new FileSystemResource(stops));
-        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, Clock.systemUTC());
+        var bootstrap = new BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, review, Clock.systemUTC());
         bootstrap.bootstrap(TransitProvider.SEOUL_BUS);
         var beforeRoutes = rows("bus_routes", "id"); var beforeStops = rows("bus_stops", "id");
         var beforeOccurrences = rows("bus_route_stop_occurrences", "id"); var beforeRaw = rows("transit_source_metadata", "id");
@@ -65,10 +66,26 @@ class BusMetadataSafetyIntegrationTest {
         var run = history.find(failed);
         assertThat(run.getFailureMessage()).isEqualTo("Unsafe metadata change blocked");
         assertThat(run.getStatus().name()).isEqualTo("FAILED");
+        var reviewPage = review.find(failed, 0, 20);
+        assertThat(reviewPage.fingerprint()).isEqualTo(analysis.find(failed).fingerprint());
+        assertThat(reviewPage.details()).extracting(TransitMetadataUnsafeChangeDetails.Detail::reason).contains(
+                BusMetadataSafetyGuard.Reason.ROUTE_REMOVAL, BusMetadataSafetyGuard.Reason.OCCURRENCE_REMOVAL,
+                BusMetadataSafetyGuard.Reason.STOP_CLEANUP);
         var summary = TransitRawMetadataDiff.parse(analysis.find(failed).summaryJson());
         assertThat(summary.path("routes").path("removed").asInt()).isEqualTo(1);
         assertThat(summary.path("stops").path("removed").asInt()).isEqualTo(1);
         assertThat(summary.path("occurrences").path("removed").asInt()).isEqualTo(1);
+        assertThat(rows("bus_routes", "id")).isEqualTo(beforeRoutes);
+        assertThat(rows("bus_stops", "id")).isEqualTo(beforeStops);
+        assertThat(rows("bus_route_stop_occurrences", "id")).isEqualTo(beforeOccurrences);
+        assertThat(rows("transit_source_metadata", "id")).isEqualTo(beforeRaw);
+        assertThat(rows("bus_metadata_sync_states", "provider")).isEqualTo(beforeState);
+        jdbc.execute("create trigger reject_bootstrap_review before insert on transit_metadata_unsafe_change_details for each row signal sqlstate '45000' set message_text = 'test failure'");
+        try {
+            assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.SEOUL_BUS)).hasMessageContaining("code=REVIEW_SAVE_FAILED");
+        } finally { jdbc.execute("drop trigger reject_bootstrap_review"); }
+        long storageFailure = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs", Long.class);
+        assertThat(review.find(storageFailure, 0, 20).total()).isZero();
         assertThat(rows("bus_routes", "id")).isEqualTo(beforeRoutes);
         assertThat(rows("bus_stops", "id")).isEqualTo(beforeStops);
         assertThat(rows("bus_route_stop_occurrences", "id")).isEqualTo(beforeOccurrences);
@@ -80,6 +97,7 @@ class BusMetadataSafetyIntegrationTest {
         long retry = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs", Long.class);
         assertThat(retry).isGreaterThan(failed);
         assertThat(history.find(retry).getStatus().name()).isEqualTo("COMPLETED");
+        assertThat(review.find(retry, 0, 20).total()).isZero();
         assertThat(analysis.find(failed)).isNotNull();
         assertThat(jdbc.queryForObject("select route_number from bus_routes where external_route_id='r1'", String.class)).isEqualTo("변경");
     }

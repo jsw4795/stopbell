@@ -48,7 +48,11 @@ public class TransitMetadataDiffAnalysisService {
     public record Summary(Counts routes, Counts stops, Counts occurrences, Map<TransitSourceSystem, TransitRawMetadataDiff.Counts> sources) { }
     public record Stored(long runId, TransitProvider provider, Instant previousCompleteSyncAt, Instant analyzedAt,
                          String baselineType, boolean exactPreviousSnapshotGuaranteed, String fingerprint, String summaryJson) { }
-    public record Analysis(Stored stored, BusMetadataDiffService.Result normalized) { }
+    public record Analysis(Stored stored, BusMetadataDiffService.Result normalized,
+            List<TransitMetadataUnsafeChangeDetails.Detail> details) {
+        public Analysis { details = List.copyOf(details); }
+        public Analysis(Stored stored, BusMetadataDiffService.Result normalized) { this(stored, normalized, List.of()); }
+    }
 
     @Transactional(isolation = Isolation.REPEATABLE_READ, propagation = Propagation.REQUIRES_NEW)
     public Analysis analyzeAndStore(long runId, SeoulCsvMetadataSource seoul, SeoulCsvMetadataSource.SeoulCsvSnapshot snapshot) {
@@ -86,6 +90,8 @@ public class TransitMetadataDiffAnalysisService {
             throw new InvalidSnapshotException();
         var current = reader.read(complete.provider());
         var normalized = new BusMetadataDiffService().analyze(current, complete);
+        var details = TransitMetadataUnsafeChangeDetails.build(normalized, complete);
+        String reviewFingerprint = TransitMetadataUnsafeChangeDetails.fingerprint(details);
         List<TransitRawMetadataDiff.Row> previous = new ArrayList<>();
         for (var source : sources) jdbc.query("select data_kind, source_key, raw_payload, source_version from transit_source_metadata where source_system = ?",
                 rs -> { previous.add(raw(source, TransitSourceDataKind.valueOf(rs.getString(1)), rs.getString(2),
@@ -100,13 +106,15 @@ public class TransitMetadataDiffAnalysisService {
         var existing = find(runId);
         if (existing != null) {
             if (!existing.fingerprint().equals(fingerprint)) throw new IllegalStateException("Conflicting analysis for collection run");
-            return new Analysis(existing, normalized);
+            String savedReviewFingerprint = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id = ?", String.class, runId);
+            if (!reviewFingerprint.equals(savedReviewFingerprint)) throw new IllegalStateException("Conflicting review evidence for collection run");
+            return new Analysis(existing, normalized, details);
         }
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         String summaryJson = JSON.writeValueAsString(summary);
-        jdbc.update("insert into transit_metadata_diff_analyses (collection_run_id, provider, baseline_type, previous_complete_sync_at, analyzed_at, result_fingerprint, summary) values (?, ?, 'CURRENT_DB_BEFORE_APPLY', ?, ?, ?, cast(? as json))",
-                runId, complete.provider().name(), last == null ? null : Timestamp.from(last), Timestamp.from(now), fingerprint, summaryJson);
-        return new Analysis(find(runId), normalized);
+        jdbc.update("insert into transit_metadata_diff_analyses (collection_run_id, provider, baseline_type, previous_complete_sync_at, analyzed_at, result_fingerprint, summary, review_fingerprint) values (?, ?, 'CURRENT_DB_BEFORE_APPLY', ?, ?, ?, cast(? as json), ?)",
+                runId, complete.provider().name(), last == null ? null : Timestamp.from(last), Timestamp.from(now), fingerprint, summaryJson, reviewFingerprint);
+        return new Analysis(find(runId), normalized, details);
     }
     @Transactional(readOnly = true)
     public Stored find(long runId) {

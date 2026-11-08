@@ -2050,3 +2050,5 @@ TASK-901에서 필수 식별·진행 근거를 확보하지 못한 범위는 후
 
 - [x] 3-B-1A: 명시적 Bootstrap에서 V36 분석 commit 후 Route 삭제·occurrence 제거·Stop cleanup 후보 및 공유 Stop 충돌을 차단하고 비파괴적 변경은 허용한다. 차단은 `VALIDATION / UNSAFE_CHANGE`로 기록하며 분석과 기존 DB를 보존한다. 직접 동기화 우회 및 분석과 적용 사이 경계는 [Architecture](architecture.md#교통-메타데이터-사전-분석-db-연동-phase-3-a-4-2차)를 따른다. 수동 검토·승인과 3-B 전체는 미완료다.
 - 3-B-1A 검증: Java 21·Gradle Wrapper 8.14.3·격리 MySQL Testcontainers에서 직접 관련 및 인접 11개 클래스 88개 최종 통과, 실패·오류·skip 0개. 서울 차단과 새 실행 재시도, TAGO·GBIS 차단과 행선지 변경 허용, 실제 정규화·원본 행 및 완료 시각 보존을 확인했다. 삭제·cleanup 자체의 기존 동작은 직접 동기화 경로에서 검증했다. 실제 Provider 호출·운영 DB 적용·전체 Backend 및 Flutter 테스트는 수행하지 않았고 Migration·Dependency 변경은 없다.
+- 3-B-1B 1차 (3-B 전체 미완료): 차단 실행의 Route·occurrence 제거, Stop cleanup 후보와 공유 Stop 충돌 근거를 V37에 저장하고 분석 지문에 연결해 실행 ID별 페이지 조회한다. 상세 저장 실패는 `VALIDATION / REVIEW_SAVE_FAILED`로 동기화를 차단한다. 승인과 실제 적용은 후속 단계다.
+- 3-B-1B 1차 검증: Java 21·Gradle Wrapper 8.14.3·격리 MySQL Testcontainers에서 선택한 17개 클래스 125개 통과, 실패·오류·skip 0개. 서울·TAGO 차단과 저장 실패 롤백, 공유 Stop 충돌 조회, 분석 연결 및 Flyway Fresh 37개·V23 이후 14개·V34 이후 3개를 검증했다. 실제 Provider 호출·운영 적용·전체 Backend 및 Flutter 테스트와 대량 데이터 성능 검증은 수행하지 않았다. 신규 Dependency는 없다.

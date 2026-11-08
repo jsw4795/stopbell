@@ -628,4 +628,25 @@ LEFT JOIN transit_metadata_diff_analyses d ON d.collection_run_id = r.id
 ORDER BY r.id DESC;
 ```
 
-상세 결과는 DB에 저장되지 않는다. 이전 완전 Snapshot과 현재 DB의 일치는 보장되지 않으며 실패한 동기화의 분석도 예정치로 보존된다.
+차단된 실행의 위험 상세는 아래처럼 실행 ID를 지정해 순서대로 조회한다. `:run_id`, `:page_size`, `:offset`은 MySQL 클라이언트에 맞는 숫자 값으로 바꾼다. `STOP_CLEANUP`에는 기존 고아도 포함될 수 있으며 상세는 실제 적용 결과가 아니다.
+
+```sql
+SELECT r.id AS collection_run_id, r.provider, a.result_fingerprint,
+       d.sequence_number, d.reason, d.route_id, d.stop_id, d.stop_order, d.replacement_stop_id
+FROM transit_metadata_collection_runs r
+JOIN transit_metadata_diff_analyses a ON a.collection_run_id = r.id
+JOIN transit_metadata_unsafe_change_details d ON d.collection_run_id = r.id
+WHERE r.id = :run_id
+ORDER BY d.sequence_number
+LIMIT :page_size OFFSET :offset;
+
+SELECT d.sequence_number, v.route_id, v.stop_order, v.stop_name, v.latitude, v.longitude
+FROM transit_metadata_unsafe_change_details d
+JOIN transit_metadata_unsafe_change_variants v ON v.detail_id = d.id
+WHERE d.collection_run_id = :run_id
+ORDER BY d.sequence_number, v.sequence_number;
+
+SELECT COUNT(*) AS total FROM transit_metadata_unsafe_change_details WHERE collection_run_id = :run_id;
+```
+
+이전 완전 Snapshot과 현재 DB의 일치는 보장되지 않으며 실패한 동기화의 분석도 예정치로 보존된다.

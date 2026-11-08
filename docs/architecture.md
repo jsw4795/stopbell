@@ -751,4 +751,6 @@ Apple 인증은 검증 성공한 ID 토큰의 서명된 발급 시각을 credent
 
 Phase 3-B-1A의 명시적 Bootstrap은 분석 commit 이후 `SYNCING` 이전에 같은 분석 결과를 평가한다. Route 삭제, occurrence 제거, Stop cleanup 후보 또는 공유 Stop 충돌이 하나라도 있으면 `VALIDATION / UNSAFE_CHANGE`로 차단하고 동기화를 시작하지 않는다. 그 외 추가·수정은 허용한다. 판단은 분석 시점 현재 DB 기준이며 분석과 적용 사이 다른 writer의 변경까지 보호하지 않는다. Provider별 single-flight는 같은 인스턴스의 Bootstrap만 제한한다.
 
+Phase 3-B-1B-1에서 차단 시 분석 결과와 동일 Snapshot으로 만든 상세 근거를 별도 `REQUIRES_NEW` 트랜잭션에 저장하고 commit한 뒤 `UNSAFE_CHANGE`를 기록한다. 상세 저장이 실패하면 `VALIDATION / REVIEW_SAVE_FAILED`로 기록하고 동기화를 시작하지 않는다. 허용된 실행은 상세 행을 만들지 않는다. 분석 트랜잭션이 상세 지문을 확정하며 저장 서비스는 실행·Provider·분석 지문과 상세 지문 및 Guard 결과를 검증한다. 근거는 승인이나 적용이 아니며 승인·적용 경로는 아직 없다.
+
 Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncRoute`, `syncSeoulSource`, `syncTagoSource`, `syncSeoulSnapshot`, `syncTagoSnapshot`, `syncCompleteProviderSnapshot` 및 실행 가능한 작업을 반환하는 `prepareSeoulSnapshot`, `prepareTagoSnapshot`, `BusRouteMetadataSyncService`의 `syncRoute`, `syncSeoulRoute`, `syncTagoRoute`, `BusProviderMetadataCleanupService.cleanupProvider`다. 이 경로와 다른 인스턴스·직접 DB writer를 포함하는 보호, 검토·승인 정책은 후속 작업이다.

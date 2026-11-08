@@ -33,7 +33,7 @@ class TransitMetadataCollectionMigrationTest {
         assertThatThrownBy(() -> jdbc.update(insert, "TAGO", "INVALID")).isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.update(insert, "TAGO", "COMPLETED")).isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.update(insert, "TAGO", "FAILED")).isInstanceOf(DataAccessException.class);
-        assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isEqualTo(2);
+        assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isEqualTo(3);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_metadata_collection_runs", Integer.class)).isOne();
         assertThatThrownBy(() -> jdbc.update("INSERT INTO transit_metadata_archives (collection_run_id, source_system, logical_key_hash, file_name, sha256, size_bytes, stored_at) VALUES (99999, 'TAGO', ?, ?, ?, 1, NOW(6))", "a".repeat(64), "b".repeat(64), "c".repeat(64))).isInstanceOf(DataAccessException.class);
     }

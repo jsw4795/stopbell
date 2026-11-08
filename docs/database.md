@@ -603,8 +603,17 @@ V32는 이 행에 `latest_deletion_generation`을 추가하고 단일 행 `apple
 
 V36 `transit_metadata_diff_analyses`는 `collection_run_id`를 PK 및 수집 이력 FK로 두고 Provider, `CURRENT_DB_BEFORE_APPLY` 기준, 이전 complete 시각, 분석 시각, SHA-256 결과 지문 및 요약 JSON을 보관한다. 저장 서비스는 실행 행을 잠가 Provider와 `COLLECTED` 상태를 확인한다. 결과는 예상 집계이며 실제 반영을 뜻하지 않는다. 이전 complete 시각 유무와 관계없이 과거 완전 Snapshot과의 정확한 일치는 보장하지 않는다.
 
-JSON에는 정규화 항목별 건수와 출처별 원본 신규·수정·동일·이번 수집에 없음·버전 변경 건수 및 비교 실시 여부만 포함한다. 원본 JSON과 변경 상세는 복제하지 않으며 전체 상세는 이력에 남지 않는다. 분석 시의 세부 정규화 결과는 호출자에게만 반환한다. 같은 실행의 동일 지문은 기존 결과를 반환하고 다른 지문은 거부한다. 실행 행 잠금과 PK가 동시 요청을 보호한다. 지문은 비교 입력을 구조적으로 정렬해 계산하며 원본 내용을 로그에 기록하지 않는다.
+JSON에는 정규화 항목별 건수와 출처별 원본 신규·수정·동일·이번 수집에 없음·버전 변경 건수 및 비교 실시 여부만 포함한다. 요약 JSON에 원본 JSON과 변경 상세를 복제하지 않는다. 차단된 실행의 위험 상세는 아래 V37에 별도로 저장한다. 같은 실행의 동일 지문은 기존 결과를 반환하고 다른 지문은 거부한다. 실행 행 잠금과 PK가 동시 요청을 보호한다. 지문은 비교 입력을 구조적으로 정렬해 계산하며 원본 내용을 로그에 기록하지 않는다.
 
 Bootstrap은 같은 수집 실행이 `COLLECTED`인 동안 분석 결과를 commit하고 안전 정책을 통과한 뒤 `SYNCING`으로 전이한다. 분석 또는 저장이 실패하면 교통 메타데이터 동기화를 시작하지 않는다. 이후 동기화 실패 또는 완료 이력 기록의 불확실성은 이미 저장된 분석을 삭제하거나 적용 결과로 변경하지 않는다.
 
 명시적 Bootstrap의 안전 정책 차단은 분석 commit 후 `SYNCING` 이전에 `VALIDATION / UNSAFE_CHANGE`, 고정 메시지 `Unsafe metadata change blocked`로 기록한다. 실행 ID와 Provider로 V36 요약의 `routes.removed`, `occurrences.removed`, `stops.removed`, `stops.conflicts`를 조회해 사유를 확인한다. `stops.removed`는 새 Snapshot에서 참조되지 않아 cleanup 대상이 될 수 있는 기존 Stop이며 기존 고아도 포함한다. 요약은 분석 시점 예상치이고 적용 결과나 마지막 성공 Snapshot과의 비교가 아니다. V34의 코드 열은 VARCHAR(32)이며 코드별 CHECK는 없다.
+
+
+### Transit metadata 위험 변경 검토 근거 (Phase 3-B-1B-1)
+
+V37은 V36 분석 행에 `review_fingerprint`를 추가하고 실행별 항목 `transit_metadata_unsafe_change_details`, 공유 Stop의 Route별 값 `transit_metadata_unsafe_change_variants`를 저장한다. 분석 시 정렬된 상세 근거의 SHA-256 지문을 함께 확정한다. V37 이전 분석은 상세 지문이 없어 새 근거를 연결할 수 없다. 상세 행은 V36을 FK로 참조하며 실행과 순번의 유일 제약을 둔다. 상세 Provider와 분석 지문은 연결된 실행과 분석에서 조회한다.
+
+Route 제거, occurrence 제거(이전 Stop·순번과 같은 위치의 대체 Stop), Stop cleanup 후보 및 공유 Stop 충돌을 구분한다. 충돌 후보의 노선·순번별 이름과 좌표는 자식 행에 저장한다. cleanup 대상은 기존 고아를 포함할 수 있다. 원본 응답, URL, 자격 증명은 복제하지 않는다. 항목별 저장과 실행별 순번 정렬 및 페이지 조회를 제공하며 임의 개수 절단은 없다. 크기·DB 오류 등 저장 실패는 전체 상세 트랜잭션을 롤백하고 검토 준비 성공으로 기록하지 않는다.
+
+저장 서비스는 실행 행을 잠그고 Provider, V36 지문, 상세 지문 및 BLOCK 결과를 검증한다. 같은 실행의 같은 상세는 멱등이며 다른 상세는 거부한다. Java `TransitMetadataUnsafeChangeReviewService.find(runId, page, size)`는 0부터 시작하는 페이지, 총 건수, Provider 및 분석 지문을 제공한다. 결과는 분석 당시의 예정 근거이며 실제 적용이나 승인을 뜻하지 않는다.

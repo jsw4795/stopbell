@@ -43,6 +43,7 @@ class GbisRawMetadataSyncIntegrationTest {
     private static final Instant TIME = Instant.parse("2026-11-07T00:00:00Z");
     private static final JsonMapper JSON = JsonMapper.builder().build();
     @Autowired private com.stopbell.transit.service.TransitMetadataDiffAnalysisService analysis;
+    @org.springframework.beans.factory.annotation.Autowired private com.stopbell.transit.service.TransitMetadataUnsafeChangeReviewService review;
     @Autowired BusMetadataSyncService sync;
     @Autowired JdbcTemplate jdbc;
     @Autowired com.stopbell.transit.service.TransitMetadataCollectionHistoryService history;
@@ -149,7 +150,7 @@ class GbisRawMetadataSyncIntegrationTest {
                 .thenReturn(snapshot(2, "GGB10", "1", "014"));
         jdbc.execute("CREATE TRIGGER fail_gbis_bootstrap BEFORE INSERT ON transit_source_metadata FOR EACH ROW BEGIN IF NEW.source_system = 'GBIS' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'failure'; END IF; END");
         try {
-            var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, java.time.Clock.systemUTC());
+            var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, review, java.time.Clock.systemUTC());
             assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.TAGO)).hasMessageContaining("stage=SYNC");
             Long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
             var failed = history.find(id);
@@ -178,9 +179,13 @@ class GbisRawMetadataSyncIntegrationTest {
         org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
         org.mockito.Mockito.when(source.fetchSnapshotWithRawRows(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(archive)))
                 .thenReturn(snapshot(2, "GGB10", "2", "015"));
-        var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, java.time.Clock.systemUTC());
+        var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, review, java.time.Clock.systemUTC());
         assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.TAGO)).hasMessageContaining("stage=VALIDATION").hasMessageContaining("code=UNSAFE_CHANGE");
         long run = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs where provider='TAGO'", Long.class);
+        var evidence = review.find(run, 0, 100);
+        assertThat(evidence.provider()).isEqualTo(TransitProvider.TAGO);
+        assertThat(evidence.fingerprint()).isEqualTo(analysis.find(run).fingerprint());
+        assertThat(evidence.details()).anyMatch(d -> d.reason() == com.stopbell.transit.service.BusMetadataSafetyGuard.Reason.ROUTE_REMOVAL && "stale".equals(d.routeId()));
         var summary = com.stopbell.transit.service.TransitRawMetadataDiff.parse(analysis.find(run).summaryJson());
         assertThat(summary.path("routes").path("removed").asInt()).isEqualTo(1);
         assertThat(summary.path("sources").path("GBIS").path("compared").asBoolean()).isTrue();
@@ -206,7 +211,7 @@ class GbisRawMetadataSyncIntegrationTest {
         var source = org.mockito.Mockito.mock(TagoMetadataSource.class);
         org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
         org.mockito.Mockito.when(source.fetchSnapshotWithRawRows(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(archive))).thenReturn(changed);
-        new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, java.time.Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
+        new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, review, java.time.Clock.systemUTC()).bootstrap(TransitProvider.TAGO);
         long run = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs where provider='TAGO'", Long.class);
         assertThat(history.find(run).getStatus().name()).isEqualTo("COMPLETED");
         assertThat(analysis.find(run)).isNotNull();
@@ -223,7 +228,7 @@ class GbisRawMetadataSyncIntegrationTest {
         var invalid = new TagoMetadataSource.TagoSnapshot(valid.normalized(), List.of(), valid.gbis());
         org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
         org.mockito.Mockito.when(source.fetchSnapshotWithRawRows(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(archive))).thenReturn(invalid);
-        var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, java.time.Clock.systemUTC());
+        var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, analysis, review, java.time.Clock.systemUTC());
         assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.TAGO)).hasMessageContaining("stage=VALIDATION");
         Long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
         assertThat(history.find(id).getFailureCode()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureCode.INVALID_SOURCE);
