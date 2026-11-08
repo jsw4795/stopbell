@@ -78,10 +78,6 @@ class DevicePersistenceIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "select count(*) from devices where user_id = ? and enabled = true", Integer.class, user.getId()
         )).isEqualTo(2);
-        assertThat(jdbcTemplate.queryForObject(
-                "select version from flyway_schema_history where success = true order by installed_rank desc limit 1",
-                String.class
-        )).isEqualTo("38");
     }
 
     @Test

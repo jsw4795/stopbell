@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.FlywayTestAssertions;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,7 +54,7 @@ class UserIdentityMigrationIntegrationTest {
     @Test
     @DisplayName("Fresh DB의 전체 Migration은 Identity NOT NULL과 Provider별 복합 UNIQUE를 유지한다")
     void migrate_fresh_database() {
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(38);
+        FlywayTestAssertions.migrateToLatest(flyway("latest", true));
         assertIdentitySchema();
         insertIdentity("GOOGLE", "same-sub");
         insertIdentity("APPLE", "same-sub");
@@ -151,7 +152,7 @@ class UserIdentityMigrationIntegrationTest {
                 .hasRootCauseInstanceOf(SQLException.class);
         assertThatThrownBy(() -> jdbc.update("insert into apple_credentials (user_id, encrypted_refresh_token) values (?, 'v1.fixture')", Long.MAX_VALUE))
                 .hasRootCauseInstanceOf(SQLException.class);
-        assertThat(flyway("latest", true).migrate().migrationsExecuted).isEqualTo(15);
+        FlywayTestAssertions.migrateToLatest(flyway("latest", true));
         assertLatestAndNoOp();
     }
 
@@ -271,8 +272,7 @@ class UserIdentityMigrationIntegrationTest {
 
     private void assertLatestAndNoOp() {
         Flyway latest = flyway("latest", true);
-        assertThat(latest.info().current().getVersion().getVersion()).isEqualTo("38");
-        assertThat(latest.validateWithResult().validationSuccessful).isTrue();
+        FlywayTestAssertions.assertLatest(latest);
         var history = jdbc.queryForList("select * from flyway_schema_history order by installed_rank");
         assertThat(latest.migrate().migrationsExecuted).isZero();
         assertThat(jdbc.queryForList("select * from flyway_schema_history order by installed_rank")).isEqualTo(history);

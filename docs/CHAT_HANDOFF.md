@@ -58,7 +58,7 @@ ChatGPT는 개발 계획과 현재·다음 Phase, 범위·아키텍처, 기존 �
 
 직접 관련 테스트와 필요한 인접 회귀를 우선하며 전체 Backend·Flutter 테스트는 기본적으로 실행하지 않는다. 예외와 보고 기준은 [개발 가이드라인](development-guidelines.md#테스트-실행-범위)을 따른다. 문서 전용 작업의 불필요한 코드 테스트는 생략하고 실행·미실행을 구분한다. 작업 전 Git 상태를 확인하고 사용자 변경을 보존하며 관련 파일만 수정·로컬 커밋한다. Push는 사용자가 직접 수행한다.
 
-**Flyway Migration 추가 시 필수 확인:** V34와 V35 추가 후 기존 테스트의 최신 버전·적용 개수 기대값 누락이 반복됐다. 이후 모든 Migration 작업에서 최신 버전, 전체 적용 수와 특정 버전 이후 적용 수를 점검하고 영향받는 테스트를 같은 작업에서 수정·선택 실행한다. 과거 버전 검증은 보존한다. [상세 규칙](development-guidelines.md#flyway-migration-추가-시-필수-회귀-검증)을 따른다.
+**Flyway Migration 추가 시:** 최신 버전과 최신까지의 적용 개수는 숫자로 고정하지 않고 Flyway가 인식한 Migration과 DB 상태를 비교한다. 과거 버전 호환성 검증은 보존한다. [상세 규칙](development-guidelines.md#flyway-migration-추가-시-필수-회귀-검증)을 따른다.
 
 ## 유지관리
 

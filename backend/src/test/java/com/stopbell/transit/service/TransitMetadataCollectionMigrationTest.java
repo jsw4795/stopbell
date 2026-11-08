@@ -3,6 +3,7 @@ package com.stopbell.transit.service;
 import static org.assertj.core.api.Assertions.*;
 
 import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.FlywayTestAssertions;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,7 +34,7 @@ class TransitMetadataCollectionMigrationTest {
         assertThatThrownBy(() -> jdbc.update(insert, "TAGO", "INVALID")).isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.update(insert, "TAGO", "COMPLETED")).isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.update(insert, "TAGO", "FAILED")).isInstanceOf(DataAccessException.class);
-        assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isEqualTo(4);
+        FlywayTestAssertions.migrateToLatest(Flyway.configure().dataSource(ds).load());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_metadata_collection_runs", Integer.class)).isOne();
         assertThatThrownBy(() -> jdbc.update("INSERT INTO transit_metadata_archives (collection_run_id, source_system, logical_key_hash, file_name, sha256, size_bytes, stored_at) VALUES (99999, 'TAGO', ?, ?, ?, 1, NOW(6))", "a".repeat(64), "b".repeat(64), "c".repeat(64))).isInstanceOf(DataAccessException.class);
     }

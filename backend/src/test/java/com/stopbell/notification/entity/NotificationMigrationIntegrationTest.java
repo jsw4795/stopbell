@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.FlywayTestAssertions;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,10 +47,9 @@ class NotificationMigrationIntegrationTest {
 
         // Simulate normal completion of this test fixture's old follow-up; no invented UUID.
         jdbc.update("update alarms set status='INACTIVE', follow_up_vehicle_tracking_id=null, follow_up_started_at=null, follow_up_expires_at=null where id=?", alarmId);
-        Flyway.configure().dataSource(dataSource).load().migrate();
+        FlywayTestAssertions.migrateToLatest(Flyway.configure().dataSource(dataSource).load());
         assertThat(jdbc.queryForList("select * from notification_history")).isEqualTo(originalHistory);
         jdbc.update("delete from alarms where id=?", alarmId);
         assertThat(jdbc.queryForList("select * from notification_history")).isEqualTo(originalHistory);
-        assertThat(jdbc.queryForObject("select version from flyway_schema_history order by installed_rank desc limit 1", String.class)).isEqualTo("38");
     }
 }

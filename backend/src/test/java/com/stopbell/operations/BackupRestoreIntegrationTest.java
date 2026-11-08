@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.FlywayTestAssertions;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -52,9 +53,7 @@ class BackupRestoreIntegrationTest {
         var restore = destination.execInContainer("sh", "-c", "MYSQL_PWD=\"$MYSQL_PASSWORD\" mysql -u\"$MYSQL_USER\" \"$MYSQL_DATABASE\" < /tmp/stopbell-test.sql");
         assertThat(restore.getExitCode()).isZero();
         Flyway restoredFlyway = flyway(destination);
-        restoredFlyway.validate();
-        assertThat(restoredFlyway.info().pending()).isEmpty();
-        assertThat(restoredFlyway.info().current().getVersion().getVersion()).isEqualTo("38");
+        FlywayTestAssertions.assertLatest(restoredFlyway);
         JdbcTemplate restored = jdbc(destination);
         for (String table : List.of("users", "apple_credentials", "account_deletions", "alarms", "devices", "notification_events", "notification_deliveries", "flyway_schema_history")) {
             List<Map<String, Object>> expected = original.queryForList("select * from " + table + " order by 1");

@@ -139,9 +139,6 @@ class DeviceApiIntegrationTest {
         assertThat(stored.getCurrentPushTargetId()).isEqualTo(target);
         assertThat(stored.getLastRegisteredAt()).isBetween(before, LocalDateTime.now(ZoneOffset.UTC));
         assertThat(stored.getUpdatedAt()).isEqualTo(stored.getCreatedAt());
-        assertThat(jdbc.queryForObject(
-                "select max(cast(version as unsigned)) from flyway_schema_history where success = true", Integer.class
-        )).isEqualTo(38);
     }
 
     @Test
