@@ -297,7 +297,11 @@ Flutter `BoardingCandidateClient.find()`의 최초 HTTP·공유 Refresh·최대 
 
 Bus static metadata는 서울 T Data CSV full import와 경기 TAGO throttled full sync에서 받아 StopBell DB의 현재 상태로 보관한다. 경기 GBIS route/routeStation bulk는 전체 TAGO traversal이 검증된 Route의 destination 표시값만 보강하며 Provider identity와 realtime routing은 TAGO를 유지한다. 사용자 Route/Stop 조회와 Alarm 생성은 DB metadata를 사용하고, Alarm 생성 시 필요한 값은 `BusAlarmTarget` snapshot으로 복사한다. Alarm target은 metadata Entity를 FK로 장기 참조하지 않으므로 subsequent sync가 기존 Alarm을 변경하지 않는다.
 
-Phase 3-A-3A-1은 기존 동기화와 독립된 수집 실행 이력 서비스를 제공한다. 상태·동시성·보안 계약은 [Database](database.md#transit-metadata-수집-이력-phase-3-a-3a-1)를 따른다. 실제 Bootstrap 연결과 자동 이력 기록 및 원본 파일 저장은 아직 구현하지 않았다. 향후 연결 시 전체 동기화 성공과 기존 완료 시각 갱신 후에만 COMPLETED를 기록해야 한다.
+Phase 3-A-3A-1은 기존 동기화와 독립된 수집 실행 이력 서비스를 제공한다. 상태·동시성·보안 계약은 [Database](database.md#transit-metadata-수집-이력-phase-3-a-3a-1)를 따른다. 실제 Bootstrap 연결과 자동 이력 기록은 아직 구현하지 않았다. 향후 연결 시 전체 동기화 성공과 기존 완료 시각 갱신 후에만 COMPLETED를 기록해야 한다.
+
+원본 파일 아카이브 기반은 설정 `transit.metadata.archive.directory`의 이미 존재하는 절대 디렉터리를 사용한다. 외부 파일 저장소나 다운로드 API는 없다. 서비스는 임시 파일을 작성하고 하드 링크로 덮어쓰기 없이 확정한 뒤 독립 DB transaction을 commit한다. DB BLOB은 백업·트랜잭션이 단순하지만 대형 원본으로 DB 크기와 부하가 증가하므로 단일 Backend의 로컬 파일과 MySQL 메타데이터를 선택한다. 저장소는 Backend만 쓰도록 운영 권한을 제한해야 하며 하드 링크를 지원해야 한다.
+
+파일과 DB는 원자적이지 않다. 파일 실패는 DB 행을 만들지 않으며 DB 실패나 프로세스 중단은 완성된 고아 파일을 남길 수 있다. 동일 식별자의 재시도는 고아 파일의 크기와 SHA-256이 일치할 때만 재사용한다. 임시 파일은 정상 종료 시 삭제를 시도하며 중단 또는 삭제 실패로 남은 임시 파일과 미참조 완성 파일은 자동 삭제하지 않고 운영자가 실행 중인 작업과 DB 참조를 확인해 수동 정리한다. DB에 행이 있어도 파일 누락·변조 시 조회 검증과 동일 요청은 실패한다. 파일시스템과 DB의 장애·복구를 함께 관리해야 하며 정전 시 파일과 디렉터리의 durable flush를 보장하지 않는다. 원본 자체의 민감정보를 변조하지 않으므로 실제 연결 전 저장 가능 여부와 접근 통제를 검토해야 한다.
 
 TASK-513의 source adapter는 서울의 노선마스터·정류장마스터·노선-정류장마스터 CSV와 경기의 TAGO city별 Route·Route Stop pagination을 검증해 normalized metadata snapshot으로 만든 뒤 기존 reconciliation service에 전달한다. 서울 CSV header·UTF-8 BOM·좌표 column은 source와 fixture를 확인해 parser에 반영했으며 [ADR-009의 TASK-513 구현 기록](adr/ADR-009-bus-transit-metadata-persistence-and-diff-sync-strategy.md#후속-구현-경계-task-513)을 따른다. source 일부 fetch 실패, parser failure, pagination 미완료, required source 누락, provider request 일부 실패와 검증되지 않은 empty result는 complete provider snapshot이 아니므로 absence/deletion으로 해석하지 않으며 provider-level cleanup을 실행하지 않는다. 서울과 TAGO bootstrap은 검증된 정규화 snapshot과 원본 행을 함께 수집하며, 직접 정규화 snapshot을 전달하는 동기화 경로도 유지한다. 검증되지 않은 부분 수집 결과는 cleanup 경로에 들어가지 않는다.
 

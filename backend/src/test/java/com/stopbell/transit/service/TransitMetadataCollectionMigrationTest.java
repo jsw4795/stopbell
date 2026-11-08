@@ -23,7 +23,7 @@ class TransitMetadataCollectionMigrationTest {
         jdbc.update("INSERT INTO bus_route_stop_occurrences (id,route_id,stop_id,stop_order) VALUES (103,101,102,1)");
         jdbc.update("INSERT INTO bus_metadata_sync_states (provider,last_complete_sync_at) VALUES ('SEOUL_BUS',NOW(6))");
         jdbc.update("INSERT INTO transit_source_metadata (source_system,data_kind,source_key,raw_payload,collected_at,updated_at) VALUES ('SEOUL_TDATA','ROUTE','r','{}',NOW(6),NOW(6))");
-        assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isOne();
+        assertThat(Flyway.configure().dataSource(ds).target("34").load().migrate().migrationsExecuted).isOne();
         for (String table : new String[] {"bus_routes", "bus_stops", "bus_route_stop_occurrences", "bus_metadata_sync_states", "transit_source_metadata"}) {
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class)).isOne();
         }
@@ -33,5 +33,8 @@ class TransitMetadataCollectionMigrationTest {
         assertThatThrownBy(() -> jdbc.update(insert, "TAGO", "INVALID")).isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.update(insert, "TAGO", "COMPLETED")).isInstanceOf(DataAccessException.class);
         assertThatThrownBy(() -> jdbc.update(insert, "TAGO", "FAILED")).isInstanceOf(DataAccessException.class);
+        assertThat(Flyway.configure().dataSource(ds).load().migrate().migrationsExecuted).isOne();
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_metadata_collection_runs", Integer.class)).isOne();
+        assertThatThrownBy(() -> jdbc.update("INSERT INTO transit_metadata_archives (collection_run_id, source_system, logical_key_hash, file_name, sha256, size_bytes, stored_at) VALUES (99999, 'TAGO', ?, ?, ?, 1, NOW(6))", "a".repeat(64), "b".repeat(64), "c".repeat(64))).isInstanceOf(DataAccessException.class);
     }
 }
