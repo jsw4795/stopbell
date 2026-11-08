@@ -689,3 +689,9 @@ Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여�
 `--page`는 0부터, `--size`는 1~500이다. 위험 상세와 공유 Stop 변형은 각각 출력 행으로 페이지를 구성하며, 충돌 변형은 입력된 Route·occurrence 처리 순서로 표시한다. 모든 페이지를 확인하려면 같은 입력으로 페이지를 바꾸어 재실행하며, 그 사이 DB나 파일이 바뀌면 결과가 달라질 수 있다. 원본 JSON과 승인 가능한 지문은 출력하지 않는다. Raw는 SEOUL_TDATA/TAGO/GBIS와 데이터 종류별로 비교 여부·추가·변경·동일·미포함·버전 변경을 표시하며 미수집 출처의 미포함은 삭제를 뜻하지 않는다.
 
 관리 프로필은 Flyway 자동 실행, Hibernate DDL, SQL 초기화, Scheduler와 다른 one-shot 실행을 차단한다. Preview는 수집 이력·아카이브·분석·위험 상세·승인·정규화·원본·완료 시각을 쓰지 않는다. 결과는 현재 DB 기준이며 마지막 성공 Snapshot과의 일치를 보장하지 않는다. ALLOW도 이후 적용 시 Guard를 생략할 권한이 아니다. TAGO와 GBIS Snapshot은 서비스 입력으로 지원하지만 실제 네트워크 CLI는 제공하지 않는다. 3-B-2B-2에서는 서울 최신 파일, TAGO 31개 cityCode 수집 범위와 GBIS 기반정보·버전을 확보하고 최신성, 호출량 및 메모리를 검증한다. 검토된 실제 적용은 3-B-2C에서 별도로 결정한다.
+
+### TAGO 로컬 원본 묶음 (Phase 3-B-2B-2B-1A)
+
+`TagoLocalBundle.create(절대_디렉터리, serviceKey)`는 Git 저장소 밖의 이미 존재하는 실제 경로에서 묶음을 만든다. `cityOrder()` 순서대로 cityCode 목록, 도시별 Route 페이지, 각 Route의 정류장 페이지를 `Writer.add(Request, 원본바이트)`에 전달한다. operation은 각각 `getCtyCodeList`(city·route null, page 0), `getRouteNoList`(city·page), `getRouteAcctoThrghSttnList`(city·route·page)다. 모든 응답은 원본 그대로 보존한다. `complete()`가 기존 수집 검증을 끝내야 `manifest.json`이 생기며, 누락이나 실패 시 묶음은 재생할 수 없다. `TagoLocalBundle.replay(묶음_절대경로, serviceKey)`는 파일 무결성과 범위·순서를 재확인하고 네트워크 없이 `TagoSnapshot`을 반환한다. serviceKey는 내용 검사에만 사용하며 Manifest에 기록하지 않는다. 실제 Provider 수집 명령과 호출량 제한은 후속 작업이다.
+
+파일 권한과 보존은 실행자가 관리한다. 기존 디렉터리 및 그 조상에 심볼릭 링크가 없어야 하고 하드 링크를 지원해야 한다. 해시는 서명이 아니므로 파일과 Manifest에 대한 무단 수정 방지는 파일시스템 접근 통제에 의존한다. 완료되지 않은 묶음과 임시 파일은 자동 삭제하지 않는다.

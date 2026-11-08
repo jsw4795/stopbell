@@ -24,7 +24,7 @@ public final class TagoMetadataSource implements BusMetadataSource {
     private static final int PROGRESS_LOG_INTERVAL = 100;
 
     private final TagoMetadataClient client; private final GbisMetadataClient gbisClient;
-    private final long requestIntervalMillis; private final Set<String> gyeonggiCodes;
+    private final long requestIntervalMillis; private final List<String> gyeonggiCodes;
     public TagoMetadataSource(TagoMetadataClient client, GbisMetadataClient gbisClient, long requestIntervalMillis) {
         this(client, gbisClient, requestIntervalMillis, GYEONGGI_CODES);
     }
@@ -32,8 +32,16 @@ public final class TagoMetadataSource implements BusMetadataSource {
     TagoMetadataSource(TagoMetadataClient client, long requestIntervalMillis, Set<String> gyeonggiCodes) { this(client, null, requestIntervalMillis, gyeonggiCodes); }
     TagoMetadataSource(TagoMetadataClient client, GbisMetadataClient gbisClient, long requestIntervalMillis, Set<String> gyeonggiCodes) {
         this.client=client; this.gbisClient=gbisClient; this.requestIntervalMillis=requestIntervalMillis;
-        this.gyeonggiCodes=Set.copyOf(gyeonggiCodes);
+        this.gyeonggiCodes=List.copyOf(Set.copyOf(gyeonggiCodes));
     }
+    // Replay receives the recorded city traversal order, not Set's process-dependent iteration order.
+    TagoMetadataSource(TagoMetadataClient client, List<String> orderedCities) {
+        this.client = client; this.gbisClient = null; this.requestIntervalMillis = 0;
+        this.gyeonggiCodes = List.copyOf(orderedCities);
+        if (gyeonggiCodes.isEmpty() || new HashSet<>(gyeonggiCodes).size() != gyeonggiCodes.size())
+            throw new IllegalArgumentException("Invalid city traversal");
+    }
+    static List<String> fullCityScope() { return List.copyOf(GYEONGGI_CODES); }
     @Override public TransitProvider provider() { return TransitProvider.TAGO; }
     @Override public CompleteBusMetadataSnapshot fetchCompleteSnapshot() {
         return collect(false).normalized();

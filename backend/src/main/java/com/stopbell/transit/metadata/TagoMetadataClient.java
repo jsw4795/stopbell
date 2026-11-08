@@ -39,9 +39,7 @@ public class TagoMetadataClient {
     public Page<RawItem<Stop>> routeStopsWithRaw(String cityCode, String routeId, int page) { return rawPage(ROUTE_STOPS, cityCode, routeId, page, Stop.class); }
     public List<City> cityCodes(Consumer<byte[]> archive) {
         byte[] bytes = get(CITY_CODES, null, null, null);
-        List<City> result;
-        try { result = items(objectMapper.readValue(bytes, CityResponse.class).response, CITY_CODES); }
-        catch (Exception e) { throw protocol(CITY_CODES, e); }
+        List<City> result = parseCityCodes(bytes);
         archiveSafe(bytes, archive);
         return result;
     }
@@ -56,7 +54,17 @@ public class TagoMetadataClient {
     }
     private <T> Page<RawItem<T>> rawPage(String operation, String cityCode, String routeId, int number, Class<T> type, Consumer<byte[]> archive) {
         byte[] bytes = get(operation, cityCode, routeId, number);
-        Page<RawItem<T>> result;
+        Page<RawItem<T>> result = parseRawPage(bytes, operation, type);
+        if (archive != null) archiveSafe(bytes, archive);
+        return result;
+    }
+    List<City> parseCityCodes(byte[] bytes) {
+        try { return items(objectMapper.readValue(bytes, CityResponse.class).response, CITY_CODES); }
+        catch (Exception e) { throw protocol(CITY_CODES, e); }
+    }
+    Page<RawItem<Route>> parseRoutes(byte[] bytes) { return parseRawPage(bytes, ROUTES, Route.class); }
+    Page<RawItem<Stop>> parseRouteStops(byte[] bytes) { return parseRawPage(bytes, ROUTE_STOPS, Stop.class); }
+    private <T> Page<RawItem<T>> parseRawPage(byte[] bytes, String operation, Class<T> type) {
         try {
             RawResponse response = objectMapper.readValue(bytes, RawResponse.class);
             Page<JsonNode> page = page(response.response, operation);
@@ -64,10 +72,8 @@ public class TagoMetadataClient {
                 if (!node.isObject()) throw TransitProviderClientException.protocol(TransitProvider.TAGO, operation, null);
                 return new RawItem<>(objectMapper.treeToValue(node, type), node);
             }).toList();
-            result = new Page<>(items, page.totalCount(), page.pageNo());
+            return new Page<>(items, page.totalCount(), page.pageNo());
         } catch (Exception e) { throw protocol(operation, e); }
-        if (archive != null) archiveSafe(bytes, archive);
-        return result;
     }
     private void archiveSafe(byte[] bytes, Consumer<byte[]> archive) {
         JsonNode tree;

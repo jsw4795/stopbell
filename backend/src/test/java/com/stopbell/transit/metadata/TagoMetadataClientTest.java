@@ -19,6 +19,19 @@ import org.springframework.web.client.RestClient;
 class TagoMetadataClientTest {
 
     @Test
+    void parses_saved_pages_without_http_and_preserves_raw_fields() {
+        var city = "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"citycode\":\"31010\"}}}}}";
+        var route = pageJson("{\"routeid\":\"r\",\"routeno\":\"1\",\"extra\":\"kept\"}", 1, 1);
+        var stop = pageJson("{\"nodeid\":\"s\",\"nodenm\":\"A\",\"nodeord\":1}", 1, 1);
+        var charset = java.nio.charset.StandardCharsets.UTF_8;
+        assertThat(client.parseCityCodes(city.getBytes(charset))).extracting(TagoMetadataClient.City::citycode).containsExactly("31010");
+        assertThat(client.parseRoutes(route.getBytes(charset)).items().getFirst().fields().get("extra").asString()).isEqualTo("kept");
+        assertThat(client.parseRouteStops(stop.getBytes(charset)).items().getFirst().normalized().nodeid()).isEqualTo("s");
+        assertThatThrownBy(() -> client.parseRoutes("{}".getBytes(charset))).isInstanceOf(TransitProviderClientException.class);
+        server.verify();
+    }
+
+    @Test
     void archive_receives_exact_page_bytes_and_failure_propagates() {
         String body = " {\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"citycode\":\"31010\"}}}}}\r\n";
         expect(TagoMetadataClient.CITY_CODES, "serviceKey=test-service-key&_type=json").andRespond(json(body));
