@@ -81,9 +81,17 @@ public class TagoMetadataClient {
             return restClient.get().uri(uri(operation, cityCode, routeId, page)).accept(MediaType.APPLICATION_JSON).retrieve().body(byte[].class);
         } catch (TransitProviderClientException e) { throw e;
         } catch (RestClientResponseException e) { throw TransitProviderClientException.http(TransitProvider.TAGO, operation, e.getStatusCode().value(), null);
-        } catch (ResourceAccessException e) { throw TransitProviderClientException.transport(TransitProvider.TAGO, operation, null);
+        } catch (ResourceAccessException e) { preserveInterruption(e); throw TransitProviderClientException.transport(TransitProvider.TAGO, operation, null);
         } catch (IllegalArgumentException e) { throw TransitProviderClientException.protocol(TransitProvider.TAGO, operation, null);
         } catch (RestClientException e) { throw TransitProviderClientException.protocol(TransitProvider.TAGO, operation, null); }
+    }
+    private static void preserveInterruption(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InterruptedException || cause instanceof java.util.concurrent.CancellationException) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
     private URI uri(String operation, String cityCode, String routeId, Integer page) { var b=UriComponentsBuilder.fromUriString(properties.metadataBaseUrl()).pathSegment(operation).queryParam("serviceKey", properties.serviceKey()); if(page!=null)b.queryParam("pageNo", page).queryParam("numOfRows", 1000); b.queryParam("_type", "json"); if(cityCode!=null)b.queryParam("cityCode", UriUtils.encodeQueryParam(cityCode, StandardCharsets.UTF_8)); if(routeId!=null)b.queryParam("routeId", UriUtils.encodeQueryParam(routeId, StandardCharsets.UTF_8)); return b.build(true).toUri(); }
     private <T> List<T> items(Envelope<T> response, String operation) { Body<T> body=body(response,operation); if(body.items==null||body.items.item==null)throw TransitProviderClientException.protocol(TransitProvider.TAGO,operation,null); return body.items.item; }

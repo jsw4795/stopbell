@@ -36,6 +36,10 @@ import org.springframework.core.io.ByteArrayResource;
  * <p>The provider scope follows the documented T Data route and stop type semantics.</p>
  */
 public final class SeoulCsvMetadataSource implements BusMetadataSource {
+    public static final class SourceUnavailableException extends IllegalStateException {
+        public SourceUnavailableException() { super("Seoul CSV source unavailable"); }
+    }
+
 
     private static final Logger log = LoggerFactory.getLogger(SeoulCsvMetadataSource.class);
     private static final int INVALID_ROUTE_SAMPLE_LIMIT = 10;
@@ -128,13 +132,13 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
             archive.store(runId, TransitSourceSystem.SEOUL_TDATA, "seoul_route_stop_master", routeStops);
             return snapshot;
         } catch (IOException exception) {
-            throw new IllegalStateException("Unable to read Seoul metadata CSV", exception);
+            throw new SourceUnavailableException();
         }
     }
 
     private static byte[] readSource(String name, Resource resource) throws IOException {
         if (resource == null || !resource.exists()) {
-            throw new IllegalStateException("Required Seoul CSV source is missing: " + name);
+            throw new SourceUnavailableException();
         }
         try (InputStream input = resource.getInputStream()) {
             return input.readAllBytes();

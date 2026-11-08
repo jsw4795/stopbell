@@ -461,7 +461,9 @@ V34의 `transit_metadata_collection_runs`는 독립 실행 ID, `provider`(SEOUL_
 
 정상 순서는 COLLECTING → COLLECTED → SYNCING → COMPLETED이며 진행 상태에서 FAILED 또는 INTERRUPTED로 종료할 수 있다. 종료 상태에서 다른 상태로 전이할 수 없다. 현재 상태와 같은 요청은 변경 없이 성공하며 FAILED 재요청은 같은 단계와 코드일 때만 허용한다. 상태 변경은 행 잠금 transaction으로 직렬화한다. `start`는 호출마다 새 실행을 생성하며 시작 요청 자체의 중복 제거는 제공하지 않는다. 실패 메시지는 예외나 외부 문자열이 아닌 코드별 고정 문구다. COMPLETED는 Provider DB 동기화와 완료 시각 갱신까지 성공한 후에만 호출해야 하는 오케스트레이션 계약이며 이 독립 서비스가 동기화 성공 여부를 검증하지는 않는다.
 
-이번 단계는 이력 저장 기반만 제공한다. Bootstrap 연결과 자동 수집 이력 기록은 미구현이며 `bus_metadata_sync_states.last_complete_sync_at`의 기존 의미는 변하지 않는다.
+명시적 Bootstrap은 guard 획득 후 이력을 생성하고 아카이브·원본과 정규화 Snapshot 검증 후 COLLECTED, DB 작업 직전 SYNCING으로 전이한다. 각 노선 transaction과 추가 원본 저장, cleanup 및 `last_complete_sync_at` 저장이 모두 commit된 뒤 COMPLETED로 전이한다. 수집 접근 실패는 COLLECTION/SOURCE_UNAVAILABLE, 원본 검증 실패는 VALIDATION/INVALID_SOURCE, 아카이브 저장소 실패는 COLLECTION/UNEXPECTED_FAILURE, DB 동기화 실패는 SYNC/SYNC_FAILED로 기록한다. 실제 중단은 INTERRUPTED이며 스레드 인터럽트 플래그를 보존한다. 이력 시각은 저장 전 마이크로초로 절삭한다. 이미 commit된 노선과 부분 아카이브는 실패 시 유지되며 재실행은 새 이력을 만든다.
+
+동기화가 성공한 뒤 완료 이력 commit이 실패하면 같은 ID에 대해 멱등 완료 전이를 한 번 재시도한다. 재시도도 실패하면 동기화 실패로 오기록하지 않고 불확실한 완료 이력을 오류로 보고한다. 프로세스 중단이나 DB 장애 후 SYNCING이 남으면 `last_complete_sync_at`만으로 특정 실행의 성공을 증명할 수 없으므로 자동 완료하지 않는다. 운영자가 Provider 데이터와 이력을 조사하고 필요하면 새 Bootstrap을 실행해야 한다. 이력 저장 자체 실패도 별도 오류로 보고한다.
 
 ### Transit 원본 파일 아카이브 (Phase 3-A-3A-2 기반)
 

@@ -42,9 +42,23 @@ public class TransitMetadataArchiveService {
         this.transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
+    public void validateStorage() {
+        try { root(); } catch (RuntimeException e) { throw new ArchiveFailure(); }
+    }
+
+    public static final class ArchiveFailure extends IllegalStateException {
+        public ArchiveFailure() { super("Archive storage unavailable"); }
+    }
+
     /** Identity is scoped to a run and source. Content is committed before its metadata. */
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public synchronized Archive store(long runId, TransitSourceSystem source, String logicalId, byte[] bytes) {
+        try { return storeInternal(runId, source, logicalId, bytes); }
+        catch (IllegalArgumentException e) { throw e; }
+        catch (RuntimeException e) { throw new ArchiveFailure(); }
+    }
+
+    private Archive storeInternal(long runId, TransitSourceSystem source, String logicalId, byte[] bytes) {
         Objects.requireNonNull(source);
         Objects.requireNonNull(bytes);
         if (runId <= 0 || logicalId == null || !logicalId.matches("[A-Za-z0-9_-]{1,128}")) {

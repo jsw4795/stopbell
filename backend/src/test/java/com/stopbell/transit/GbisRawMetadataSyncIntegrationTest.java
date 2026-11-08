@@ -44,6 +44,7 @@ class GbisRawMetadataSyncIntegrationTest {
     private static final JsonMapper JSON = JsonMapper.builder().build();
     @Autowired BusMetadataSyncService sync;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.stopbell.transit.service.TransitMetadataCollectionHistoryService history;
 
     @DynamicPropertySource
     static void database(DynamicPropertyRegistry registry) { SharedMySqlExtension.database(registry, "gbis_raw_sync"); }
@@ -135,6 +136,46 @@ class GbisRawMetadataSyncIntegrationTest {
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes", Integer.class)).isZero();
             assertThat(count("1=1")).isZero();
         }
+    }
+
+    @Test
+    @DisplayName("Bootstrap GBIS 원본 저장 실패는 TAGO 완료 시각과 cleanup을 차단한다")
+    void bootstrap_records_gbis_write_failure() {
+        var archive = org.mockito.Mockito.mock(com.stopbell.transit.service.TransitMetadataArchiveService.class);
+        var source = org.mockito.Mockito.mock(TagoMetadataSource.class);
+        org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
+        org.mockito.Mockito.when(source.fetchSnapshotWithRawRows(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(archive)))
+                .thenReturn(snapshot(2, "GGB10", "1", "014"));
+        sync.syncRoute(new BusRouteMetadataSnapshot(TransitProvider.TAGO, "stale", "stale", "31010", List.of(new BusStopOccurrenceMetadataSnapshot("stale", "stale", null, null, 1))));
+        jdbc.execute("CREATE TRIGGER fail_gbis_bootstrap BEFORE INSERT ON transit_source_metadata FOR EACH ROW BEGIN IF NEW.source_system = 'GBIS' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'failure'; END IF; END");
+        try {
+            var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, java.time.Clock.systemUTC());
+            assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.TAGO)).hasMessageContaining("stage=SYNC");
+            Long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
+            var failed = history.find(id);
+            assertThat(failed.getStatus()).isEqualTo(com.stopbell.transit.domain.TransitCollectionStatus.FAILED);
+            assertThat(failed.getFailureStage()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureStage.SYNC);
+            assertThat(failed.getFailureCode()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureCode.SYNC_FAILED);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_metadata_sync_states WHERE provider='TAGO'", Integer.class)).isZero();
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='stale'", Integer.class)).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='GGB200'", Integer.class)).isEqualTo(1);
+        } finally { jdbc.execute("DROP TRIGGER fail_gbis_bootstrap"); }
+    }
+
+    @Test
+    @DisplayName("TAGO 원본과 정규화 값 불일치는 DB 쓰기 전에 검증 실패로 기록한다")
+    void bootstrap_rejects_invalid_tago_raw() {
+        var archive = org.mockito.Mockito.mock(com.stopbell.transit.service.TransitMetadataArchiveService.class);
+        var source = org.mockito.Mockito.mock(TagoMetadataSource.class);
+        var valid = snapshot(2, "GGB10", "1", "014");
+        var invalid = new TagoMetadataSource.TagoSnapshot(valid.normalized(), List.of(), valid.gbis());
+        org.mockito.Mockito.when(source.provider()).thenReturn(TransitProvider.TAGO);
+        org.mockito.Mockito.when(source.fetchSnapshotWithRawRows(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.eq(archive))).thenReturn(invalid);
+        var bootstrap = new com.stopbell.transit.service.BusMetadataBootstrapService(List.of(source), sync, history, archive, java.time.Clock.systemUTC());
+        assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.TAGO)).hasMessageContaining("stage=VALIDATION");
+        Long id = jdbc.queryForObject("SELECT MAX(id) FROM transit_metadata_collection_runs WHERE provider='TAGO'", Long.class);
+        assertThat(history.find(id).getFailureCode()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureCode.INVALID_SOURCE);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes", Integer.class)).isZero();
     }
 
     private TagoMetadataSource.TagoSnapshot snapshot(int extraStations, String tagoStop, String version, String type) {

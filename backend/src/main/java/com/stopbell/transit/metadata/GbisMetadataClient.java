@@ -69,11 +69,30 @@ public class GbisMetadataClient {
             return new GbisCollectedSnapshot(
                     GbisBulkMetadata.parse(routes, stations, item.routeVersion(), item.routeStationVersion()),
                     java.util.List.of(), item.routeVersion());
+        } catch (TransitMetadataArchiveService.ArchiveFailure e) {
+            throw e;
+        } catch (org.springframework.web.client.RestClientException e) {
+            preserveInterruption(e);
+            throw new SourceUnavailableException();
         } catch (Exception e) {
+            preserveInterruption(e);
             // Provider exceptions may contain a request URI, including the service key.
             throw new IllegalStateException("GBIS base-info snapshot could not be validated: "
                     + e.getClass().getSimpleName());
         }
+    }
+
+    private static void preserveInterruption(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InterruptedException || cause instanceof java.util.concurrent.CancellationException) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
+    public static final class SourceUnavailableException extends IllegalStateException {
+        public SourceUnavailableException() { super("GBIS source unavailable"); }
     }
 
     private byte[] download(String url) {

@@ -86,6 +86,10 @@ public class BusMetadataSyncService {
 
     /** Reuse both the snapshot and collection time when retrying a partial database sync. */
     public void syncTagoSnapshot(TagoMetadataSource.TagoSnapshot collected, Instant collectedAt) {
+        prepareTagoSnapshot(collected, collectedAt).run();
+    }
+
+    public Runnable prepareTagoSnapshot(TagoMetadataSource.TagoSnapshot collected, Instant collectedAt) {
         Objects.requireNonNull(collectedAt, "Collection time must not be null");
         CompleteBusMetadataSnapshot complete = Objects.requireNonNull(collected, "Snapshot must not be null").normalized();
         if (complete == null || complete.provider() != TransitProvider.TAGO) throw new IllegalArgumentException("Expected TAGO snapshot");
@@ -139,7 +143,7 @@ public class BusMetadataSyncService {
             matches = GbisDestinationEnricher.verifiedMatches(complete.routes(), gbis.normalized());
         }
         Map<String, String> verifiedMatches = matches;
-        syncComplete(complete, route -> {
+        return () -> syncComplete(complete, route -> {
             Map<String, String> payloads = new HashMap<>();
             for (BusStopOccurrenceMetadataSnapshot stop : route.occurrences()) {
                 String key = TagoMetadataSource.occurrenceSourceKey(route.externalRouteId(), stop.stopOrder());
@@ -187,6 +191,11 @@ public class BusMetadataSyncService {
     /** Reusing the same snapshot and collection time represents a retry of the same collection. */
     public void syncSeoulSnapshot(SeoulCsvMetadataSource source, SeoulCsvMetadataSource.SeoulCsvSnapshot collected,
             Instant collectedAt) {
+        prepareSeoulSnapshot(source, collected, collectedAt).run();
+    }
+
+    public Runnable prepareSeoulSnapshot(SeoulCsvMetadataSource source, SeoulCsvMetadataSource.SeoulCsvSnapshot collected,
+            Instant collectedAt) {
         Objects.requireNonNull(collectedAt, "Collection time must not be null");
         CompleteBusMetadataSnapshot complete = source.toCompleteSnapshot(collected.normalized());
         Map<TransitSourceDataKind, Map<String, RawSourceRow>> rows = new EnumMap<>(TransitSourceDataKind.class);
@@ -212,7 +221,7 @@ public class BusMetadataSyncService {
             saved.put(kind, new HashSet<>());
         }
         Set<String> savedStops = saved.get(TransitSourceDataKind.STOP);
-        syncComplete(complete, route -> {
+        return () -> syncComplete(complete, route -> {
             Map<String, String> stops = new HashMap<>();
             Map<String, String> occurrences = new HashMap<>();
             for (BusStopOccurrenceMetadataSnapshot occurrence : route.occurrences()) {

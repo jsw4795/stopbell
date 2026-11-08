@@ -1,28 +1,38 @@
 package com.stopbell.transit.service;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import com.stopbell.transit.client.TransitProviderClientException;
+import com.stopbell.transit.client.TransitProviderClientFailureKind;
+import com.stopbell.transit.domain.TransitCollectionFailureCode;
+import com.stopbell.transit.domain.TransitCollectionFailureStage;
 import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.transit.metadata.GbisMetadataClient;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
 import com.stopbell.transit.metadata.TagoMetadataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 @Service
 public class BusMetadataBootstrapService {
-
     private static final Logger log = LoggerFactory.getLogger(BusMetadataBootstrapService.class);
-
-    private final Map<TransitProvider, BusMetadataSource> sources;
+    private final Map<TransitProvider, BusMetadataSource> sources = new EnumMap<>(TransitProvider.class);
     private final Map<TransitProvider, AtomicBoolean> running = new EnumMap<>(TransitProvider.class);
     private final BusMetadataSyncService syncService;
+    private final TransitMetadataCollectionHistoryService history;
+    private final TransitMetadataArchiveService archive;
+    private final Clock clock;
 
-    public BusMetadataBootstrapService(List<BusMetadataSource> sources, BusMetadataSyncService syncService) {
-        this.sources = new EnumMap<>(TransitProvider.class);
+    public BusMetadataBootstrapService(List<BusMetadataSource> sources, BusMetadataSyncService syncService,
+            TransitMetadataCollectionHistoryService history, TransitMetadataArchiveService archive,
+            @Qualifier("transitMetadataClock") Clock clock) {
         for (BusMetadataSource source : sources) {
             if (this.sources.put(source.provider(), source) != null) {
                 throw new IllegalStateException("Duplicate metadata source for " + source.provider());
@@ -30,29 +40,106 @@ public class BusMetadataBootstrapService {
             running.put(source.provider(), new AtomicBoolean());
         }
         this.syncService = syncService;
+        this.history = history;
+        this.archive = archive;
+        this.clock = clock;
     }
 
+    @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void bootstrap(TransitProvider provider) {
         BusMetadataSource source = sources.get(provider);
-        if (source == null) {
-            throw new IllegalArgumentException("No metadata source configured for " + provider);
+        if (source == null) throw new IllegalArgumentException("No metadata source configured for " + provider);
+        if (!(source instanceof SeoulCsvMetadataSource) && !(source instanceof TagoMetadataSource)) {
+            throw new IllegalArgumentException("Archive-enabled metadata source required");
         }
-        AtomicBoolean providerRunning = running.get(provider);
-        if (!providerRunning.compareAndSet(false, true)) {
-            throw new IllegalStateException("Metadata sync is already running for " + provider);
-        }
+        AtomicBoolean guard = running.get(provider);
+        if (!guard.compareAndSet(false, true)) throw new IllegalStateException("Metadata sync is already running for " + provider);
         try {
-            log.info("Metadata bootstrap started: provider={}", provider);
-            if (source instanceof SeoulCsvMetadataSource seoulSource) {
-                syncService.syncSeoulSource(seoulSource);
-            } else if (source instanceof TagoMetadataSource tagoSource) {
-                syncService.syncTagoSource(tagoSource);
-            } else {
-                syncService.syncCompleteProviderSnapshot(source.fetchCompleteSnapshot());
+            long runId = history.start(provider).getId();
+            TransitCollectionFailureStage stage = TransitCollectionFailureStage.COLLECTION;
+            try {
+                checkInterrupted();
+                archive.validateStorage();
+                Instant collectedAt = clock.instant();
+                Runnable sync;
+                if (source instanceof SeoulCsvMetadataSource seoul) {
+                    var snapshot = seoul.fetchSnapshotWithRawRows(runId, archive);
+                    stage = TransitCollectionFailureStage.VALIDATION;
+                    sync = syncService.prepareSeoulSnapshot(seoul, snapshot, collectedAt);
+                } else {
+                    var snapshot = ((TagoMetadataSource) source).fetchSnapshotWithRawRows(runId, archive);
+                    stage = TransitCollectionFailureStage.VALIDATION;
+                    sync = syncService.prepareTagoSnapshot(snapshot, collectedAt);
+                }
+                checkInterrupted();
+                try { history.collected(runId); } catch (RuntimeException e) { throw new HistoryFailure(); }
+                checkInterrupted();
+                try { history.syncing(runId); } catch (RuntimeException e) { throw new HistoryFailure(); }
+                stage = TransitCollectionFailureStage.SYNC;
+                checkInterrupted();
+                sync.run();
+            } catch (RuntimeException failure) {
+                boolean interrupted = isInterrupted(failure);
+                TransitCollectionFailureStage failureStage = stage;
+                TransitCollectionFailureCode code = classify(failure, stage);
+                if (stage == TransitCollectionFailureStage.COLLECTION && code == TransitCollectionFailureCode.INVALID_SOURCE) {
+                    failureStage = TransitCollectionFailureStage.VALIDATION;
+                }
+                try {
+                    if (interrupted) history.interrupt(runId);
+                    else history.fail(runId, failureStage, code);
+                } catch (RuntimeException recordFailure) {
+                    throw new IllegalStateException("Bootstrap failed; collection history recording also failed: runId=" + runId
+                            + ", stage=" + failureStage + ", code=" + code + ", interrupted=" + interrupted
+                            + ", failureType=" + failure.getClass().getSimpleName()
+                            + ", historyFailureType=" + recordFailure.getClass().getSimpleName());
+                }
+                throw new IllegalStateException("Bootstrap failed: runId=" + runId + ", stage=" + failureStage
+                        + ", code=" + code + ", interrupted=" + interrupted);
             }
-            log.info("Metadata bootstrap completed: provider={}", provider);
+            // The committed provider sync may have succeeded even if the history commit response was lost.
+            // complete is idempotent, so one retry is safe; never mislabel this as a failed sync.
+            try {
+                history.complete(runId);
+            } catch (RuntimeException first) {
+                try { history.complete(runId); }
+                catch (RuntimeException second) {
+                    throw new IllegalStateException("Provider sync succeeded but completion history is uncertain: runId=" + runId);
+                }
+            }
+            log.info("Metadata bootstrap completed: provider={}, runId={}", provider, runId);
         } finally {
-            providerRunning.set(false);
+            guard.set(false);
         }
+    }
+
+    private static TransitCollectionFailureCode classify(RuntimeException failure, TransitCollectionFailureStage stage) {
+        if (failure instanceof HistoryFailure) return TransitCollectionFailureCode.UNEXPECTED_FAILURE;
+        if (stage == TransitCollectionFailureStage.SYNC) return TransitCollectionFailureCode.SYNC_FAILED;
+        if (failure instanceof TransitMetadataArchiveService.ArchiveFailure) return TransitCollectionFailureCode.UNEXPECTED_FAILURE;
+        if (failure instanceof SeoulCsvMetadataSource.SourceUnavailableException
+                || failure instanceof GbisMetadataClient.SourceUnavailableException) return TransitCollectionFailureCode.SOURCE_UNAVAILABLE;
+        if (failure instanceof TransitProviderClientException client) {
+            return client.failureKind() == TransitProviderClientFailureKind.PROTOCOL
+                    ? TransitCollectionFailureCode.INVALID_SOURCE : TransitCollectionFailureCode.SOURCE_UNAVAILABLE;
+        }
+        return TransitCollectionFailureCode.INVALID_SOURCE;
+    }
+
+    private static final class HistoryFailure extends IllegalStateException { }
+
+    private static void checkInterrupted() {
+        if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("Bootstrap interrupted");
+    }
+
+    private static boolean isInterrupted(Throwable failure) {
+        if (Thread.currentThread().isInterrupted()) return true;
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof InterruptedException || cause instanceof java.util.concurrent.CancellationException) {
+                if (cause instanceof InterruptedException) Thread.currentThread().interrupt();
+                return true;
+            }
+        }
+        return false;
     }
 }

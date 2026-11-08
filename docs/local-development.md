@@ -81,6 +81,7 @@ metadata bootstrap은 일반 Backend startup과 분리된 명시적 one-shot 실
 ./gradlew bootRun --args='
 --spring.main.web-application-type=none
 --transit.metadata.bootstrap.provider=SEOUL_BUS
+--transit.metadata.archive.directory=/absolute/path/to/archive
 --transit.metadata.seoul.route-master=file:/path/to/route-master.csv
 --transit.metadata.seoul.route-stop-master=file:/path/to/route-stop-master.csv
 --transit.metadata.seoul.stop-master=file:/path/to/stop-master.csv
@@ -95,12 +96,14 @@ TAGO metadata bootstrap도 같은 방식으로 provider만 지정해 실행한�
 ./gradlew bootRun --args='
 --spring.main.web-application-type=none
 --transit.metadata.bootstrap.provider=TAGO
+--transit.metadata.archive.directory=/absolute/path/to/archive
 '
 ```
 
 실행 전 확인 사항:
 
 - MySQL이 실행 중인지 확인
+- 아카이브 경로는 미리 생성한 쓰기 가능 절대 디렉터리여야 하며 하드 링크를 지원해야 한다. 설정이 없거나 사용 불가하면 Bootstrap은 수집 전에 실패한다. 일반 Backend 기동에는 설정이 필수가 아니다.
 - 저장소 루트의 `.env`에 필요한 Local Development용 설정값이 준비되었는지 확인
 - 외부 Transit API 또는 FCM 연동이 필요한 경우 Local Development용 credential이 준비되었는지 확인
 

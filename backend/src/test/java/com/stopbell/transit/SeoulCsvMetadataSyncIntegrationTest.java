@@ -64,6 +64,9 @@ class SeoulCsvMetadataSyncIntegrationTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    @Autowired private com.stopbell.transit.service.TransitMetadataCollectionHistoryService history;
+    @Autowired private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     @TempDir
     Path temporaryDirectory;
 
@@ -87,8 +90,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
         assertThatThrownBy(() -> bootstrap(source(ROUTES, withoutRoute(ROUTE_STOPS, ROUTE_A), STOPS))
                 .bootstrap(TransitProvider.SEOUL_BUS))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("no occurrences")
-                .hasMessageContaining(ROUTE_A);
+                .hasMessageContaining("stage=VALIDATION");
 
         assertThat(databaseSnapshot()).isEqualTo(before);
         assertThat(output.getAll().substring(logStart))
@@ -106,7 +108,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
         assertThatThrownBy(() -> bootstrap(source(ROUTES, withoutRoute(ROUTE_STOPS, ROUTE_B), STOPS))
                 .bootstrap(TransitProvider.SEOUL_BUS))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining(ROUTE_B);
+                .hasMessageContaining("stage=VALIDATION");
 
         assertThat(databaseSnapshot()).isEqualTo(before);
     }
@@ -122,7 +124,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
         assertThatThrownBy(() -> bootstrap(source(changedRoutes, withoutRoute(ROUTE_STOPS, ROUTE_B), changedStops))
                 .bootstrap(TransitProvider.SEOUL_BUS))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining(ROUTE_B);
+                .hasMessageContaining("stage=VALIDATION");
 
         assertThat(databaseSnapshot()).isEqualTo(before);
     }
@@ -212,7 +214,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
         assertThatThrownBy(() -> bootstrap(source(ROUTES, ROUTE_STOPS.replace("stop-2", "missing-stop"), STOPS))
                 .bootstrap(TransitProvider.SEOUL_BUS))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("unknown stop");
+                .hasMessageContaining("stage=VALIDATION");
 
         assertThat(databaseSnapshot()).isEqualTo(before);
     }
@@ -226,7 +228,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
         assertThatThrownBy(() -> bootstrap(source(ROUTES, ROUTE_STOPS + "malformed,row\n", STOPS))
                 .bootstrap(TransitProvider.SEOUL_BUS))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Malformed Seoul CSV row");
+                .hasMessageContaining("stage=VALIDATION");
 
         assertThat(databaseSnapshot()).isEqualTo(before);
     }
@@ -245,7 +247,8 @@ class SeoulCsvMetadataSyncIntegrationTest {
                 """);
         try {
             assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.SEOUL_BUS))
-                    .isInstanceOf(DataAccessException.class);
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("stage=SYNC");
+            assertLastSyncFailed();
             assertThat(databaseSnapshot()).isEqualTo(before);
         } finally {
             jdbc.execute("DROP TRIGGER reject_test_occurrence");
@@ -267,7 +270,8 @@ class SeoulCsvMetadataSyncIntegrationTest {
         try {
             assertThatThrownBy(() -> bootstrap(source(ROUTES.replace("7016", "7016변경"), ROUTE_STOPS,
                     STOPS.replace("첫 정류장", "변경 정류장"))).bootstrap(TransitProvider.SEOUL_BUS))
-                    .isInstanceOf(DataAccessException.class);
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("stage=SYNC");
+            assertLastSyncFailed();
             assertThat(databaseSnapshot()).isEqualTo(before);
         } finally {
             jdbc.execute("DROP TRIGGER reject_test_stop_update");
@@ -358,7 +362,8 @@ class SeoulCsvMetadataSyncIntegrationTest {
                 """);
         try {
             assertThatThrownBy(() -> bootstrap.bootstrap(TransitProvider.SEOUL_BUS))
-                    .isInstanceOf(DataAccessException.class);
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("stage=SYNC");
+            assertLastSyncFailed();
             assertThat(databaseSnapshot()).isEqualTo(before);
             assertThat(jdbc.queryForList("SELECT * FROM transit_source_metadata ORDER BY id")).isEqualTo(rawBefore);
         } finally {
@@ -385,7 +390,8 @@ class SeoulCsvMetadataSyncIntegrationTest {
         try {
             assertThatThrownBy(() -> bootstrap(source(ROUTES.replace("7016", "앞 노선 변경")
                     .replace("N26", "뒤 노선 변경"), ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS))
-                    .isInstanceOf(DataAccessException.class);
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("stage=SYNC");
+            assertLastSyncFailed();
             assertThat(jdbc.queryForObject("SELECT route_number FROM bus_routes WHERE external_route_id=?",
                     String.class, ROUTE_A)).isEqualTo("앞 노선 변경");
             assertThat(jdbc.queryForObject("SELECT route_number FROM bus_routes WHERE external_route_id=?",
@@ -446,7 +452,8 @@ class SeoulCsvMetadataSyncIntegrationTest {
                 """);
         try {
             assertThatThrownBy(() -> bootstrap(source(ROUTES + "stale-route,이전 노선,경기,1.0\n",
-                    ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS)).isInstanceOf(DataAccessException.class);
+                    ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS)).isInstanceOf(IllegalStateException.class).hasMessageContaining("stage=SYNC");
+            assertLastSyncFailed();
             assertThat(jdbc.queryForObject("SELECT route_id FROM transit_source_metadata WHERE id=?", Long.class, id))
                     .isEqualTo(routeId);
         } finally {
@@ -486,6 +493,41 @@ class SeoulCsvMetadataSyncIntegrationTest {
                 .isEqualTo(collected.rawRows().size());
     }
 
+    @Test
+    @DisplayName("cleanup 실패는 이전 완료 시각을 보존하고 실패 이력을 남긴다")
+    void records_cleanup_failure() {
+        seedMetadata();
+        jdbc.execute("CREATE TRIGGER reject_cleanup BEFORE DELETE ON bus_routes FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'cleanup failure'");
+        try {
+            assertThatThrownBy(() -> bootstrap(source(ROUTES, ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS))
+                    .hasMessageContaining("stage=SYNC");
+            assertLastSyncFailed();
+            assertThat(lastCompleteSyncAt()).isEqualTo(PREVIOUS_COMPLETION);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes WHERE external_route_id='stale-route'", Integer.class)).isEqualTo(1);
+        } finally { jdbc.execute("DROP TRIGGER reject_cleanup"); }
+    }
+
+    @Test
+    @DisplayName("완료 시각 저장 실패는 완료 이력을 만들지 않고 이전 시각을 보존한다")
+    void records_completion_timestamp_failure() {
+        seedMetadata();
+        jdbc.execute("CREATE TRIGGER reject_completion BEFORE UPDATE ON bus_metadata_sync_states FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'completion failure'");
+        try {
+            assertThatThrownBy(() -> bootstrap(source(ROUTES, ROUTE_STOPS, STOPS)).bootstrap(TransitProvider.SEOUL_BUS))
+                    .hasMessageContaining("stage=SYNC");
+            assertLastSyncFailed();
+            assertThat(lastCompleteSyncAt()).isEqualTo(PREVIOUS_COMPLETION);
+        } finally { jdbc.execute("DROP TRIGGER reject_completion"); }
+    }
+
+    private void assertLastSyncFailed() {
+        var rows = jdbc.queryForList("SELECT status, failure_stage, failure_code, failure_message, finished_at FROM transit_metadata_collection_runs WHERE provider='SEOUL_BUS' ORDER BY id DESC LIMIT 1");
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst()).containsEntry("status", "FAILED").containsEntry("failure_stage", "SYNC")
+                .containsEntry("failure_code", "SYNC_FAILED").containsEntry("failure_message", "Database synchronization failed");
+        assertThat(rows.getFirst().get("finished_at")).isNotNull();
+    }
+
     private void seedMetadata() {
         bootstrap(source(ROUTES + "stale-route,이전 노선,지선,1.0\n",
                 ROUTE_STOPS + "stale-route,stale-stop,0.0,1\n",
@@ -499,7 +541,10 @@ class SeoulCsvMetadataSyncIntegrationTest {
     }
 
     private BusMetadataBootstrapService bootstrap(SeoulCsvMetadataSource source) {
-        return new BusMetadataBootstrapService(List.of(source), syncService);
+        var clock = java.time.Clock.systemUTC();
+        var archive = new com.stopbell.transit.service.TransitMetadataArchiveService(
+                jdbc, clock, temporaryDirectory.toAbsolutePath().normalize().toString(), transactionManager);
+        return new BusMetadataBootstrapService(List.of(source), syncService, history, archive, clock);
     }
 
     private SeoulCsvMetadataSource source(String routes, String routeStops, String stops) {

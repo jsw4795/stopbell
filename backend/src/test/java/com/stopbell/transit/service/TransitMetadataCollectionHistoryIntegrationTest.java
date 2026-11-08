@@ -39,7 +39,7 @@ class TransitMetadataCollectionHistoryIntegrationTest {
         service.collected(first.getId());
         service.syncing(first.getId());
         var completed = service.complete(first.getId());
-        assertThat(completed.getFinishedAt()).isEqualTo(Instant.parse("2026-11-07T00:00:00.123456123Z"));
+        assertThat(completed.getFinishedAt()).isEqualTo(Instant.parse("2026-11-07T00:00:00.123456Z"));
         var persisted = service.find(first.getId());
         assertThat(persisted.getFinishedAt()).isEqualTo(Instant.parse("2026-11-07T00:00:00.123456Z"));
         assertThat(persisted.getUpdatedAt()).isEqualTo(persisted.getFinishedAt());

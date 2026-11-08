@@ -2038,6 +2038,5 @@ TASK-901에서 필수 식별·진행 근거를 확보하지 못한 범위는 후
 
 - 3-A-3A-2 1차: 독립 파일 저장·무결성 검증 및 실행 FK 기반 구현
 - [x] 3-A-3A-2 후속: 명시적 실행 ID로 서울 CSV 3개, TAGO discovery·페이지 응답, GBIS 다운로드 2개를 같은 수집 바이트로 아카이브하고 정규화·원본 행 저장에 연결했다. 인증정보·URL 반영 검사와 예외 비노출을 적용했으며 검사로 미지의 개인정보 부재를 보장하지 않는다. 격리 MySQL Testcontainers와 합성 Provider 응답을 포함한 직접 관련·인접 회귀 92개 통과, 실패·Skip 0개; 실제 Provider 호출과 운영 검증은 수행하지 않았다. 기존 Bootstrap 및 자동 이력 상태 전이는 변경하지 않았다.
-- [ ] 3-A-3B: Bootstrap 수집 실행 이력 및 완료 상태 연결
-
-Bootstrap 수집 실행 생성, 상태 전이 및 완료 기록은 3-A-3B에 남는다.
+- [x] 3-A-3B: 명시적 Bootstrap에서 Provider별 실행을 만들고 동일 ID로 서울·TAGO·GBIS 원본을 아카이브한다. Snapshot 검증 이후에만 DB 동기화를 시작하고 노선별 commit, 추가 원본, cleanup 및 완료 시각 저장 성공 뒤 완료 이력을 기록한다. 실패·중단 및 완료 이력 저장 실패의 복구 경계는 [Database](database.md#transit-metadata-수집-이력-phase-3-a-3a-1)를 따른다.
+- 선택 검증: Java/Gradle JVM 21.0.12.1, Wrapper 8.14.3, 격리 MySQL Testcontainers와 합성 Provider 응답으로 직접 관련·인접 14개 클래스 115개 최종 통과, 실패·오류·Skip 0개. 서울·TAGO·GBIS 정상 경로, 원본 누락·검증·페이지·버전·아카이브 오류, 노선 및 GBIS 저장·cleanup·완료 시각 저장 실패, 부분 commit, 인터럽트, 동시 실행과 완료 이력 실패를 확인했다. 완료 이력 오류는 서비스 spy로 주입했으며 실제 DB commit 응답 유실은 재현하지 않았다. 실제 Provider 최신성·운영 적용과 Flutter 전체 UI 검증은 별도다. 새 Migration과 Dependency는 없다.

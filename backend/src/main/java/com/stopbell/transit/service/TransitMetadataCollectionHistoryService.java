@@ -25,7 +25,7 @@ public class TransitMetadataCollectionHistoryService {
 
     @Transactional
     public TransitMetadataCollectionRun start(TransitProvider provider) {
-        return repository.save(new TransitMetadataCollectionRun(provider, clock.instant()));
+        return repository.save(new TransitMetadataCollectionRun(provider, now()));
     }
 
     @Transactional(readOnly = true)
@@ -44,19 +44,23 @@ public class TransitMetadataCollectionHistoryService {
     }
 
     @Transactional public TransitMetadataCollectionRun collected(Long id) {
-        TransitMetadataCollectionRun run = locked(id); run.collected(clock.instant()); return run;
+        TransitMetadataCollectionRun run = locked(id); run.collected(now()); return run;
     }
     @Transactional public TransitMetadataCollectionRun syncing(Long id) {
-        TransitMetadataCollectionRun run = locked(id); run.syncing(clock.instant()); return run;
+        TransitMetadataCollectionRun run = locked(id); run.syncing(now()); return run;
     }
     @Transactional public TransitMetadataCollectionRun complete(Long id) {
-        TransitMetadataCollectionRun run = locked(id); run.complete(clock.instant()); return run;
+        TransitMetadataCollectionRun run = locked(id); run.complete(now()); return run;
     }
     @Transactional public TransitMetadataCollectionRun fail(Long id, TransitCollectionFailureStage stage, TransitCollectionFailureCode code) {
-        TransitMetadataCollectionRun run = locked(id); run.fail(stage, code, clock.instant()); return run;
+        TransitMetadataCollectionRun run = locked(id); run.fail(stage, code, now()); return run;
     }
     @Transactional public TransitMetadataCollectionRun interrupt(Long id) {
-        TransitMetadataCollectionRun run = locked(id); run.interrupt(clock.instant()); return run;
+        TransitMetadataCollectionRun run = locked(id); run.interrupt(now()); return run;
+    }
+
+    private java.time.Instant now() {
+        return clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
     }
 
     private TransitMetadataCollectionRun locked(Long id) {
