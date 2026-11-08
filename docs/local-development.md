@@ -677,3 +677,15 @@ V38까지 적용된 로컬 DB에서 아래 명령을 명시적으로 실행한�
 Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여부와 상태를 확인하기 전까지 `BLOCKED`이며, 이력만으로 실제 프로세스가 살아 있다고 단정하지 않는다. `READY`는 로컬 조회 결과에만 적용되며 실제 최신성, API 가용성, 메모리 사용량 또는 공식 노선유형 매핑의 검증이 아니다. 파일은 내용 해시가 아니라 접근 여부와 크기를 확인한다. 실패했던 동기화가 일부 Route를 저장했을 수 있어 마지막 성공 시각만으로 현재 DB의 일치를 판단하지 않는다. 검토 대기는 승인 행이 아직 없는 위험 변경을 뜻한다. 다른 writer와 파일의 동시 변경을 막지 않는다.
 
 3-B-2B 수집 전에는 서울 CSV 최신 원본 확보 방법, TAGO 전체 범위, GBIS 기반정보와 버전, Provider별 호출량, 수집 메모리와 아카이브 저장 공간을 확인한다. 적용 전에 백업, 위험 변경 승인 필요성, 실패·부분 적용 복구 방법을 확인한다. 실제 최신성·호출량·메모리 사용량은 아직 측정하지 않았다.
+
+### 교통 메타데이터 Snapshot 비적용 Preview
+
+기존 서울 T-Data 노선·노선-정류장·정류장 CSV 세 파일을 로컬에 확보한 뒤 절대 경로로 지정한다. 기존 CSV 포맷과 서비스 범위 판정을 사용하며 네트워크 수집은 하지 않는다. DB가 현재 Migration까지 적용되어 있어야 하며 Preview는 이를 자동 업그레이드하지 않는다.
+
+```bash
+./gradlew bootRun --args='--spring.profiles.active=local,metadata-admin --spring.main.web-application-type=none --transit.metadata.admin.enabled=true --metadata.command=preview --provider=SEOUL_BUS --route-master=/absolute/routes.csv --route-stop-master=/absolute/route-stops.csv --stop-master=/absolute/stops.csv --page=0 --size=50'
+```
+
+`--page`는 0부터, `--size`는 1~500이다. 위험 상세와 공유 Stop 변형은 각각 출력 행으로 페이지를 구성하며, 충돌 변형은 입력된 Route·occurrence 처리 순서로 표시한다. 모든 페이지를 확인하려면 같은 입력으로 페이지를 바꾸어 재실행하며, 그 사이 DB나 파일이 바뀌면 결과가 달라질 수 있다. 원본 JSON과 승인 가능한 지문은 출력하지 않는다. Raw는 SEOUL_TDATA/TAGO/GBIS와 데이터 종류별로 비교 여부·추가·변경·동일·미포함·버전 변경을 표시하며 미수집 출처의 미포함은 삭제를 뜻하지 않는다.
+
+관리 프로필은 Flyway 자동 실행, Hibernate DDL, SQL 초기화, Scheduler와 다른 one-shot 실행을 차단한다. Preview는 수집 이력·아카이브·분석·위험 상세·승인·정규화·원본·완료 시각을 쓰지 않는다. 결과는 현재 DB 기준이며 마지막 성공 Snapshot과의 일치를 보장하지 않는다. ALLOW도 이후 적용 시 Guard를 생략할 권한이 아니다. TAGO와 GBIS Snapshot은 서비스 입력으로 지원하지만 실제 네트워크 CLI는 제공하지 않는다. 3-B-2B-2에서는 서울 최신 파일, TAGO 31개 cityCode 수집 범위와 GBIS 기반정보·버전을 확보하고 최신성, 호출량 및 메모리를 검증한다. 검토된 실제 적용은 3-B-2C에서 별도로 결정한다.

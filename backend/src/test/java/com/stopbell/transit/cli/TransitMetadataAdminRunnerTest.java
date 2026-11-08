@@ -23,10 +23,11 @@ class TransitMetadataAdminRunnerTest {
     private final TransitMetadataUnsafeChangeReviewService reviews = mock(TransitMetadataUnsafeChangeReviewService.class);
     private final BusMetadataBootstrapService bootstrap = mock(BusMetadataBootstrapService.class);
     private final TransitMetadataPreflightService preflight = mock(TransitMetadataPreflightService.class);
+    private final com.stopbell.transit.service.TransitMetadataSnapshotPreviewService preview = mock(com.stopbell.transit.service.TransitMetadataSnapshotPreviewService.class);
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
     private final Environment environment = mock(Environment.class);
     private final ConfigurableApplicationContext context = mock(ConfigurableApplicationContext.class);
-    private final TransitMetadataAdminRunner runner = new TransitMetadataAdminRunner(approvals, reviews, bootstrap, preflight, jdbc, environment, context);
+    private final TransitMetadataAdminRunner runner = new TransitMetadataAdminRunner(approvals, reviews, bootstrap, preflight, preview, jdbc, environment, context);
 
     @Test @DisplayName("적용 명령은 승인 ID와 명시적 확인 없이 실행되지 않는다")
     void apply_requires_explicit_confirmation_and_approval() {
@@ -71,6 +72,12 @@ class TransitMetadataAdminRunnerTest {
         assertThatThrownBy(() -> runner.run(args("--metadata.command=preflight", "--provider=GBIS"))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> runner.run(args("--metadata.command=preflight", "--provider=TAGO", "--provider=SEOUL_BUS"))).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(preflight, bootstrap, approvals, reviews);
+    }
+    @Test void preview_rejects_unsupported_provider_and_missing_files_before_database_access() {
+        when(environment.acceptsProfiles(any(org.springframework.core.env.Profiles.class))).thenReturn(true);
+        assertThatThrownBy(() -> runner.run(args("--metadata.command=preview", "--provider=TAGO"))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> runner.run(args("--metadata.command=preview", "--provider=SEOUL_BUS"))).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(preview, bootstrap, jdbc);
     }
     private static DefaultApplicationArguments args(String... command) {
         var values = new java.util.ArrayList<>(List.of("--spring.main.web-application-type=none", "--transit.metadata.admin.enabled=true"));

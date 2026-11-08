@@ -503,7 +503,7 @@ class TransitMetadataDiffAnalysisIntegrationTest {
         org.mockito.Mockito.when(environment.acceptsProfiles(org.mockito.ArgumentMatchers.any(org.springframework.core.env.Profiles.class))).thenReturn(true);
         var context = org.mockito.Mockito.mock(org.springframework.context.ConfigurableApplicationContext.class);
         var runner = new com.stopbell.transit.cli.TransitMetadataAdminRunner(approvals, review,
-                org.mockito.Mockito.mock(BusMetadataBootstrapService.class), org.mockito.Mockito.mock(TransitMetadataPreflightService.class), jdbc, environment, context);
+                org.mockito.Mockito.mock(BusMetadataBootstrapService.class), org.mockito.Mockito.mock(TransitMetadataPreflightService.class), org.mockito.Mockito.mock(TransitMetadataSnapshotPreviewService.class), jdbc, environment, context);
         runner.run(new org.springframework.boot.DefaultApplicationArguments("--spring.main.web-application-type=none", "--transit.metadata.admin.enabled=true", "--metadata.command=review", "--run=" + run, "--page=0", "--size=10"));
         assertThat(jdbc.queryForObject("select count(*) from transit_metadata_change_approvals", Integer.class)).isZero();
         runner.run(new org.springframework.boot.DefaultApplicationArguments("--spring.main.web-application-type=none", "--transit.metadata.admin.enabled=true", "--metadata.command=approve", "--run=" + run, "--size=10", "--result-fingerprint=" + result.stored().fingerprint(), "--review-fingerprint=" + hash, "--expires-at=" + Instant.now().plusSeconds(300), "--note=reviewed", "--confirm=APPROVE"));

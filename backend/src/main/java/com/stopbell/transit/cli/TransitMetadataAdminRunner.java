@@ -1,6 +1,12 @@
 package com.stopbell.transit.cli;
 
 import java.time.Instant;
+import java.nio.file.Path;
+
+import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
+import com.stopbell.transit.service.TransitMetadataSnapshotPreviewService;
+import org.springframework.core.io.FileSystemResource;
+import org.flywaydb.core.Flyway;
 
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.service.BusMetadataBootstrapService;
@@ -25,13 +31,14 @@ public class TransitMetadataAdminRunner implements ApplicationRunner {
     private final TransitMetadataUnsafeChangeReviewService reviews;
     private final BusMetadataBootstrapService bootstrap;
     private final TransitMetadataPreflightService preflight;
+    private final TransitMetadataSnapshotPreviewService preview;
     private final JdbcTemplate jdbc;
     private final Environment environment;
     private final ConfigurableApplicationContext context;
 
     public TransitMetadataAdminRunner(TransitMetadataChangeApprovalService approvals, TransitMetadataUnsafeChangeReviewService reviews,
-            BusMetadataBootstrapService bootstrap, TransitMetadataPreflightService preflight, JdbcTemplate jdbc, Environment environment, ConfigurableApplicationContext context) {
-        this.approvals = approvals; this.reviews = reviews; this.bootstrap = bootstrap; this.preflight = preflight; this.jdbc = jdbc;
+            BusMetadataBootstrapService bootstrap, TransitMetadataPreflightService preflight, TransitMetadataSnapshotPreviewService preview, JdbcTemplate jdbc, Environment environment, ConfigurableApplicationContext context) {
+        this.approvals = approvals; this.reviews = reviews; this.bootstrap = bootstrap; this.preflight = preflight; this.preview = preview; this.jdbc = jdbc;
         this.environment = environment; this.context = context;
     }
     @Override public void run(ApplicationArguments args) {
@@ -41,6 +48,7 @@ public class TransitMetadataAdminRunner implements ApplicationRunner {
                     || !environment.acceptsProfiles(org.springframework.core.env.Profiles.of("local & metadata-admin")))
                 throw new IllegalArgumentException("Explicit local non-web administration required");
             switch (option(args, "metadata.command")) {
+                case "preview" -> printPreview(args);
                 case "preflight" -> printPreflight(TransitProvider.valueOf(option(args, "provider")));
                 case "review" -> printReview(number(args, "run"), integer(args, "page"), integer(args, "size"));
                 case "approve" -> {
@@ -64,6 +72,41 @@ public class TransitMetadataAdminRunner implements ApplicationRunner {
                 default -> throw new IllegalArgumentException("Unknown metadata command");
             }
         } finally { context.close(); }
+    }
+    private void printPreview(ApplicationArguments args) {
+        if (TransitProvider.valueOf(option(args, "provider")) != TransitProvider.SEOUL_BUS)
+            throw new IllegalArgumentException("CLI preview supports local Seoul CSV only");
+        var routes = localFile(option(args, "route-master"));
+        var routeStops = localFile(option(args, "route-stop-master"));
+        var stops = localFile(option(args, "stop-master"));
+        int page = integer(args, "page"), size = integer(args, "size");
+        if (page < 0 || size < 1 || size > 500) throw new IllegalArgumentException("Invalid detail page");
+        var migrations = Flyway.configure().dataSource(jdbc.getDataSource()).load().info();
+        if (migrations.pending().length != 0 || java.util.Arrays.stream(migrations.all()).anyMatch(m -> m.getState().isFailed()))
+            throw new IllegalStateException("Database migrations are pending or failed; preview will not migrate");
+        var source = new SeoulCsvMetadataSource(routes, routeStops, stops);
+        var result = preview.preview(source, source.fetchSnapshotWithRawRows());
+        var diff = result.diff();
+        System.out.println("Provider: " + result.provider() + " 현재 DB: " + result.current() + " Snapshot: " + result.snapshot());
+        System.out.println("Route 추가/수정/삭제 후보: " + diff.addedRoutes().size() + "/" + diff.modifiedRoutes().size() + "/" + diff.removedRoutes().size());
+        System.out.println("Stop 추가/수정/cleanup/충돌: " + diff.addedStops().size() + "/" + diff.modifiedStops().size() + "/" + diff.orphanStops().size() + "/" + diff.conflictingStops().size());
+        System.out.println("Occurrence 추가/수정/제거/위치 변경: " + diff.addedOccurrences().size() + "/" + diff.modifiedOccurrences().size() + "/" + diff.removedOccurrences().size() + "/" + diff.positionChanges().size());
+        System.out.println("Raw 출처/종류 비교: " + result.raw());
+        long detailRows = result.details().stream().mapToLong(d -> 1L + d.variants().size()).sum();
+        System.out.println("Guard: " + result.safety() + " 상세 행 전체=" + detailRows + " page=" + page + " size=" + size);
+        result.details().stream().flatMap(d -> java.util.stream.Stream.concat(
+                java.util.stream.Stream.of("상세: reason=" + d.reason() + " route=" + d.routeId() + " stop=" + d.stopId()
+                        + " order=" + d.stopOrder() + " replacement=" + d.replacementStopId() + " variants=" + d.variants().size()),
+                d.variants().stream().map(v -> "충돌 값: stop=" + d.stopId() + " " + v)))
+                .skip((long) page * size).limit(size).forEach(System.out::println);
+        System.out.println("상세는 동일한 입력으로 --page와 --size를 변경해 조회합니다. 현재 DB와 입력이 바뀌면 결과도 달라질 수 있습니다.");
+        System.out.println("실제 적용하지 않았습니다. 현재 DB는 마지막 성공 Snapshot과 다를 수 있으며 실제 적용 시 Guard를 다시 실행해야 합니다.");
+    }
+    private static FileSystemResource localFile(String value) {
+        Path path = Path.of(value);
+        if (!path.isAbsolute() || !java.nio.file.Files.isRegularFile(path) || !java.nio.file.Files.isReadable(path))
+            throw new IllegalArgumentException("Readable absolute local file required");
+        return new FileSystemResource(path);
     }
     private void printPreflight(TransitProvider provider) {
         var result = preflight.inspect(provider);

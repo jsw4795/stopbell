@@ -51,4 +51,11 @@ class MetadataAdminSchedulingTest {
         }
     }
 
+    @org.junit.jupiter.api.Test void preview_rejects_wrong_profile_before_context_start() {
+        try (var context = new org.springframework.context.support.GenericApplicationContext()) {
+            org.springframework.test.context.support.TestPropertySourceUtils.addInlinedPropertiesToEnvironment(context, "metadata.command=preview", "spring.main.web-application-type=none",
+                    "transit.metadata.admin.enabled=true");
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> new MetadataAdminSafetyInitializer().initialize(context)).isInstanceOf(IllegalStateException.class);
+        }
+    }
 }

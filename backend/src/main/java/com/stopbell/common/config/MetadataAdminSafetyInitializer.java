@@ -10,6 +10,12 @@ import org.springframework.core.env.Profiles;
 public final class MetadataAdminSafetyInitializer implements ApplicationContextInitializer<ConfigurableApplicationContext> {
     @Override public void initialize(ConfigurableApplicationContext context) {
         var environment = context.getEnvironment();
+        if ("preview".equals(environment.getProperty("metadata.command"))
+                && (!environment.acceptsProfiles(Profiles.of("local & metadata-admin"))
+                || !"none".equals(environment.getProperty("spring.main.web-application-type"))
+                || !"true".equals(environment.getProperty("transit.metadata.admin.enabled")))) {
+            throw new IllegalStateException("Preview requires explicit local metadata-admin non-web execution");
+        }
         if (environment.acceptsProfiles(Profiles.of("metadata-admin"))) {
             environment.getPropertySources().addFirst(new MapPropertySource("metadataAdminSafety", Map.of(
                     "spring.flyway.enabled", false,
