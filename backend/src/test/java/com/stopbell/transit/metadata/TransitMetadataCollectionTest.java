@@ -19,6 +19,10 @@ class TransitMetadataCollectionTest {
     private static final String TAGO = "https://apis.data.go.kr/1613000/BusRouteInfoInqireService";
     private static final String GBIS = "https://apis.data.go.kr/6410000/baseinfoservice/v2/getBaseInfoItemv2";
     private static final String BASE = "{\"response\":{\"msgHeader\":{\"resultCode\":0},\"msgBody\":{\"baseInfoItem\":{"
+            + "\"areaDownloadUrl\":\"http://openapi.gbis.go.kr/download?file=area\",\"areaVersion\":\"v1\","
+            + "\"routeLineDownloadUrl\":\"http://openapi.gbis.go.kr/download?file=line\",\"routeLineVersion\":\"v1\","
+            + "\"stationDownloadUrl\":\"http://openapi.gbis.go.kr/download?file=stops\",\"stationVersion\":\"v1\","
+            + "\"vehicleDownloadUrl\":\"http://openapi.gbis.go.kr/download?file=vehicles\",\"vehicleVersion\":\"v1\","
             + "\"routeDownloadUrl\":\"http://openapi.gbis.go.kr/download?file=route\",\"routeVersion\":\"v1\","
             + "\"routeStationDownloadUrl\":\"http://openapi.gbis.go.kr/download?file=station\",\"routeStationVersion\":\"v1\"}}}}";
     private static final String ROUTE = "routeId|routeName|turnSeq^200|300|2";

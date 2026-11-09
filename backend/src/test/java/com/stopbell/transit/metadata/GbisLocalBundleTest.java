@@ -16,8 +16,12 @@ class GbisLocalBundleTest {
     private static final String URL = "http://openapi.gbis.go.kr/ws/download?file=route";
     private static final String BASE = """
             {"response":{"msgHeader":{"resultCode":0},"msgBody":{"baseInfoItem":{
+            "areaDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=area","areaVersion":"v1",
             "routeDownloadUrl":"%s","routeVersion":"v1",
-            "routeStationDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=station","routeStationVersion":"v1"}}}}
+            "routeLineDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=line","routeLineVersion":"v1",
+            "routeStationDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=station","routeStationVersion":"v1",
+            "stationDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=stops","stationVersion":"v1",
+            "vehicleDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=vehicles","vehicleVersion":"v1"}}}}
             """.formatted(URL);
     private static final String ROUTE = "routeId|routeName|turnSeq|extra^200|300|2| raw ";
     private static final String STATION = "routeId|routeName|upDown|staOrder|stationId|stationName|x|y^"
@@ -129,5 +133,28 @@ class GbisLocalBundleTest {
         Files.writeString(w.directory().resolve("route.dat"), ROUTE + "x");
         assertThatThrownBy(w::complete).isInstanceOf(IllegalStateException.class);
         assertThat(Files.exists(w.directory().resolve("manifest.json"))).isFalse();
+    }
+    @Test void every_official_url_field_rejects_unsafe_values_without_disclosure() throws Exception {
+        for (String field : List.of("areaDownloadUrl", "routeDownloadUrl", "routeLineDownloadUrl", "routeStationDownloadUrl", "stationDownloadUrl", "vehicleDownloadUrl")) {
+            String prefix = "\"" + field + "\":\"";
+            int start = BASE.indexOf(prefix) + prefix.length();
+            int end = BASE.indexOf('"', start);
+            for (String url : List.of("http://evil.test/a", "https://openapi.gbis.go.kr.evil.test/a",
+                    "http://user:secret@openapi.gbis.go.kr/a", "http://openapi.gbis.go.kr/a?signature=fake",
+                    "http://openapi.gbis.go.kr/a?token=secret", "http://openapi.gbis.go.kr/a?apiKey=secret",
+                    "http://openapi.gbis.go.kr/a?authorization=secret", "http://openapi.gbis.go.kr/a?serviceKey=" + KEY,
+                    "http://openapi.gbis.go.kr/a?file=%73ecret", "ftp://openapi.gbis.go.kr/a")) {
+                String invalid = BASE.substring(0, start) + url + BASE.substring(end);
+                var w = writer();
+                assertThatThrownBy(() -> w.add(GbisLocalBundle.Source.BASE_INFO, bytes(invalid)))
+                        .isInstanceOf(IllegalStateException.class).hasMessageNotContaining(KEY).hasMessageNotContaining(url).hasNoCause();
+                assertThat(Files.exists(w.directory().resolve("base-info.json"))).isFalse();
+            }
+        }
+    }
+    @Test void official_field_name_is_not_exempt_in_other_locations() throws Exception {
+        String invalid = BASE.replace("\"resultCode\":0", "\"resultCode\":0,\"areaDownloadUrl\":\"http://openapi.gbis.go.kr/a\"");
+        var w = writer();
+        assertThatThrownBy(() -> w.add(GbisLocalBundle.Source.BASE_INFO, bytes(invalid))).isInstanceOf(IllegalStateException.class);
     }
 }

@@ -129,9 +129,28 @@ class GbisMetadataClientTest {
         }
     }
 
+    @Test
+    @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void rejects_sensitive_extra_official_url_before_download_without_logging(org.springframework.boot.test.system.CapturedOutput output) {
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        String bad = response("1", "1").replace("file=area", "file=area&signature=fake");
+        server.expect(requestTo("https://provider.test/base?format=json&serviceKey=fake-service-key"))
+                .andRespond(withSuccess(bad, MediaType.APPLICATION_JSON));
+        var client = new GbisMetadataClient(builder.build(), "https://provider.test/base", "fake-service-key");
+        assertThatThrownBy(client::fetchWithRaw).isInstanceOf(IllegalStateException.class)
+                .hasMessageNotContaining("signature=fake").hasMessageNotContaining("fake-service-key").hasNoCause();
+        server.verify();
+        assertThat(output.getAll()).doesNotContain("signature=fake", "fake-service-key", "openapi.gbis.go.kr");
+    }
+
     private static String response(String routeVersion, String stationVersion) {
         return """
                 {"response":{"msgHeader":{"resultCode":0},"msgBody":{"baseInfoItem":{
+                "areaDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=area","areaVersion":"1",
+                "routeLineDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=line","routeLineVersion":"1",
+                "stationDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=stops","stationVersion":"1",
+                "vehicleDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=vehicles","vehicleVersion":"1",
                 "routeDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=route",
                 "routeVersion":"%s",
                 "routeStationDownloadUrl":"http://openapi.gbis.go.kr/ws/download?file=station",

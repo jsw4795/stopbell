@@ -14,6 +14,9 @@ public class GbisMetadataClient {
     private final RestClient restClient;
     private final String baseUrl;
     private final String serviceKey;
+    private static final java.util.Set<String> DOWNLOAD_URL_FIELDS = java.util.Set.of(
+            "areaDownloadUrl", "routeDownloadUrl", "routeLineDownloadUrl",
+            "routeStationDownloadUrl", "stationDownloadUrl", "vehicleDownloadUrl");
     private static final ObjectMapper MAPPER = new ObjectMapper(tools.jackson.core.json.JsonFactory.builder()
             .enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION).build());
 
@@ -102,8 +105,7 @@ public class GbisMetadataClient {
         if (node.isObject()) {
             for (var field : node.properties()) {
                 ArchiveContentSafety.checkField(field.getKey());
-                if (node == item && (field.getKey().equals("routeDownloadUrl")
-                        || field.getKey().equals("routeStationDownloadUrl"))) {
+                if (node == item && DOWNLOAD_URL_FIELDS.contains(field.getKey())) {
                     if (!field.getValue().isString()) throw new IllegalArgumentException();
                     validateDownloadUrl(field.getValue().asString(), key);
                 } else checkBaseJson(field.getValue(), item, safety, key);

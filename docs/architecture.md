@@ -773,7 +773,7 @@ Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncR
 
 ### GBIS 로컬 원본 보존과 오프라인 재생 (Phase 3-B-2B-2B-1B)
 
-`GbisLocalBundle`은 기반정보 JSON, Route, RouteStation 바이트를 Git 밖에 보존한다. 크기·SHA-256과 버전 등을 담은 Manifest는 세 원본의 무결성, 기반정보와 공식 다운로드 URL, 버전, 기존 Bulk 파서와 Raw 안전성 검사로 Snapshot을 생성한 뒤에만 게시한다. 재생도 같은 검증을 수행하며 HTTP와 DB를 사용하지 않는다. 두 다운로드 URL 필드에 한해 구조적으로 공식 호스트를 검사하고 인코딩·인증정보 및 민감한 query를 거부한다. 그 밖의 필드에는 기존 아카이브 안전 정책을 적용한다. 파일 게시와 신뢰 경계는 위 TAGO 묶음과 동일하다. 실제 Provider 호출, TAGO·GBIS 통합과 실제 DB Preview는 이 단계에서 수행하지 않았다.
+`GbisLocalBundle`은 기반정보 JSON, Route, RouteStation 바이트를 Git 밖에 보존한다. 크기·SHA-256과 버전 등을 담은 Manifest는 세 원본의 무결성, 기반정보와 공식 다운로드 URL, 버전, 기존 Bulk 파서와 Raw 안전성 검사로 Snapshot을 생성한 뒤에만 게시한다. 재생도 같은 검증을 수행하며 HTTP와 DB를 사용하지 않는다. 공식 기반정보의 여섯 다운로드 URL 필드에 한해 구조적으로 공식 호스트를 검사하고 인코딩·인증정보 및 민감한 query를 거부한다. 실제 다운로드는 Route와 RouteStation만 수행한다. 그 밖의 필드에는 기존 아카이브 안전 정책을 적용한다. 파일 게시와 신뢰 경계는 위 TAGO 묶음과 동일하다. 실제 Provider 호출, TAGO·GBIS 통합과 실제 DB Preview는 이 단계에서 수행하지 않았다.
 
 ### TAGO·GBIS 오프라인 Snapshot 통합 (Phase 3-B-2B-2B-1C)
 

@@ -723,3 +723,11 @@ Backend 디렉터리에서 환경변수 `PUBLIC_DATA_SERVICE_KEY`에 키를 주�
 별도 JVM은 Java 21 JDK HTTP Client의 재시도 제한 속성을 시작 시 설정하고 Redirect를 따르지 않는다. 버전 변경 시 재시도 차단을 재검증한다. 각 수집은 새 디렉터리를 사용하고 저장 성공한 원본은 바꾸지 않는다. 실패 시 Provider·단계·오류·요청/수신량·응답 수와 각 경로/완료 상태를 출력하며 예외 원문과 인증정보는 출력하지 않는다. GBIS 완료 후 TAGO가 실패하면 GBIS 묶음은 독립 완료 상태로 남을 수 있지만 전체 수집은 실패다. 완료 Manifest가 없는 부분 묶음은 재생하지 않으며 자동 재개·삭제하지 않는다. 실행자는 파일 접근 권한과 보존을 관리한다. 파일 무결성 해시는 서명이 아니다.
 
 이 명령은 웹 서버, Scheduler, FCM, Flyway, Hibernate, DB 연결 및 Bootstrap을 시작하지 않는다. 정상 수집 후 기존 Bundle 및 통합 Snapshot 재생을 검증하지만 DB Preview나 적용은 하지 않는다. 이 단계에서는 Mock Provider와 로컬 HTTP fixture만 사용했으며 실제 Provider·개발/운영 DB는 사용하지 않았다. 실제 GBIS URL·최신성, API quota와 수집 결과 및 DB Preview는 Live 수집 전에 별도로 검토한다.
+
+### GBIS 공식 기반정보와 Live 수집 시도 (Phase 3-B-2B-2B-2B)
+
+GBIS 기반정보의 `baseInfoItem`에 있는 공식 다운로드 URL 여섯 필드는 각각 기존 공식 호스트·URI·민감 query 검사를 통과해야 하며, 그 밖의 URL은 기존 안전 정책을 따른다. 실제 다운로드는 Route와 RouteStation 두 파일뿐이다. 합성 응답으로 원본 보존과 무결성·재생을 검증했으며 서명·인증정보를 허용하지 않는다. 실제 공식 URL 형식과 이 정책의 호환성은 아직 확인되지 않았다.
+
+2026-11-09 별도 Quota 조회 없이 사용자 승인에 따라 제한된 Live 수집을 한 번 시도했다. GBIS 기반정보 요청 1회가 HTTP 성공 응답 869바이트를 받았으나 기반정보 검증에서 `INVALID_RESPONSE`로 중단됐다. CLI가 안전하지 않을 수 있는 원본과 상세 예외를 저장·출력하지 않으므로 구조·Provider 오류, 버전 불일치 또는 URL 안전성 충돌 등 구체적인 원인은 확인되지 않았다. 추가 호출·재시도는 수행하지 않았고 GBIS 다운로드와 TAGO 요청은 시작되지 않았다. 미완료 디렉터리는 `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/1601bbe1-4301-44df-969c-66620cb20597`이며 원본과 완료 Manifest가 없다. GBIS·TAGO 완료 Bundle 및 통합 Snapshot은 확보하지 못했다. 실행 시간은 CLI 실패 보고에 기록되지 않았다.
+
+실제 최신성·데이터 품질·수집 완료를 주장하지 않으며 DB에는 접근하거나 적용하지 않았다. 안전한 진단 방법과 별도 Live 실행 승인 후 원인을 확인해야 한다. 실제 데이터 수집과 DB Preview는 미완료다.
