@@ -184,6 +184,54 @@ Docker Compose configuration은 저장소 루트의 `docker-compose.yml`에 있�
 - Container 재생성 시에도 Database 데이터가 유지되어야 한다.
 - Volume 삭제는 명시적인 데이터 삭제 작업으로 취급한다.
 
+## Docker MySQL 개발 DB 백업 및 복원
+
+DB 최신화, Migration 또는 대량 데이터 변경 전에 프로젝트 루트의 `docker-compose.yml`을 사용하고 `mysql` 서비스가 실행 중인지 확인한다. 이 절차는 Docker Named Volume을 사용하는 로컬 개발 MySQL 8.4 DB를 대상으로 한다. 백업 파일은 Git 저장소 외부에 저장한다.
+
+```bash
+cd ~/GPT_Codex_Project/stopbell
+
+mkdir -p "$HOME/GPT_Codex_Project/stopbell-db-backups"
+
+BACKUP="$HOME/GPT_Codex_Project/stopbell-db-backups/stopbell-$(date +%Y%m%d-%H%M%S).sql.gz"
+
+(
+  set -o pipefail
+
+  docker compose exec -T mysql sh -c '
+    export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
+    exec mysqldump \
+      -h 127.0.0.1 \
+      -u root \
+      --single-transaction \
+      --quick \
+      --routines \
+      --triggers \
+      --events \
+      --hex-blob \
+      --no-tablespaces \
+      --set-gtid-purged=OFF \
+      "$MYSQL_DATABASE"
+  ' | gzip -c > "$BACKUP"
+) && \
+gzip -t "$BACKUP" && \
+shasum -a 256 "$BACKUP" && \
+ls -lh "$BACKUP" && \
+echo "백업 생성 및 gzip 무결성 검사 완료"
+```
+
+컨테이너의 `MYSQL_DATABASE`를 대상으로 하며, root 비밀번호는 컨테이너의 `MYSQL_ROOT_PASSWORD`에서 `MYSQL_PWD`로 전달하므로 별도 입력할 필요가 없다. 비밀번호를 명령어에 직접 기재하거나 로그에 출력하지 않는다. 호스트의 `stopbell` 계정으로 `mysqldump`를 실행했을 때 `1045 Access denied for user 'stopbell'@'localhost'`가 발생한 적이 있으며, 위 컨테이너 내부 root 방식은 실제 백업에 성공했다. root 사용은 로컬 개발 DB 백업에 한정하며 운영 환경의 일반적인 권한 정책으로 확대하지 않는다.
+
+- `set -o pipefail`은 `mysqldump` 실패를 파이프라인 실패로 감지한다. 실패했거나 불완전한 파일은 정상 백업으로 사용하지 않는다.
+- `gzip -t`로 압축 파일의 무결성을 검사하고, `shasum -a 256` 출력으로 SHA-256을 기록하며, `ls -lh`로 실제 크기를 확인한다. 파일명에는 실행 시각이 포함된다.
+- 백업 파일과 비밀번호는 Git에 커밋하지 않는다.
+- gzip 무결성 검사는 실제 MySQL 복원 성공을 보장하지 않는다. 중요한 DB 변경 전에는 가능하면 별도 격리 MySQL에 복원하여 검증하고, 기존 개발 DB에 복원 테스트를 직접 실행하지 않는다.
+- 다른 쓰기 작업이 진행 중이라면 백업 시점의 일관성과 작업 영향을 검토한다. `--single-transaction`은 InnoDB의 일관된 Snapshot 백업에 유용하지만 모든 동시 변경과 DDL을 완전히 보호하지는 않는다.
+
+### 실제 백업 검증 기록 (2026-11-10)
+
+서울버스 전체 CSV Raw Metadata 적용 전에 `~/GPT_Codex_Project/stopbell-db-backups/stopbell-20261110-025545.sql.gz`를 생성했다. 크기는 약 14 MB이고 SHA-256은 `25cabf44039131e4fd3cec9ec36e71c3e5cdca48ba037b50735a3c49ee5e0d83`이다. Docker MySQL 내부 `mysqldump`와 gzip 무결성 검사가 성공했고 SHA-256을 기록했다. 실제 격리 MySQL 복원 테스트는 수행하지 않았다.
+
 ## Schema
 
 Database Schema 변경은 Flyway Migration으로 관리한다. Hibernate `ddl-auto`를 통한 자동 Schema 변경은 사용하지 않는다.
