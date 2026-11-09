@@ -781,7 +781,7 @@ Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncR
 
 ### TAGO·GBIS 독립 수집 (Phase 3-B-2B-2B-2A)
 
-`collectTransitMetadata`는 Spring 애플리케이션을 시작하지 않는 명시적 Java one-shot이다. 공통 예산으로 GBIS와 TAGO의 요청 횟수, 응답·누적 바이트, 단조 시간, 요청 간격과 연결·응답 제한을 적용한다. Redirect와 재시도는 차단한다. 정상 응답 바이트는 기존 파서와 Bundle Writer에 전달하고 각 완료 Manifest 게시 전에도 시간·중단을 확인한다. 두 묶음과 오프라인 통합을 다시 재생해 결과를 비교하며 DB 이력·동기화·Preview·승인을 호출하지 않는다. 상세 실행 조건과 제한은 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다. 이 단계의 검증은 Mock Provider와 로컬 서버에 한정하며 실제 최신성 및 실수집 호환성은 미확인이다.
+`collectTransitMetadata`는 Spring 애플리케이션을 시작하지 않는 명시적 Java one-shot이다. 공통 예산으로 GBIS와 TAGO의 요청 횟수, 응답·누적 바이트, 단조 시간, 요청 간격과 연결·응답 제한을 적용한다. Redirect와 HTTP Client의 숨겨진 재시도는 차단하며, 연결 실패와 HTTP 5xx는 예산 안에서 요청별 최대 2회 명시적으로 재시도한다. 기존 완료 GBIS Bundle을 재생해 TAGO만 수집할 수 있다. 정상 응답 바이트는 기존 파서와 Bundle Writer에 전달하고 각 완료 Manifest 게시 전에도 시간·중단을 확인한다. TAGO 응답의 파싱·구조 실패 시에는 인증정보가 포함될 수 있는 원본을 정상 Bundle과 별도로 사용자 전용 파일에 보존한다. 두 묶음과 오프라인 통합을 다시 재생해 결과를 비교하며 DB 이력·동기화·Preview·승인을 호출하지 않는다. 상세 실행 조건과 제한은 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다.
 
 ### GBIS 기반정보 검증 진단 (Phase 3-B-2B-2B-2B-D1)
 

@@ -42,7 +42,10 @@ class TransitMetadataCollectionTest {
         int failAt = -1;
         boolean duplicate;
         Runnable beforeCity = () -> { };
+        Runnable beforeStop = () -> { };
         String base = BASE;
+        String cityBody;
+        String stopBody;
         @Override public byte[] get(URI uri, CollectionBudget budget) {
             budget.reserve();
             int n = sent.incrementAndGet();
@@ -55,15 +58,18 @@ class TransitMetadataCollectionTest {
                 String cities = TagoMetadataSource.fullCityScope().stream().map(c -> "{\"citycode\":\"" + c + "\"}")
                         .collect(java.util.stream.Collectors.joining(",", "[", "]"));
                 body = "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":" + cities + "}}}}";
+                if (cityBody != null) body = cityBody;
             } else if (path.endsWith("getRouteNoList")) {
                 String first = TagoMetadataSource.fullCityScope().getFirst();
                 boolean city = query.contains("cityCode=" + first);
                 boolean second = query.contains("pageNo=2");
                 body = page(city ? (second ? (duplicate ? "{\"routeid\":\"GGB200\",\"routeno\":\"300\"}" : "{\"routeid\":\"GGB201\",\"routeno\":\"301\"}") : "{\"routeid\":\"GGB200\",\"routeno\":\"300\"}") : "[]", city ? 2 : 0, second ? 2 : 1);
             } else {
+                beforeStop.run();
                 boolean second = query.contains("pageNo=2");
                 body = page("{\"nodeid\":\"GGB" + (second ? "20" : "10") + "\",\"nodenm\":\"" + (second ? "end" : "turn")
                         + "\",\"nodeord\":" + (second ? "2" : "1") + "}", 2, second ? 2 : 1);
+                if (stopBody != null) body = stopBody;
             }
             try { return budget.read(new ByteArrayInputStream(bytes(body))); }
             catch (java.io.IOException e) { throw new AssertionError(e); }
@@ -83,6 +89,96 @@ class TransitMetadataCollectionTest {
         assertThat(Files.readAllBytes(result.gbisPath().resolve("base-info.json"))).isEqualTo(bytes(BASE));
         assertThat(Files.readAllBytes(result.gbisPath().resolve("route.dat"))).isEqualTo(bytes(ROUTE));
         assertThat(TagoGbisOfflineSnapshotAssembler.withGbis(result.tagoPath(), result.gbisPath(), KEY).normalized().routes()).hasSize(2);
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("기존 GBIS 묶음을 재생하고 일시적 TAGO 오류만 제한적으로 재시도한다")
+    void reuses_gbis_and_retries_transient_requests() throws Exception {
+        var writer = GbisLocalBundle.create(temp.toRealPath(), KEY);
+        writer.add(GbisLocalBundle.Source.BASE_INFO, bytes(BASE));
+        writer.add(GbisLocalBundle.Source.ROUTE, bytes(ROUTE));
+        writer.add(GbisLocalBundle.Source.ROUTE_STATION, bytes(STATIONS));
+        writer.complete();
+        var mock = new Mock(); var attempts = new AtomicInteger();
+        CollectionHttp.Transport transientFirst = (uri, budget) -> {
+            assertThat(uri.getHost()).isEqualTo("apis.data.go.kr");
+            if (attempts.getAndIncrement() < 2) { budget.reserve(); throw new CollectionBudget.Failure(CollectionBudget.Code.HTTP_ERROR, true); }
+            return mock.get(uri, budget);
+        };
+        var budget = new CollectionBudget(limits(100, 10000, 100000, 10000));
+        var result = new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, budget, transientFirst, writer.directory()).collect();
+        assertThat(result.gbisPath()).isEqualTo(writer.directory());
+        assertThat(result.requests()).isEqualTo(39);
+        assertThat(mock.sent).hasValue(37);
+        assertThat(TagoGbisOfflineSnapshotAssembler.withGbis(result.tagoPath(), result.gbisPath(), KEY).normalized().routes()).hasSize(2);
+        var limit = new CollectionBudget(limits(2, 10000, 100000, 10000));
+        var retry = new AtomicInteger();
+        CollectionHttp.Transport always = (uri, b) -> { b.reserve(); retry.incrementAndGet(); throw new CollectionBudget.Failure(CollectionBudget.Code.HTTP_ERROR, true); };
+        assertThatThrownBy(() -> new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, limit, always, writer.directory()).collect()).hasMessage("REQUEST_LIMIT");
+        assertThat(retry).hasValue(2);
+        var exhausted = new CollectionBudget(limits(10, 10000, 100000, 10000));
+        retry.set(0);
+        assertThatThrownBy(() -> new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, exhausted, always, writer.directory()).collect()).hasMessage("HTTP_ERROR");
+        assertThat(retry).hasValue(3);
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("잘못된 JSON과 응답 구조 오류를 재시도 없이 구분한다")
+    void distinguishes_invalid_json_from_response_structure() throws Exception {
+        for (var scenario : Map.of("{", "JSON_PARSE", "{}", "TAGO_STRUCTURE").entrySet()) {
+            var mock = new Mock(); mock.cityBody = scenario.getKey();
+            var c = collector(new CollectionBudget(limits(50, 10000, 100000, 10000)), mock);
+            assertThatThrownBy(c::collect).hasMessage("INVALID_RESPONSE");
+            assertThat(mock.sent).hasValue(4);
+            assertThat(c.failureSummary(CollectionBudget.Code.INVALID_RESPONSE)).contains("detail=" + scenario.getValue()).doesNotContain(KEY);
+        }
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("TAGO 실패 응답을 비공개 원본과 요청 정보로 저장한다")
+    @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void preserves_failed_responses_and_request_without_logging_content(org.springframework.boot.test.system.CapturedOutput logs) throws Exception {
+        for (var scenario : Map.of("{\"secret\":\"" + KEY + "\"", "JSON_PARSE",
+                "{\"unexpected\":\"" + KEY + "\"}", "TAGO_STRUCTURE").entrySet()) {
+            Path root = Files.createDirectory(temp.resolve(scenario.getValue()));
+            var out = new ByteArrayOutputStream(); var err = new ByteArrayOutputStream(); var mock = new Mock();
+            mock.stopBody = scenario.getKey();
+            var args = new String[]{"--directory=" + root.toRealPath(), "--live", "--confirm=COLLECT", "--max-requests=50", "--interval-ms=1"};
+            assertThat(TransitMetadataCollectionCli.run(args, Map.of("PUBLIC_DATA_SERVICE_KEY", KEY), new PrintStream(out), new PrintStream(err), mock)).isEqualTo(1);
+            String output = out.toString() + err;
+            assertThat(output).contains("operation=getRouteAcctoThrghSttnList", "cityCode=" + TagoMetadataSource.fullCityScope().getFirst(),
+                    "routeId=GGB200", "pageNo=1", "httpStatus=2xx", "detail=" + scenario.getValue(), "diagnosticStatus=saved")
+                    .doesNotContain(KEY, scenario.getKey());
+            try (var files = Files.walk(root)) {
+                Path response = files.filter(p -> p.getFileName().toString().equals("response.bin")).findFirst().orElseThrow();
+                assertThat(Files.readAllBytes(response)).isEqualTo(bytes(scenario.getKey()));
+                assertThat(Files.getPosixFilePermissions(response)).isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+                assertThat(Files.getPosixFilePermissions(response.getParent())).isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+                assertThat(Files.readString(response.getParent().resolve("request.txt")))
+                        .contains("routeId=GGB200", "pageNo=1", "failure=" + scenario.getValue(), "diagnosticFile=" + response.toRealPath())
+                        .doesNotContain(KEY, scenario.getKey());
+            }
+        }
+        assertThat(logs.getAll()).doesNotContain(KEY, "unexpected");
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("진단 원본 저장 실패가 기존 파싱 오류를 가리지 않는다")
+    void diagnostic_storage_failure_preserves_original_failure() throws Exception {
+        Path root = Files.createDirectory(temp.resolve("root"));
+        var mock = new Mock(); mock.stopBody = "{";
+        mock.beforeStop = () -> {
+            try { Files.move(root, temp.resolve("moved")); Files.writeString(root, "not a directory"); }
+            catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
+        };
+        var c = new TransitMetadataCollector(root.toRealPath(), KEY, TAGO, GBIS, new CollectionBudget(limits(50, 10000, 100000, 10000)), mock);
+        assertThatThrownBy(c::collect).hasMessage("INVALID_RESPONSE");
+        assertThat(c.failureSummary(CollectionBudget.Code.INVALID_RESPONSE)).contains("detail=JSON_PARSE", "diagnosticFile=none", "diagnosticStatus=storage_failed");
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("응답 수신 전 오류는 원본 파일이 없음을 표시한다")
+    void reports_no_diagnostic_when_response_not_received() throws Exception {
+        var mock = new Mock(); mock.failAt = 4;
+        var c = collector(new CollectionBudget(limits(50, 10000, 100000, 10000)), mock);
+        assertThatThrownBy(c::collect).hasMessage("HTTP_ERROR");
+        assertThat(c.failureSummary(CollectionBudget.Code.HTTP_ERROR)).contains("operation=getCtyCodeList", "httpStatus=unavailable",
+                "diagnosticFile=none", "diagnosticStatus=no_response");
     }
     @Test void request_limit_stops_before_send_and_failed_requests_count() throws Exception {
         var budget = new CollectionBudget(limits(4, 10000, 100000, 10000)); var mock = new Mock(); var c = collector(budget, mock);
@@ -170,6 +266,24 @@ class TransitMetadataCollectionTest {
             assertThat(hits).hasValue(2); assertThat(budget.requests()).isEqualTo(2);
             assertThatThrownBy(() -> CollectionHttp.NETWORK.get(URI.create(root + "/denied"), budget)).hasMessage("HTTP_ERROR").hasMessageNotContaining(KEY);
             assertThat(hits).hasValue(3); assertThat(budget.requests()).isEqualTo(3);
+        } finally { server.stop(0); }
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("HTTP 5xx만 재시도 대상으로 표시하고 인증 오류는 재시도하지 않는다")
+    void marks_server_error_retryable_but_not_auth_error() throws Exception {
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/server", e -> { e.sendResponseHeaders(503, -1); e.close(); });
+        server.createContext("/auth", e -> { e.sendResponseHeaders(401, -1); e.close(); });
+        server.start();
+        try {
+            var root = "http://127.0.0.1:" + server.getAddress().getPort();
+            var budget = new CollectionBudget(limits(5, 1000, 10000, 5000));
+            var serverFailure = catchThrowable(() -> CollectionHttp.NETWORK.get(URI.create(root + "/server"), budget));
+            var authFailure = catchThrowable(() -> CollectionHttp.NETWORK.get(URI.create(root + "/auth"), budget));
+            assertThat(serverFailure).isInstanceOf(CollectionBudget.Failure.class);
+            assertThat(((CollectionBudget.Failure) serverFailure).retryable).isTrue();
+            assertThat(authFailure).isInstanceOf(CollectionBudget.Failure.class);
+            assertThat(((CollectionBudget.Failure) authFailure).retryable).isFalse();
         } finally { server.stop(0); }
     }
     @Test void socket_timeout_ends_failed_attempt_without_retry() throws Exception {

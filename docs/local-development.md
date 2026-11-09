@@ -720,7 +720,9 @@ Backend 디렉터리에서 환경변수 `PUBLIC_DATA_SERVICE_KEY`에 키를 주�
 
 `--offline`은 Gradle의 의존성 네트워크 접근을 제한할 뿐 Live Provider 요청을 차단하지 않는다. 기본값은 개별 응답 50,000,000바이트, 전체 응답 500,000,000바이트, 전체 3,600,000ms, 간격 1,000ms, 연결 2,000ms, 응답 30,000ms다. 모든 값은 유한한 양수여야 한다. Dry Run의 기본 최대 요청은 1,000회지만 Live에서는 반드시 별도 지정한다. 최소 요청은 GBIS 3회와 TAGO 도시 목록·31개 도시 Route 각 1회로 35회이며 추가 페이지와 Route별 정류장 때문에 전체 횟수는 수집 전 확정할 수 없다. 제한을 높이는 일은 실행자의 요청량·저장 공간 검토가 필요하다.
 
-별도 JVM은 Java 21 JDK HTTP Client의 재시도 제한 속성을 시작 시 설정하고 Redirect를 따르지 않는다. 두 속성이 JVM 시작 인수에 없거나 현재 값이 다르면 요청 예산 선점과 네트워크 전송 전에 실패한다. 실행 중 뒤늦게 속성만 설정하는 방식은 허용하지 않는다. JDK 버전 변경 시 재시도 차단을 재검증한다. 각 수집은 새 디렉터리를 사용하고 저장 성공한 원본은 바꾸지 않는다. 실패 시 Provider·단계·오류·요청/수신량·응답 수와 각 경로/완료 상태를 출력하며 예외 원문과 인증정보는 출력하지 않는다. GBIS 완료 후 TAGO가 실패하면 GBIS 묶음은 독립 완료 상태로 남을 수 있지만 전체 수집은 실패다. 완료 Manifest가 없는 부분 묶음은 재생하지 않으며 자동 재개·삭제하지 않는다. 실행자는 파일 접근 권한과 보존을 관리한다. 파일 무결성 해시는 서명이 아니다.
+별도 JVM은 Java 21 JDK HTTP Client의 숨겨진 재시도 제한 속성을 시작 시 설정하고 Redirect를 따르지 않는다. 두 속성이 JVM 시작 인수에 없거나 현재 값이 다르면 요청 예산 선점과 네트워크 전송 전에 실패한다. 연결 실패와 HTTP 5xx는 요청별 최대 2회 명시적으로 재시도하며 매 시도는 요청·시간 예산과 간격을 따른다. 인증 오류, 잘못된 응답, 무결성·저장 오류는 재시도하지 않는다. `--gbis-bundle=/절대/완료/경로`를 지정하면 기존 GBIS 묶음을 검증·재생하고 TAGO만 새로 수집한다. 각 수집은 새 디렉터리를 사용하고 저장 성공한 원본은 바꾸지 않는다. 실패 시 Provider·단계·오류·요청/수신량·응답 수와 각 경로/완료 상태를 출력하며 예외 원문과 인증정보는 출력하지 않는다. GBIS 완료 후 TAGO가 실패하면 GBIS 묶음은 독립 완료 상태로 남을 수 있지만 전체 수집은 실패다. 완료 Manifest가 없는 부분 묶음은 재생하지 않으며 자동 재개·삭제하지 않는다. 실행자는 파일 접근 권한과 보존을 관리한다. 파일 무결성 해시는 서명이 아니다.
+
+TAGO에서 성공 HTTP 본문을 받은 뒤 JSON 파싱 또는 응답 구조 검사가 실패하면 수집 루트의 새 `tago-diagnostic-*` 디렉터리에 `response.bin` 원본과 `request.txt` 요청·실패 정보를 별도로 저장한다. 디렉터리는 `0700`, 파일은 `0600`이며 기존 Bundle에는 포함하지 않는다. 원본은 인증정보를 포함할 수 있으므로 민감한 로컬 파일로 취급하고 실행자가 접근과 보존을 관리한다. CLI는 본문이나 키 대신 요청 식별자와 저장 경로를 출력한다. 현재 HTTP 전송 경계는 정확한 성공 상태 코드를 전달하지 않아 `2xx`로만 표시한다. 저장이 실패하거나 본문을 받지 못하면 그 상태를 표시하고 원래 실패 코드를 유지한다.
 
 이 명령은 웹 서버, Scheduler, FCM, Flyway, Hibernate, DB 연결 및 Bootstrap을 시작하지 않는다. 정상 수집 후 기존 Bundle 및 통합 Snapshot 재생을 검증하지만 DB Preview나 적용은 하지 않는다. 이 단계에서는 Mock Provider와 로컬 HTTP fixture만 사용했으며 실제 Provider·개발/운영 DB는 사용하지 않았다. 실제 GBIS URL·최신성, API quota와 수집 결과 및 DB Preview는 Live 수집 전에 별도로 검토한다.
 
@@ -751,3 +753,7 @@ GBIS 기반정보의 `routeDownloadUrl`과 `routeStationDownloadUrl`은 실제 �
 이번 코드·테스트 단계에는 Provider와 DB에 접근하지 않았다. 별도 승인 후 `--max-requests=1`로 진단할 수 있으나, 현재 CLI는 기반정보가 정상 검증되면 Route 요청 한도 검사 전에 기반정보 원본을 새 Bundle에 저장한다. 따라서 원본 저장까지 금지하는 후속 Live 진단은 현 CLI 그대로 실행할 수 없고 실행 전에 이 충돌을 해결해야 한다. 실제 GBIS·TAGO 수집과 DB Preview는 미완료다.
 
 이후 사용자 승인으로 미사용 필드 형식을 완화하고 전체 수집을 1회 시도했다. GBIS 기반정보 HTTP 요청 1회, 869바이트 수신 후 필수 `ROUTE_DOWNLOAD_URL`에서 `URL_QUERY_STRUCTURE`로 중단됐다. 당시 query 원문을 저장·출력하지 않아 구체적인 형태는 확인하지 못했다. GBIS Route·RouteStation과 TAGO 요청, 완료 Bundle, 통합 Snapshot은 없다. 미완료 경로는 `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/5e808d65-64a2-419e-9909-c58fccfb84f1`이다. 재시도와 DB 접근은 하지 않았다. 이후 사용자가 제공한 공식 URL 형식을 지원하도록 수정했으며 실제 수집은 별도로 검증해야 한다.
+
+이후 Live 수집에서 GBIS Bundle `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/90f6ce9d-c9d7-4a2d-a3ec-238961d8f1e7`은 완료됐으나 TAGO 정류장 수집은 요청 265회에서 `INVALID_RESPONSE`로 중단됐다. 미완료 TAGO Bundle `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/973ee134-9c7d-43d5-acc4-8392277ad28f`의 261개 응답은 보존했다. 복원한 실패 요청을 별도로 1회 확인했을 때 109개 정류장의 정상 응답이 기존 파서와 안전성 검사를 통과했으나 원래 실패 응답은 없어 원인을 확정할 수 없다.
+
+완료 GBIS Bundle 재생과 제한적 재시도를 추가한 뒤 TAGO만 새로 수집했다. 경기 31개 도시 확인 후 TAGO 정류장 단계에서 `INVALID_RESPONSE detail=TAGO_STRUCTURE`, 요청 53회, 560,827바이트로 중단됐으며 응답 원문은 보관하지 않았다. 새 미완료 TAGO Bundle은 `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/db5433d9-9349-467e-8902-1c8aadb53f86`이다. GBIS 재호출과 수집 명령 재실행, DB 접근은 없었다. TAGO 완료 Bundle과 통합 Snapshot은 확보하지 못했다.

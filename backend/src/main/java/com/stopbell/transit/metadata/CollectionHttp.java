@@ -42,7 +42,7 @@ final class CollectionHttp {
                 var response = future.get(timeout, TimeUnit.NANOSECONDS);
                 budget.check();
                 if (response.statusCode() < 200 || response.statusCode() >= 300)
-                    throw new CollectionBudget.Failure(CollectionBudget.Code.HTTP_ERROR);
+                    throw new CollectionBudget.Failure(CollectionBudget.Code.HTTP_ERROR, response.statusCode() >= 500 && response.statusCode() <= 599);
                 return response.body();
             } catch (InterruptedException e) {
                 future.cancel(true);
@@ -54,12 +54,14 @@ final class CollectionHttp {
                 throw new CollectionBudget.Failure(totalDeadlineFirst ? CollectionBudget.Code.TIME_LIMIT : CollectionBudget.Code.HTTP_ERROR);
             } catch (java.util.concurrent.ExecutionException e) {
                 Throwable cause = e.getCause();
+                boolean connectionFailure = false;
                 while (cause != null) {
                     if (cause instanceof CollectionBudget.Failure failure) throw failure;
+                    if (cause instanceof java.net.ConnectException || cause instanceof java.net.http.HttpConnectTimeoutException) connectionFailure = true;
                     cause = cause.getCause();
                 }
                 budget.check();
-                throw new CollectionBudget.Failure(CollectionBudget.Code.HTTP_ERROR);
+                throw new CollectionBudget.Failure(CollectionBudget.Code.HTTP_ERROR, connectionFailure);
             } catch (CollectionBudget.Failure e) {
                 future.cancel(true);
                 throw e;

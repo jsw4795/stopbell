@@ -13,7 +13,9 @@ final class CollectionBudget {
         PROVIDER_ERROR, INVALID_RESPONSE, INTEGRITY_FAILURE, STORAGE_FAILURE, INTERRUPTED }
     static final class Failure extends RuntimeException {
         final Code code;
-        Failure(Code code) { super(code.name()); this.code = code; }
+        final boolean retryable;
+        Failure(Code code) { this(code, false); }
+        Failure(Code code, boolean retryable) { super(code.name()); this.code = code; this.retryable = retryable; }
     }
     record Limits(int requests, long responseBytes, long totalBytes, Duration duration,
                   Duration interval, Duration connectTimeout, Duration responseTimeout) {

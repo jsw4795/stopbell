@@ -29,6 +29,11 @@ public final class TransitMetadataCollectionCli {
             Path directory = checkDirectory(options.get("directory"), key);
             String tago = endpoint(env.getOrDefault("TAGO_METADATA_BASE_URL", TAGO_DEFAULT));
             String gbis = endpoint(env.getOrDefault("GBIS_METADATA_BASE_URL", GBIS_DEFAULT));
+            Path existingGbis = options.containsKey("gbis-bundle") ? Path.of(options.get("gbis-bundle")) : null;
+            if (existingGbis != null) {
+                if (!existingGbis.isAbsolute()) throw new IllegalArgumentException();
+                new ArchiveContentSafety(key).checkText(existingGbis.toString());
+            }
             if (live && !options.containsKey("max-requests")) throw new IllegalArgumentException();
             var limits = new CollectionBudget.Limits(integer(options, "max-requests", 1000),
                     number(options, "max-response-bytes", 50_000_000), number(options, "max-total-bytes", 500_000_000),
@@ -42,12 +47,13 @@ public final class TransitMetadataCollectionCli {
                     + " intervalMs=" + limits.interval().toMillis() + " connectTimeoutMs=" + limits.connectTimeout().toMillis()
                     + " responseTimeoutMs=" + limits.responseTimeout().toMillis());
             if (!live) {
-                out.println("No HTTP requests. Steps: GBIS base and two files; TAGO cities, routes and stop pages; validate and replay bundles.");
-                out.println("Minimum requests=35; actual total is unknown until all pages and routes are discovered.");
+                out.println(existingGbis == null ? "No HTTP requests. Steps: GBIS base and two files; TAGO cities, routes and stop pages; validate and replay bundles."
+                        : "No HTTP requests. Steps: replay GBIS bundle; collect TAGO cities, routes and stop pages; validate and replay bundles.");
+                out.println("Minimum requests=" + (existingGbis == null ? 35 : 32) + "; actual total is unknown until all pages and routes are discovered.");
                 return 0;
             }
             var budget = new CollectionBudget(limits);
-            var collector = new TransitMetadataCollector(directory, key, tago, gbis, budget, transport);
+            var collector = new TransitMetadataCollector(directory, key, tago, gbis, budget, transport, existingGbis);
             try {
                 var result = collector.collect();
                 out.println("complete=true tagoBundle=" + result.tagoPath() + " tagoComplete=true gbisBundle=" + result.gbisPath()
@@ -69,7 +75,7 @@ public final class TransitMetadataCollectionCli {
     private static Map<String, String> parse(String[] args) {
         Map<String, String> result = new HashMap<>();
         var allowed = java.util.Set.of("directory", "max-requests", "max-response-bytes", "max-total-bytes",
-                "max-duration-ms", "interval-ms", "connect-timeout-ms", "response-timeout-ms", "live", "confirm");
+                "max-duration-ms", "interval-ms", "connect-timeout-ms", "response-timeout-ms", "live", "confirm", "gbis-bundle");
         for (String arg : args) {
             if (arg.equals("--live")) arg = "--live=true";
             if (!arg.startsWith("--") || !arg.contains("=")) throw new IllegalArgumentException();
