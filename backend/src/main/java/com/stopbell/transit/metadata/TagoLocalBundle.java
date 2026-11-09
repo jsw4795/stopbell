@@ -71,10 +71,14 @@ public final class TagoLocalBundle {
             }
         }
         public TagoMetadataSource.TagoSnapshot complete() throws IOException {
+            return complete(() -> { });
+        }
+        TagoMetadataSource.TagoSnapshot complete(Runnable beforePublish) throws IOException {
             if (closed) throw new IllegalStateException("Bundle is closed");
             closed = true;
             Manifest manifest = new Manifest(id, startedAt, Instant.now().toString(), true, cities, List.copyOf(entries));
             var snapshot = replay(directory, manifest, safety);
+            beforePublish.run();
             writeNew(directory.resolve(MANIFEST), MAPPER.writeValueAsBytes(manifest));
             return snapshot;
         }

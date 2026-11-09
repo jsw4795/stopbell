@@ -50,3 +50,12 @@ tasks.withType(AbstractArchiveTask).configureEach {
 tasks.named('bootJar') {
     archiveFileName = 'stopbell.jar'
 }
+
+// Explicit, database-independent one-shot entry point; never starts the Spring application.
+tasks.register('collectTransitMetadata', JavaExec) {
+    group = 'application'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.stopbell.transit.metadata.TransitMetadataCollectionCli'
+    jvmArgs '-Djdk.httpclient.redirects.retrylimit=1', '-Djdk.httpclient.disableRetryConnect=true'
+    standardInput = System.in
+}

@@ -688,11 +688,11 @@ Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여�
 
 `--page`는 0부터, `--size`는 1~500이다. 위험 상세와 공유 Stop 변형은 각각 출력 행으로 페이지를 구성하며, 충돌 변형은 입력된 Route·occurrence 처리 순서로 표시한다. 모든 페이지를 확인하려면 같은 입력으로 페이지를 바꾸어 재실행하며, 그 사이 DB나 파일이 바뀌면 결과가 달라질 수 있다. 원본 JSON과 승인 가능한 지문은 출력하지 않는다. Raw는 SEOUL_TDATA/TAGO/GBIS와 데이터 종류별로 비교 여부·추가·변경·동일·미포함·버전 변경을 표시하며 미수집 출처의 미포함은 삭제를 뜻하지 않는다.
 
-관리 프로필은 Flyway 자동 실행, Hibernate DDL, SQL 초기화, Scheduler와 다른 one-shot 실행을 차단한다. Preview는 수집 이력·아카이브·분석·위험 상세·승인·정규화·원본·완료 시각을 쓰지 않는다. 결과는 현재 DB 기준이며 마지막 성공 Snapshot과의 일치를 보장하지 않는다. ALLOW도 이후 적용 시 Guard를 생략할 권한이 아니다. TAGO와 GBIS Snapshot은 서비스 입력으로 지원하지만 실제 네트워크 CLI는 제공하지 않는다. 3-B-2B-2에서는 서울 최신 파일, TAGO 31개 cityCode 수집 범위와 GBIS 기반정보·버전을 확보하고 최신성, 호출량 및 메모리를 검증한다. 검토된 실제 적용은 3-B-2C에서 별도로 결정한다.
+관리 프로필은 Flyway 자동 실행, Hibernate DDL, SQL 초기화, Scheduler와 다른 one-shot 실행을 차단한다. Preview는 수집 이력·아카이브·분석·위험 상세·승인·정규화·원본·완료 시각을 쓰지 않는다. 결과는 현재 DB 기준이며 마지막 성공 Snapshot과의 일치를 보장하지 않는다. ALLOW도 이후 적용 시 Guard를 생략할 권한이 아니다. TAGO와 GBIS Snapshot은 서비스 입력으로 지원하지만 Preview CLI는 서울 CSV만 지원한다. 별도의 수집 명령은 아래 실행 경계를 따른다. 3-B-2B-2에서는 서울 최신 파일, TAGO 31개 cityCode 수집 범위와 GBIS 기반정보·버전을 확보하고 최신성, 호출량 및 메모리를 검증한다. 검토된 실제 적용은 3-B-2C에서 별도로 결정한다.
 
 ### TAGO 로컬 원본 묶음 (Phase 3-B-2B-2B-1A)
 
-`TagoLocalBundle.create(절대_디렉터리, serviceKey)`는 Git 저장소 밖의 이미 존재하는 실제 경로에서 묶음을 만든다. `cityOrder()` 순서대로 cityCode 목록, 도시별 Route 페이지, 각 Route의 정류장 페이지를 `Writer.add(Request, 원본바이트)`에 전달한다. operation은 각각 `getCtyCodeList`(city·route null, page 0), `getRouteNoList`(city·page), `getRouteAcctoThrghSttnList`(city·route·page)다. 모든 응답은 원본 그대로 보존한다. `complete()`가 기존 수집 검증을 끝내야 `manifest.json`이 생기며, 누락이나 실패 시 묶음은 재생할 수 없다. `TagoLocalBundle.replay(묶음_절대경로, serviceKey)`는 파일 무결성과 범위·순서를 재확인하고 네트워크 없이 `TagoSnapshot`을 반환한다. serviceKey는 내용 검사에만 사용하며 Manifest에 기록하지 않는다. 실제 Provider 수집 명령과 호출량 제한은 후속 작업이다.
+`TagoLocalBundle.create(절대_디렉터리, serviceKey)`는 Git 저장소 밖의 이미 존재하는 실제 경로에서 묶음을 만든다. `cityOrder()` 순서대로 cityCode 목록, 도시별 Route 페이지, 각 Route의 정류장 페이지를 `Writer.add(Request, 원본바이트)`에 전달한다. operation은 각각 `getCtyCodeList`(city·route null, page 0), `getRouteNoList`(city·page), `getRouteAcctoThrghSttnList`(city·route·page)다. 모든 응답은 원본 그대로 보존한다. `complete()`가 기존 수집 검증을 끝내야 `manifest.json`이 생기며, 누락이나 실패 시 묶음은 재생할 수 없다. `TagoLocalBundle.replay(묶음_절대경로, serviceKey)`는 파일 무결성과 범위·순서를 재확인하고 네트워크 없이 `TagoSnapshot`을 반환한다. serviceKey는 내용 검사에만 사용하며 Manifest에 기록하지 않는다. 이 단계에서는 실제 Provider 수집을 실행하지 않았다.
 
 파일 권한과 보존은 실행자가 관리한다. 기존 디렉터리 및 그 조상에 심볼릭 링크가 없어야 하고 하드 링크를 지원해야 한다. 해시는 서명이 아니므로 파일과 Manifest에 대한 무단 수정 방지는 파일시스템 접근 통제에 의존한다. 완료되지 않은 묶음과 임시 파일은 자동 삭제하지 않는다.
 
@@ -702,4 +702,24 @@ Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여�
 
 ### TAGO·GBIS 오프라인 Snapshot 통합 (Phase 3-B-2B-2B-1C)
 
-`TagoGbisOfflineSnapshotAssembler.tagoOnly(tago경로, serviceKey)`는 명시적으로 TAGO만 재생한다. `withGbis(tago경로, gbis경로, serviceKey)`는 양쪽 묶음을 검증한 뒤 기존 목적지 보강 규칙을 적용하고 TAGO와 GBIS Raw를 포함한 `TagoSnapshot`을 반환한다. 결합을 요청한 GBIS 묶음이 누락·손상되거나 버전이 맞지 않으면 실패하며 TAGO-only로 대체하지 않는다. 반환값은 기존 `TransitMetadataSnapshotPreviewService.preview(snapshot)`에 전달할 수 있다. TAGO-only Preview는 GBIS 미수집을 삭제로 취급하지 않는다. 두 Manifest의 수집 시각은 별개이며 데이터 시점 일치나 최신성을 뜻하지 않는다. 서비스 수준의 격리 MySQL 테스트로 Preview와 DB 행 불변성을 확인했으며 실제 Provider 수집·개발 DB 비교·경기 Bundle CLI는 후속 작업이다.
+`TagoGbisOfflineSnapshotAssembler.tagoOnly(tago경로, serviceKey)`는 명시적으로 TAGO만 재생한다. `withGbis(tago경로, gbis경로, serviceKey)`는 양쪽 묶음을 검증한 뒤 기존 목적지 보강 규칙을 적용하고 TAGO와 GBIS Raw를 포함한 `TagoSnapshot`을 반환한다. 결합을 요청한 GBIS 묶음이 누락·손상되거나 버전이 맞지 않으면 실패하며 TAGO-only로 대체하지 않는다. 반환값은 기존 `TransitMetadataSnapshotPreviewService.preview(snapshot)`에 전달할 수 있다. TAGO-only Preview는 GBIS 미수집을 삭제로 취급하지 않는다. 두 Manifest의 수집 시각은 별개이며 데이터 시점 일치나 최신성을 뜻하지 않는다. 서비스 수준의 격리 MySQL 테스트로 Preview와 DB 행 불변성을 확인했으며 실제 Provider 수집과 개발 DB 비교는 후속 작업이다.
+
+### TAGO·GBIS 독립 수집 명령 (Phase 3-B-2B-2B-2A)
+
+Backend 디렉터리에서 환경변수 `PUBLIC_DATA_SERVICE_KEY`에 키를 주입하고, Git 밖의 기존 실제 절대 디렉터리를 지정한다. 기존 기본 Provider 주소를 사용하며 `TAGO_METADATA_BASE_URL`과 `GBIS_METADATA_BASE_URL`을 지정할 경우 HTTPS 공식 `apis.data.go.kr` 호스트만 허용한다. 기본은 Dry Run이며 키 값이나 Provider URL을 출력하지 않는다. 아래는 요청을 보내지 않는 예다.
+
+```bash
+./gradlew --offline collectTransitMetadata --args='--directory=/absolute/path/to/bundles --max-requests=5000 --interval-ms=1000'
+```
+
+실제 Live 실행은 **사용자의 별도 승인 후에만** 수행한다. 명시적 `--live`, `--confirm=COLLECT`, 양의 `--max-requests`가 모두 필요하다. 다음은 형식 예시이며 이번 단계에서 실제 실행하지 않았다.
+
+```bash
+./gradlew --offline collectTransitMetadata --args='--directory=/absolute/path/to/bundles --live --confirm=COLLECT --max-requests=5000 --interval-ms=1000 --max-response-bytes=50000000 --max-total-bytes=500000000 --max-duration-ms=3600000 --connect-timeout-ms=2000 --response-timeout-ms=30000'
+```
+
+`--offline`은 Gradle의 의존성 네트워크 접근을 제한할 뿐 Live Provider 요청을 차단하지 않는다. 기본값은 개별 응답 50,000,000바이트, 전체 응답 500,000,000바이트, 전체 3,600,000ms, 간격 1,000ms, 연결 2,000ms, 응답 30,000ms다. 모든 값은 유한한 양수여야 한다. Dry Run의 기본 최대 요청은 1,000회지만 Live에서는 반드시 별도 지정한다. 최소 요청은 GBIS 3회와 TAGO 도시 목록·31개 도시 Route 각 1회로 35회이며 추가 페이지와 Route별 정류장 때문에 전체 횟수는 수집 전 확정할 수 없다. 제한을 높이는 일은 실행자의 요청량·저장 공간 검토가 필요하다.
+
+별도 JVM은 Java 21 JDK HTTP Client의 재시도 제한 속성을 시작 시 설정하고 Redirect를 따르지 않는다. 버전 변경 시 재시도 차단을 재검증한다. 각 수집은 새 디렉터리를 사용하고 저장 성공한 원본은 바꾸지 않는다. 실패 시 Provider·단계·오류·요청/수신량·응답 수와 각 경로/완료 상태를 출력하며 예외 원문과 인증정보는 출력하지 않는다. GBIS 완료 후 TAGO가 실패하면 GBIS 묶음은 독립 완료 상태로 남을 수 있지만 전체 수집은 실패다. 완료 Manifest가 없는 부분 묶음은 재생하지 않으며 자동 재개·삭제하지 않는다. 실행자는 파일 접근 권한과 보존을 관리한다. 파일 무결성 해시는 서명이 아니다.
+
+이 명령은 웹 서버, Scheduler, FCM, Flyway, Hibernate, DB 연결 및 Bootstrap을 시작하지 않는다. 정상 수집 후 기존 Bundle 및 통합 Snapshot 재생을 검증하지만 DB Preview나 적용은 하지 않는다. 이 단계에서는 Mock Provider와 로컬 HTTP fixture만 사용했으며 실제 Provider·개발/운영 DB는 사용하지 않았다. 실제 GBIS URL·최신성, API quota와 수집 결과 및 DB Preview는 Live 수집 전에 별도로 검토한다.

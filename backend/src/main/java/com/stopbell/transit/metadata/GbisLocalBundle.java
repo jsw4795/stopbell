@@ -57,6 +57,9 @@ public final class GbisLocalBundle {
             } catch (RuntimeException | IOException e) { closed = true; throw e; }
         }
         public GbisCollectedSnapshot complete() throws IOException {
+            return complete(() -> { });
+        }
+        GbisCollectedSnapshot complete(Runnable beforePublish) throws IOException {
             if (closed) throw new IllegalStateException("Bundle is closed");
             closed = true;
             if (entries.size() != Source.values().length) throw new IllegalStateException("Incomplete bundle");
@@ -67,6 +70,7 @@ public final class GbisLocalBundle {
                     item.routeVersion(), item.routeStationVersion(), List.of(entries.get(Source.BASE_INFO),
                     entries.get(Source.ROUTE), entries.get(Source.ROUTE_STATION)));
             var snapshot = replay(directory, manifest, key);
+            beforePublish.run();
             writeNew(directory.resolve("manifest.json"), MAPPER.writeValueAsBytes(manifest));
             return snapshot;
         }
