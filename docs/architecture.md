@@ -771,6 +771,10 @@ Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncR
 
 원본 파일과 Manifest는 임시 파일 작성 후 덮어쓰기 없는 하드 링크로 확정한다. 저장소와 파일은 신뢰할 수 있는 사용자만 변경할 수 있어야 하며 하드 링크가 지원되어야 한다. 해시는 우발적인 손상 검출용이며 Manifest와 파일을 함께 바꾸는 공격에 대한 인증은 아니다. 정전 시 durable flush는 보장하지 않고 실패하거나 중단된 디렉터리와 고아 임시 파일은 자동 삭제하지 않는다. 이 단계는 실제 수집 명령, API 호출 예산, GBIS, Preview 연결이나 DB 적용을 제공하지 않는다.
 
+### GBIS 로컬 원본 보존과 오프라인 재생 (Phase 3-B-2B-2B-1B)
+
+`GbisLocalBundle`은 기반정보 JSON, Route, RouteStation 바이트를 Git 밖에 보존한다. 크기·SHA-256과 버전 등을 담은 Manifest는 세 원본의 무결성, 기반정보와 공식 다운로드 URL, 버전, 기존 Bulk 파서와 Raw 안전성 검사로 Snapshot을 생성한 뒤에만 게시한다. 재생도 같은 검증을 수행하며 HTTP와 DB를 사용하지 않는다. 두 다운로드 URL 필드에 한해 구조적으로 공식 호스트를 검사하고 인코딩·인증정보 및 민감한 query를 거부한다. 그 밖의 필드에는 기존 아카이브 안전 정책을 적용한다. 파일 게시와 신뢰 경계는 위 TAGO 묶음과 동일하다. 실제 Provider 호출, TAGO·GBIS 통합과 실제 DB Preview는 이 단계에서 수행하지 않았다.
+
 ### 교통 메타데이터 Snapshot Preview (Phase 3-B-2B-1)
 
 `TransitMetadataSnapshotPreviewService`는 서울 CSV 또는 기존 TAGO/선택적 GBIS 수집 Snapshot의 완전성과 원본 대응을 기존 준비 경로로 검증하고, 반복 읽기 트랜잭션에서 현재 DB와 기존 Diff 엔진으로 비교한다. Guard와 위험 상세도 기존 계산을 사용하며 결과는 적용 결과나 승인 근거가 아니다. V36 분석·V37 상세·V38 승인을 생성하거나 지문을 발급하지 않고, 수집 이력·아카이브·정규화 및 원본 데이터와 완료 시각도 변경하지 않는다. 상세는 페이지로 조회하며 공유 Stop의 모든 변형을 보존한다. Raw 비교는 출처와 데이터 종류를 구분하고 미수집 GBIS를 비교하지 않는다.

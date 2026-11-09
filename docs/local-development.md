@@ -695,3 +695,7 @@ Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여�
 `TagoLocalBundle.create(절대_디렉터리, serviceKey)`는 Git 저장소 밖의 이미 존재하는 실제 경로에서 묶음을 만든다. `cityOrder()` 순서대로 cityCode 목록, 도시별 Route 페이지, 각 Route의 정류장 페이지를 `Writer.add(Request, 원본바이트)`에 전달한다. operation은 각각 `getCtyCodeList`(city·route null, page 0), `getRouteNoList`(city·page), `getRouteAcctoThrghSttnList`(city·route·page)다. 모든 응답은 원본 그대로 보존한다. `complete()`가 기존 수집 검증을 끝내야 `manifest.json`이 생기며, 누락이나 실패 시 묶음은 재생할 수 없다. `TagoLocalBundle.replay(묶음_절대경로, serviceKey)`는 파일 무결성과 범위·순서를 재확인하고 네트워크 없이 `TagoSnapshot`을 반환한다. serviceKey는 내용 검사에만 사용하며 Manifest에 기록하지 않는다. 실제 Provider 수집 명령과 호출량 제한은 후속 작업이다.
 
 파일 권한과 보존은 실행자가 관리한다. 기존 디렉터리 및 그 조상에 심볼릭 링크가 없어야 하고 하드 링크를 지원해야 한다. 해시는 서명이 아니므로 파일과 Manifest에 대한 무단 수정 방지는 파일시스템 접근 통제에 의존한다. 완료되지 않은 묶음과 임시 파일은 자동 삭제하지 않는다.
+
+### GBIS 로컬 원본 묶음 (Phase 3-B-2B-2B-1B)
+
+`GbisLocalBundle.create(절대_디렉터리, serviceKey)`로 Git 밖의 기존 실제 디렉터리에 묶음을 만든다. `Writer.add(Source, 원본바이트)`에 `BASE_INFO`, `ROUTE`, `ROUTE_STATION`을 각각 한 번 전달한다. `complete()`가 세 파일과 기반정보·버전·Bulk·Raw 안전성을 검증해야 Manifest가 게시된다. `GbisLocalBundle.replay(묶음_절대경로, serviceKey)`는 크기와 SHA-256, 모든 원본과 버전을 재검증해 네트워크 없이 Snapshot을 반환한다. 서비스 키는 검사에만 사용하며 Manifest에 URL과 키를 기록하지 않는다. 공식 URL의 인코딩된 형태와 확인할 수 없는 query는 거부한다. 실제 Provider 수집, TAGO 통합 및 실제 DB Preview는 후속 작업이다. 파일 권한, 하드 링크, 해시와 미완료 묶음에 관한 위 TAGO 경계가 동일하게 적용된다.

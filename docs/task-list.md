@@ -2060,3 +2060,4 @@ TASK-901에서 필수 식별·진행 근거를 확보하지 못한 범위는 후
 - 3-B-2B-1 검증: Java 21·Gradle Wrapper 8.14.3·격리 MySQL Testcontainers에서 선택한 11개 클래스 102개 통과, 실패·오류·skip 0개. 서울 및 합성 TAGO/GBIS, DB 행과 기존 승인 불변성, 이전 스키마 차단, 공유 Stop 변형과 CLI 격리를 확인했다. 합성 노선 200개와 occurrence 400개를 검증했으나 처리량·메모리 수치는 측정하지 않았다. 실제 Provider 호출·개발/운영 DB 접근·전체 Backend 및 Flutter 테스트는 수행하지 않았고 Migration·Dependency 변경은 없다.
 - 3-B-2B-2 준비: 서울 최신 CSV, TAGO 31개 cityCode와 GBIS 기반정보·버전을 확보하고 최신성·호출량·메모리 및 Preview 결과를 검증한다. 검토된 데이터의 적용은 3-B-2C에서 별도로 진행한다.
 - [x] 3-B-2B-2B-1A: TAGO 응답의 DB 비의존 로컬 보존과 기존 파서·수집 경로를 이용한 오프라인 재생을 구현했다. 실제 API 호출·GBIS 원본 보존과 Preview 연결은 별도이며 3-B-2B-2B-1 전체는 미완료다. [로컬 묶음 경계](local-development.md#tago-로컬-원본-묶음-phase-3-b-2b-2b-1a)를 따른다.
+- [x] 3-B-2B-2B-1B: GBIS 기반정보·Route·RouteStation 원본의 로컬 보존, URL 안전성과 무결성 검증, 오프라인 Snapshot 재생을 구현했다. 실제 Provider 호출, TAGO·GBIS 통합 및 실제 DB Preview는 미실행이며 상위 3-B-2B-2B-1은 미완료다. [로컬 묶음 경계](local-development.md#gbis-로컬-원본-묶음-phase-3-b-2b-2b-1b)를 따른다.

@@ -14,7 +14,8 @@ public class GbisMetadataClient {
     private final RestClient restClient;
     private final String baseUrl;
     private final String serviceKey;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper(tools.jackson.core.json.JsonFactory.builder()
+            .enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION).build());
 
     public GbisMetadataClient(RestClient restClient, String baseUrl, String serviceKey) {
         this.restClient = restClient;
@@ -38,18 +39,8 @@ public class GbisMetadataClient {
         try {
             URI uri = UriComponentsBuilder.fromUriString(baseUrl)
                     .queryParam("format", "json").queryParam("serviceKey", serviceKey).build(true).toUri();
-            String response = restClient.get().uri(uri).retrieve().body(String.class);
-            BaseInfo envelope = mapper.readValue(response, BaseInfo.class);
-            if (envelope == null || envelope.response() == null || envelope.response().msgHeader() == null
-                    || envelope.response().msgHeader().resultCode() == null
-                    || envelope.response().msgHeader().resultCode() != 0
-                    || envelope.response().msgBody() == null || envelope.response().msgBody().baseInfoItem() == null) {
-                throw new IllegalStateException("GBIS base-info response failed");
-            }
-            Item item = envelope.response().msgBody().baseInfoItem();
-            if (item.routeVersion() == null || !item.routeVersion().equals(item.routeStationVersion())) {
-                throw new IllegalStateException("GBIS route and routeStation versions differ");
-            }
+            byte[] response = restClient.get().uri(uri).retrieve().body(byte[].class);
+            Item item = parseBaseInfo(response, serviceKey);
             byte[] routes = download(item.routeDownloadUrl());
             byte[] stations = download(item.routeStationDownloadUrl());
             if (preserveRaw) {
@@ -80,6 +71,78 @@ public class GbisMetadataClient {
             throw new IllegalStateException("GBIS base-info snapshot could not be validated: "
                     + e.getClass().getSimpleName());
         }
+    }
+
+    static Item parseBaseInfo(byte[] bytes, String key) {
+        try {
+            if (bytes == null || bytes.length == 0 || key == null || key.isBlank()) throw new IllegalArgumentException();
+            var tree = MAPPER.readTree(bytes);
+            var itemNode = tree.path("response").path("msgBody").path("baseInfoItem");
+            checkBaseJson(tree, itemNode, new ArchiveContentSafety(key), key);
+            BaseInfo envelope = MAPPER.readValue(bytes, BaseInfo.class);
+            if (envelope == null || envelope.response() == null || envelope.response().msgHeader() == null
+                    || envelope.response().msgHeader().resultCode() == null
+                    || envelope.response().msgHeader().resultCode() != 0
+                    || envelope.response().msgBody() == null || envelope.response().msgBody().baseInfoItem() == null)
+                throw new IllegalArgumentException();
+            Item item = envelope.response().msgBody().baseInfoItem();
+            if (item.routeVersion() == null || item.routeVersion().isBlank()
+                    || !item.routeVersion().equals(item.routeStationVersion())) throw new IllegalArgumentException();
+            validateDownloadUrl(item.routeDownloadUrl(), key);
+            validateDownloadUrl(item.routeStationDownloadUrl(), key);
+            return item;
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("GBIS base-info response could not be safely validated");
+        }
+    }
+
+    private static void checkBaseJson(tools.jackson.databind.JsonNode node, tools.jackson.databind.JsonNode item,
+                                      ArchiveContentSafety safety, String key) {
+        if (node == null) throw new IllegalArgumentException();
+        if (node.isObject()) {
+            for (var field : node.properties()) {
+                ArchiveContentSafety.checkField(field.getKey());
+                if (node == item && (field.getKey().equals("routeDownloadUrl")
+                        || field.getKey().equals("routeStationDownloadUrl"))) {
+                    if (!field.getValue().isString()) throw new IllegalArgumentException();
+                    validateDownloadUrl(field.getValue().asString(), key);
+                } else checkBaseJson(field.getValue(), item, safety, key);
+            }
+        } else if (node.isArray()) node.forEach(child -> checkBaseJson(child, item, safety, key));
+        else if (node.isString()) safety.checkText(node.asString());
+    }
+
+    private static void validateDownloadUrl(String url, String key) {
+        try {
+            URI uri = URI.create(url);
+            if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
+                    || !"openapi.gbis.go.kr".equalsIgnoreCase(uri.getHost()) || uri.getRawUserInfo() != null
+                    || uri.getPort() != -1 || uri.getRawFragment() != null || uri.getRawPath() == null
+                    || !uri.getRawPath().startsWith("/") || url.indexOf('%') >= 0
+                    || url.indexOf('\\') >= 0) throw new IllegalArgumentException();
+            ArchiveContentSafety safety = new ArchiveContentSafety(key);
+            safety.checkText(uri.getRawPath());
+            rejectCredentialWords(uri.getRawPath());
+            String query = uri.getRawQuery();
+            if (query != null) {
+                if (query.isEmpty()) throw new IllegalArgumentException();
+                for (String part : query.split("&", -1)) {
+                    String[] pair = part.split("=", -1);
+                    if (pair.length != 2 || !pair[0].matches("[A-Za-z0-9_-]+")
+                            || !pair[1].matches("[A-Za-z0-9._/-]+")) throw new IllegalArgumentException();
+                    ArchiveContentSafety.checkField(pair[0]);
+                    safety.checkText(pair[1]);
+                    rejectCredentialWords(pair[1]);
+                }
+            }
+        } catch (RuntimeException e) { throw new IllegalArgumentException("Invalid GBIS download URL"); }
+    }
+
+    private static void rejectCredentialWords(String value) {
+        String lower = value.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
+        if (lower.contains("token") || lower.contains("apikey") || lower.contains("servicekey")
+                || lower.contains("authorization") || lower.contains("bearer") || lower.contains("password")
+                || lower.contains("signature")) throw new IllegalArgumentException();
     }
 
     private static void preserveInterruption(Throwable failure) {
