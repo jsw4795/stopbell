@@ -737,3 +737,13 @@ GBIS 기반정보의 `baseInfoItem`에 있는 공식 다운로드 URL 여섯 필
 기반정보가 기존 검사에서 거부되면 수집 CLI는 `failure=INVALID_RESPONSE validation=...`과 필요한 경우 고정 `field=...`를 출력한다. 코드에는 `JSON_PARSE_ERROR`, `JSON_DUPLICATE_FIELD`, `ENVELOPE_STRUCTURE`, `PROVIDER_RESULT_ERROR`, `REQUIRED_FIELD_MISSING`, `FIELD_TYPE_INVALID`, `VERSION_MISMATCH`, `URL_MISSING`, `URL_INVALID_FORMAT`, `URL_HOST_MISMATCH`, `URL_FORBIDDEN_QUERY`, `URL_ENCODED_OR_USERINFO`, `URL_FORBIDDEN_CONTENT`, `URL_OUTSIDE_OFFICIAL_FIELD`, `CONTENT_UNSAFE`, `UNKNOWN`이 있다. 필드는 응답 구조·버전·공식 URL의 미리 정의된 식별자만 사용한다. 분류가 확실하지 않으면 `UNKNOWN`이며 실제 필드 값, 원본 JSON, URL, 인증정보 및 원본 예외는 출력하거나 저장하지 않는다. HTTP 오류와 저장 오류에는 GBIS 검증 코드를 붙이지 않는다.
 
 이전 869바이트 응답은 저장되지 않아 원인이 여전히 미확정이다. 이후 별도로 승인된 Live 진단에서는 요청·바이트·Bundle 상태와 이 고정 코드를 확인하고, 필요한 설계 판단은 실제 값을 추측하지 않고 진행한다. 이번 단계는 합성 데이터와 로컬 Mock으로 검증했으며 Provider 호출과 DB 접근을 수행하지 않았다. 실제 수집과 DB Preview는 미완료다.
+
+### GBIS URL 형식 진단 세분화 (Phase 3-B-2B-2B-2B-D3)
+
+이후 별도 승인된 기반정보 Live 진단 1회는 HTTP 2xx, 869바이트, `URL_INVALID_FORMAT` / `AREA_DOWNLOAD_URL`로 중단됐고 원본을 남기지 않았다. 이전 869바이트 응답과 동일한 원인인지는 알 수 없다. Route·RouteStation·TAGO 추가 요청과 완료 Manifest는 없었다.
+
+기존 검증이 거부한 후 URL 형식은 `URL_URI_SYNTAX`, `URL_SCHEME_MISSING`, `URL_SCHEME_UNSUPPORTED`, `URL_HOST_MISSING`, `URL_PORT_PRESENT`, `URL_FRAGMENT_PRESENT`, `URL_PATH_MISSING`, `URL_PATH_NOT_ABSOLUTE`, `URL_QUERY_STRUCTURE`, `URL_QUERY_PARAMETER_FORMAT`, `URL_BACKSLASH`로 세분화한다. 기존 호스트 불일치·민감 query·인코딩/인증정보 분류는 유지한다. 중복 조건은 검사 순서상 먼저 발견한 코드만 보고하며 확인할 수 없는 원인은 `UNKNOWN`이다. 응답 값과 URL, query 이름·값은 출력하지 않는다.
+
+Route와 RouteStation은 실제 다운로드에 필수다. 나머지 네 URL은 다운로드하지 않지만 현재는 필드가 존재하면 동일한 공식 URL 및 민감정보 검사를 통과해야 원본에 보존한다. 합성 입력에서 상대경로·빈 값·null·비공식 호스트·민감 query·인증정보·인코딩을 거부했으며 실제 값과 공식 규격 확인 전에는 허용 범위를 변경하지 않는다. 후속 검토에서는 비필수 필드의 실제 의미와 원본 보존 안전성을 별도로 판단한다.
+
+이번 코드·테스트 단계에는 Provider와 DB에 접근하지 않았다. 별도 승인 후 `--max-requests=1`로 진단할 수 있으나, 현재 CLI는 기반정보가 정상 검증되면 Route 요청 한도 검사 전에 기반정보 원본을 새 Bundle에 저장한다. 따라서 원본 저장까지 금지하는 후속 Live 진단은 현 CLI 그대로 실행할 수 없고 실행 전에 이 충돌을 해결해야 한다. 실제 GBIS·TAGO 수집과 DB Preview는 미완료다.

@@ -61,12 +61,52 @@ class GbisBaseInfoDiagnosticsTest {
     @Test void classifies_url_security_without_exposing_values() {
         for (String url : List.of("http://evil.test/a", "http://openapi.gbis.go.kr.evil.test/a"))
             rejects(BASE.replace(ROUTE_URL, url), URL_HOST_MISMATCH, ROUTE_DOWNLOAD_URL);
-        rejects(BASE.replace(ROUTE_URL, "ftp://openapi.gbis.go.kr/a"), URL_INVALID_FORMAT, ROUTE_DOWNLOAD_URL);
+        rejects(BASE.replace(ROUTE_URL, "ftp://openapi.gbis.go.kr/a"), URL_SCHEME_UNSUPPORTED, ROUTE_DOWNLOAD_URL);
         rejects(BASE.replace(ROUTE_URL, "http://user:secret@openapi.gbis.go.kr/a"), URL_ENCODED_OR_USERINFO, ROUTE_DOWNLOAD_URL);
         rejects(BASE.replace(ROUTE_URL, "http://openapi.gbis.go.kr/a?file=%73ecret"), URL_ENCODED_OR_USERINFO, ROUTE_DOWNLOAD_URL);
         for (String query : List.of("signature=fake", "token=secret", "serviceKey=" + KEY, "apiKey=secret", "authorization=secret"))
             rejects(BASE.replace(ROUTE_URL, "http://openapi.gbis.go.kr/a?" + query), URL_FORBIDDEN_QUERY, ROUTE_DOWNLOAD_URL);
         rejects(BASE.replace(ROUTE_URL, "http://openapi.gbis.go.kr/" + KEY), URL_FORBIDDEN_CONTENT, ROUTE_DOWNLOAD_URL);
+    }
+    @Test void classifies_url_format_without_disclosing_input() {
+        var cases = java.util.Map.ofEntries(
+                java.util.Map.entry("http://openapi.gbis.go.kr/a b", URL_URI_SYNTAX),
+                java.util.Map.entry("/relative", URL_SCHEME_MISSING),
+                java.util.Map.entry("ftp://openapi.gbis.go.kr/a", URL_SCHEME_UNSUPPORTED),
+                java.util.Map.entry("http:///a", URL_HOST_MISSING),
+                java.util.Map.entry("http://openapi.gbis.go.kr:80/a", URL_PORT_PRESENT),
+                java.util.Map.entry("http://openapi.gbis.go.kr/a#fragment", URL_FRAGMENT_PRESENT),
+                java.util.Map.entry("http://openapi.gbis.go.kr", URL_PATH_MISSING),
+                java.util.Map.entry("http:relative", URL_PATH_NOT_ABSOLUTE),
+                java.util.Map.entry("http://openapi.gbis.go.kr/a?", URL_QUERY_STRUCTURE),
+                java.util.Map.entry("http://openapi.gbis.go.kr/a?file=a=b", URL_QUERY_STRUCTURE),
+                java.util.Map.entry("http://openapi.gbis.go.kr/a?file=", URL_QUERY_PARAMETER_FORMAT),
+                java.util.Map.entry("http://openapi.gbis.go.kr/a?file=a+b", URL_QUERY_PARAMETER_FORMAT),
+                java.util.Map.entry("http://openapi.gbis.go.kr/a\\\\b", URL_BACKSLASH));
+        cases.forEach((url, code) -> rejects(BASE.replace(ROUTE_URL, url), code, ROUTE_DOWNLOAD_URL));
+    }
+    @Test void optional_official_fields_keep_existing_acceptance_and_security_boundary() {
+        for (String name : List.of("areaDownloadUrl", "routeLineDownloadUrl", "stationDownloadUrl", "vehicleDownloadUrl")) {
+            String prefix = "\"" + name + "\":";
+            String valid = BASE.replace("\"routeVersion\":", prefix + "\"" + ROUTE_URL + "\",\"routeVersion\":");
+            assertThat(GbisMetadataClient.parseBaseInfo(bytes(valid), KEY).routeVersion()).isEqualTo("v1");
+            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"/relative\""), URL_SCHEME_MISSING, fieldFor(name));
+            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"\""), URL_MISSING, fieldFor(name));
+            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "null"), URL_MISSING, fieldFor(name));
+            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"http://evil.test/a\""), URL_HOST_MISMATCH, fieldFor(name));
+            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"http://openapi.gbis.go.kr/a?token=secret\""), URL_FORBIDDEN_QUERY, fieldFor(name));
+            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"http://user:secret@openapi.gbis.go.kr/a\""), URL_ENCODED_OR_USERINFO, fieldFor(name));
+            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"http://openapi.gbis.go.kr/a?token=%73ecret\""), URL_ENCODED_OR_USERINFO, fieldFor(name));
+        }
+    }
+    private static GbisBaseInfoValidationException.Field fieldFor(String name) {
+        return switch (name) {
+            case "areaDownloadUrl" -> AREA_DOWNLOAD_URL;
+            case "routeLineDownloadUrl" -> ROUTE_LINE_DOWNLOAD_URL;
+            case "stationDownloadUrl" -> STATION_DOWNLOAD_URL;
+            case "vehicleDownloadUrl" -> VEHICLE_DOWNLOAD_URL;
+            default -> throw new AssertionError();
+        };
     }
     @Test void classifies_unsafe_other_fields() {
         rejects(BASE.replace("\"resultCode\":0", "\"resultCode\":0,\"other\":\"https://evil.test/a\""), URL_OUTSIDE_OFFICIAL_FIELD, NONE);

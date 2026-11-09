@@ -106,27 +106,32 @@ final class GbisBaseInfoDiagnostics {
         catch (RuntimeException ignored) { /* The original validator decides acceptance. */ }
         if (value == null || value.isBlank()) return failure(Code.URL_MISSING, field);
         if (value.indexOf('%') >= 0) return failure(Code.URL_ENCODED_OR_USERINFO, field);
+        if (value.indexOf('\\') >= 0) return failure(Code.URL_BACKSLASH, field);
         URI uri;
         try { uri = URI.create(value); }
-        catch (RuntimeException e) { return failure(Code.URL_INVALID_FORMAT, field); }
+        catch (RuntimeException e) { return failure(Code.URL_URI_SYNTAX, field); }
+        if (uri.getScheme() == null) return failure(Code.URL_SCHEME_MISSING, field);
         if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme())))
-            return failure(Code.URL_INVALID_FORMAT, field);
-        if (uri.getHost() == null) return failure(Code.URL_INVALID_FORMAT, field);
+            return failure(Code.URL_SCHEME_UNSUPPORTED, field);
+        if (uri.isOpaque()) return failure(Code.URL_PATH_NOT_ABSOLUTE, field);
+        if (uri.getHost() == null) return failure(Code.URL_HOST_MISSING, field);
         if (!"openapi.gbis.go.kr".equalsIgnoreCase(uri.getHost())) return failure(Code.URL_HOST_MISMATCH, field);
         if (uri.getRawUserInfo() != null) return failure(Code.URL_ENCODED_OR_USERINFO, field);
-        if (uri.getPort() != -1 || uri.getRawFragment() != null || uri.getRawPath() == null
-                || !uri.getRawPath().startsWith("/") || value.indexOf('\\') >= 0)
-            return failure(Code.URL_INVALID_FORMAT, field);
+        if (uri.getPort() != -1) return failure(Code.URL_PORT_PRESENT, field);
+        if (uri.getRawFragment() != null) return failure(Code.URL_FRAGMENT_PRESENT, field);
+        if (uri.getRawPath() == null || uri.getRawPath().isEmpty()) return failure(Code.URL_PATH_MISSING, field);
+        if (!uri.getRawPath().startsWith("/")) return failure(Code.URL_PATH_NOT_ABSOLUTE, field);
         var safety = new ArchiveContentSafety(key);
         try { safety.checkText(uri.getRawPath()); GbisMetadataClient.rejectCredentialWords(uri.getRawPath()); }
         catch (RuntimeException e) { return failure(Code.URL_FORBIDDEN_CONTENT, field); }
         String query = uri.getRawQuery();
         if (query != null) {
-            if (query.isEmpty()) return failure(Code.URL_INVALID_FORMAT, field);
+            if (query.isEmpty()) return failure(Code.URL_QUERY_STRUCTURE, field);
             for (String part : query.split("&", -1)) {
                 String[] pair = part.split("=", -1);
-                if (pair.length != 2 || !pair[0].matches("[A-Za-z0-9_-]+") || !pair[1].matches("[A-Za-z0-9._/-]+"))
-                    return failure(Code.URL_INVALID_FORMAT, field);
+                if (pair.length != 2) return failure(Code.URL_QUERY_STRUCTURE, field);
+                if (!pair[0].matches("[A-Za-z0-9_-]+") || !pair[1].matches("[A-Za-z0-9._/-]+"))
+                    return failure(Code.URL_QUERY_PARAMETER_FORMAT, field);
                 try { ArchiveContentSafety.checkField(pair[0]); safety.checkText(pair[1]); GbisMetadataClient.rejectCredentialWords(pair[1]); }
                 catch (RuntimeException e) { return failure(Code.URL_FORBIDDEN_QUERY, field); }
             }
