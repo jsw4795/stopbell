@@ -133,6 +133,33 @@ class SeoulCsvMetadataSourceTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
+    @Test
+    @DisplayName("서울 좌표는 유효성 검증 후 MySQL 정밀도로 반올림하고 원본을 보존한다")
+    void normalize_coordinates_at_decimal_boundaries_and_preserve_raw() {
+        String routes = "노선ID,노선명,노선유형,거리\nr,1,간선,1\n";
+        String occurrences = "노선ID,노드ID,링크거리누계,정류장순번\nr,a,0,1\nr,b,0,2\nr,a,0,3\n";
+        String stops = "정류장ID,정류장명,정류장유형,정류장번호,좌표X,좌표Y,BIT설치여부\n"
+                + "a,A,일반차로,1,127.12345674,37.12345675,미설치\n"
+                + "b,B,일반차로,2,-127.12345675,-37.12345675,미설치\n";
+        var source = source(routes, occurrences, stops);
+        var collected = source.fetchSnapshotWithRawRows();
+        var normalized = source.toCompleteSnapshot(collected.normalized()).routes().getFirst().occurrences();
+        assertThat(normalized).hasSize(3);
+        assertThat(normalized.get(0).latitude()).isEqualByComparingTo("37.1234568");
+        assertThat(normalized.get(0).longitude()).isEqualByComparingTo("127.1234567");
+        assertThat(normalized.get(1).latitude()).isEqualByComparingTo("-37.1234568");
+        assertThat(normalized.get(1).longitude()).isEqualByComparingTo("-127.1234568");
+        assertThat(normalized.get(2).latitude()).isEqualTo(normalized.get(0).latitude());
+        assertThat(normalized.get(2).stopOrder()).isEqualTo(3);
+        assertThat(raw(collected, TransitSourceDataKind.STOP, "a").fields())
+                .containsEntry("좌표X", "127.12345674").containsEntry("좌표Y", "37.12345675");
+        assertThat(raw(collected, TransitSourceDataKind.STOP, "b").fields())
+                .containsEntry("좌표X", "-127.12345675").containsEntry("좌표Y", "-37.12345675");
+        assertThatThrownBy(() -> source(routes, occurrences, stops.replace("37.12345675", "90.00000001"))
+                .fetchCompleteSourceSnapshot()).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("latitude");
+    }
+
     private SeoulCsvMetadataSource.RawSourceRow raw(SeoulCsvMetadataSource.SeoulCsvSnapshot snapshot,
             TransitSourceDataKind kind, String key) {
         return snapshot.rawRows().stream().filter(row -> row.dataKind() == kind && row.sourceKey().equals(key))

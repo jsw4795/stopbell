@@ -86,6 +86,58 @@ class TransitMetadataSnapshotPreviewIntegrationTest {
         assertThat(result.detailPage(0, 1)).hasSize(1);
         assertThat(rows()).isEqualTo(before);
     }
+    @Test void seoul_precision_matches_mysql_and_preserves_real_changes_and_raw() {
+        String routes = "노선ID,노선명,노선유형,거리\nr,1,간선,1\nz,2,지선,1\n";
+        String occurrences = "노선ID,노드ID,링크거리누계,정류장순번\nr,a,0,1\nr,b,0,2\nr,a,0,3\nz,a,0,1\n";
+        String stops = "정류장ID,정류장명,정류장유형,정류장번호,좌표X,좌표Y,BIT설치여부\n"
+                + "a,A,일반차로,1,127.12345674,37.12345675,미설치\n"
+                + "b,B,일반차로,2,-127.12345675,-37.12345675,미설치\n";
+        var source = new SeoulCsvMetadataSource(resource(routes), resource(occurrences), resource(stops));
+        var collected = source.fetchSnapshotWithRawRows();
+        var snapshot = source.toCompleteSnapshot(collected.normalized());
+        var first = snapshot.routes().stream().filter(r -> r.externalRouteId().equals("r")).findFirst().orElseThrow().occurrences();
+        // Insert the unrounded provider values through JDBC to verify MySQL's actual DECIMAL behavior.
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name,latitude,longitude) values ('SEOUL_BUS','a','A',?,?)",
+                new java.math.BigDecimal("37.12345675"), new java.math.BigDecimal("127.12345674"));
+        jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name,latitude,longitude) values ('SEOUL_BUS','b','B',?,?)",
+                new java.math.BigDecimal("-37.12345675"), new java.math.BigDecimal("-127.12345675"));
+        for (int i = 0; i < 2; i++) {
+            var stop = first.get(i);
+            assertThat(jdbc.queryForObject("select latitude from bus_stops where external_stop_id=?", java.math.BigDecimal.class, stop.externalStopId()))
+                    .isEqualByComparingTo(stop.latitude());
+            assertThat(jdbc.queryForObject("select longitude from bus_stops where external_stop_id=?", java.math.BigDecimal.class, stop.externalStopId()))
+                    .isEqualByComparingTo(stop.longitude());
+        }
+        Instant collectedAt = Instant.parse("2026-01-01T00:00:00Z");
+        sync.syncSeoulSnapshot(source, collected, collectedAt);
+        var before = rows();
+        var result = preview.preview(source, collected);
+        assertThat(result.diff().modifiedStops()).isEmpty();
+        assertThat(result.diff().conflictingStops()).isEmpty();
+        assertThat(result.diff().unchangedOccurrences()).hasSize(4);
+        assertThat(result.safety().decision()).isEqualTo(BusMetadataSafetyGuard.Decision.ALLOW);
+        assertThat(rows()).isEqualTo(before);
+        jdbc.execute("CREATE TRIGGER reject_unnecessary_stop_update BEFORE UPDATE ON bus_stops FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'unexpected stop update'");
+        try {
+            sync.syncSeoulSnapshot(source, collected, collectedAt);
+        } finally {
+            jdbc.execute("DROP TRIGGER reject_unnecessary_stop_update");
+        }
+        assertThat(jdbc.queryForObject("select count(*) from bus_route_stop_occurrences", Integer.class)).isEqualTo(4);
+        assertThat(jdbc.queryForObject("select JSON_UNQUOTE(JSON_EXTRACT(raw_payload, '$.\"좌표Y\"')) from transit_source_metadata where source_system='SEOUL_TDATA' and data_kind='STOP' and source_key='a'", String.class))
+                .isEqualTo("37.12345675");
+
+        var changed = new SeoulCsvMetadataSource(resource(routes), resource(occurrences), resource(stops
+                .replace("a,A,", "a,A changed,")
+                .replace("127.12345674,37.12345675", "127.12345674,37.12345695")));
+        var changedResult = preview.preview(changed, changed.fetchSnapshotWithRawRows());
+        assertThat(changedResult.diff().modifiedStops()).singleElement().satisfies(change ->
+                assertThat(change.fields()).extracting(BusMetadataDiffService.FieldChange::field)
+                        .containsExactly("stopName", "latitude"));
+        assertThat(changedResult.diff().conflictingStops()).isEmpty();
+        assertThat(changedResult.diff().unchangedOccurrences()).hasSize(4);
+    }
+
     @Test void seoul_addition_and_reordered_occurrences_are_detected() {
         var original = seoul("r,1,지선,1\n", "r,a,0,1\nr,b,0,2\n");
         sync.syncSeoulSnapshot(original, original.fetchSnapshotWithRawRows(), Instant.parse("2026-01-01T00:00:00Z"));

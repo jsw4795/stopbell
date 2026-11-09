@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -383,7 +384,7 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
                 && (coordinate.compareTo(BigDecimal.valueOf(-180)) < 0 || coordinate.compareTo(BigDecimal.valueOf(180)) > 0)) {
             throw new IllegalStateException("Seoul CSV longitude is outside the valid range");
         }
-        return coordinate;
+        return coordinate.setScale(7, RoundingMode.HALF_UP);
     }
 
     /** Raw rows are independent of the normalized snapshot and include out-of-scope data. */
