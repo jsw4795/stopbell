@@ -15,6 +15,8 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -81,8 +83,20 @@ class OfflineBundleApprovalIntegrationTest {
         String hash = jdbc.queryForObject("select review_fingerprint from transit_metadata_diff_analyses where collection_run_id=?", String.class, run);
         return approvals.approve(run, TransitProvider.TAGO, analysis.find(run).fingerprint(), hash, Instant.now().plusSeconds(3600), "reviewed").id();
     }
-    @Test @DisplayName("완료 Bundle은 위험 변경 상세 승인 후 같은 원본과 수집 시각으로 오프라인 적용된다")
-    void applies_reviewed_bundles_without_collection() throws Exception {
+    @ParameterizedTest
+    @CsvSource({
+            "2026-01-02T00:00:00.123456789Z, 2026-01-02T23:59:59.999999999Z, 2026-01-02T00:00:00.123457Z, 2026-01-03T00:00:00Z",
+            "2026-01-02T00:00:00.123456499Z, 2026-01-02T00:00:00.123456000Z, 2026-01-02T00:00:00.123456Z, 2026-01-02T00:00:00.123456Z"
+    })
+    @DisplayName("완료 Bundle은 위험 변경 상세 승인 후 같은 원본과 수집 시각으로 오프라인 적용된다")
+    void applies_reviewed_bundles_without_collection(String tagoStartedAt, String gbisStartedAt, String tagoStoredAt, String gbisStoredAt) throws Exception {
+        var mapper = new tools.jackson.databind.ObjectMapper();
+        var tagoFile = tago.resolve("manifest.json");
+        var t = mapper.readValue(Files.readAllBytes(tagoFile), TagoLocalBundle.Manifest.class);
+        Files.write(tagoFile, mapper.writeValueAsBytes(new TagoLocalBundle.Manifest(t.id(), tagoStartedAt, t.completedAt(), t.complete(), t.cities(), t.responses())));
+        var gbisFile = gbis.resolve("manifest.json");
+        var g = mapper.readValue(Files.readAllBytes(gbisFile), GbisLocalBundle.Manifest.class);
+        Files.write(gbisFile, mapper.writeValueAsBytes(new GbisLocalBundle.Manifest(g.id(), gbisStartedAt, g.completedAt(), g.complete(), g.sourceSystem(), g.routeVersion(), g.routeStationVersion(), g.files())));
         long id = reviewAndApprove();
         bootstrap.applyOfflineBundlesWithApproval(tago, gbis, OfflineBundleFixtures.KEY, id);
         assertThat(approvals.find(id).status()).isEqualTo(TransitMetadataChangeApprovalService.Status.APPLIED);
@@ -92,9 +106,11 @@ class OfflineBundleApprovalIntegrationTest {
         assertThat(jdbc.queryForObject("select json_unquote(json_extract(raw_payload,'$.extra')) from transit_source_metadata where source_system='TAGO' and data_kind='ROUTE' and source_key='GGB201' and route_id is null", String.class)).isEqualTo("old");
         var tagoManifest = new tools.jackson.databind.ObjectMapper().readValue(Files.readAllBytes(tago.resolve("manifest.json")), TagoLocalBundle.Manifest.class);
         var gbisManifest = new tools.jackson.databind.ObjectMapper().readValue(Files.readAllBytes(gbis.resolve("manifest.json")), GbisLocalBundle.Manifest.class);
-        for (var entry : Map.of("TAGO", tagoManifest.startedAt(), "GBIS", gbisManifest.startedAt()).entrySet()) {
+        assertThat(tagoManifest.startedAt()).isEqualTo(tagoStartedAt);
+        assertThat(gbisManifest.startedAt()).isEqualTo(gbisStartedAt);
+        for (var entry : Map.of("TAGO", tagoStoredAt, "GBIS", gbisStoredAt).entrySet()) {
             var time = jdbc.queryForObject("select max(collected_at) from transit_source_metadata where source_system=?", java.sql.Timestamp.class, entry.getKey()).toInstant();
-            assertThat(time).isEqualTo(Instant.parse(entry.getValue()).truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+            assertThat(time).isEqualTo(Instant.parse(entry.getValue()));
         }
     }
     @Test @DisplayName("승인 후 DB 기준이 달라지면 Bundle 적용과 승인 선점을 차단한다")
