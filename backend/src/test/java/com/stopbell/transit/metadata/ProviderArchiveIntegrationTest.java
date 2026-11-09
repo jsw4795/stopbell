@@ -74,7 +74,7 @@ class ProviderArchiveIntegrationTest {
     private static String stop(int page, int id, String name) {
         return "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"nodeid\":\"GGB" + id + "\",\"nodenm\":\"" + name + "\",\"nodeord\":" + page + "}},\"totalCount\":2,\"pageNo\":" + page + "}}}";
     }
-    private static final String BASE = "{\"response\":{\"msgHeader\":{\"resultCode\":0},\"msgBody\":{\"baseInfoItem\":{\"routeDownloadUrl\":\"http://openapi.gbis.go.kr/ws/download?file=route&signature=fake\",\"routeVersion\":\"1\",\"routeStationDownloadUrl\":\"http://openapi.gbis.go.kr/ws/download?file=station&signature=fake\",\"routeStationVersion\":\"1\"}}}}";
+    private static final String BASE = "{\"response\":{\"msgHeader\":{\"resultCode\":0},\"msgBody\":{\"baseInfoItem\":{\"routeDownloadUrl\":\"http://openapi.gbis.go.kr/ws/download?file=route\",\"routeVersion\":\"1\",\"routeStationDownloadUrl\":\"http://openapi.gbis.go.kr/ws/download?file=station\",\"routeStationVersion\":\"1\"}}}}";
 
     @Test void seoul_files_are_identical_and_sync_only_after_archiving() throws Exception {
         SeoulCsvMetadataSource source = new SeoulCsvMetadataSource(resource(SEOUL_ROUTES), resource(SEOUL_ROUTE_STOPS), resource(SEOUL_STOPS));
@@ -101,8 +101,8 @@ class ProviderArchiveIntegrationTest {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         expect(server, "https://provider.test/base?format=json&serviceKey=fake-service-key", BASE);
-        expect(server, "http://openapi.gbis.go.kr/ws/download?file=route&signature=fake", GBIS_ROUTES);
-        expect(server, "http://openapi.gbis.go.kr/ws/download?file=station&signature=fake", GBIS_STOPS);
+        expect(server, "http://openapi.gbis.go.kr/ws/download?file=route", GBIS_ROUTES);
+        expect(server, "http://openapi.gbis.go.kr/ws/download?file=station", GBIS_STOPS);
         expect(server, "https://provider.test/tago/getCtyCodeList?serviceKey=fake-service-key&_type=json", CITY);
         expect(server, "https://provider.test/tago/getRouteNoList?serviceKey=fake-service-key&pageNo=1&numOfRows=1000&_type=json&cityCode=31010", ROUTE);
         for (int i = 1; i <= 2; i++) expect(server, "https://provider.test/tago/getRouteAcctoThrghSttnList?serviceKey=fake-service-key&pageNo=" + i + "&numOfRows=1000&_type=json&cityCode=31010&routeId=GGB200", stop(i, i * 10, i == 1 ? "출발" : "종점"));
@@ -130,6 +130,44 @@ class ProviderArchiveIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT destination_name FROM bus_route_stop_occurrences WHERE destination_name IS NOT NULL LIMIT 1", String.class)).isEqualTo("종점");
         assertThat(jdbc.queryForList("SELECT file_name FROM transit_metadata_archives WHERE collection_run_id=?", String.class, run)).allSatisfy(name -> assertThat(name).matches("[0-9a-f]{64}"));
         assertThat(output.getAll()).doesNotContain("fake-service-key", "signature=fake", "openapi.gbis.go.kr");
+    }
+
+    @Test
+    @ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void signed_gbis_url_is_rejected_before_download_and_sync(org.springframework.boot.test.system.CapturedOutput output) {
+        var beforeRoutes = jdbc.queryForList("select * from bus_routes order by id");
+        var beforeStops = jdbc.queryForList("select * from bus_stops order by id");
+        var beforeOccurrences = jdbc.queryForList("select * from bus_route_stop_occurrences order by id");
+        var beforeRaw = jdbc.queryForList("select * from transit_source_metadata order by id");
+        var beforeState = jdbc.queryForList("select * from bus_metadata_sync_states order by provider");
+        RestClient.Builder builder = RestClient.builder();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        String signedUrl = "http://openapi.gbis.go.kr/ws/download?file=route&signature=fake";
+        expect(server, "https://provider.test/base?format=json&serviceKey=fake-service-key",
+                BASE.replace("http://openapi.gbis.go.kr/ws/download?file=route", signedUrl));
+        RestClient rest = builder.build();
+        var tago = new TagoMetadataClient(rest, new TransitClientProperties.Tago("https://provider.test/unused", "https://provider.test/tago", "fake-service-key"));
+        var gbis = new GbisMetadataClient(rest, "https://provider.test/base", "fake-service-key");
+        var source = new TagoMetadataSource(tago, gbis, 0, Set.of("31010"));
+        assertThatThrownBy(() -> new BusMetadataBootstrapService(List.of(source), sync, runs, archives, analysis, review, approvals, Clock.systemUTC())
+                .bootstrap(TransitProvider.TAGO)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("code=INVALID_SOURCE").hasMessageNotContaining("fake-service-key")
+                .hasMessageNotContaining("signature=fake").hasMessageNotContaining(signedUrl);
+        server.verify();
+        long id = jdbc.queryForObject("select max(id) from transit_metadata_collection_runs where provider='TAGO'", Long.class);
+        var failed = runs.find(id);
+        assertThat(failed.getStatus()).isEqualTo(com.stopbell.transit.domain.TransitCollectionStatus.FAILED);
+        assertThat(failed.getFailureStage()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION);
+        assertThat(failed.getFailureCode()).isEqualTo(com.stopbell.transit.domain.TransitCollectionFailureCode.INVALID_SOURCE);
+        assertThat(failed.getFailureMessage()).isEqualTo("Source validation failed");
+        assertThat(countArchives(id)).isZero();
+        assertThat(analysis.find(id)).isNull();
+        assertThat(jdbc.queryForList("select * from bus_routes order by id")).isEqualTo(beforeRoutes);
+        assertThat(jdbc.queryForList("select * from bus_stops order by id")).isEqualTo(beforeStops);
+        assertThat(jdbc.queryForList("select * from bus_route_stop_occurrences order by id")).isEqualTo(beforeOccurrences);
+        assertThat(jdbc.queryForList("select * from transit_source_metadata order by id")).isEqualTo(beforeRaw);
+        assertThat(jdbc.queryForList("select * from bus_metadata_sync_states order by provider")).isEqualTo(beforeState);
+        assertThat(output.getAll()).doesNotContain("fake-service-key", "signature=fake", signedUrl);
     }
 
     @Test void incomplete_tago_keeps_partial_archives_but_does_not_sync() {

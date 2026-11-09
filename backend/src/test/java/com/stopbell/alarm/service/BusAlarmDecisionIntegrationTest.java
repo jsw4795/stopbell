@@ -316,8 +316,15 @@ class BusAlarmDecisionIntegrationTest {
             while (!java.nio.file.Files.exists(marker) && process.isAlive() && System.nanoTime() < deadline) {
                 Thread.sleep(100);
             }
-            assertThat(java.nio.file.Files.exists(marker)).as("child startup: %s", java.nio.file.Files.readString(log)).isTrue();
-            assertThat(java.nio.file.Files.readString(marker)).isEqualTo(expected);
+            boolean exists = java.nio.file.Files.exists(marker);
+            String actual = exists ? java.nio.file.Files.readString(marker) : "<missing>";
+            String safeActual = actual.matches("[A-Z0-9_:]*") ? actual : "<redacted>";
+            String status = process.isAlive() ? "running" : "exited:" + process.exitValue();
+            String diagnostics = "mode=" + name + " markerExists=" + exists + " expected=" + expected
+                    + " actual=" + safeActual + " child=" + status;
+            assertThat(exists).as(diagnostics).isTrue();
+            assertThat(safeActual).as(diagnostics).isEqualTo(expected);
+            assertThat(process.isAlive()).as(diagnostics).isTrue();
         } finally {
             process.destroy(); // SIGTERM on the supported Unix CI and development environments.
             if (!process.waitFor(30, TimeUnit.SECONDS)) {
@@ -326,7 +333,8 @@ class BusAlarmDecisionIntegrationTest {
                 throw new AssertionError("Child did not terminate gracefully");
             }
         }
-        assertThat(java.nio.file.Files.readString(log)).contains("Shutdown completed");
+        assertThat(java.nio.file.Files.readString(log).contains("Shutdown completed"))
+                .as("mode=%s child shutdown completed", name).isTrue();
     }
 
     @Test

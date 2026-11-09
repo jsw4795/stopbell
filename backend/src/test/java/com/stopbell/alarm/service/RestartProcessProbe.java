@@ -43,7 +43,7 @@ public class RestartProcessProbe {
                     deliveries, attempts, provider, clock);
             worker.dispatchPending();
             org.mockito.Mockito.verify(provider).send(org.mockito.ArgumentMatchers.any());
-            Files.writeString(Path.of(args[4]), "DISPATCHED");
+            publishMarker(Path.of(args[4]), "DISPATCHED");
             Thread.sleep(Long.MAX_VALUE);
         }
         long alarmId = Long.parseLong(args[3]);
@@ -54,7 +54,7 @@ public class RestartProcessProbe {
                 app.getBean(org.springframework.jdbc.core.JdbcTemplate.class).update(
                         "update alarms set initial_baseline_pending = false where id = ?", alarmId);
                 try {
-                    Files.writeString(Path.of(args[4]), "IN_FLIGHT");
+                    publishMarker(Path.of(args[4]), "IN_FLIGHT");
                     Thread.sleep(Long.MAX_VALUE);
                 } catch (Exception failure) {
                     throw new IllegalStateException(failure);
@@ -73,7 +73,16 @@ public class RestartProcessProbe {
         var evaluated = app.getBean(BusAlarmEvaluator.class).evaluate(alarm, BusAlarmEvaluationState.initial(), List.of(observation), now);
         var result = app.getBean(BusAlarmLifecycleService.class).applyIfCurrent(
                 new AlarmEvaluationKey(alarmId, alarm.getActivationGeneration()), status, evaluated, now);
-        Files.writeString(Path.of(args[4]), result.outcome() + ":" + evaluated.eventCandidates().size());
+        publishMarker(Path.of(args[4]), result.outcome() + ":" + evaluated.eventCandidates().size());
         Thread.sleep(Long.MAX_VALUE);
+    }
+    private static void publishMarker(Path marker, String value) throws java.io.IOException {
+        Path temp = Files.createTempFile(marker.getParent(), ".marker-", ".tmp");
+        try {
+            Files.writeString(temp, value);
+            Files.move(temp, marker, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } finally {
+            Files.deleteIfExists(temp);
+        }
     }
 }
