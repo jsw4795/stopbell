@@ -27,6 +27,7 @@ class TransitMetadataCollectionTest {
             + "\"routeStationDownloadUrl\":\"http://openapi.gbis.go.kr/download?file=station\",\"routeStationVersion\":\"v1\"}}}}";
     private static final String ROUTE = "routeId|routeName|turnSeq^200|300|2";
     private static final String STATIONS = "routeId|routeName|upDown|staOrder|stationId|stationName|x|y^200|300|상행|1|10|turn|127|37^200|300|하행|2|20|end|127|37";
+    private static final String SESSION_ERROR = "{\"response\":{\"header\":{\"resultCode\":99,\"resultMsg\":\"가용한 세션이 존재하지 않습니다. (30/30)\"},\"body\":\"\"}}";
     @TempDir Path temp;
     private static byte[] bytes(String text) { return text.getBytes(StandardCharsets.UTF_8); }
     private static CollectionBudget.Limits limits(int requests, long response, long total, long millis) {
@@ -46,6 +47,8 @@ class TransitMetadataCollectionTest {
         String base = BASE;
         String cityBody;
         String stopBody;
+        java.util.List<String> stopResponses;
+        final AtomicInteger stopCalls = new AtomicInteger();
         @Override public byte[] get(URI uri, CollectionBudget budget) {
             budget.reserve();
             int n = sent.incrementAndGet();
@@ -70,6 +73,10 @@ class TransitMetadataCollectionTest {
                 body = page("{\"nodeid\":\"GGB" + (second ? "20" : "10") + "\",\"nodenm\":\"" + (second ? "end" : "turn")
                         + "\",\"nodeord\":" + (second ? "2" : "1") + "}", 2, second ? 2 : 1);
                 if (stopBody != null) body = stopBody;
+                if (stopResponses != null) {
+                    String selected = stopResponses.get(Math.min(stopCalls.getAndIncrement(), stopResponses.size() - 1));
+                    if (selected != null) body = selected;
+                }
             }
             try { return budget.read(new ByteArrayInputStream(bytes(body))); }
             catch (java.io.IOException e) { throw new AssertionError(e); }
@@ -119,6 +126,73 @@ class TransitMetadataCollectionTest {
         retry.set(0);
         assertThatThrownBy(() -> new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, exhausted, always, writer.directory()).collect()).hasMessage("HTTP_ERROR");
         assertThat(retry).hasValue(3);
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("세션 부족 재시도 성공 시 정상 응답만 묶음에 저장한다")
+    void retries_session_error_then_stores_only_success() throws Exception {
+        var mock = new Mock(); mock.stopResponses = java.util.Arrays.asList(SESSION_ERROR, null);
+        var delays = new java.util.ArrayList<Duration>();
+        var budget = new CollectionBudget(limits(100, 10000, 100000, 10000));
+        var c = new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, budget, mock, null, delays::add);
+        var result = c.collect();
+        assertThat(delays).containsExactly(Duration.ofSeconds(5));
+        assertThat(result.requests()).isEqualTo(41);
+        assertThat(TagoLocalBundle.replay(result.tagoPath(), KEY).normalized().routes()).hasSize(2);
+        try (var files = Files.list(result.tagoPath())) { assertThat(files.filter(p -> p.toString().endsWith(".json")).count()).isEqualTo(38); }
+        try (var files = Files.list(temp)) { assertThat(files.noneMatch(p -> p.getFileName().toString().startsWith("tago-diagnostic-"))).isTrue(); }
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("세션 부족 재시도 소진 시 마지막 원본만 보존한다")
+    void session_retries_are_bounded_and_save_last_response() throws Exception {
+        var mock = new Mock(); mock.stopBody = SESSION_ERROR;
+        var waits = new java.util.ArrayList<Duration>();
+        var budget = new CollectionBudget(limits(50, 10000, 100000, 10000));
+        var c = new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, budget, mock, null, waits::add);
+        assertThatThrownBy(c::collect).hasMessage("PROVIDER_ERROR");
+        assertThat(waits).containsExactly(Duration.ofSeconds(5), Duration.ofSeconds(15));
+        assertThat(mock.sent).hasValue(9);
+        assertThat(c.failureSummary(CollectionBudget.Code.PROVIDER_ERROR)).contains("detail=SESSION_UNAVAILABLE", "diagnosticStatus=saved").doesNotContain(SESSION_ERROR);
+        try (var files = Files.walk(temp)) {
+            Path raw = files.filter(p -> p.getFileName().toString().equals("response.bin")).findFirst().orElseThrow();
+            assertThat(Files.readAllBytes(raw)).isEqualTo(bytes(SESSION_ERROR));
+        }
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("다른 Provider 오류는 세션 부족으로 재시도하지 않는다")
+    void other_provider_error_does_not_retry() throws Exception {
+        for (String error : java.util.List.of(SESSION_ERROR.replace("가용한 세션이 존재하지 않습니다. (30/30)", "other failure"), SESSION_ERROR.replace("\"resultCode\":99", "\"resultCode\":\"03\""))) {
+            var mock = new Mock(); mock.stopBody = error;
+            var waits = new java.util.ArrayList<Duration>();
+            var c = new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, new CollectionBudget(limits(50, 10000, 100000, 10000)), mock, null, waits::add);
+            assertThatThrownBy(c::collect).hasMessage("PROVIDER_ERROR");
+            assertThat(mock.sent).hasValue(7); assertThat(waits).isEmpty();
+        }
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("연결 오류와 세션 부족은 하나의 재시도 한도를 공유한다")
+    void mixed_failures_share_attempt_limit() throws Exception {
+        var mock = new Mock(); mock.stopBody = SESSION_ERROR;
+        var networkFailures = new AtomicInteger(); var waits = new java.util.ArrayList<Duration>();
+        CollectionHttp.Transport transport = (uri, b) -> {
+            if (uri.getPath().endsWith(TagoMetadataClient.ROUTE_STOPS) && networkFailures.getAndIncrement() == 0) {
+                b.reserve(); throw new CollectionBudget.Failure(CollectionBudget.Code.HTTP_ERROR, true);
+            }
+            return mock.get(uri, b);
+        };
+        var b = new CollectionBudget(limits(50, 10000, 100000, 10000));
+        var c = new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, b, transport, null, waits::add);
+        assertThatThrownBy(c::collect).hasMessage("PROVIDER_ERROR");
+        assertThat(b.requests()).isEqualTo(9);
+        assertThat(waits).containsExactly(Duration.ofSeconds(15));
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("세션 재시도 대기는 전체 시간과 중단 제한을 따른다")
+    void retry_pause_respects_deadline_and_interruption() {
+        var budget = new CollectionBudget(limits(5, 1000, 10000, 10));
+        assertThatThrownBy(() -> budget.pause(Duration.ofSeconds(5))).hasMessage("TIME_LIMIT");
+        Thread.currentThread().interrupt();
+        try { assertThatThrownBy(() -> budget.pause(Duration.ofSeconds(5))).hasMessage("INTERRUPTED"); }
+        finally { Thread.interrupted(); }
     }
     @Test
     @org.junit.jupiter.api.DisplayName("잘못된 JSON과 응답 구조 오류를 재시도 없이 구분한다")
@@ -284,6 +358,25 @@ class TransitMetadataCollectionTest {
             assertThat(((CollectionBudget.Failure) serverFailure).retryable).isTrue();
             assertThat(authFailure).isInstanceOf(CollectionBudget.Failure.class);
             assertThat(((CollectionBudget.Failure) authFailure).retryable).isFalse();
+        } finally { server.stop(0); }
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("하나의 HTTP 클라이언트로 연결을 재사용하고 종료한다")
+    void reuses_http_connection_and_closes_client() throws Exception {
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        var ports = new java.util.HashSet<Integer>();
+        server.createContext("/", e -> { ports.add(e.getRemoteAddress().getPort()); byte[] data = bytes("ok"); e.sendResponseHeaders(200, data.length); e.getResponseBody().write(data); e.close(); });
+        server.start();
+        try {
+            var budget = new CollectionBudget(limits(5, 1000, 10000, 5000));
+            var client = new CollectionHttp.Connection(budget.limits());
+            try {
+                var uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/");
+                assertThat(client.get(uri, budget)).isEqualTo(bytes("ok"));
+                assertThat(client.get(uri, budget)).isEqualTo(bytes("ok"));
+                assertThat(ports).hasSize(1);
+            } finally { client.close(); }
+            assertThat(client.isClosed()).isTrue();
         } finally { server.stop(0); }
     }
     @Test void socket_timeout_ends_failed_attempt_without_retry() throws Exception {

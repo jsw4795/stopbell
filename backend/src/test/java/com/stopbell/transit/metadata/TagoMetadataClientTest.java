@@ -19,6 +19,18 @@ import org.springframework.web.client.RestClient;
 class TagoMetadataClientTest {
 
     @Test
+    @DisplayName("빈 body가 있는 Provider 오류는 정상 데이터 역직렬화 전에 분류한다")
+    void classifies_provider_error_before_body_deserialization() {
+        String response = "{\"response\":{\"header\":{\"resultCode\":\"99\",\"resultMsg\":\"가용한 세션이 존재하지 않습니다. (40/40)\"},\"body\":\"\"}}";
+        byte[] bytes = response.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        assertThatThrownBy(() -> client.parseRouteStops(bytes)).isInstanceOfSatisfying(TransitProviderClientException.class, e -> {
+            assertThat(e.failureKind()).isEqualTo(TransitProviderClientFailureKind.PROVIDER);
+            assertThat(e.providerResultCode()).isEqualTo("99");
+        });
+        assertThat(client.isSessionUnavailable(bytes)).isTrue();
+    }
+
+    @Test
     void parses_saved_pages_without_http_and_preserves_raw_fields() {
         var city = "{\"response\":{\"header\":{\"resultCode\":\"00\"},\"body\":{\"items\":{\"item\":{\"citycode\":\"31010\"}}}}}";
         var route = pageJson("{\"routeid\":\"r\",\"routeno\":\"1\",\"extra\":\"kept\"}", 1, 1);

@@ -5,6 +5,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.List;
 
@@ -23,6 +24,7 @@ final class TransitMetadataCollector {
     private final CollectionBudget budget;
     private final CollectionHttp.Transport transport;
     private final Path existingGbis;
+    private final java.util.function.Consumer<Duration> retryWait;
     private String provider = "GBIS", stage = "CREATE";
     private Path tagoPath, gbisPath;
     private int responses;
@@ -42,8 +44,13 @@ final class TransitMetadataCollector {
     }
     TransitMetadataCollector(Path root, String key, String tagoUrl, String gbisUrl,
                              CollectionBudget budget, CollectionHttp.Transport transport, Path existingGbis) {
+        this(root, key, tagoUrl, gbisUrl, budget, transport, existingGbis, budget::pause);
+    }
+    TransitMetadataCollector(Path root, String key, String tagoUrl, String gbisUrl,
+                             CollectionBudget budget, CollectionHttp.Transport transport, Path existingGbis,
+                             java.util.function.Consumer<Duration> retryWait) {
         this.root = root; this.key = key; this.tagoUrl = tagoUrl; this.gbisUrl = gbisUrl;
-        this.budget = budget; this.transport = transport; this.existingGbis = existingGbis;
+        this.budget = budget; this.transport = transport; this.existingGbis = existingGbis; this.retryWait = retryWait;
     }
     Report collect() {
         try {
@@ -176,7 +183,7 @@ final class TransitMetadataCollector {
         private byte[] fetch(String op, String city, String route, Integer page) {
             stage = op; requestOperation = op; requestCity = city; requestRoute = route; requestPage = page;
             receivedResponse = false; diagnosticFile = null; diagnosticStatus = "no_response";
-            byte[] result = get(uri(op, city, route, page));
+            byte[] result = transport.get(uri(op, city, route, page), budget);
             receivedResponse = true; diagnosticStatus = "not_saved";
             return result;
         }
@@ -185,32 +192,38 @@ final class TransitMetadataCollector {
             catch (IOException | RuntimeException e) { throw new CollectionBudget.Failure(CollectionBudget.Code.STORAGE_FAILURE); }
         }
         @Override public List<City> cityCodes() {
-            byte[] bytes = fetch(CITY_CODES, null, null, null);
-            List<City> result = parse(bytes, () -> parseCityCodes(bytes));
-            save(new RequestWithBytes(new TagoLocalBundle.Request(CITY_CODES, null, null, 0), bytes));
-            return result;
+            return fetchAndSave(CITY_CODES, null, null, null, this::parseCityCodes);
         }
         @Override public Page<RawItem<Route>> routesWithRaw(String city, int page) {
-            byte[] bytes = fetch(ROUTES, city, null, page);
-            var result = parse(bytes, () -> parseRoutes(bytes));
-            save(new RequestWithBytes(new TagoLocalBundle.Request(ROUTES, city, null, page), bytes));
-            return result;
+            return fetchAndSave(ROUTES, city, null, page, this::parseRoutes);
         }
         @Override public Page<RawItem<Stop>> routeStopsWithRaw(String city, String route, int page) {
-            byte[] bytes = fetch(ROUTE_STOPS, city, route, page);
-            var result = parse(bytes, () -> parseRouteStops(bytes));
-            save(new RequestWithBytes(new TagoLocalBundle.Request(ROUTE_STOPS, city, route, page), bytes));
-            return result;
+            return fetchAndSave(ROUTE_STOPS, city, route, page, this::parseRouteStops);
         }
-        private <T> T parse(byte[] bytes, java.util.function.Supplier<T> parser) {
-            try { return parser.get(); }
-            catch (TransitProviderClientException e) {
-                if (e.failureKind() != com.stopbell.transit.client.TransitProviderClientFailureKind.PROVIDER) {
-                    try { new tools.jackson.databind.ObjectMapper().readTree(bytes); failureDetail = "TAGO_STRUCTURE"; }
-                    catch (RuntimeException invalidJson) { failureDetail = "JSON_PARSE"; }
-                    saveDiagnostic(bytes);
+        private <T> T fetchAndSave(String op, String city, String route, Integer page, java.util.function.Function<byte[], T> parser) {
+            for (int attempt = 0; ; attempt++) {
+                byte[] bytes;
+                try { bytes = fetch(op, city, route, page); }
+                catch (CollectionBudget.Failure e) { if (e.retryable && attempt < 2) continue; throw e; }
+                try {
+                    T result = parser.apply(bytes);
+                    save(new RequestWithBytes(new TagoLocalBundle.Request(op, city, route, page == null ? 0 : page), bytes));
+                    return result;
+                } catch (TransitProviderClientException e) {
+                    boolean sessionUnavailable = e.failureKind() == com.stopbell.transit.client.TransitProviderClientFailureKind.PROVIDER
+                            && isSessionUnavailable(bytes);
+                    if (sessionUnavailable && attempt < 2) {
+                        budget.check(); retryWait.accept(Duration.ofSeconds(attempt == 0 ? 5 : 15)); budget.check();
+                        continue;
+                    }
+                    if (sessionUnavailable) { failureDetail = "SESSION_UNAVAILABLE"; saveDiagnostic(bytes); }
+                    else if (e.failureKind() != com.stopbell.transit.client.TransitProviderClientFailureKind.PROVIDER) {
+                        try { new tools.jackson.databind.ObjectMapper().readTree(bytes); failureDetail = "TAGO_STRUCTURE"; }
+                        catch (RuntimeException invalidJson) { failureDetail = "JSON_PARSE"; }
+                        saveDiagnostic(bytes);
+                    }
+                    throw e;
                 }
-                throw e;
             }
         }
     }

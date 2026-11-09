@@ -53,19 +53,21 @@ public final class TransitMetadataCollectionCli {
                 return 0;
             }
             var budget = new CollectionBudget(limits);
-            var collector = new TransitMetadataCollector(directory, key, tago, gbis, budget, transport, existingGbis);
-            try {
-                var result = collector.collect();
-                out.println("complete=true tagoBundle=" + result.tagoPath() + " tagoComplete=true gbisBundle=" + result.gbisPath()
-                        + " gbisComplete=true tagoRoutes=" + result.tagoRoutes() + " tagoStops=" + result.tagoStops()
-                        + " occurrences=" + result.occurrences() + " gbisRoutes=" + result.gbisRoutes()
-                        + " gbisVersion=" + result.version().replaceAll("[\\p{Cntrl}]", "?") + " enrichedRoutes=" + result.enriched()
-                        + " skippedRoutes=" + result.skipped() + " requests=" + result.requests()
-                        + " bytes=" + result.bytes() + " elapsedMs=" + result.elapsedMillis());
-                return 0;
-            } catch (CollectionBudget.Failure e) {
-                err.println("complete=false " + collector.failureSummary(e.code));
-                return 1;
+            try (var connection = transport == CollectionHttp.NETWORK ? new CollectionHttp.Connection(limits) : null) {
+                var collector = new TransitMetadataCollector(directory, key, tago, gbis, budget, connection == null ? transport : connection, existingGbis);
+                try {
+                    var result = collector.collect();
+                    out.println("complete=true tagoBundle=" + result.tagoPath() + " tagoComplete=true gbisBundle=" + result.gbisPath()
+                            + " gbisComplete=true tagoRoutes=" + result.tagoRoutes() + " tagoStops=" + result.tagoStops()
+                            + " occurrences=" + result.occurrences() + " gbisRoutes=" + result.gbisRoutes()
+                            + " gbisVersion=" + result.version().replaceAll("[\\p{Cntrl}]", "?") + " enrichedRoutes=" + result.enriched()
+                            + " skippedRoutes=" + result.skipped() + " requests=" + result.requests()
+                            + " bytes=" + result.bytes() + " elapsedMs=" + result.elapsedMillis());
+                    return 0;
+                } catch (CollectionBudget.Failure e) {
+                    err.println("complete=false " + collector.failureSummary(e.code));
+                    return 1;
+                }
             }
         } catch (RuntimeException | java.io.IOException e) {
             err.println("Invalid collection configuration or storage directory; no collection started");

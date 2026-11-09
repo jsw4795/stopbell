@@ -15,17 +15,28 @@ import java.util.concurrent.TimeUnit;
 /** A single non-redirecting HTTP attempt with limits enforced while reading. */
 final class CollectionHttp {
     interface Transport { byte[] get(URI uri, CollectionBudget budget); }
-    static final Transport NETWORK = CollectionHttp::get;
+    static final Transport NETWORK = (uri, budget) -> {
+        try (var connection = new Connection(budget.limits())) { return connection.get(uri, budget); }
+    };
     private CollectionHttp() { }
-    private static byte[] get(URI uri, CollectionBudget budget) {
+    static final class Connection implements Transport, AutoCloseable {
+        private final HttpClient client;
+        Connection(CollectionBudget.Limits limits) {
+            client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER)
+                    .connectTimeout(limits.connectTimeout()).version(HttpClient.Version.HTTP_1_1).build();
+        }
+        @Override public byte[] get(URI uri, CollectionBudget budget) { return CollectionHttp.get(client, uri, budget); }
+        @Override public void close() { client.close(); }
+        boolean isClosed() { return client.isTerminated(); }
+    }
+    private static byte[] get(HttpClient client, URI uri, CollectionBudget budget) {
         // The one-shot JVM must set these before the JDK HTTP client is initialized.
         if (!startupProperty("jdk.httpclient.redirects.retrylimit", "1")
                 || !startupProperty("jdk.httpclient.disableRetryConnect", "true"))
             throw new CollectionBudget.Failure(CollectionBudget.Code.HTTP_ERROR);
         budget.check();
         boolean reserved = false;
-        try (var client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(budget.limits().connectTimeout()).version(HttpClient.Version.HTTP_1_1).build()) {
+        try {
             var request = HttpRequest.newBuilder(uri).GET().timeout(budget.limits().responseTimeout()).build();
             budget.reserve();
             reserved = true;

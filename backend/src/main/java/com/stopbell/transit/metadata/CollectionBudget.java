@@ -43,6 +43,14 @@ final class CollectionBudget {
         if (Thread.currentThread().isInterrupted()) throw new Failure(Code.INTERRUPTED);
         if (time.getAsLong() - start >= limits.duration().toNanos()) throw new Failure(Code.TIME_LIMIT);
     }
+    void pause(Duration duration) {
+        check();
+        long wait = duration.toNanos();
+        if (wait >= remainingNanos()) throw new Failure(Code.TIME_LIMIT);
+        try { TimeUnit.NANOSECONDS.sleep(wait); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new Failure(Code.INTERRUPTED); }
+        check();
+    }
     void reserve() {
         check();
         if (requests >= limits.requests()) throw new Failure(Code.REQUEST_LIMIT);

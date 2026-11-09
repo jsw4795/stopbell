@@ -32,9 +32,9 @@ public class TagoMetadataClient {
             .enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
             .build();
     public TagoMetadataClient(RestClient restClient, TransitClientProperties.Tago properties) { this.restClient = restClient; this.properties = properties; }
-    public List<City> cityCodes() { try { CityResponse r=objectMapper.readValue(get(CITY_CODES,null,null,null),CityResponse.class); return items(r.response, CITY_CODES); } catch(Exception e){throw protocol(CITY_CODES,e);} }
-    public Page<Route> routes(String cityCode, int page) { try { RouteResponse r=objectMapper.readValue(get(ROUTES,cityCode,null,page),RouteResponse.class); return page(r.response, ROUTES); } catch(Exception e){throw protocol(ROUTES,e);} }
-    public Page<Stop> routeStops(String cityCode, String routeId, int page) { try { StopResponse r=objectMapper.readValue(get(ROUTE_STOPS,cityCode,routeId,page),StopResponse.class); return page(r.response, ROUTE_STOPS); } catch(Exception e){throw protocol(ROUTE_STOPS,e);} }
+    public List<City> cityCodes() { try { byte[] bytes=get(CITY_CODES,null,null,null); checkHeader(bytes,CITY_CODES); CityResponse r=objectMapper.readValue(bytes,CityResponse.class); return items(r.response, CITY_CODES); } catch(Exception e){throw protocol(CITY_CODES,e);} }
+    public Page<Route> routes(String cityCode, int page) { try { byte[] bytes=get(ROUTES,cityCode,null,page); checkHeader(bytes,ROUTES); RouteResponse r=objectMapper.readValue(bytes,RouteResponse.class); return page(r.response, ROUTES); } catch(Exception e){throw protocol(ROUTES,e);} }
+    public Page<Stop> routeStops(String cityCode, String routeId, int page) { try { byte[] bytes=get(ROUTE_STOPS,cityCode,routeId,page); checkHeader(bytes,ROUTE_STOPS); StopResponse r=objectMapper.readValue(bytes,StopResponse.class); return page(r.response, ROUTE_STOPS); } catch(Exception e){throw protocol(ROUTE_STOPS,e);} }
     public Page<RawItem<Route>> routesWithRaw(String cityCode, int page) { return rawPage(ROUTES, cityCode, null, page, Route.class); }
     public Page<RawItem<Stop>> routeStopsWithRaw(String cityCode, String routeId, int page) { return rawPage(ROUTE_STOPS, cityCode, routeId, page, Stop.class); }
     public List<City> cityCodes(Consumer<byte[]> archive) {
@@ -59,13 +59,14 @@ public class TagoMetadataClient {
         return result;
     }
     List<City> parseCityCodes(byte[] bytes) {
-        try { return items(objectMapper.readValue(bytes, CityResponse.class).response, CITY_CODES); }
+        try { checkHeader(bytes, CITY_CODES); return items(objectMapper.readValue(bytes, CityResponse.class).response, CITY_CODES); }
         catch (Exception e) { throw protocol(CITY_CODES, e); }
     }
     Page<RawItem<Route>> parseRoutes(byte[] bytes) { return parseRawPage(bytes, ROUTES, Route.class); }
     Page<RawItem<Stop>> parseRouteStops(byte[] bytes) { return parseRawPage(bytes, ROUTE_STOPS, Stop.class); }
     private <T> Page<RawItem<T>> parseRawPage(byte[] bytes, String operation, Class<T> type) {
         try {
+            checkHeader(bytes, operation);
             RawResponse response = objectMapper.readValue(bytes, RawResponse.class);
             Page<JsonNode> page = page(response.response, operation);
             List<RawItem<T>> items = page.items().stream().map(node -> {
@@ -74,6 +75,18 @@ public class TagoMetadataClient {
             }).toList();
             return new Page<>(items, page.totalCount(), page.pageNo());
         } catch (Exception e) { throw protocol(operation, e); }
+    }
+    private void checkHeader(byte[] bytes, String operation) {
+        JsonNode code = objectMapper.readTree(bytes).path("response").path("header").path("resultCode");
+        if (!code.isMissingNode() && !code.isNull() && (code.isString() || code.isNumber()) && !"00".equals(code.asString()))
+            throw TransitProviderClientException.provider(TransitProvider.TAGO, operation, code.asString());
+    }
+    boolean isSessionUnavailable(byte[] bytes) {
+        try {
+            JsonNode header = objectMapper.readTree(bytes).path("response").path("header");
+            String message = header.path("resultMsg").asString("");
+            return "99".equals(header.path("resultCode").asString()) && message.contains("가용한 세션이 존재하지 않습니다");
+        } catch (RuntimeException e) { return false; }
     }
     private void archiveSafe(byte[] bytes, Consumer<byte[]> archive) {
         JsonNode tree;
