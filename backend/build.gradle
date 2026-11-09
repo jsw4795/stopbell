@@ -39,6 +39,9 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+    // The JDK snapshots retry settings when its HTTP implementation initializes.
+    systemProperty 'jdk.httpclient.redirects.retrylimit', '1'
+    systemProperty 'jdk.httpclient.disableRetryConnect', 'true'
     systemProperty 'task811.test.classpath', sourceSets.test.runtimeClasspath.asPath
 }
 

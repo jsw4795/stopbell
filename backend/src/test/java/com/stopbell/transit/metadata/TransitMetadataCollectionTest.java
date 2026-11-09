@@ -154,8 +154,6 @@ class TransitMetadataCollectionTest {
         assertThat(c.failureSummary(CollectionBudget.Code.INVALID_RESPONSE)).contains("gbisComplete=false").doesNotContain(KEY);
     }
     @Test void socket_transport_rejects_redirect_and_stops_oversized_body() throws Exception {
-        System.setProperty("jdk.httpclient.redirects.retrylimit", "1");
-        System.setProperty("jdk.httpclient.disableRetryConnect", "true");
         var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         var hits = new AtomicInteger();
         server.createContext("/redirect", e -> { hits.incrementAndGet(); e.getResponseHeaders().add("Location", "/target"); e.sendResponseHeaders(302, -1); e.close(); });
@@ -175,8 +173,6 @@ class TransitMetadataCollectionTest {
         } finally { server.stop(0); }
     }
     @Test void socket_timeout_ends_failed_attempt_without_retry() throws Exception {
-        System.setProperty("jdk.httpclient.redirects.retrylimit", "1");
-        System.setProperty("jdk.httpclient.disableRetryConnect", "true");
         var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         var hits = new AtomicInteger();
         server.createContext("/slow", e -> { hits.incrementAndGet(); try { Thread.sleep(500); } catch (InterruptedException x) { Thread.currentThread().interrupt(); } e.close(); });
@@ -199,8 +195,6 @@ class TransitMetadataCollectionTest {
         }
     }
     @Test void socket_total_deadline_terminates_slow_response() throws Exception {
-        System.setProperty("jdk.httpclient.redirects.retrylimit", "1");
-        System.setProperty("jdk.httpclient.disableRetryConnect", "true");
         var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/slow", e -> { try { Thread.sleep(800); } catch (InterruptedException x) { Thread.currentThread().interrupt(); } e.close(); });
         server.start();
@@ -225,8 +219,6 @@ class TransitMetadataCollectionTest {
         assertThat(Files.exists(tago.directory().resolve("manifest.json"))).isFalse();
     }
     @Test void socket_interruption_preserves_flag_and_does_not_retry() throws Exception {
-        System.setProperty("jdk.httpclient.redirects.retrylimit", "1");
-        System.setProperty("jdk.httpclient.disableRetryConnect", "true");
         var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         var entered = new java.util.concurrent.CountDownLatch(1);
         var hits = new AtomicInteger();
@@ -245,8 +237,6 @@ class TransitMetadataCollectionTest {
         } finally { thread.interrupt(); server.stop(0); }
     }
     @Test void connection_failure_is_not_retried() throws Exception {
-        System.setProperty("jdk.httpclient.redirects.retrylimit", "1");
-        System.setProperty("jdk.httpclient.disableRetryConnect", "true");
         var server = new java.net.ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"));
         server.setSoTimeout(800);
         var accepted = new AtomicInteger();
@@ -261,16 +251,17 @@ class TransitMetadataCollectionTest {
         try {
             var budget = new CollectionBudget(limits(5, 1000, 10000, 5000));
             URI uri = URI.create("http://127.0.0.1:" + server.getLocalPort() + "/closed");
-            assertThatThrownBy(() -> CollectionHttp.NETWORK.get(uri, budget)).hasMessage("HTTP_ERROR");
+            Throwable failure = catchThrowable(() -> CollectionHttp.NETWORK.get(uri, budget));
             worker.join(2000);
-            assertThat(worker.isAlive()).isFalse();
-            assertThat(accepted).hasValue(1);
-            assertThat(budget.requests()).isEqualTo(1);
+            String diagnostics = "accepted=" + accepted.get() + " requests=" + budget.requests()
+                    + " exception=" + (failure == null ? "none" : failure.getClass().getSimpleName());
+            assertThat(worker.isAlive()).as(diagnostics).isFalse();
+            assertThat(failure).as(diagnostics).isInstanceOf(CollectionBudget.Failure.class).hasMessage("HTTP_ERROR");
+            assertThat(accepted.get()).as(diagnostics).isEqualTo(1);
+            assertThat(budget.requests()).as(diagnostics).isEqualTo(1);
         } finally { server.close(); worker.join(2000); }
     }
     @Test void actual_request_starts_are_separated_even_after_slow_response() throws Exception {
-        System.setProperty("jdk.httpclient.redirects.retrylimit", "1");
-        System.setProperty("jdk.httpclient.disableRetryConnect", "true");
         var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         var times = new java.util.concurrent.CopyOnWriteArrayList<Long>();
         server.createContext("/ok", e -> {
@@ -312,5 +303,37 @@ class TransitMetadataCollectionTest {
         assertThat(mock.sent).hasValue(2);
         assertThat(err.toString()).contains("complete=false", "provider=GBIS", "stage=ROUTE", "failure=HTTP_ERROR", "requests=2", "gbisComplete=false").doesNotContain(KEY, "openapi.gbis.go.kr");
         assertThat(out.toString()).doesNotContain(KEY);
+    }
+    @Test void late_retry_properties_are_rejected_before_reserving_or_connecting() throws Exception {
+        try (var server = new java.net.ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))) {
+            server.setSoTimeout(1000);
+            String uri = "http://127.0.0.1:" + server.getLocalPort() + "/closed";
+            var process = new ProcessBuilder(System.getProperty("java.home") + "/bin/java",
+                    "-Djdk.httpclient.redirects.retrylimit=5", "-Djdk.httpclient.disableRetryConnect=false",
+                    "-cp", System.getProperty("task811.test.classpath"), LateSettingsProbe.class.getName(), uri)
+                    .redirectErrorStream(true).start();
+            try {
+                assertThat(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                assertThat(process.exitValue()).as("child result: %s", output).isZero();
+                assertThat(output).contains("failure=HTTP_ERROR requests=0");
+                assertThatThrownBy(server::accept).isInstanceOf(java.net.SocketTimeoutException.class);
+            } finally { process.destroyForcibly(); }
+        }
+    }
+    public static final class LateSettingsProbe {
+        public static void main(String[] args) throws Exception {
+            Class.forName("jdk.internal.net.http.MultiExchange", true, ClassLoader.getPlatformClassLoader());
+            System.setProperty("jdk.httpclient.redirects.retrylimit", "1");
+            System.setProperty("jdk.httpclient.disableRetryConnect", "true");
+            var budget = new CollectionBudget(limits(5, 1000, 10000, 5000));
+            try {
+                CollectionHttp.NETWORK.get(URI.create(args[0]), budget);
+                throw new AssertionError("Unexpected successful request");
+            } catch (CollectionBudget.Failure failure) {
+                if (failure.code != CollectionBudget.Code.HTTP_ERROR || budget.requests() != 0) throw failure;
+                System.out.println("failure=" + failure.code + " requests=" + budget.requests());
+            }
+        }
     }
 }

@@ -19,8 +19,8 @@ final class CollectionHttp {
     private CollectionHttp() { }
     private static byte[] get(URI uri, CollectionBudget budget) {
         // The one-shot JVM must set these before the JDK HTTP client is initialized.
-        if (!"1".equals(System.getProperty("jdk.httpclient.redirects.retrylimit"))
-                || !"true".equals(System.getProperty("jdk.httpclient.disableRetryConnect")))
+        if (!startupProperty("jdk.httpclient.redirects.retrylimit", "1")
+                || !startupProperty("jdk.httpclient.disableRetryConnect", "true"))
             throw new CollectionBudget.Failure(CollectionBudget.Code.HTTP_ERROR);
         budget.check();
         boolean reserved = false;
@@ -65,6 +65,14 @@ final class CollectionHttp {
                 throw e;
             }
         } finally { if (reserved) budget.finished(); }
+    }
+    private static boolean startupProperty(String key, String expected) {
+        String prefix = "-D" + key + "=";
+        String startupValue = null;
+        for (String argument : java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments()) {
+            if (argument.startsWith(prefix)) startupValue = argument.substring(prefix.length());
+        }
+        return expected.equals(startupValue) && expected.equals(System.getProperty(key));
     }
     private static final class RejectSubscriber implements HttpResponse.BodySubscriber<byte[]> {
         private final CompletableFuture<byte[]> result = new CompletableFuture<>();
