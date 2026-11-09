@@ -783,6 +783,10 @@ Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncR
 
 `collectTransitMetadata`는 Spring 애플리케이션을 시작하지 않는 명시적 Java one-shot이다. 공통 예산으로 GBIS와 TAGO의 요청 횟수, 응답·누적 바이트, 단조 시간, 요청 간격과 연결·응답 제한을 적용한다. Redirect와 재시도는 차단한다. 정상 응답 바이트는 기존 파서와 Bundle Writer에 전달하고 각 완료 Manifest 게시 전에도 시간·중단을 확인한다. 두 묶음과 오프라인 통합을 다시 재생해 결과를 비교하며 DB 이력·동기화·Preview·승인을 호출하지 않는다. 상세 실행 조건과 제한은 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다. 이 단계의 검증은 Mock Provider와 로컬 서버에 한정하며 실제 최신성 및 실수집 호환성은 미확인이다.
 
+### GBIS 기반정보 검증 진단 (Phase 3-B-2B-2B-2B-D1)
+
+기존 기반정보 검증에서 거부한 응답만 고정된 검증 코드와 허용 목록의 필드 식별자로 분류한다. 검증 자체의 순서와 허용·거부 기준은 유지하며, 원본 값·URL·인증정보와 원본 예외는 구조화 예외나 수집 CLI에 전달하지 않는다. 수집 실패는 기존 `INVALID_RESPONSE`를 유지하고 GBIS 검증에 한해 진단을 덧붙인다. [코드와 실행 경계](local-development.md#gbis-기반정보-검증-실패-진단-phase-3-b-2b-2b-2b-d1)를 따른다.
+
 ### 교통 메타데이터 Snapshot Preview (Phase 3-B-2B-1)
 
 `TransitMetadataSnapshotPreviewService`는 서울 CSV 또는 기존 TAGO/선택적 GBIS 수집 Snapshot의 완전성과 원본 대응을 기존 준비 경로로 검증하고, 반복 읽기 트랜잭션에서 현재 DB와 기존 Diff 엔진으로 비교한다. Guard와 위험 상세도 기존 계산을 사용하며 결과는 적용 결과나 승인 근거가 아니다. V36 분석·V37 상세·V38 승인을 생성하거나 지문을 발급하지 않고, 수집 이력·아카이브·정규화 및 원본 데이터와 완료 시각도 변경하지 않는다. 상세는 페이지로 조회하며 공유 Stop의 모든 변형을 보존한다. Raw 비교는 출처와 데이터 종류를 구분하고 미수집 GBIS를 비교하지 않는다.

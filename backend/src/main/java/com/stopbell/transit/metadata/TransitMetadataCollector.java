@@ -24,6 +24,8 @@ final class TransitMetadataCollector {
     private Path tagoPath, gbisPath;
     private int responses;
     private boolean tagoComplete, gbisComplete;
+    private GbisBaseInfoValidationException.Code validationCode;
+    private GbisBaseInfoValidationException.Field validationField;
 
     TransitMetadataCollector(Path root, String key, String tagoUrl, String gbisUrl,
                              CollectionBudget budget, CollectionHttp.Transport transport) {
@@ -87,6 +89,9 @@ final class TransitMetadataCollector {
                     gbis.normalized().routes().size(), gbis.sourceVersion(), enriched.enrichedRoutes(),
                     combined.normalized().routes().size() - enriched.enrichedRoutes(), budget.requests(), budget.bytes(), budget.elapsedMillis());
         } catch (CollectionBudget.Failure e) { throw e;
+        } catch (GbisBaseInfoValidationException e) {
+            validationCode = e.code(); validationField = e.field();
+            throw new CollectionBudget.Failure(CollectionBudget.Code.INVALID_RESPONSE);
         } catch (TransitProviderClientException e) {
             throw new CollectionBudget.Failure(e.failureKind() == com.stopbell.transit.client.TransitProviderClientFailureKind.PROVIDER
                     ? CollectionBudget.Code.PROVIDER_ERROR : CollectionBudget.Code.INVALID_RESPONSE);
@@ -95,7 +100,9 @@ final class TransitMetadataCollector {
     }
     private byte[] get(URI uri) { return transport.get(uri, budget); }
     String failureSummary(CollectionBudget.Code code) {
-        return "provider=" + provider + " stage=" + stage + " failure=" + code + " requests=" + budget.requests()
+        String validation = code == CollectionBudget.Code.INVALID_RESPONSE && validationCode != null
+                ? " validation=" + validationCode + (validationField == GbisBaseInfoValidationException.Field.NONE ? "" : " field=" + validationField) : "";
+        return "provider=" + provider + " stage=" + stage + " failure=" + code + validation + " requests=" + budget.requests()
                 + " bytes=" + budget.bytes() + " responses=" + responses + " tagoBundle=" + tagoPath
                 + " tagoComplete=" + tagoComplete + " gbisBundle=" + gbisPath + " gbisComplete=" + gbisComplete;
     }

@@ -731,3 +731,9 @@ GBIS 기반정보의 `baseInfoItem`에 있는 공식 다운로드 URL 여섯 필
 2026-11-09 별도 Quota 조회 없이 사용자 승인에 따라 제한된 Live 수집을 한 번 시도했다. GBIS 기반정보 요청 1회가 HTTP 성공 응답 869바이트를 받았으나 기반정보 검증에서 `INVALID_RESPONSE`로 중단됐다. CLI가 안전하지 않을 수 있는 원본과 상세 예외를 저장·출력하지 않으므로 구조·Provider 오류, 버전 불일치 또는 URL 안전성 충돌 등 구체적인 원인은 확인되지 않았다. 추가 호출·재시도는 수행하지 않았고 GBIS 다운로드와 TAGO 요청은 시작되지 않았다. 미완료 디렉터리는 `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/1601bbe1-4301-44df-969c-66620cb20597`이며 원본과 완료 Manifest가 없다. GBIS·TAGO 완료 Bundle 및 통합 Snapshot은 확보하지 못했다. 실행 시간은 CLI 실패 보고에 기록되지 않았다.
 
 실제 최신성·데이터 품질·수집 완료를 주장하지 않으며 DB에는 접근하거나 적용하지 않았다. 안전한 진단 방법과 별도 Live 실행 승인 후 원인을 확인해야 한다. 실제 데이터 수집과 DB Preview는 미완료다.
+
+### GBIS 기반정보 검증 실패 진단 (Phase 3-B-2B-2B-2B-D1)
+
+기반정보가 기존 검사에서 거부되면 수집 CLI는 `failure=INVALID_RESPONSE validation=...`과 필요한 경우 고정 `field=...`를 출력한다. 코드에는 `JSON_PARSE_ERROR`, `JSON_DUPLICATE_FIELD`, `ENVELOPE_STRUCTURE`, `PROVIDER_RESULT_ERROR`, `REQUIRED_FIELD_MISSING`, `FIELD_TYPE_INVALID`, `VERSION_MISMATCH`, `URL_MISSING`, `URL_INVALID_FORMAT`, `URL_HOST_MISMATCH`, `URL_FORBIDDEN_QUERY`, `URL_ENCODED_OR_USERINFO`, `URL_FORBIDDEN_CONTENT`, `URL_OUTSIDE_OFFICIAL_FIELD`, `CONTENT_UNSAFE`, `UNKNOWN`이 있다. 필드는 응답 구조·버전·공식 URL의 미리 정의된 식별자만 사용한다. 분류가 확실하지 않으면 `UNKNOWN`이며 실제 필드 값, 원본 JSON, URL, 인증정보 및 원본 예외는 출력하거나 저장하지 않는다. HTTP 오류와 저장 오류에는 GBIS 검증 코드를 붙이지 않는다.
+
+이전 869바이트 응답은 저장되지 않아 원인이 여전히 미확정이다. 이후 별도로 승인된 Live 진단에서는 요청·바이트·Bundle 상태와 이 고정 코드를 확인하고, 필요한 설계 판단은 실제 값을 추측하지 않고 진행한다. 이번 단계는 합성 데이터와 로컬 Mock으로 검증했으며 Provider 호출과 DB 접근을 수행하지 않았다. 실제 수집과 DB Preview는 미완료다.

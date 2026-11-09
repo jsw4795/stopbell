@@ -336,4 +336,31 @@ class TransitMetadataCollectionTest {
             }
         }
     }
+    @Test
+    @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
+    void cli_reports_safe_gbis_validation_without_more_requests_or_manifest(org.springframework.boot.test.system.CapturedOutput logs) throws Exception {
+        var scenarios = java.util.Map.of(
+                BASE.replace("\"routeStationVersion\":\"v1\"", "\"routeStationVersion\":\"v2\""), "VERSION_MISMATCH",
+                BASE.replace("file=route", "file=route&signature=fake"), "URL_FORBIDDEN_QUERY",
+                BASE.replace("file=route", "file=route&token=secret"), "URL_FORBIDDEN_QUERY",
+                BASE.replace("file=route", "file=%73ecret"), "URL_ENCODED_OR_USERINFO",
+                "{\"serviceKey\":\"" + KEY + "\",", "JSON_PARSE_ERROR",
+                BASE.replace("\"resultCode\":0", "\"resultCode\":0,\"password\":\"secret\""), "CONTENT_UNSAFE");
+        for (var scenario : scenarios.entrySet()) {
+            var output = new ByteArrayOutputStream(); var error = new ByteArrayOutputStream(); var mock = new Mock(); mock.base = scenario.getKey();
+            var args = new String[]{"--directory=" + temp.toRealPath(), "--live", "--confirm=COLLECT", "--max-requests=50", "--interval-ms=1"};
+            assertThat(TransitMetadataCollectionCli.run(args, Map.of("PUBLIC_DATA_SERVICE_KEY", KEY), new PrintStream(output), new PrintStream(error), mock)).isEqualTo(1);
+            assertThat(error.toString()).contains("provider=GBIS", "stage=BASE_INFO", "failure=INVALID_RESPONSE", "validation=" + scenario.getValue());
+            assertThat(output.toString() + error).doesNotContain(KEY, "signature=fake", "token=secret", "openapi.gbis.go.kr", scenario.getKey());
+            assertThat(mock.sent).hasValue(1);
+        }
+        assertThat(logs.getAll()).doesNotContain(KEY, "signature=fake", "token=secret", "openapi.gbis.go.kr");
+        try (var files = Files.walk(temp)) {
+            assertThat(files.noneMatch(p -> p.getFileName().toString().equals("manifest.json"))).isTrue();
+        }
+        var normalHttpFailure = new Mock(); normalHttpFailure.failAt = 1;
+        var budget = new CollectionBudget(limits(50, 10000, 100000, 10000)); var collection = collector(budget, normalHttpFailure);
+        assertThatThrownBy(collection::collect).hasMessage("HTTP_ERROR");
+        assertThat(collection.failureSummary(CollectionBudget.Code.HTTP_ERROR)).doesNotContain("validation=");
+    }
 }

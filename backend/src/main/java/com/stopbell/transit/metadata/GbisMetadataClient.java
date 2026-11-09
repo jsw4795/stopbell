@@ -95,7 +95,7 @@ public class GbisMetadataClient {
             validateDownloadUrl(item.routeStationDownloadUrl(), key);
             return item;
         } catch (RuntimeException e) {
-            throw new IllegalStateException("GBIS base-info response could not be safely validated");
+            throw GbisBaseInfoDiagnostics.classify(bytes, key);
         }
     }
 
@@ -114,7 +114,7 @@ public class GbisMetadataClient {
         else if (node.isString()) safety.checkText(node.asString());
     }
 
-    private static void validateDownloadUrl(String url, String key) {
+    static void validateDownloadUrl(String url, String key) {
         try {
             URI uri = URI.create(url);
             if (!("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme()))
@@ -140,7 +140,7 @@ public class GbisMetadataClient {
         } catch (RuntimeException e) { throw new IllegalArgumentException("Invalid GBIS download URL"); }
     }
 
-    private static void rejectCredentialWords(String value) {
+    static void rejectCredentialWords(String value) {
         String lower = value.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]", "");
         if (lower.contains("token") || lower.contains("apikey") || lower.contains("servicekey")
                 || lower.contains("authorization") || lower.contains("bearer") || lower.contains("password")
