@@ -146,6 +146,20 @@ public class BusMetadataSyncService {
         if (gbis != null) {
             GbisRawValidation.validate(gbis);
             matches = GbisDestinationEnricher.verifiedMatches(complete.routes(), gbis.normalized());
+            for (var route : complete.routes()) {
+                if (!route.routeTypeObserved()) continue;
+                String gbisId = matches.entrySet().stream().filter(e -> e.getValue().equals(route.externalRouteId()))
+                        .map(Map.Entry::getKey).findFirst().orElseThrow(
+                                () -> new IllegalStateException("Route type has no verified GBIS match"));
+                String rawType = gbis.normalized().routes().get(gbisId).routeTypeCd();
+                if (rawType == null || !Objects.equals(route.routeType(),
+                        com.stopbell.transit.metadata.BusRouteTypeMapper.fromGbis(rawType))) {
+                    throw new IllegalStateException("Route type does not match GBIS source");
+                }
+            }
+        }
+        if (gbis == null && complete.routes().stream().anyMatch(BusRouteMetadataSnapshot::routeTypeObserved)) {
+            throw new IllegalStateException("TAGO route type requires GBIS source");
         }
         Map<String, String> verifiedMatches = matches;
         return () -> syncComplete(complete, route -> {

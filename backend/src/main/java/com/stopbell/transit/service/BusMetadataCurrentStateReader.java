@@ -21,8 +21,8 @@ public class BusMetadataCurrentStateReader {
     @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
     public BusMetadataDiffService.CurrentState read(TransitProvider provider) {
         Map<String, RouteRow> routes = new LinkedHashMap<>();
-        jdbc.query("select external_route_id, route_number, city_code from bus_routes where provider = ? order by external_route_id",
-                rs -> { routes.put(rs.getString(1), new RouteRow(rs.getString(2), rs.getString(3), new ArrayList<>())); }, provider.name());
+        jdbc.query("select external_route_id, route_number, city_code, route_type from bus_routes where provider = ? order by external_route_id",
+                rs -> { routes.put(rs.getString(1), new RouteRow(rs.getString(2), rs.getString(3), rs.getString(4), new ArrayList<>())); }, provider.name());
         List<BusMetadataDiffService.Stop> stops = jdbc.query(
                 "select external_stop_id, stop_name, latitude, longitude from bus_stops where provider = ? order by external_stop_id",
                 (rs, n) -> new BusMetadataDiffService.Stop(provider, rs.getString(1), rs.getString(2), rs.getBigDecimal(3), rs.getBigDecimal(4)), provider.name());
@@ -38,9 +38,9 @@ public class BusMetadataCurrentStateReader {
                     rs.getString(3), rs.getString(4), rs.getBigDecimal(5), rs.getBigDecimal(6), rs.getInt(7), rs.getString(8)));
         }, provider.name());
         List<BusRouteMetadataSnapshot> result = new ArrayList<>(routes.size());
-        routes.forEach((id, row) -> result.add(new BusRouteMetadataSnapshot(provider, id, row.number(), row.city(), row.occurrences())));
+        routes.forEach((id, row) -> result.add(new BusRouteMetadataSnapshot(provider, id, row.number(), row.city(), row.occurrences(), row.type() == null ? null : com.stopbell.transit.domain.BusRouteType.valueOf(row.type()), true)));
         return new BusMetadataDiffService.CurrentState(result, stops);
     }
 
-    private record RouteRow(String number, String city, List<BusStopOccurrenceMetadataSnapshot> occurrences) { }
+    private record RouteRow(String number, String city, String type, List<BusStopOccurrenceMetadataSnapshot> occurrences) { }
 }

@@ -121,7 +121,7 @@ public class TransitMetadataDiffAnalysisService {
         }
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
         String summaryJson = JSON.writeValueAsString(summary);
-        jdbc.update("insert into transit_metadata_diff_analyses (collection_run_id, provider, baseline_type, previous_complete_sync_at, analyzed_at, result_fingerprint, summary, review_fingerprint, fingerprint_version) values (?, ?, 'CURRENT_DB_BEFORE_APPLY', ?, ?, ?, cast(? as json), ?, 2)",
+        jdbc.update("insert into transit_metadata_diff_analyses (collection_run_id, provider, baseline_type, previous_complete_sync_at, analyzed_at, result_fingerprint, summary, review_fingerprint, fingerprint_version) values (?, ?, 'CURRENT_DB_BEFORE_APPLY', ?, ?, ?, cast(? as json), ?, 3)",
                 runId, complete.provider().name(), last == null ? null : Timestamp.from(last), Timestamp.from(now), fingerprint, summaryJson, reviewFingerprint);
         return new Analysis(find(runId), normalized, details);
     }
@@ -166,6 +166,8 @@ public class TransitMetadataDiffAnalysisService {
         update(digest, Integer.toString(ordered.size()));
         for (var route : ordered) {
             update(digest, route.externalRouteId()); update(digest, route.routeNumber()); update(digest, route.cityCode());
+            update(digest, Boolean.toString(route.routeTypeObserved()));
+            update(digest, route.routeType() == null ? null : route.routeType().name());
             var occurrences = new ArrayList<>(route.occurrences()); occurrences.sort(Comparator.comparingInt(BusStopOccurrenceMetadataSnapshot::stopOrder));
             update(digest, Integer.toString(occurrences.size()));
             for (var occurrence : occurrences) {

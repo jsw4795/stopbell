@@ -108,6 +108,8 @@ public class TransitMetadataChangeApprovalService {
             throw new IllegalStateException("Review evidence does not match summary");
         if ((int) row[7] < 2 && actual.containsKey(BusMetadataSafetyGuard.Reason.SHARED_STOP_CONFLICT))
             throw new IllegalStateException("Legacy conflicting-stop analysis lacks apply-order binding");
+        if ((int) row[7] < 3)
+            throw new IllegalStateException("Legacy analysis lacks route type binding; recollect and review");
         return new Evidence(provider, (String) row[4], (String) row[5]);
     }
 

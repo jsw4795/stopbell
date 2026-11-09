@@ -777,7 +777,7 @@ Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncR
 
 ### TAGO·GBIS 오프라인 Snapshot 통합 (Phase 3-B-2B-2B-1C)
 
-`TagoGbisOfflineSnapshotAssembler`는 기존 두 Bundle의 공개 재생 경로로 각각 무결성과 완전성을 검증한다. 명시적 TAGO-only는 TAGO Snapshot을 반환하고, 결합 모드는 GBIS 재생 실패를 전파한다. 기존 `GbisDestinationEnricher`의 전체 Route 매칭 검증에 성공한 경우에만 목적지를 보강하며 TAGO identity·처리 순서와 반복 occurrence를 유지한다. TAGO Raw 행과 GBIS 원본 Snapshot·SourceVersion도 보존해 기존 Preview에 전달한다. 각 Bundle의 수집 시각은 각각의 Manifest에 남으며 두 시점의 일치나 최신성을 추정하지 않는다. 합성 Bundle과 격리 MySQL에서 Diff·Guard와 DB 행 불변성을 확인했으며 실제 Provider 호출과 개발 DB Preview는 수행하지 않았다.
+`TagoGbisOfflineSnapshotAssembler`는 기존 두 Bundle의 공개 재생 경로로 각각 무결성과 완전성을 검증한다. 명시적 TAGO-only는 TAGO Snapshot을 반환하고, 결합 모드는 GBIS 재생 실패를 전파한다. 기존 `GbisDestinationEnricher`의 전체 Route 매칭 검증에 성공한 경우에만 목적지와 공식 유형을 보강하며 TAGO identity·처리 순서와 반복 occurrence를 유지한다. TAGO Raw 행과 GBIS 원본 Snapshot·SourceVersion도 보존해 기존 Preview에 전달한다. 각 Bundle의 수집 시각은 각각의 Manifest에 남으며 두 시점의 일치나 최신성을 추정하지 않는다. 합성 Bundle과 격리 MySQL에서 Diff·Guard와 DB 행 불변성을 확인했으며 실제 Provider 호출과 개발 DB Preview는 수행하지 않았다.
 
 ### TAGO·GBIS Bundle 위험 검토와 승인 적용
 

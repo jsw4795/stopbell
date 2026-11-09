@@ -122,7 +122,7 @@ class GbisRawMetadataSyncIntegrationTest {
         invalid.add(new GbisCollectedSnapshot(g.normalized(), g.rawRows(), " "));
         var badStations = List.of(new GbisBulkMetadata.Station(1, "", "정류장"), new GbisBulkMetadata.Station(2, "10", "정류장"));
         var badRoutes = new HashMap<>(g.normalized().routes());
-        badRoutes.put("200", new GbisBulkMetadata.Route("200", "300", 1, badStations));
+        badRoutes.put("200", new GbisBulkMetadata.Route("200", "300", 1, "014", badStations));
         invalid.add(new GbisCollectedSnapshot(new GbisBulkMetadata(badRoutes), g.rawRows(), "1"));
         for (int mode = 0; mode < 5; mode++) {
             var rows = new ArrayList<>(g.rawRows());
@@ -253,6 +253,19 @@ class GbisRawMetadataSyncIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bus_routes", Integer.class)).isZero();
     }
 
+    @Test
+    void verifiedRawTypeFlowsIntoStoredTagoRoute() {
+        var collected = snapshot(2, "GGB10", "20261109", "13");
+        var enriched = com.stopbell.transit.metadata.GbisDestinationEnricher.enrich(
+                collected.normalized().routes(), collected.gbis().normalized());
+        var withType = new TagoMetadataSource.TagoSnapshot(
+                new CompleteBusMetadataSnapshot(TransitProvider.TAGO, enriched.routes()), collected.rawRows(), collected.gbis());
+        sync.syncTagoSnapshot(withType, Instant.now());
+        assertThat(jdbc.queryForObject("SELECT route_type FROM bus_routes WHERE external_route_id='GGB200'", String.class))
+                .isEqualTo("CITY_LOCAL");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM transit_source_metadata WHERE source_system='GBIS' AND data_kind='ROUTE' AND route_id IS NOT NULL", Integer.class)).isEqualTo(1);
+    }
+
     private TagoMetadataSource.TagoSnapshot snapshot(int extraStations, String tagoStop, String version, String type) {
         var stops = List.of(new BusStopOccurrenceMetadataSnapshot(tagoStop, "A", null, null, 1), new BusStopOccurrenceMetadataSnapshot(tagoStop, "A", null, null, 2));
         var tago = new CompleteBusMetadataSnapshot(TransitProvider.TAGO, List.of(new BusRouteMetadataSnapshot(TransitProvider.TAGO, "GGB200", "300", "31010", stops)));
@@ -265,7 +278,7 @@ class GbisRawMetadataSyncIntegrationTest {
         rows.add(routeRaw("200", "300", type)); rows.add(routeRaw("999", "999", type));
         addStations(rows, matched, "200", "300", 2);
         addStations(rows, extra, "999", "999", extraStations);
-        var normalized = new GbisBulkMetadata(Map.of("200", new GbisBulkMetadata.Route("200", "300", 1, matched), "999", new GbisBulkMetadata.Route("999", "999", 1, extra)));
+        var normalized = new GbisBulkMetadata(Map.of("200", new GbisBulkMetadata.Route("200", "300", 1, type, matched), "999", new GbisBulkMetadata.Route("999", "999", 1, type, extra)));
         return new TagoMetadataSource.TagoSnapshot(tago, raw, new GbisCollectedSnapshot(normalized, rows, version));
     }
     private static RawRow routeRaw(String id, String name, String type) {

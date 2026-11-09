@@ -101,7 +101,8 @@ public final class SeoulCsvMetadataSource implements BusMetadataSource {
                     route.externalRouteId(),
                     route.routeNumber(),
                     null,
-                    route.occurrences().stream().map(SourceStopOccurrenceSnapshot::toMetadataSnapshot).toList()
+                    route.occurrences().stream().map(SourceStopOccurrenceSnapshot::toMetadataSnapshot).toList(),
+                    BusRouteTypeMapper.fromSeoul(route.routeType()), true
             ));
         }
         return new CompleteBusMetadataSnapshot(provider(), routes);

@@ -46,7 +46,7 @@ public record GbisBulkMetadata(Map<String, Route> routes) {
         List<GbisCollectedSnapshot.RawRow> rawRows = new ArrayList<>();
         rows(routeBytes, ROUTE_COLUMNS, row -> {
             String id = row.required("routeId");
-            Route route = new Route(id, row.required("routeName"), row.positive("turnSeq"), new ArrayList<>());
+            Route route = new Route(id, row.required("routeName"), row.positive("turnSeq"), row.optional("routeTypeCd"), new ArrayList<>());
             if (routes.putIfAbsent(id, route) != null) {
                 throw new IllegalArgumentException("GBIS duplicate route identity");
             }
@@ -78,7 +78,7 @@ public record GbisBulkMetadata(Map<String, Route> routes) {
                 throw new IllegalArgumentException("GBIS route has invalid turn sequence or no stations");
             }
             validated.put(route.routeId(), new Route(route.routeId(), route.routeName(),
-                    route.turnSeq(), List.copyOf(route.stations())));
+                    route.turnSeq(), route.routeTypeCd(), List.copyOf(route.stations())));
         }
         return new GbisCollectedSnapshot(new GbisBulkMetadata(validated), rawRows, routeVersion);
     }
@@ -125,6 +125,10 @@ public record GbisBulkMetadata(Map<String, Route> routes) {
             columns.forEach((name, index) -> raw.put(name, fields[index]));
             return raw;
         }
+        String optional(String name) {
+            Integer index = columns.get(name);
+            return index == null ? null : fields[index].trim();
+        }
         String required(String name) {
             String value = fields[columns.get(name)].trim();
             if (value.isEmpty()) throw new IllegalArgumentException("GBIS required value missing: " + name);
@@ -139,6 +143,10 @@ public record GbisBulkMetadata(Map<String, Route> routes) {
         }
     }
 
-    public record Route(String routeId, String routeName, int turnSeq, List<Station> stations) { }
+    public record Route(String routeId, String routeName, int turnSeq, String routeTypeCd, List<Station> stations) {
+        public Route(String routeId, String routeName, int turnSeq, List<Station> stations) {
+            this(routeId, routeName, turnSeq, null, stations);
+        }
+    }
     public record Station(int order, String stationId, String stationName) { }
 }

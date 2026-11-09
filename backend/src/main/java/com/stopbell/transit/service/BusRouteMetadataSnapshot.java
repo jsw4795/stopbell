@@ -6,16 +6,25 @@ import java.util.Objects;
 import java.util.Set;
 
 import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.transit.domain.BusRouteType;
 
 public record BusRouteMetadataSnapshot(
         TransitProvider provider,
         String externalRouteId,
         String routeNumber,
         String cityCode,
-        List<BusStopOccurrenceMetadataSnapshot> occurrences
+        List<BusStopOccurrenceMetadataSnapshot> occurrences,
+        BusRouteType routeType,
+        boolean routeTypeObserved
 ) {
 
+    public BusRouteMetadataSnapshot(TransitProvider provider, String externalRouteId, String routeNumber,
+            String cityCode, List<BusStopOccurrenceMetadataSnapshot> occurrences) {
+        this(provider, externalRouteId, routeNumber, cityCode, occurrences, null, false);
+    }
+
     public BusRouteMetadataSnapshot {
+        if (!routeTypeObserved && routeType != null) throw new IllegalArgumentException("Unobserved route type must be null");
         requireNonBlank(provider, externalRouteId, "External route ID");
         requireNonBlank(provider, routeNumber, "Route number");
         if (provider == TransitProvider.TAGO) {

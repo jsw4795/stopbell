@@ -268,6 +268,9 @@ class TransitMetadataDiffAnalysisIntegrationTest {
         jdbc.update("update transit_metadata_diff_analyses set fingerprint_version=1 where collection_run_id=?", run);
         assertThatThrownBy(() -> approvals.approve(run, TAGO, result.stored().fingerprint(), hash, Instant.now().plusSeconds(300), "reviewed"))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("apply-order");
+        jdbc.update("update transit_metadata_diff_analyses set fingerprint_version=2 where collection_run_id=?", run);
+        assertThatThrownBy(() -> approvals.approve(run, TAGO, result.stored().fingerprint(), hash, Instant.now().plusSeconds(300), "reviewed"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("route type binding");
     }
 
     @Test @org.junit.jupiter.api.DisplayName("공유 정류장 충돌 시 노선 처리 순서가 달라지면 분석 지문이 달라야 한다")

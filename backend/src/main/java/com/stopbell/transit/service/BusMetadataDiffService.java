@@ -108,6 +108,9 @@ public final class BusMetadataDiffService {
                 List<FieldChange> changes = new ArrayList<>();
                 change(changes, "routeNumber", before.routeNumber(), after.routeNumber());
                 change(changes, "cityCode", before.cityCode(), after.cityCode());
+                if (after.routeTypeObserved()) change(changes, "routeType",
+                        before.routeType() == null ? null : before.routeType().name(),
+                        after.routeType() == null ? null : after.routeType().name());
                 if (changes.isEmpty()) unchangedRoutes.add(id); else modifiedRoutes.add(new EntityChange(id, changes));
             }
         }

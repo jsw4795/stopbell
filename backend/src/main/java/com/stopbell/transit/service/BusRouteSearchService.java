@@ -28,7 +28,9 @@ public class BusRouteSearchService {
                 .map(route -> new BusRouteSearchResponse(
                         route.getId(),
                         route.getRouteNumber(),
-                        regionNameResolver.resolve(route)
+                        regionNameResolver.resolve(route),
+                        route.getProvider(),
+                        route.getRouteType()
                 ))
                 .toList();
     }

@@ -83,6 +83,18 @@ class GbisBulkMetadataTest {
     }
 
     @Test
+    void enrichesTypeOnlyWhenTraversalIsVerified() {
+        GbisBulkMetadata bulk = parse(ROUTES.replace("turnSeq|startStationName^200|300|2|", "turnSeq|routeTypeCd|startStationName^200|300|2|13|"), STATIONS);
+        var result = GbisDestinationEnricher.enrich(List.of(
+                tago("GGB200", "300", "GGB10", "GGB20", "GGB10"),
+                tago("GGB200", "300", "GGB10", "GGB20", "GGB99")), bulk);
+        assertThat(result.routes().get(0).routeType()).isEqualTo(com.stopbell.transit.domain.BusRouteType.CITY_LOCAL);
+        assertThat(result.routes().get(0).routeTypeObserved()).isTrue();
+        assertThat(result.routes().get(1).routeType()).isNull();
+        assertThat(result.routes().get(1).routeTypeObserved()).isFalse();
+    }
+
+    @Test
     void gbis_only_route_never_expands_tago_scope() {
         GbisBulkMetadata bulk = parse(ROUTES + "^999|999|1|start",
                 STATIONS + "^999|999|상행|1|99|only GBIS|127|37");

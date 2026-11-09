@@ -77,6 +77,26 @@ class BusMetadataSyncTransactionIntegrationTest {
     }
 
     @Test
+    void savesUpdatesPreservesAndClearsObservedRouteTypes() {
+        var stops = List.of(validStop("typed-stop", "정류장", 1));
+        var provider = TransitProvider.TAGO;
+        var first = new BusRouteMetadataSnapshot(provider, "typed-route", "123", "31010", stops,
+                com.stopbell.transit.domain.BusRouteType.CITY_LOCAL, true);
+        metadataSyncService.syncRoute(first);
+        assertThat(busRouteRepository.findByProviderAndExternalRouteId(provider, "typed-route").orElseThrow().getRouteType())
+                .isEqualTo(com.stopbell.transit.domain.BusRouteType.CITY_LOCAL);
+        metadataSyncService.syncRoute(new BusRouteMetadataSnapshot(provider, "typed-route", "123", "31010", stops));
+        assertThat(busRouteRepository.findByProviderAndExternalRouteId(provider, "typed-route").orElseThrow().getRouteType())
+                .isEqualTo(com.stopbell.transit.domain.BusRouteType.CITY_LOCAL);
+        metadataSyncService.syncRoute(new BusRouteMetadataSnapshot(provider, "typed-route", "123", "31010", stops,
+                com.stopbell.transit.domain.BusRouteType.CITY_SEAT, true));
+        assertThat(busRouteRepository.findByProviderAndExternalRouteId(provider, "typed-route").orElseThrow().getRouteType())
+                .isEqualTo(com.stopbell.transit.domain.BusRouteType.CITY_SEAT);
+        metadataSyncService.syncRoute(new BusRouteMetadataSnapshot(provider, "typed-route", "123", "31010", stops, null, true));
+        assertThat(busRouteRepository.findByProviderAndExternalRouteId(provider, "typed-route").orElseThrow().getRouteType()).isNull();
+    }
+
+    @Test
     @DisplayName("complete provider sync가 성공하면 마지막 complete sync 시각을 갱신한다")
     void update_last_complete_sync_at_after_successful_complete_sync() {
         Instant previousCompletion = Instant.parse("2026-09-01T00:00:00Z");

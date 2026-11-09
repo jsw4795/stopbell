@@ -445,7 +445,35 @@ TASK-513은 V10의 `bus_metadata_sync_states`에 `provider VARCHAR(20)` PK와 `l
 
 ### Transit 원본 메타데이터 저장 (Phase 3-A-1)
 
-V33은 기존 `bus_routes`에 nullable `route_type VARCHAR(24)`를 추가하고 `transit_source_metadata`를 생성한다. 공통 타입은 `TRUNK`, `BRANCH`, `METROPOLITAN`, `LOCAL`, `VILLAGE`, `CIRCULAR`, `AIRPORT`, `TOUR`이며 NULL은 미분류다. 원본 유형의 공통 타입 변환 및 기존 데이터 보강은 아직 수행하지 않는다.
+V33은 기존 `bus_routes`에 nullable `route_type VARCHAR(24)`를 추가하고 `transit_source_metadata`를 생성한다. NULL은 미분류이며 원본 코드는 정규화 타입과 별개다. 서울 CSV와 [GBIS 공식 기반정보 명세](https://www.gbis.go.kr/gbis2014/publicService.action?cmd=mBaseInfo)의 다음 값만 변환한다. 서울의 경기·인천은 서비스 범위 밖이다. 빈 값이나 표에 없는 코드(실제 원본의 `50` 포함)는 NULL이다.
+
+| 원본 | 의미 | route_type | 표시 색상 |
+| --- | --- | --- | --- |
+| 서울 간선 | 간선 | TRUNK | 파랑 |
+| 서울 지선 | 지선 | BRANCH | 초록 |
+| 서울 광역 | 광역 | METROPOLITAN | 빨강 |
+| 서울 마을 | 마을 | VILLAGE | 미확인: 회색 |
+| 서울 순환 | 순환 | CIRCULAR | 노랑 |
+| 서울 공항 | 공항 | AIRPORT | 미확인: 회색 |
+| 서울 관광 | 관광 | TOUR | 미확인: 회색 |
+| GBIS 11 | 직행좌석형시내 | CITY_EXPRESS_SEAT | 회색 |
+| GBIS 12 | 좌석형시내 | CITY_SEAT | 회색 |
+| GBIS 13 | 일반형시내 | CITY_LOCAL | 회색 |
+| GBIS 14 | 광역급행형시내 | CITY_METRO_EXPRESS | 회색 |
+| GBIS 15 | 따복형시내 | CITY_DDABOK | 회색 |
+| GBIS 16 | 경기순환 | GYEONGGI_CIRCULAR | 회색 |
+| GBIS 21 | 직행좌석형농어촌 | RURAL_EXPRESS_SEAT | 회색 |
+| GBIS 22 | 좌석형농어촌 | RURAL_SEAT | 회색 |
+| GBIS 23 | 일반형농어촌 | RURAL_LOCAL | 회색 |
+| GBIS 30 | 마을 | VILLAGE | 회색 |
+| GBIS 41 | 고속형시외 | INTERCITY_EXPRESS | 회색 |
+| GBIS 42 | 좌석형시외 | INTERCITY_SEAT | 회색 |
+| GBIS 43 | 일반형시외 | INTERCITY_LOCAL | 회색 |
+| GBIS 51 | 리무진공항 | AIRPORT_LIMOUSINE | 회색 |
+| GBIS 52 | 좌석형공항 | AIRPORT_SEAT | 회색 |
+| GBIS 53 | 일반형공항 | AIRPORT_LOCAL | 회색 |
+
+색상은 Flutter에 적용하지 않은 표시 정책이며, 경기는 별도 확인 전 회색을 사용한다. `LOCAL`은 기존 호환 타입이고 현재 원본 매핑에서는 생성하지 않는다. GBIS는 노선명과 전체 정류장 순번·ID가 일치한 TAGO 노선에만 유형을 부여한다. GBIS 필드가 수집되지 않은 TAGO 단독 동기화는 기존 유형을 보존하며 수집된 미지원 값은 NULL로 갱신한다. 유형은 비교 및 승인 지문에 포함되므로 변경 전 승인 지문은 새 지문과 일치하지 않는다.
 
 원본 행은 `source_system`(SEOUL_TDATA/TAGO/GBIS), `data_kind`(ROUTE/STOP/OCCURRENCE), `source_key` 복합 UNIQUE로 식별한다. JSON 객체, nullable 원본 버전, 수집 시각과 갱신 시각을 저장한다. 기존 Route/Stop/Occurrence 중 같은 종류의 nullable FK 하나로 연결하며 FK 삭제 시 연결만 NULL이 되고 원본은 보존된다. 경유 source key는 제공기관의 노선과 순번을 모호하지 않게 인코딩해야 하며 내부 occurrence ID로 취급하지 않는다. 서울 서비스 범위 밖의 원본은 연결 없이 저장할 수 있다.
 
@@ -627,4 +655,4 @@ V38 `transit_metadata_change_approvals`는 원본 실행 및 적용 실행 FK, P
 
 `APPROVED`만 만료 전 선점하거나 취소할 수 있다. 선점은 행 잠금과 새 `COLLECTED` 실행의 동일 근거 확인 후 `CLAIMED`를 commit한다. `CLAIMED` 이후 결과는 `APPLIED`, `FAILED`, `UNCERTAIN` 중 하나이며 승인 가능 상태로 되돌리지 않는다. 완료 이력 확인이 있을 때만 `APPLIED`다. 결과 기록의 commit이 불확실하면 남은 행과 수집 이력·실제 DB를 수동 확인한다. 재적용은 새 수집·검토·승인을 거친다.
 
-V38의 분석 `fingerprint_version`은 기존 V36 행을 1, 새 분석을 2로 표시한다. 공유 Stop 충돌에서는 Route 및 occurrence 처리 순서가 최종 Stop 값을 바꾸므로 버전 2 지문에 그 순서를 추가한다. 버전 1의 공유 Stop 충돌은 순서를 증명할 수 없어 승인할 수 없다. 새로 수집해 검토해야 한다. 충돌이 없는 기존 분석은 원래 지문 계산을 유지한다.
+V38에서 분석 `fingerprint_version`은 기존 V36 행을 1, 당시 새 분석을 2로 표시했다. 버전 2는 공유 Stop 충돌의 Route·occurrence 처리 순서를 묶었다. 현재 새 분석은 노선 유형과 수집 여부도 지문에 포함하는 버전 3이다. 버전 1·2 근거로 새 승인을 발급하거나 기존 승인을 적용할 수 없으며, 새로 수집해 검토해야 한다. 기존 기록은 수정하지 않는다.

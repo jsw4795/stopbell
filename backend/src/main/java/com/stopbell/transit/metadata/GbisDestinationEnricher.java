@@ -36,7 +36,8 @@ public final class GbisDestinationEnricher {
                             stop.stopOrder() < route.turnSeq() ? turnName : terminalName))
                     .toList();
             result.add(new BusRouteMetadataSnapshot(tago.provider(), tago.externalRouteId(),
-                    tago.routeNumber(), tago.cityCode(), stops));
+                    tago.routeNumber(), tago.cityCode(), stops,
+                    BusRouteTypeMapper.fromGbis(route.routeTypeCd()), route.routeTypeCd() != null));
             enriched++;
             destinations += stops.size();
         }

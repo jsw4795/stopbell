@@ -52,7 +52,8 @@ final class GbisRawValidation {
                     || route.routeName().isBlank() || route.turnSeq() <= 0 || route.stations() == null
                     || !entry.getKey().equals(route.routeId())
                     || !Objects.equals(route.routeName(), trim(raw.fields().get("routeName")))
-                    || !sameOrder(raw.fields().get("turnSeq"), route.turnSeq())) {
+                    || !sameOrder(raw.fields().get("turnSeq"), route.turnSeq())
+                    || !Objects.equals(route.routeTypeCd(), trim(raw.fields().get("routeTypeCd")))) {
                 throw new IllegalStateException("GBIS raw route does not match snapshot");
             }
             boolean turnFound = false;

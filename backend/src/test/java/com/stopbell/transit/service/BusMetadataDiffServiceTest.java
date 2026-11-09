@@ -46,6 +46,22 @@ class BusMetadataDiffServiceTest {
         assertThat(result.modifiedOccurrences()).isEmpty();
     }
 
+    @Test void comparesOnlyObservedRouteTypes() {
+        var stops = List.of(o("a", 1, "A", null, null));
+        var current = new BusRouteMetadataSnapshot(TAGO, "r", "1", "1", stops,
+                com.stopbell.transit.domain.BusRouteType.CITY_LOCAL, true);
+        var unknown = new BusRouteMetadataSnapshot(TAGO, "r", "1", "1", stops);
+        var cleared = new BusRouteMetadataSnapshot(TAGO, "r", "1", "1", stops, null, true);
+        var state = new CurrentState(List.of(current), List.of(stop(TAGO, "a", "A", null)));
+        assertThat(service.analyze(state, snapshot(TAGO, unknown)).unchangedRoutes()).containsExactly("r");
+        assertThat(service.analyze(state, snapshot(TAGO, cleared)).modifiedRoutes()).singleElement()
+                .satisfies(change -> assertThat(change.fields()).singleElement().satisfies(field -> {
+                    assertThat(field.field()).isEqualTo("routeType");
+                    assertThat(field.before()).isEqualTo("CITY_LOCAL");
+                    assertThat(field.after()).isNull();
+                }));
+    }
+
     @Test void routeStopAndOccurrenceChangesAreCountedIndependently() {
         var old = route(TAGO, "r", "1", "1", o("a", 1, "Old", "37", "D"), o("b", 2, "B", null, null));
         var removed = route(TAGO, "gone", "9", "1", o("orphan", 1, "O", null, null));

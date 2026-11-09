@@ -106,6 +106,8 @@ class BusRouteSearchIntegrationTest {
     @DisplayName("동일 노선번호 후보를 내부 ID와 지역명으로 각각 반환하고 ID 오름차순으로 정렬한다")
     void return_duplicate_route_number_candidates_in_id_order() throws Exception {
         BusRoute suwon = route(TransitProvider.TAGO, "route-suwon", "7000", "31010");
+        suwon.updateRouteType(com.stopbell.transit.domain.BusRouteType.CITY_LOCAL);
+        busRouteRepository.saveAndFlush(suwon);
         BusRoute gimpo = route(TransitProvider.TAGO, "route-gimpo", "7000", "31230");
         BusRoute gapyeong = route(TransitProvider.TAGO, "route-gapyeong", "7000", "31370");
 
@@ -117,7 +119,8 @@ class BusRouteSearchIntegrationTest {
                 .andExpect(jsonPath("$[0].id").value(suwon.getId()))
                 .andExpect(jsonPath("$[0].routeNumber").value("7000"))
                 .andExpect(jsonPath("$[0].regionName").value("수원시"))
-                .andExpect(jsonPath("$[0].provider").doesNotExist())
+                .andExpect(jsonPath("$[0].provider").value("TAGO"))
+                .andExpect(jsonPath("$[0].routeType").value("CITY_LOCAL"))
                 .andExpect(jsonPath("$[0].externalRouteId").doesNotExist())
                 .andExpect(jsonPath("$[0].cityCode").doesNotExist())
                 .andExpect(jsonPath("$[1].id").value(gimpo.getId()))

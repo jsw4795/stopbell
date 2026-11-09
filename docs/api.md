@@ -59,17 +59,21 @@ JWT Access Token이 필요한 Application API다. `query`는 trim한 뒤 노선�
   {
     "id": 754,
     "routeNumber": "7000",
-    "regionName": "수원시"
+    "regionName": "수원시",
+    "provider": "TAGO",
+    "routeType": "CITY_LOCAL"
   },
   {
     "id": 1390,
     "routeNumber": "7000",
-    "regionName": "김포시"
+    "regionName": "김포시",
+    "provider": "TAGO",
+    "routeType": null
   }
 ]
 ```
 
-`id`는 `BusRoute.id`인 내부 selection reference다. `routeNumber`는 unique하지 않으므로 같은 번호의 복수 후보가 존재할 수 있으며, `regionName`은 이를 표시용으로 구분한다. Client에는 `provider`, `externalRouteId`, `cityCode`를 노출하지 않는다. Client는 선택한 response의 `id`를 다음 Stop 조회 endpoint의 `{routeId}`로 사용한다.
+`id`는 `BusRoute.id`인 내부 selection reference다. `routeNumber`는 unique하지 않으므로 같은 번호의 복수 후보가 존재할 수 있으며, `regionName`은 이를 표시용으로 구분한다. `provider`는 `SEOUL_BUS` 또는 `TAGO`이며 `routeType`은 [Database의 정규화 유형](database.md#transit-원본-메타데이터-저장-phase-3-a-1) 또는 미확인 시 `null`이다. `externalRouteId`, `cityCode`는 노출하지 않는다. Client는 선택한 response의 `id`를 다음 Stop 조회 endpoint의 `{routeId}`로 사용한다.
 
 ### 버스 노선의 정류장 조회
 

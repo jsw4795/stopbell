@@ -91,6 +91,10 @@ public class BusRoute {
         }
     }
 
+    public void updateRouteType(BusRouteType routeType) {
+        this.routeType = routeType;
+    }
+
     public BusRouteType getRouteType() {
         return routeType;
     }

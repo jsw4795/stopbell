@@ -172,6 +172,7 @@ class SeoulCsvMetadataSyncIntegrationTest {
                 .isEqualTo(retainedOccurrences);
         assertThat(jdbc.queryForObject("SELECT id FROM bus_routes WHERE external_route_id = ?", Long.class, ROUTE_A))
                 .isEqualTo(routeId);
+        assertThat(jdbc.queryForObject("SELECT route_type FROM bus_routes WHERE id = ?", String.class, routeId)).isEqualTo("BRANCH");
         assertThat(jdbc.queryForObject("SELECT route_number FROM bus_routes WHERE id = ?", String.class, routeId))
                 .isEqualTo("7016변경");
         assertThat(jdbc.queryForObject("SELECT stop_name FROM bus_stops WHERE id = ?", String.class, stopId))

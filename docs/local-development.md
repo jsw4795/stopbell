@@ -773,3 +773,17 @@ GBIS 기반정보의 `routeDownloadUrl`과 `routeStationDownloadUrl`은 실제 �
 이후 Live 수집에서 GBIS Bundle `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/90f6ce9d-c9d7-4a2d-a3ec-238961d8f1e7`은 완료됐으나 TAGO 정류장 수집은 요청 265회에서 `INVALID_RESPONSE`로 중단됐다. 미완료 TAGO Bundle `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/973ee134-9c7d-43d5-acc4-8392277ad28f`의 261개 응답은 보존했다. 복원한 실패 요청을 별도로 1회 확인했을 때 109개 정류장의 정상 응답이 기존 파서와 안전성 검사를 통과했으나 원래 실패 응답은 없어 원인을 확정할 수 없다.
 
 완료 GBIS Bundle 재생과 제한적 재시도를 추가한 뒤 TAGO만 새로 수집했다. 경기 31개 도시 확인 후 TAGO 정류장 단계에서 `INVALID_RESPONSE detail=TAGO_STRUCTURE`, 요청 53회, 560,827바이트로 중단됐으며 응답 원문은 보관하지 않았다. 새 미완료 TAGO Bundle은 `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/db5433d9-9349-467e-8902-1c8aadb53f86`이다. GBIS 재호출과 수집 명령 재실행, DB 접근은 없었다. TAGO 완료 Bundle과 통합 Snapshot은 확보하지 못했다.
+
+### 기존 노선 유형 보강 준비
+
+`backend/scripts/prepare_route_type_backfill.py`는 기존 서울 노선마스터 CSV에서 두 SQL 파일만 생성하며 DB에 접속하지 않는다. GBIS 후보는 SQL 실행 시 `transit_source_metadata`의 버전 `20261109` ROUTE 중 기존에 검증되어 `route_id`가 연결된 행만 사용한다. 서울은 provider·원본 ID·노선명, 경기는 provider·연결된 내부 ID·`GGB` 원본 ID를 확인한다. 두 출처 모두 현재 유형이 NULL이고 알려진 코드인 행만 후보로 삼는다. 중복 Route 연결은 임시 후보 테이블의 기본키 제약으로 실패한다.
+
+```sh
+python3 backend/scripts/prepare_route_type_backfill.py \
+  '../stopbell-metadata/rout-data/2026-11-09/SEOUL/TBIS_MS_노선 (노선마스터).csv' \
+  /private/tmp/stopbell-route-type-plan
+```
+
+출력 디렉터리의 파일이 이미 있으면 덮어쓰지 않는다. 먼저 CSV 출처·해시, DB 백업과 복구 방법을 확인하고 모든 metadata writer를 중지한다. MySQL **같은 세션**에서 `route-type-preview.sql`을 실행하면 임시 테이블과 트랜잭션을 열고 Route/GBIS 원본을 잠근 뒤 후보 목록과 유형별 수를 출력한다. 영구 테이블은 쓰지 않는다. 분석 시점의 예상은 서울 705개, 경기 2,104개, 합계 2,809개이며 현재 DB가 달라졌다면 적용하지 않고 차이를 검토한다. 전체 후보 목록과 기존 `route_type`, 원본 버전·연결, `bus_routes`/occurrence/원본/`bus_metadata_sync_states`의 행 수 및 백업을 적용 전 확인한다. 검토하지 않거나 오류가 나면 같은 세션에서 `ROLLBACK`하고 종료한다.
+
+**실제 DB UPDATE에는 별도의 명시적 승인이 필요하다.** 승인 후에도 위 잠금과 동일 트랜잭션이 유지된 경우에만 같은 세션에서 `route-type-update.sql`을 실행한다. 이 파일은 `bus_routes.route_type`만 갱신하며 자동 commit하지 않는다. 갱신 건수와 후보별 값이 사전 검토 결과와 일치하고 mismatch가 0인지, 나머지 열·테이블과 완료 시각이 보존됐는지 확인한 뒤에만 수동 `COMMIT`; 하나라도 다르면 `ROLLBACK`한다. 세션 단절이나 writer 개입 시 처음부터 미리보기와 승인을 다시 진행한다. 이 작업은 전체 동기화, 원본 갱신, 삭제 또는 동기화 상태 갱신을 실행하지 않는다.

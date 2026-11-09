@@ -80,6 +80,7 @@ public class BusRouteMetadataSyncService {
                         snapshot.cityCode()
                 )));
         route.updateMetadata(snapshot.routeNumber(), snapshot.cityCode());
+        if (snapshot.routeTypeObserved()) route.updateRouteType(snapshot.routeType());
 
         Map<OccurrenceKey, BusRouteStopOccurrence> existingOccurrences = new HashMap<>();
         for (BusRouteStopOccurrence occurrence : occurrenceRepository.findAllByRouteOrderByStopOrderAsc(route)) {
