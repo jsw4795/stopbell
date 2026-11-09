@@ -16,8 +16,8 @@
 
 ## 현재 위치 — 2026-11-10 기준
 
-- 확인 당시 HEAD는 `b8a9435` (`feat: TAGO GBIS Bundle 승인 적용 경로 추가`)다. 공식 노선 타입 관련 미커밋 Backend 변경과 신규 파일이 진행 중이므로 다른 작업에서 덮어쓰거나 완료된 구현으로 취급하지 않는다. HEAD와 작업 트리는 매번 다시 확인한다.
-- 아래 수집·DB 결과는 개발자가 전달한 완료 결과다. 이 문서 갱신에서는 Bundle과 백업 경로의 존재만 확인했으며 DB, 원본 무결성·재생 및 백업 복원을 재검증하지 않았다. [로드맵](roadmap.md)과 [Task List](task-list.md)의 11월 8일 이후 갱신되지 않은 진행 기록은 당시 상태로 읽고, Phase 번호나 Task 완료 여부를 임의로 바꾸지 않는다.
+- 공식 노선 유형 Backend는 `d9300c2`에서 구현됐으며 기존 개발 DB 유형 보강도 완료됐다. HEAD와 작업 트리는 매번 다시 확인한다.
+- 아래 TAGO·GBIS 수집과 최초 DB 적용 결과는 개발자가 전달한 기록이며, 당시 인수인계에서는 DB와 원본·백업 복원을 재검증하지 않았다. 이후 공식 유형 보강의 백업·DB 검증은 아래에 별도로 기록한다. [로드맵](roadmap.md)과 [Task List](task-list.md)의 이전 진행 기록은 당시 상태로 읽는다.
 - TASK-710 및 TASK-908은 미완료다. 서울·TAGO의 일부 실제 iPhone 결과가 있으나 전체 현장 검증은 남아 있다. TAGO는 기본 OFF 실험이며 원본 최신성·동일 운행 보장과 운영 적용은 별개다.
 
 ### 완료된 TAGO·GBIS 수집과 개발 DB 적용
@@ -33,14 +33,16 @@
 
 적용 전 백업 `~/GPT_Codex_Project/stopbell-db-backups/stopbell-20261110-001404.sql.gz`는 보존한다. gzip 무결성 검사는 통과했으나 실제 복원 테스트는 하지 않았다.
 
+2026-11-10 개발 DB에 공식 유형만 보강했다. 사용자 승인 후 동일 트랜잭션에서 Preview와 후보별 검증을 다시 수행하고 `bus_routes.route_type` 2,809건(서울 705, TAGO 2,104)을 갱신·commit했다. 전체 Route 2,888개 중 서울 원본 공란 15개와 GBIS 미지원 코드 `50` 64개는 NULL로 유지했다. Route의 다른 필드와 비대상 테이블을 트랜잭션 전후 지문 및 commit 후 주요 테이블 체크섬으로 확인했고 Raw·Stop·Occurrence·Alarm·BoardingSession·동기화 완료 시각은 변경하지 않았다. 적용 전 백업 `~/GPT_Codex_Project/stopbell-db-backups/stopbell-route-type-preflight-20261110-014037.sql.gz`는 SHA-256 `ad6e45a3362c677ff69d6b825b4b719370c8e2b3cfbb82e899a7a6f0b94185fc`이며 gzip과 격리 MySQL 복원을 검증했다.
+
 **서울버스는 이번에 최신화하지 않았다.** `bus_metadata_sync_states`에서 TAGO만 최신 동기화 시각으로 바뀌었고 `SEOUL_BUS`는 기존 날짜를 유지했다. 서울 기존 데이터가 있어도 2026년 11월 최신 CSV 적용을 뜻하지 않는다.
 
 ### 현재 우선순위와 남은 작업
 
-1. **최우선: 서울·경기 공식 노선 타입 저장과 검색 API 제공.** 개발자가 확인한 적용 후 DB의 `bus_routes.route_type`은 모든 노선에서 NULL이다. 커밋된 기준에는 컬럼과 `BusRouteType`, 서울 CSV `노선유형` 및 TAGO·GBIS Raw 보존이 있으나 공식 유형의 정규화 저장 연결과 검색 응답의 `provider`·`routeType`은 완성되지 않았다. 현재 작업 트리에는 매핑·저장·응답 관련 미커밋 변경이 있으므로 먼저 확인하고 이어서 검증한다. 완료나 적용으로 간주하지 않는다.
-2. 서울 CSV 실제 값과 기존 TAGO `routetp`·GBIS `routeTypeCd` 등 Raw 공식 필드의 코드 분포와 근거를 조사한 뒤 매핑을 확정하고 필요하면 enum을 확장한다. 정규화 Snapshot·저장 및 검색 API에 연결하고 기존 데이터 보강 경로와 적용 전후 검증을 마련한다. 노선번호로 추측하거나 원본 근거 없이 할당하지 않고 미확인 값은 NULL 또는 명시적으로 정한 미확인 정책으로 처리한다. 기존 Raw를 우선 재사용해 경기 전체를 불필요하게 재동기화하지 않으며 **실제 DB 변경은 별도 검증과 사용자 승인 후** 진행한다. 코드 분포와 대응 관계는 아직 확정하지 않았다.
-3. 후속으로 서울버스 CSV 최신성을 확인하고 DB 비교·안전한 갱신을 수행한다. 이어 수집 폴더 구조와 필요한 수집기 편의 기능을 개선한다. 목표 구조는 `stopbell-collections/YYYY-MM-DD/{TAGO,GBIS}/HHmmss/<Bundle UUID>/`, 날짜별 `diagnostics/`, 최상위 `README.md`, `incomplete/`, `metadata-admin-archive/`다. UUID·Manifest 무결성과 적용 이력·아카이브를 보호하고 기존 Bundle 이동 전후 검증한다. 현재 확인된 기존 경로는 이 구조가 아니며 전체 구현·이동 완료 여부는 확인되지 않았다.
-4. 공식 타입 Backend와 서울버스 최신화 이후 Flutter UI-2~UI-8을 이어서 진행하고 통합 검증한다. 기존 Phase 번호는 유지한다.
+1. 공식 노선 유형 저장과 검색 API 구현 및 기존 개발 DB 유형 보강은 완료됐다. 서울 원본 공란과 GBIS 코드 `50`은 미분류로 유지하며, 미확인 유형을 노선번호로 추정하지 않는다.
+2. 서울버스 CSV 최신성을 확인하고 DB 비교·안전한 전체 최신화를 별도로 수행한다. 서울 유형만 보강한 것은 서울 전체 최신화가 아니다. Phase 3-B는 진행 중이다.
+3. 후속으로 수집 폴더 구조와 필요한 수집기 편의 기능을 개선한다. 목표 구조는 `stopbell-collections/YYYY-MM-DD/{TAGO,GBIS}/HHmmss/<Bundle UUID>/`, 날짜별 `diagnostics/`, 최상위 `README.md`, `incomplete/`, `metadata-admin-archive/`다. UUID·Manifest 무결성과 적용 이력·아카이브를 보호하고 기존 Bundle 이동 전후 검증한다.
+4. 서울버스 최신화 이후 Flutter UI-2~UI-8을 이어서 진행하고 통합 검증한다. 공식 유형 색상 UI는 아직 미적용이며 기존 Phase 번호와 순서는 유지한다.
 
 ### Flutter UI/UX 전면 리뉴얼 유지
 
