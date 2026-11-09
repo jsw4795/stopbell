@@ -193,10 +193,14 @@ class TransitMetadataSnapshotPreviewIntegrationTest {
         assertThat(result.raw().get(new TransitMetadataSnapshotPreviewService.SourceKind(TransitSourceSystem.TAGO, OCCURRENCE)).added()).isEqualTo(400);
         assertThat(rows()).isEqualTo(before);
     }
-    @Test void existing_analysis_details_and_approval_are_unchanged() {
+    @Test void existing_analysis_details_and_approval_are_unchanged(@org.junit.jupiter.api.io.TempDir java.nio.file.Path temp) throws Exception {
         jdbc.update("insert into bus_stops(provider,external_stop_id,stop_name) values ('TAGO','orphan','orphan')");
         long run = history.start(TAGO).getId(); history.collected(run);
-        var snapshot = tago("1", "a", null);
+        var tagoBundle = com.stopbell.transit.metadata.OfflineBundleFixtures.tago(temp, List.of("GGB200"),
+                Map.of("GGB200", com.stopbell.transit.metadata.OfflineBundleFixtures.stops("A", "A")), "raw");
+        var gbisBundle = com.stopbell.transit.metadata.OfflineBundleFixtures.gbis(temp, "v1", "turn", "end");
+        var snapshot = com.stopbell.transit.metadata.TagoGbisOfflineSnapshotAssembler.withGbis(tagoBundle, gbisBundle,
+                com.stopbell.transit.metadata.OfflineBundleFixtures.KEY);
         var stored = analysis.analyzeAndStore(run, snapshot);
         review.save(run, stored, new BusMetadataSafetyGuard().evaluate(stored));
         history.fail(run, com.stopbell.transit.domain.TransitCollectionFailureStage.VALIDATION, com.stopbell.transit.domain.TransitCollectionFailureCode.UNSAFE_CHANGE);
@@ -211,5 +215,51 @@ class TransitMetadataSnapshotPreviewIntegrationTest {
         assertThatThrownBy(source::fetchSnapshotWithRawRows).isInstanceOf(RuntimeException.class);
         var valid = tago("1", "a", null);
         assertThatThrownBy(() -> preview.preview(new TagoMetadataSource.TagoSnapshot(valid.normalized(), List.of()))).isInstanceOf(IllegalStateException.class);
+    }
+    @Test void offline_bundle_preview_compares_both_sources_and_preserves_every_row(@org.junit.jupiter.api.io.TempDir java.nio.file.Path temp) throws Exception {
+        var ids = List.of("GGB200");
+        var tago1 = com.stopbell.transit.metadata.OfflineBundleFixtures.tago(temp, ids,
+                Map.of("GGB200", com.stopbell.transit.metadata.OfflineBundleFixtures.stops("A", "A")), "old");
+        var gbis1 = com.stopbell.transit.metadata.OfflineBundleFixtures.gbis(temp, "v1", "turn", "old-end");
+        String key = com.stopbell.transit.metadata.OfflineBundleFixtures.KEY;
+        var initial = com.stopbell.transit.metadata.TagoGbisOfflineSnapshotAssembler.withGbis(tago1, gbis1, key);
+        sync.syncTagoSnapshot(initial, Instant.parse("2026-01-01T00:00:00Z"));
+        var before = rows();
+        var tago2 = com.stopbell.transit.metadata.OfflineBundleFixtures.tago(temp, ids,
+                Map.of("GGB200", com.stopbell.transit.metadata.OfflineBundleFixtures.stops("A", "A")), "new");
+        var gbis2 = com.stopbell.transit.metadata.OfflineBundleFixtures.gbis(temp, "v2", "turn", "new-end");
+        var combined = com.stopbell.transit.metadata.TagoGbisOfflineSnapshotAssembler.withGbis(tago2, gbis2, key);
+        var result = preview.preview(combined);
+        assertThat(result.safety().decision()).isEqualTo(BusMetadataSafetyGuard.Decision.ALLOW);
+        assertThat(result.diff().modifiedOccurrences()).hasSize(2);
+        assertThat(result.raw().get(new TransitMetadataSnapshotPreviewService.SourceKind(TransitSourceSystem.TAGO, ROUTE)).modified()).isEqualTo(1);
+        assertThat(result.raw().get(new TransitMetadataSnapshotPreviewService.SourceKind(TransitSourceSystem.GBIS, ROUTE)).versionChanged()).isEqualTo(1);
+        assertThat(result.raw().get(new TransitMetadataSnapshotPreviewService.SourceKind(TransitSourceSystem.GBIS, OCCURRENCE)).versionChanged()).isEqualTo(2);
+        assertThat(result.raw().get(new TransitMetadataSnapshotPreviewService.SourceKind(TransitSourceSystem.GBIS, OCCURRENCE)).modified()).isEqualTo(1);
+        assertThat(rows()).isEqualTo(before);
+        var tagoOnly = com.stopbell.transit.metadata.TagoGbisOfflineSnapshotAssembler.tagoOnly(tago2, key);
+        assertThat(preview.preview(tagoOnly).raw().get(new TransitMetadataSnapshotPreviewService.SourceKind(TransitSourceSystem.GBIS, ROUTE)).compared()).isFalse();
+        assertThat(rows()).isEqualTo(before);
+        var shortStops = "[{\"nodeid\":\"GGB10\",\"nodenm\":\"A\",\"nodeord\":1}]";
+        var reduced = com.stopbell.transit.metadata.OfflineBundleFixtures.tago(temp, ids, Map.of("GGB200", shortStops), "old");
+        var blocked = preview.preview(com.stopbell.transit.metadata.TagoGbisOfflineSnapshotAssembler.withGbis(reduced, gbis2, key));
+        assertThat(blocked.safety().decision()).isEqualTo(BusMetadataSafetyGuard.Decision.BLOCK);
+        assertThat(blocked.diff().removedOccurrences()).isNotEmpty();
+        assertThat(blocked.details()).isNotEmpty();
+        assertThat(rows()).isEqualTo(before);
+    }
+    @Test void offline_bundle_shared_stop_conflicts_follow_recorded_route_order(@org.junit.jupiter.api.io.TempDir java.nio.file.Path temp) throws Exception {
+        var stops = Map.of("GGB200", com.stopbell.transit.metadata.OfflineBundleFixtures.stops("A", "A"),
+                "GGB201", com.stopbell.transit.metadata.OfflineBundleFixtures.stops("B", "B"));
+        var bundle = com.stopbell.transit.metadata.OfflineBundleFixtures.tago(temp, List.of("GGB201", "GGB200"), stops, "raw");
+        var gbis = com.stopbell.transit.metadata.OfflineBundleFixtures.gbis(temp, "v1", "turn", "end");
+        var before = rows();
+        var snapshot = com.stopbell.transit.metadata.TagoGbisOfflineSnapshotAssembler.withGbis(bundle, gbis,
+                com.stopbell.transit.metadata.OfflineBundleFixtures.KEY);
+        var result = preview.preview(snapshot);
+        assertThat(result.safety().decision()).isEqualTo(BusMetadataSafetyGuard.Decision.BLOCK);
+        assertThat(result.diff().conflictingStops()).containsExactly("GGB10");
+        assertThat(result.details().getFirst().variants().getFirst().routeId()).isEqualTo("GGB201");
+        assertThat(rows()).isEqualTo(before);
     }
 }

@@ -698,4 +698,8 @@ Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여�
 
 ### GBIS 로컬 원본 묶음 (Phase 3-B-2B-2B-1B)
 
-`GbisLocalBundle.create(절대_디렉터리, serviceKey)`로 Git 밖의 기존 실제 디렉터리에 묶음을 만든다. `Writer.add(Source, 원본바이트)`에 `BASE_INFO`, `ROUTE`, `ROUTE_STATION`을 각각 한 번 전달한다. `complete()`가 세 파일과 기반정보·버전·Bulk·Raw 안전성을 검증해야 Manifest가 게시된다. `GbisLocalBundle.replay(묶음_절대경로, serviceKey)`는 크기와 SHA-256, 모든 원본과 버전을 재검증해 네트워크 없이 Snapshot을 반환한다. 서비스 키는 검사에만 사용하며 Manifest에 URL과 키를 기록하지 않는다. 공식 URL의 인코딩된 형태와 확인할 수 없는 query는 거부한다. 실제 Provider 수집, TAGO 통합 및 실제 DB Preview는 후속 작업이다. 파일 권한, 하드 링크, 해시와 미완료 묶음에 관한 위 TAGO 경계가 동일하게 적용된다.
+`GbisLocalBundle.create(절대_디렉터리, serviceKey)`로 Git 밖의 기존 실제 디렉터리에 묶음을 만든다. `Writer.add(Source, 원본바이트)`에 `BASE_INFO`, `ROUTE`, `ROUTE_STATION`을 각각 한 번 전달한다. `complete()`가 세 파일과 기반정보·버전·Bulk·Raw 안전성을 검증해야 Manifest가 게시된다. `GbisLocalBundle.replay(묶음_절대경로, serviceKey)`는 크기와 SHA-256, 모든 원본과 버전을 재검증해 네트워크 없이 Snapshot을 반환한다. 서비스 키는 검사에만 사용하며 Manifest에 URL과 키를 기록하지 않는다. 공식 URL의 인코딩된 형태와 확인할 수 없는 query는 거부한다. 이 단계에서는 실제 Provider 수집과 실제 DB Preview를 수행하지 않았다. 파일 권한, 하드 링크, 해시와 미완료 묶음에 관한 위 TAGO 경계가 동일하게 적용된다.
+
+### TAGO·GBIS 오프라인 Snapshot 통합 (Phase 3-B-2B-2B-1C)
+
+`TagoGbisOfflineSnapshotAssembler.tagoOnly(tago경로, serviceKey)`는 명시적으로 TAGO만 재생한다. `withGbis(tago경로, gbis경로, serviceKey)`는 양쪽 묶음을 검증한 뒤 기존 목적지 보강 규칙을 적용하고 TAGO와 GBIS Raw를 포함한 `TagoSnapshot`을 반환한다. 결합을 요청한 GBIS 묶음이 누락·손상되거나 버전이 맞지 않으면 실패하며 TAGO-only로 대체하지 않는다. 반환값은 기존 `TransitMetadataSnapshotPreviewService.preview(snapshot)`에 전달할 수 있다. TAGO-only Preview는 GBIS 미수집을 삭제로 취급하지 않는다. 두 Manifest의 수집 시각은 별개이며 데이터 시점 일치나 최신성을 뜻하지 않는다. 서비스 수준의 격리 MySQL 테스트로 Preview와 DB 행 불변성을 확인했으며 실제 Provider 수집·개발 DB 비교·경기 Bundle CLI는 후속 작업이다.
