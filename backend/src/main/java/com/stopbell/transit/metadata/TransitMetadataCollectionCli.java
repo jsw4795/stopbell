@@ -38,7 +38,7 @@ public final class TransitMetadataCollectionCli {
             var limits = new CollectionBudget.Limits(integer(options, "max-requests", 1000),
                     number(options, "max-response-bytes", 50_000_000), number(options, "max-total-bytes", 500_000_000),
                     Duration.ofMillis(number(options, "max-duration-ms", 3_600_000)),
-                    Duration.ofMillis(number(options, "interval-ms", 1000)),
+                    Duration.ofMillis(number(options, "interval-ms", 100)),
                     Duration.ofMillis(number(options, "connect-timeout-ms", 2000)),
                     Duration.ofMillis(number(options, "response-timeout-ms", 30000)));
             out.println("mode=" + (live ? "LIVE" : "DRY_RUN") + " directory=" + directory
