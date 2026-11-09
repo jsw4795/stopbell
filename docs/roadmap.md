@@ -13,7 +13,7 @@
 
 TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 검증을 대체하지 않는다. 상세 결과는 [Local Development](local-development.md#task-710-실제-iphone-수신-및-tap-검증), TASK-908의 정책 변경과 실측 경계는 [증거 보고서 §28](research/TASK-908-provider-evidence.md#28-하차-전-단일-알림과-이동-진행-평가-2026-10-29)을 따른다. TASK-814/816은 완료이며, UTC의 구현·검증 범위와 운영 데이터 미확인 조건은 [TASK-814 결과](task-list.md#task-814-utc-구현-및-검증-결과-2026-10-30)를 따른다.
 
-## 교통 메타데이터 개선과 Flutter 리뉴얼 진행 현황 (2026-11-08)
+## 교통 메타데이터 개선과 Flutter 리뉴얼 진행 현황 (2026-11-10)
 
 이 표는 기존 Phase 0~9와 별도의 작업 흐름이다. 최신 HEAD와 [Task List](task-list.md)를 다시 확인한다. 완료는 해당 단계의 코드 구현을 뜻하며 운영 적용이나 실제 Provider 검증을 뜻하지 않는다. 자동 테스트 결과는 각 작업 기록과 Git을 확인한다.
 
@@ -27,7 +27,7 @@ TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 �
 | 3-A-3A-2 | 원본 파일 아카이브 | 구현 완료; 명시적 실행 ID 경로와 격리 테스트 |
 | 3-A-3B | 실제 수집 경로에 이력 연결 | 구현 및 격리 테스트 완료 |
 | 3-A-4 | 동기화 변경분 분석 | 구현 및 격리 테스트 완료 |
-| 3-B | 안전한 데이터 최신화·공식 노선유형 저장 및 API 제공 | 진행 중; 위험 변경 검토·승인 적용, 3-B-2A 사전 점검 및 3-B-2B-1 비적용 Snapshot 비교 구현; 공식 유형 저장·검색 API 구현 및 개발 DB 2,809건 보강 완료; 서울 전체 최신화는 미완료 |
+| 3-B | 안전한 데이터 최신화·공식 노선유형 저장 및 API 제공 | 진행 중; 위험 변경 검토·승인 적용, 3-B-2A 사전 점검 및 3-B-2B-1 비적용 Snapshot 비교 구현; 공식 유형 저장·검색 API 구현 및 개발 DB 2,809건 보강 완료; 서울·경기 개발 DB 최신화 완료; 운영 적용과 별도 검증은 잔여 |
 | 3-C | Flutter 공식 유형별 색상 적용 | 예정; UI-2와 연결 |
 | UI-0 / UI-1 | 공통 디자인 시스템 / 세로 타임라인 | 주요 부분 구현; 보완 범위 확인 |
 | UI-2~UI-8 | 검색부터 실시간 다중 차량 표시·통합 검증 | 예정; 아래 로드맵 참조 |
@@ -38,19 +38,13 @@ TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 �
 
 ## 향후 수집 데이터 관리 개선 계획
 
-현재 진행 중인 TAGO·GBIS DB Preview와 최신화를 마친 후 진행한다. 기존 Bundle 생성·재생 및 안전성 경계는 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다. 아래는 미구현 계획이며 세부 구현과 검증은 착수 시 결정한다.
-
-1. DB Preview 결과와 위험 변경을 검토한다.
-2. 검토 결과에 따라 DB를 최신화한다.
-3. DB 반영 결과를 검증한다.
-4. 수집 데이터 저장 구조와 수집기를 개선한다.
-5. Flutter UI 리뉴얼을 재개한다.
+서울·경기 개발 DB 최신화는 완료됐다. 다음은 수집 데이터 폴더 구조 정리, 수집기 편의 기능 개선, Flutter UI-2, UI-3~UI-8 순서다. 기존 Bundle 생성·재생 및 안전성 경계는 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다. 아래는 미구현 계획이며 세부 구현과 검증은 착수 시 결정한다.
 
 ### 저장 구조와 기존 Bundle 이전
 
 - `stopbell-collections/<날짜>/<TAGO 또는 GBIS>/<수집 시작 시각>/<고유 ID>/` 순서로 관리한다. 마지막 Bundle 디렉터리 이름은 Manifest ID와 정확히 일치시킨다. 시각 표기와 시간대는 구현 시 정한다.
-- 진단 파일은 Bundle과 구분되는 별도 `diagnostics` 디렉터리에 보관하고 기존 민감 파일 접근·보존 경계를 유지한다.
-- 기존 완료 Bundle은 원본을 보존한 채 새 구조에 복사하고 Manifest ID·파일 무결성 및 오프라인 재생을 검증한다. 충돌이나 검증 실패 시 덮어쓰거나 원본을 삭제하지 않는다. 참조 경로를 확인하고 이전 결과가 검증된 뒤에만 기존 사본의 정리 여부를 결정한다.
+- 목표 경로는 `stopbell-collections/YYYY-MM-DD/{TAGO,GBIS}/HHmmss/<Bundle UUID>/`이며 날짜별 `diagnostics/`, 최상위 `README.md`, `incomplete/`, `metadata-admin-archive/`를 유지한다. 진단 파일의 민감 파일 접근·보존 경계도 유지한다.
+- 기존 TAGO·GBIS 완료 Bundle, diagnostics, 미완료 결과와 서울 Bootstrap 원본 아카이브를 대상으로 한다. 원본을 보존한 채 복사하고 Bundle UUID·Manifest ID, 파일 SHA-256과 오프라인 replay를 검증하며 DB 수집 이력과 아카이브 참조를 보존한다. 검증 전 원본을 삭제하지 않고 기존 파일을 덮어쓰지 않으며 Provider API를 재호출하지 않는다. 참조와 이전 결과 검증 후에만 기존 사본의 정리 여부를 결정한다.
 
 ### 수집기 개선 범위
 

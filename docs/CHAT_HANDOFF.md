@@ -35,14 +35,30 @@
 
 2026-11-10 개발 DB에 공식 유형만 보강했다. 사용자 승인 후 동일 트랜잭션에서 Preview와 후보별 검증을 다시 수행하고 `bus_routes.route_type` 2,809건(서울 705, TAGO 2,104)을 갱신·commit했다. 전체 Route 2,888개 중 서울 원본 공란 15개와 GBIS 미지원 코드 `50` 64개는 NULL로 유지했다. Route의 다른 필드와 비대상 테이블을 트랜잭션 전후 지문 및 commit 후 주요 테이블 체크섬으로 확인했고 Raw·Stop·Occurrence·Alarm·BoardingSession·동기화 완료 시각은 변경하지 않았다. 적용 전 백업 `~/GPT_Codex_Project/stopbell-db-backups/stopbell-route-type-preflight-20261110-014037.sql.gz`는 SHA-256 `ad6e45a3362c677ff69d6b825b4b719370c8e2b3cfbb82e899a7a6f0b94185fc`이며 gzip과 격리 MySQL 복원을 검증했다.
 
-**서울버스는 이번에 최신화하지 않았다.** `bus_metadata_sync_states`에서 TAGO만 최신 동기화 시각으로 바뀌었고 `SEOUL_BUS`는 기존 날짜를 유지했다. 서울 기존 데이터가 있어도 2026년 11월 최신 CSV 적용을 뜻하지 않는다.
+위 유형 보강 당시에는 서울 전체 동기화를 수행하지 않았으며 `SEOUL_BUS` 완료 시각도 유지됐다. 이후 아래 별도 실행으로 서울 개발 DB를 최신화했다.
+
+### 서울버스 개발 DB 전체 동기화 (2026-11-10)
+
+사용자가 공식 파일임을 확인하고 적용을 승인한 서울 CSV 3종을 기존 `MetadataBootstrapRunner` One-shot Bootstrap으로 반영했다. 완료 로그 `Metadata bootstrap completed: provider=SEOUL_BUS, runId=3`의 시각은 2026-11-10 03:00:59 KST이며 실행 상태는 `COMPLETED`다. 사용자는 DB 검증 SQL 결과가 기대와 일치한다고 확인했으나 SQL 결과 원문 전체는 제공되지 않았다. 정규화 Route 720·Stop 12,962·Occurrence 41,728이며 Raw는 ROUTE 1,364·STOP 63,883·OCCURRENCE 89,159, 합계 154,406이다. Raw에는 서비스 범위 밖 공식 CSV 행도 포함되므로 신규 노선·정류장 수가 아니다. 기존 2026-09-22였던 동기화 완료 시각은 DB 반영 시각으로 갱신됐으며 원본 발행일이 아니다. 운영 DB 배포나 전체 노선의 실시간 운행 정확성 검증을 뜻하지 않는다.
+
+적용 전 최종 Preview는 Route 추가/수정/삭제 `0/0/0`, Stop 추가/수정/cleanup/충돌 `0/0/0/0`, Occurrence 추가/수정/제거/위치변경 `0/0/0/0`, Guard `ALLOW`, 위험 상세 0건이었다. 최초 Preview의 Stop 수정 후보 11,722건은 CSV 좌표와 DB `DECIMAL(10,7)` 정밀도 차이였고, 별도 분석에서도 정밀도 초과 11,722건을 확인했다. 수정 커밋 `24b4185cdbbf37293ee5d0f0cdaf3cb7a53c0c26`은 원본 좌표 범위 검증과 Raw 문자열을 유지하며 Preview·Sync에 `setScale(7, RoundingMode.HALF_UP)`을 적용했다. Codex 보고 기준 관련 테스트 78개가 통과했고 수정 후 실제 CSV Preview의 정규화 변경 후보는 모두 0건이었다.
+
+원본 경로는 `~/GPT_Codex_Project/stopbell-metadata/rout-data/2026-11-09/SEOUL/`이다. 디렉터리 날짜는 공식 발행일이 아니다.
+
+| 공식 CSV | SHA-256 |
+| --- | --- |
+| `TBIS_MS_노선 (노선마스터).csv` | `b7915c9076a921e1739563230c191c6f9d081aec7740530b009e74c941c3d329` |
+| `TBIS_MS_노선_노드 (노선-정류장마스터).csv` | `9141ad0b627b0856f58a2c9dbb23b525cd31f45b6093e501cb4e6cfb0038e8c4` |
+| `TBIS_MS_정류장 (정류장마스터).csv` | `bb2dd6e5588ddc4401d784c2e8ced4ad98cbd315bf9134d94147f5ca7376b238` |
+
+적용 전 백업 `~/GPT_Codex_Project/stopbell-db-backups/stopbell-20261110-025545.sql.gz`는 약 14 MB, SHA-256 `25cabf44039131e4fd3cec9ec36e71c3e5cdca48ba037b50735a3c49ee5e0d83`이다. Docker MySQL 내부 root `mysqldump`와 gzip 무결성 검사는 성공했으나 격리 MySQL 복원 테스트는 미실행이다. 백업 절차는 [Local Development](local-development.md)를 따른다.
 
 ### 현재 우선순위와 남은 작업
 
-1. 공식 노선 유형 저장과 검색 API 구현 및 기존 개발 DB 유형 보강은 완료됐다. 서울 원본 공란과 GBIS 코드 `50`은 미분류로 유지하며, 미확인 유형을 노선번호로 추정하지 않는다.
-2. 서울버스 CSV 최신성을 확인하고 DB 비교·안전한 전체 최신화를 별도로 수행한다. 서울 유형만 보강한 것은 서울 전체 최신화가 아니다. Phase 3-B는 진행 중이다.
-3. 후속으로 수집 폴더 구조와 필요한 수집기 편의 기능을 개선한다. 목표 구조는 `stopbell-collections/YYYY-MM-DD/{TAGO,GBIS}/HHmmss/<Bundle UUID>/`, 날짜별 `diagnostics/`, 최상위 `README.md`, `incomplete/`, `metadata-admin-archive/`다. UUID·Manifest 무결성과 적용 이력·아카이브를 보호하고 기존 Bundle 이동 전후 검증한다.
-4. 서울버스 최신화 이후 Flutter UI-2~UI-8을 이어서 진행하고 통합 검증한다. 공식 유형 색상 UI는 아직 미적용이며 기존 Phase 번호와 순서는 유지한다.
+1. 수집 데이터 폴더 구조를 정리한다. 기존 TAGO·GBIS 완료 Bundle, diagnostics, 미완료 결과와 서울 Bootstrap 원본 아카이브를 대상으로 한다. 목표와 보존 제약은 [로드맵](roadmap.md#저장-구조와-기존-bundle-이전)을 따른다.
+2. 수집기 편의 기능을 개선한다.
+3. Flutter UI-2 공식 노선 유형·색상 및 검색 화면을 진행한다. 서울 원본 공란과 GBIS 코드 `50`은 미분류로 유지하고 노선번호로 추정하지 않는다.
+4. Flutter UI-3~UI-8을 순차 진행하고 통합 검증한다. Phase 3-B의 운영 적용과 별도 검증 책임은 남는다.
 
 ### Flutter UI/UX 전면 리뉴얼 유지
 
