@@ -47,6 +47,19 @@ final class ArchiveContentSafety {
                 || lower.contains("authorization:") || lower.contains("bearer ")) {
             throw new IllegalStateException("Archive content contains a sensitive value");
         }
+        checkKey(value);
+    }
+
+    void checkOptionalMetadata(String value) {
+        String decoded = URLDecoder.decode(value.replaceAll("%(?![0-9a-fA-F]{2})", "%25"), StandardCharsets.UTF_8);
+        checkKey(value);
+        checkKey(decoded);
+        GbisMetadataClient.rejectCredentialWords(decoded);
+        if (decoded.matches("(?is).*//[^/\\s]*@.*"))
+            throw new IllegalStateException("Archive content contains a sensitive value");
+    }
+
+    private void checkKey(String value) {
         if (serviceKey == null || serviceKey.isBlank()) return;
         if (containsSecret(value, serviceKey) || containsSecret(value, decodedKey)) {
             throw new IllegalStateException("Archive content contains a sensitive value");

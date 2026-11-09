@@ -35,11 +35,14 @@ class GbisLocalBundleTest {
         w.add(GbisLocalBundle.Source.ROUTE_STATION, bytes(station));
     }
     @Test void stores_bytes_manifest_and_replays_identical_snapshot() throws Exception {
-        var w = writer(); addAll(w, BASE, ROUTE, STATION);
+        String base = BASE.replace("http://openapi.gbis.go.kr/ws/download?file=area", "/relative")
+                .replace("http://openapi.gbis.go.kr/ws/download?file=line", "")
+                .replace("http://openapi.gbis.go.kr/ws/download?file=stops", "http://other.test/stops");
+        var w = writer(); addAll(w, base, ROUTE, STATION);
         var expected = GbisBulkMetadata.parseWithRaw(bytes(ROUTE), bytes(STATION), "v1", "v1");
         assertThat(w.complete()).isEqualTo(expected);
         assertThat(GbisLocalBundle.replay(w.directory(), KEY)).isEqualTo(expected);
-        assertThat(Files.readAllBytes(w.directory().resolve("base-info.json"))).isEqualTo(bytes(BASE));
+        assertThat(Files.readAllBytes(w.directory().resolve("base-info.json"))).isEqualTo(bytes(base));
         assertThat(Files.readAllBytes(w.directory().resolve("route.dat"))).isEqualTo(bytes(ROUTE));
         assertThat(Files.readAllBytes(w.directory().resolve("route-station.dat"))).isEqualTo(bytes(STATION));
         String manifest = Files.readString(w.directory().resolve("manifest.json"));
@@ -47,6 +50,25 @@ class GbisLocalBundleTest {
                 .doesNotContain(KEY, URL);
         assertThat(expected.normalized().routes().get("200").stations()).extracting(GbisBulkMetadata.Station::order).containsExactly(1, 2);
         assertThat(expected.rawRows().getFirst().fields()).containsEntry("extra", " raw ");
+    }
+    @Test
+    @org.junit.jupiter.api.DisplayName("공식 GBIS 파일명 query 기반정보를 원본 그대로 저장하고 재생한다")
+    void accepts_official_filename_queries_and_replays_bundle() throws Exception {
+        String base = BASE.replace("ws/download?file=area", "ws/download?area20261109V2.txt")
+                .replace("ws/download?file=route", "ws/download?route20261109V2.txt")
+                .replace("ws/download?file=line", "ws/download?routeline20261109V2.txt")
+                .replace("ws/download?file=station\"", "ws/download?routestation20261109V2.txt\"")
+                .replace("ws/download?file=stops", "ws/download?station20261109V2.txt")
+                .replace("ws/download?file=vehicles", "ws/download?vehicle20261109V2.txt")
+                .replace("\"v1\"", "\"20261109\"");
+        var item = GbisMetadataClient.parseBaseInfo(bytes(base), KEY);
+        assertThat(item.routeVersion()).isEqualTo("20261109");
+        assertThat(item.routeDownloadUrl()).endsWith("?route20261109V2.txt");
+        assertThat(item.routeStationDownloadUrl()).endsWith("?routestation20261109V2.txt");
+        var w = writer(); addAll(w, base, ROUTE, STATION);
+        var snapshot = w.complete();
+        assertThat(GbisLocalBundle.replay(w.directory(), KEY)).isEqualTo(snapshot);
+        assertThat(Files.readAllBytes(w.directory().resolve("base-info.json"))).isEqualTo(bytes(base));
     }
     @Test void rejects_missing_duplicate_and_incomplete_sources() throws Exception {
         var w = writer(); w.add(GbisLocalBundle.Source.BASE_INFO, bytes(BASE));
@@ -135,7 +157,7 @@ class GbisLocalBundleTest {
         assertThat(Files.exists(w.directory().resolve("manifest.json"))).isFalse();
     }
     @Test void every_official_url_field_rejects_unsafe_values_without_disclosure() throws Exception {
-        for (String field : List.of("areaDownloadUrl", "routeDownloadUrl", "routeLineDownloadUrl", "routeStationDownloadUrl", "stationDownloadUrl", "vehicleDownloadUrl")) {
+        for (String field : List.of("routeDownloadUrl", "routeStationDownloadUrl")) {
             String prefix = "\"" + field + "\":\"";
             int start = BASE.indexOf(prefix) + prefix.length();
             int end = BASE.indexOf('"', start);

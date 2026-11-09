@@ -14,9 +14,9 @@ public class GbisMetadataClient {
     private final RestClient restClient;
     private final String baseUrl;
     private final String serviceKey;
-    private static final java.util.Set<String> DOWNLOAD_URL_FIELDS = java.util.Set.of(
-            "areaDownloadUrl", "routeDownloadUrl", "routeLineDownloadUrl",
-            "routeStationDownloadUrl", "stationDownloadUrl", "vehicleDownloadUrl");
+    static final java.util.Set<String> DOWNLOAD_URL_FIELDS = java.util.Set.of("routeDownloadUrl", "routeStationDownloadUrl");
+    static final java.util.Set<String> OPTIONAL_URL_FIELDS = java.util.Set.of(
+            "areaDownloadUrl", "routeLineDownloadUrl", "stationDownloadUrl", "vehicleDownloadUrl");
     private static final ObjectMapper MAPPER = new ObjectMapper(tools.jackson.core.json.JsonFactory.builder()
             .enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION).build());
 
@@ -108,6 +108,8 @@ public class GbisMetadataClient {
                 if (node == item && DOWNLOAD_URL_FIELDS.contains(field.getKey())) {
                     if (!field.getValue().isString()) throw new IllegalArgumentException();
                     validateDownloadUrl(field.getValue().asString(), key);
+                } else if (node == item && OPTIONAL_URL_FIELDS.contains(field.getKey()) && field.getValue().isString()) {
+                    safety.checkOptionalMetadata(field.getValue().asString());
                 } else checkBaseJson(field.getValue(), item, safety, key);
             }
         } else if (node.isArray()) node.forEach(child -> checkBaseJson(child, item, safety, key));
@@ -127,15 +129,9 @@ public class GbisMetadataClient {
             rejectCredentialWords(uri.getRawPath());
             String query = uri.getRawQuery();
             if (query != null) {
-                if (query.isEmpty()) throw new IllegalArgumentException();
-                for (String part : query.split("&", -1)) {
-                    String[] pair = part.split("=", -1);
-                    if (pair.length != 2 || !pair[0].matches("[A-Za-z0-9_-]+")
-                            || !pair[1].matches("[A-Za-z0-9._/-]+")) throw new IllegalArgumentException();
-                    ArchiveContentSafety.checkField(pair[0]);
-                    safety.checkText(pair[1]);
-                    rejectCredentialWords(pair[1]);
-                }
+                safety.checkText(query);
+                rejectCredentialWords(query);
+                for (String part : query.split("&", -1)) ArchiveContentSafety.checkField(part.split("=", 2)[0]);
             }
         } catch (RuntimeException e) { throw new IllegalArgumentException("Invalid GBIS download URL"); }
     }

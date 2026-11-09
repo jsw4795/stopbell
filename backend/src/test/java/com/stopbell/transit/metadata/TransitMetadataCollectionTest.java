@@ -340,7 +340,7 @@ class TransitMetadataCollectionTest {
     @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension.class)
     void cli_reports_safe_gbis_validation_without_more_requests_or_manifest(org.springframework.boot.test.system.CapturedOutput logs) throws Exception {
         var scenarios = java.util.Map.of(
-                BASE.replace("http://openapi.gbis.go.kr/download?file=area", "/relative"), "URL_SCHEME_MISSING field=AREA_DOWNLOAD_URL",
+                BASE.replace("http://openapi.gbis.go.kr/download?file=area", "/relative?token=secret"), "CONTENT_UNSAFE",
                 BASE.replace("\"routeStationVersion\":\"v1\"", "\"routeStationVersion\":\"v2\""), "VERSION_MISMATCH",
                 BASE.replace("file=route", "file=route&signature=fake"), "URL_FORBIDDEN_QUERY",
                 BASE.replace("file=route", "file=route&token=secret"), "URL_FORBIDDEN_QUERY",

@@ -18,8 +18,6 @@ final class GbisBaseInfoDiagnostics {
     private static final ObjectMapper STRICT = new ObjectMapper(tools.jackson.core.json.JsonFactory.builder()
             .enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION).build());
     private static final ObjectMapper PERMISSIVE = new ObjectMapper();
-    private static final Set<String> URL_FIELDS = Set.of("areaDownloadUrl", "routeDownloadUrl", "routeLineDownloadUrl",
-            "routeStationDownloadUrl", "stationDownloadUrl", "vehicleDownloadUrl");
     private GbisBaseInfoDiagnostics() { }
 
     static GbisBaseInfoValidationException classify(byte[] bytes, String key) {
@@ -74,12 +72,15 @@ final class GbisBaseInfoDiagnostics {
             for (var entry : node.properties()) {
                 try { ArchiveContentSafety.checkField(entry.getKey()); }
                 catch (RuntimeException e) { return failure(Code.CONTENT_UNSAFE, Field.NONE); }
-                if (node == item && URL_FIELDS.contains(entry.getKey())) {
+                if (node == item && GbisMetadataClient.DOWNLOAD_URL_FIELDS.contains(entry.getKey())) {
                     Field field = field(entry.getKey());
                     if (entry.getValue().isNull()) return failure(Code.URL_MISSING, field);
                     if (!entry.getValue().isString()) return failure(Code.FIELD_TYPE_INVALID, field);
                     var error = inspectUrl(entry.getValue().asString(), key, field);
                     if (error != null) return error;
+                } else if (node == item && GbisMetadataClient.OPTIONAL_URL_FIELDS.contains(entry.getKey()) && entry.getValue().isString()) {
+                    try { safety.checkOptionalMetadata(entry.getValue().asString()); }
+                    catch (RuntimeException e) { return failure(Code.CONTENT_UNSAFE, Field.NONE); }
                 } else {
                     var error = inspectSafety(entry.getValue(), item, safety, key);
                     if (error != null) return error;
@@ -126,15 +127,11 @@ final class GbisBaseInfoDiagnostics {
         catch (RuntimeException e) { return failure(Code.URL_FORBIDDEN_CONTENT, field); }
         String query = uri.getRawQuery();
         if (query != null) {
-            if (query.isEmpty()) return failure(Code.URL_QUERY_STRUCTURE, field);
-            for (String part : query.split("&", -1)) {
-                String[] pair = part.split("=", -1);
-                if (pair.length != 2) return failure(Code.URL_QUERY_STRUCTURE, field);
-                if (!pair[0].matches("[A-Za-z0-9_-]+") || !pair[1].matches("[A-Za-z0-9._/-]+"))
-                    return failure(Code.URL_QUERY_PARAMETER_FORMAT, field);
-                try { ArchiveContentSafety.checkField(pair[0]); safety.checkText(pair[1]); GbisMetadataClient.rejectCredentialWords(pair[1]); }
-                catch (RuntimeException e) { return failure(Code.URL_FORBIDDEN_QUERY, field); }
-            }
+            try {
+                safety.checkText(query);
+                GbisMetadataClient.rejectCredentialWords(query);
+                for (String part : query.split("&", -1)) ArchiveContentSafety.checkField(part.split("=", 2)[0]);
+            } catch (RuntimeException e) { return failure(Code.URL_FORBIDDEN_QUERY, field); }
         }
         return failure(Code.UNKNOWN, field);
     }

@@ -41,7 +41,7 @@ AI 채팅 인수인계의 진입점과 유지관리 시점은 [CHAT_HANDOFF](CHA
 
 문제 발생 시 진단 기능을 더하기 전에 기존 검증이 과도한지 확인하고, 원인이 충분히 확인되면 진단을 반복하지 않고 직접 수정한다. 작은 문제를 불필요하게 여러 Phase로 나누지 않는다. 테스트는 핵심 기능과 실제 회귀 위험에 집중하며, 보안·데이터 무결성과 직접 관련 없는 변경은 구현 완료와 실제 동작 확인을 우선한다. 필요한 회귀 테스트와 기존 기능 보호는 유지한다.
 
-GBIS 기반정보의 `routeDownloadUrl`, `routeStationDownloadUrl`, `areaDownloadUrl`, `routeLineDownloadUrl`, `stationDownloadUrl`, `vehicleDownloadUrl` 중 현재 실제 다운로드 대상은 Route와 RouteStation이다. 기존 구현은 필수인 두 필드와 존재하는 나머지 네 필드에 동일한 엄격한 URL 검증을 적용하며, Live 진단에서 미사용 `areaDownloadUrl`의 `validation=URL_INVALID_FORMAT field=AREA_DOWNLOAD_URL`로 수집이 중단됐다. 실제 값은 확인되지 않았다. 앞으로 실제 다운로드 URL은 엄격히 검증하고, 미사용 선택 필드는 인증정보 노출 방지 등 필요한 안전성만 검사해 정상적인 부가정보가 핵심 기능을 막지 않도록 한다. 이는 향후 적용할 원칙이며 현재 구현의 변경이 완료됐다는 뜻은 아니다.
+GBIS 기반정보의 실제 다운로드 대상은 `routeDownloadUrl`과 `routeStationDownloadUrl`이다. 이 두 URL은 공식 호스트와 인증정보 등 안전성을 검증하고, 사용하지 않는 네 필드는 URL 형식을 강제하지 않되 인증정보 노출을 검사한다. 공식 다운로드의 파일명 단독 query와 기존 key=value query를 모두 지원한다.
 
 ## 4. 백엔드 가이드라인
 

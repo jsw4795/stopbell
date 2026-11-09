@@ -78,35 +78,20 @@ class GbisBaseInfoDiagnosticsTest {
                 java.util.Map.entry("http://openapi.gbis.go.kr/a#fragment", URL_FRAGMENT_PRESENT),
                 java.util.Map.entry("http://openapi.gbis.go.kr", URL_PATH_MISSING),
                 java.util.Map.entry("http:relative", URL_PATH_NOT_ABSOLUTE),
-                java.util.Map.entry("http://openapi.gbis.go.kr/a?", URL_QUERY_STRUCTURE),
-                java.util.Map.entry("http://openapi.gbis.go.kr/a?file=a=b", URL_QUERY_STRUCTURE),
-                java.util.Map.entry("http://openapi.gbis.go.kr/a?file=", URL_QUERY_PARAMETER_FORMAT),
-                java.util.Map.entry("http://openapi.gbis.go.kr/a?file=a+b", URL_QUERY_PARAMETER_FORMAT),
                 java.util.Map.entry("http://openapi.gbis.go.kr/a\\\\b", URL_BACKSLASH));
         cases.forEach((url, code) -> rejects(BASE.replace(ROUTE_URL, url), code, ROUTE_DOWNLOAD_URL));
     }
-    @Test void optional_official_fields_keep_existing_acceptance_and_security_boundary() {
+    @Test void optional_fields_accept_metadata_but_reject_credentials() {
         for (String name : List.of("areaDownloadUrl", "routeLineDownloadUrl", "stationDownloadUrl", "vehicleDownloadUrl")) {
             String prefix = "\"" + name + "\":";
             String valid = BASE.replace("\"routeVersion\":", prefix + "\"" + ROUTE_URL + "\",\"routeVersion\":");
             assertThat(GbisMetadataClient.parseBaseInfo(bytes(valid), KEY).routeVersion()).isEqualTo("v1");
-            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"/relative\""), URL_SCHEME_MISSING, fieldFor(name));
-            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"\""), URL_MISSING, fieldFor(name));
-            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "null"), URL_MISSING, fieldFor(name));
-            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"http://evil.test/a\""), URL_HOST_MISMATCH, fieldFor(name));
-            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"http://openapi.gbis.go.kr/a?token=secret\""), URL_FORBIDDEN_QUERY, fieldFor(name));
-            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"http://user:secret@openapi.gbis.go.kr/a\""), URL_ENCODED_OR_USERINFO, fieldFor(name));
-            rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"http://openapi.gbis.go.kr/a?token=%73ecret\""), URL_ENCODED_OR_USERINFO, fieldFor(name));
+            for (String value : List.of("\"/relative\"", "\"\"", "null", "\"http://other.test/a\""))
+                assertThat(GbisMetadataClient.parseBaseInfo(bytes(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + value)), KEY).routeVersion()).isEqualTo("v1");
+            for (String value : List.of("http://other.test/a?token=secret", "http://user:secret@other.test/a",
+                    "/a?%74oken=secret", "/a?%74oken=secret%", "/a?file=" + KEY))
+                rejects(valid.replace(prefix + "\"" + ROUTE_URL + "\"", prefix + "\"" + value + "\""), CONTENT_UNSAFE, NONE);
         }
-    }
-    private static GbisBaseInfoValidationException.Field fieldFor(String name) {
-        return switch (name) {
-            case "areaDownloadUrl" -> AREA_DOWNLOAD_URL;
-            case "routeLineDownloadUrl" -> ROUTE_LINE_DOWNLOAD_URL;
-            case "stationDownloadUrl" -> STATION_DOWNLOAD_URL;
-            case "vehicleDownloadUrl" -> VEHICLE_DOWNLOAD_URL;
-            default -> throw new AssertionError();
-        };
     }
     @Test void classifies_unsafe_other_fields() {
         rejects(BASE.replace("\"resultCode\":0", "\"resultCode\":0,\"other\":\"https://evil.test/a\""), URL_OUTSIDE_OFFICIAL_FIELD, NONE);

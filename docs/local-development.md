@@ -698,7 +698,7 @@ Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여�
 
 ### GBIS 로컬 원본 묶음 (Phase 3-B-2B-2B-1B)
 
-`GbisLocalBundle.create(절대_디렉터리, serviceKey)`로 Git 밖의 기존 실제 디렉터리에 묶음을 만든다. `Writer.add(Source, 원본바이트)`에 `BASE_INFO`, `ROUTE`, `ROUTE_STATION`을 각각 한 번 전달한다. `complete()`가 세 파일과 기반정보·버전·Bulk·Raw 안전성을 검증해야 Manifest가 게시된다. `GbisLocalBundle.replay(묶음_절대경로, serviceKey)`는 크기와 SHA-256, 모든 원본과 버전을 재검증해 네트워크 없이 Snapshot을 반환한다. 서비스 키는 검사에만 사용하며 Manifest에 URL과 키를 기록하지 않는다. 공식 URL의 인코딩된 형태와 확인할 수 없는 query는 거부한다. `signature` query도 거부하며 실제 GBIS가 서명된 다운로드 URL을 사용하는지 공식 규격과 실수집 전에 확인해야 한다. 확인 전 보안 정책을 완화하지 않는다. 이 단계에서는 실제 Provider 수집과 실제 DB Preview를 수행하지 않았다. 파일 권한, 하드 링크, 해시와 미완료 묶음에 관한 위 TAGO 경계가 동일하게 적용된다.
+`GbisLocalBundle.create(절대_디렉터리, serviceKey)`로 Git 밖의 기존 실제 디렉터리에 묶음을 만든다. `Writer.add(Source, 원본바이트)`에 `BASE_INFO`, `ROUTE`, `ROUTE_STATION`을 각각 한 번 전달한다. `complete()`가 세 파일과 기반정보·버전·Bulk·Raw 안전성을 검증해야 Manifest가 게시된다. `GbisLocalBundle.replay(묶음_절대경로, serviceKey)`는 크기와 SHA-256, 모든 원본과 버전을 재검증해 네트워크 없이 Snapshot을 반환한다. 서비스 키는 검사에만 사용하며 Manifest에 URL과 키를 기록하지 않는다. 실제 다운로드 URL의 인코딩된 형태와 확인할 수 없는 query, `signature` query는 거부한다. 파일 권한, 하드 링크, 해시와 미완료 묶음에 관한 위 TAGO 경계가 동일하게 적용된다.
 
 ### TAGO·GBIS 오프라인 Snapshot 통합 (Phase 3-B-2B-2B-1C)
 
@@ -726,7 +726,9 @@ Backend 디렉터리에서 환경변수 `PUBLIC_DATA_SERVICE_KEY`에 키를 주�
 
 ### GBIS 공식 기반정보와 Live 수집 시도 (Phase 3-B-2B-2B-2B)
 
-GBIS 기반정보의 `baseInfoItem`에 있는 공식 다운로드 URL 여섯 필드는 각각 기존 공식 호스트·URI·민감 query 검사를 통과해야 하며, 그 밖의 URL은 기존 안전 정책을 따른다. 실제 다운로드는 Route와 RouteStation 두 파일뿐이다. 합성 응답으로 원본 보존과 무결성·재생을 검증했으며 서명·인증정보를 허용하지 않는다. 실제 공식 URL 형식과 이 정책의 호환성은 아직 확인되지 않았다.
+GBIS 기반정보의 `routeDownloadUrl`과 `routeStationDownloadUrl`은 실제 다운로드에 사용하므로 공식 호스트·URI·민감 query 검사를 통과해야 한다. 사용하지 않는 네 필드는 URL 형식을 강제하지 않으며 인증정보 안전성 검사를 통과한 원본을 변형 없이 보존한다. 다른 필드는 기존 안전 정책을 따른다.
+
+사용자가 확인한 공식 다운로드 URL의 query에는 파일명이 단독으로 들어간다. 필수 URL은 이 형식과 기존 key=value 형식을 모두 허용하고 인증정보 검사를 유지한다. 제공된 형식의 Fixture로 파싱과 Bundle 재생을 검증했으며 이 수정 후 실제 수집은 실행하지 않았다.
 
 2026-11-09 별도 Quota 조회 없이 사용자 승인에 따라 제한된 Live 수집을 한 번 시도했다. GBIS 기반정보 요청 1회가 HTTP 성공 응답 869바이트를 받았으나 기반정보 검증에서 `INVALID_RESPONSE`로 중단됐다. CLI가 안전하지 않을 수 있는 원본과 상세 예외를 저장·출력하지 않으므로 구조·Provider 오류, 버전 불일치 또는 URL 안전성 충돌 등 구체적인 원인은 확인되지 않았다. 추가 호출·재시도는 수행하지 않았고 GBIS 다운로드와 TAGO 요청은 시작되지 않았다. 미완료 디렉터리는 `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/1601bbe1-4301-44df-969c-66620cb20597`이며 원본과 완료 Manifest가 없다. GBIS·TAGO 완료 Bundle 및 통합 Snapshot은 확보하지 못했다. 실행 시간은 CLI 실패 보고에 기록되지 않았다.
 
@@ -742,8 +744,10 @@ GBIS 기반정보의 `baseInfoItem`에 있는 공식 다운로드 URL 여섯 필
 
 이후 별도 승인된 기반정보 Live 진단 1회는 HTTP 2xx, 869바이트, `URL_INVALID_FORMAT` / `AREA_DOWNLOAD_URL`로 중단됐고 원본을 남기지 않았다. 이전 869바이트 응답과 동일한 원인인지는 알 수 없다. Route·RouteStation·TAGO 추가 요청과 완료 Manifest는 없었다.
 
-기존 검증이 거부한 후 URL 형식은 `URL_URI_SYNTAX`, `URL_SCHEME_MISSING`, `URL_SCHEME_UNSUPPORTED`, `URL_HOST_MISSING`, `URL_PORT_PRESENT`, `URL_FRAGMENT_PRESENT`, `URL_PATH_MISSING`, `URL_PATH_NOT_ABSOLUTE`, `URL_QUERY_STRUCTURE`, `URL_QUERY_PARAMETER_FORMAT`, `URL_BACKSLASH`로 세분화한다. 기존 호스트 불일치·민감 query·인코딩/인증정보 분류는 유지한다. 중복 조건은 검사 순서상 먼저 발견한 코드만 보고하며 확인할 수 없는 원인은 `UNKNOWN`이다. 응답 값과 URL, query 이름·값은 출력하지 않는다.
+당시 검증이 거부한 URL 형식은 `URL_URI_SYNTAX`, `URL_SCHEME_MISSING`, `URL_SCHEME_UNSUPPORTED`, `URL_HOST_MISSING`, `URL_PORT_PRESENT`, `URL_FRAGMENT_PRESENT`, `URL_PATH_MISSING`, `URL_PATH_NOT_ABSOLUTE`, `URL_QUERY_STRUCTURE`, `URL_QUERY_PARAMETER_FORMAT`, `URL_BACKSLASH`로 세분화했다. 이후 파일명 단독 query를 허용해 query 구조·매개변수 형식 진단은 사용하지 않는다. 기존 호스트 불일치·민감 query·인코딩/인증정보 분류는 유지한다. 중복 조건은 검사 순서상 먼저 발견한 코드만 보고하며 확인할 수 없는 원인은 `UNKNOWN`이다. 응답 값과 URL, query 이름·값은 출력하지 않는다.
 
-Route와 RouteStation은 실제 다운로드에 필수다. 나머지 네 URL은 다운로드하지 않지만 현재는 필드가 존재하면 동일한 공식 URL 및 민감정보 검사를 통과해야 원본에 보존한다. 합성 입력에서 상대경로·빈 값·null·비공식 호스트·민감 query·인증정보·인코딩을 거부했으며 실제 값과 공식 규격 확인 전에는 허용 범위를 변경하지 않는다. 후속 검토에서는 비필수 필드의 실제 의미와 원본 보존 안전성을 별도로 판단한다.
+당시 Route와 RouteStation 외 네 필드에도 동일한 공식 URL 검증을 적용했다. 이후 사용자 결정에 따라 미사용 필드의 형식 제약을 제거하고 인증정보 안전성 검사는 유지했다.
 
 이번 코드·테스트 단계에는 Provider와 DB에 접근하지 않았다. 별도 승인 후 `--max-requests=1`로 진단할 수 있으나, 현재 CLI는 기반정보가 정상 검증되면 Route 요청 한도 검사 전에 기반정보 원본을 새 Bundle에 저장한다. 따라서 원본 저장까지 금지하는 후속 Live 진단은 현 CLI 그대로 실행할 수 없고 실행 전에 이 충돌을 해결해야 한다. 실제 GBIS·TAGO 수집과 DB Preview는 미완료다.
+
+이후 사용자 승인으로 미사용 필드 형식을 완화하고 전체 수집을 1회 시도했다. GBIS 기반정보 HTTP 요청 1회, 869바이트 수신 후 필수 `ROUTE_DOWNLOAD_URL`에서 `URL_QUERY_STRUCTURE`로 중단됐다. 당시 query 원문을 저장·출력하지 않아 구체적인 형태는 확인하지 못했다. GBIS Route·RouteStation과 TAGO 요청, 완료 Bundle, 통합 Snapshot은 없다. 미완료 경로는 `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/5e808d65-64a2-419e-9909-c58fccfb84f1`이다. 재시도와 DB 접근은 하지 않았다. 이후 사용자가 제공한 공식 URL 형식을 지원하도록 수정했으며 실제 수집은 별도로 검증해야 한다.
