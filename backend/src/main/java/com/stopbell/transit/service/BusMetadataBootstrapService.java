@@ -1,5 +1,7 @@
 package com.stopbell.transit.service;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.EnumMap;
@@ -15,6 +17,7 @@ import com.stopbell.transit.domain.TransitCollectionFailureStage;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.metadata.GbisMetadataClient;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
+import com.stopbell.transit.metadata.TagoGbisOfflineSnapshotAssembler;
 import com.stopbell.transit.metadata.TagoMetadataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,16 +57,30 @@ public class BusMetadataBootstrapService {
 
     @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void bootstrap(TransitProvider provider) {
-        execute(provider, null);
+        execute(provider, null, null, false);
     }
 
     @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
     public void bootstrapWithApproval(TransitProvider provider, long approvalId) {
         if (approvalId <= 0) throw new IllegalArgumentException("Approval ID must be positive");
-        execute(provider, approvalId);
+        execute(provider, approvalId, null, false);
     }
 
-    private void execute(TransitProvider provider, Long approvalId) {
+    private record Bundles(Path tago, Path gbis, String key) { }
+
+    /** Creates review evidence for a blocked bundle without ever starting a sync. */
+    @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public void reviewOfflineBundles(Path tago, Path gbis, String key) {
+        execute(TransitProvider.TAGO, null, new Bundles(tago, gbis, key), true);
+    }
+
+    @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    public void applyOfflineBundlesWithApproval(Path tago, Path gbis, String key, long approvalId) {
+        if (approvalId <= 0) throw new IllegalArgumentException("Approval ID must be positive");
+        execute(TransitProvider.TAGO, approvalId, new Bundles(tago, gbis, key), false);
+    }
+
+    private void execute(TransitProvider provider, Long approvalId, Bundles bundles, boolean reviewOnly) {
         BusMetadataSource source = sources.get(provider);
         if (source == null) throw new IllegalArgumentException("No metadata source configured for " + provider);
         if (!(source instanceof SeoulCsvMetadataSource) && !(source instanceof TagoMetadataSource)) {
@@ -81,7 +98,15 @@ public class BusMetadataBootstrapService {
                 Instant collectedAt = clock.instant();
                 Runnable sync;
                 Supplier<TransitMetadataDiffAnalysisService.Analysis> analyze;
-                if (source instanceof SeoulCsvMetadataSource seoul) {
+                if (bundles != null) {
+                    TagoGbisOfflineSnapshotAssembler.ArchivedSnapshot replay;
+                    try { replay = TagoGbisOfflineSnapshotAssembler.withGbisAndArchive(bundles.tago(), bundles.gbis(), bundles.key(), runId, archive); }
+                    catch (IOException e) { throw new IllegalArgumentException("Bundle replay failed", e); }
+                    var snapshot = replay.snapshot();
+                    stage = TransitCollectionFailureStage.VALIDATION;
+                    sync = syncService.prepareTagoSnapshot(snapshot, replay.tagoStartedAt(), replay.gbisStartedAt());
+                    analyze = () -> analysis.analyzeAndStore(runId, snapshot, replay.tagoStartedAt(), replay.gbisStartedAt());
+                } else if (source instanceof SeoulCsvMetadataSource seoul) {
                     var snapshot = seoul.fetchSnapshotWithRawRows(runId, archive);
                     stage = TransitCollectionFailureStage.VALIDATION;
                     sync = syncService.prepareSeoulSnapshot(seoul, snapshot, collectedAt);
@@ -115,6 +140,10 @@ public class BusMetadataBootstrapService {
                     } catch (RuntimeException e) { throw new ApprovalFailure(e); }
                 } else if (approvalId != null) {
                     throw new ApprovalFailure(new IllegalStateException("Approval supplied for a safe change"));
+                }
+                if (reviewOnly) {
+                    log.info("Bundle review found no blocked change; no approval evidence or sync: runId={}", runId);
+                    throw new HistoryFailure();
                 }
                 try { history.syncing(runId); } catch (RuntimeException e) { throw new HistoryFailure(); }
                 stage = TransitCollectionFailureStage.SYNC;

@@ -779,6 +779,14 @@ Guard를 거치지 않는 직접 진입점은 `BusMetadataSyncService`의 `syncR
 
 `TagoGbisOfflineSnapshotAssembler`는 기존 두 Bundle의 공개 재생 경로로 각각 무결성과 완전성을 검증한다. 명시적 TAGO-only는 TAGO Snapshot을 반환하고, 결합 모드는 GBIS 재생 실패를 전파한다. 기존 `GbisDestinationEnricher`의 전체 Route 매칭 검증에 성공한 경우에만 목적지를 보강하며 TAGO identity·처리 순서와 반복 occurrence를 유지한다. TAGO Raw 행과 GBIS 원본 Snapshot·SourceVersion도 보존해 기존 Preview에 전달한다. 각 Bundle의 수집 시각은 각각의 Manifest에 남으며 두 시점의 일치나 최신성을 추정하지 않는다. 합성 Bundle과 격리 MySQL에서 Diff·Guard와 DB 행 불변성을 확인했으며 실제 Provider 호출과 개발 DB Preview는 수행하지 않았다.
 
+### TAGO·GBIS Bundle 위험 검토와 승인 적용
+
+로컬 관리 명령은 완료 TAGO·GBIS Bundle을 기존 무결성·범위 검증으로 재생하고 검증에 사용한 동일 원본 바이트를 기존 실행별 아카이브에 저장한다. TAGO 전체 응답과 기존 GBIS Route·RouteStation 아카이브 범위를 유지하며 두 수집 시작 시각을 각각 TAGO·GBIS Raw의 수집 시각으로 사용한다. 이 시각은 각 수집의 시작이며 개별 응답 시각이나 최신성을 뜻하지 않는다. 파일 변경 방지는 기존 Bundle 신뢰 경계에 따른다.
+
+위험 검토 명령은 기존 이력·분석·Guard·상세를 생성하지만 동기화하지 않는다. BLOCK은 기존 `FAILED / UNSAFE_CHANGE` 근거가 되며, ALLOW는 승인 대상이 아니므로 `FAILED / UNEXPECTED_FAILURE`로 종료하고 동기화하지 않는다. 적용 명령은 기존 일회성 승인을 필수로 요구한다. 같은 Bundle을 다시 재생·아카이브하고 수집 시작 시각을 포함한 분석 지문과 상세 지문을 현재 DB에서 재계산한 뒤 기존 선점·동기화를 수행한다. 입력·시각·DB가 바뀌거나 승인 조건이 맞지 않으면 동기화를 차단한다. 원본을 다시 다운로드하지 않는다.
+
+이 경로도 기존 Bootstrap의 인스턴스 내부 single-flight와 부분 commit·실패/불확실성 정책을 따른다. 재분석과 마지막 쓰기 사이에 다른 writer를 차단하지 않으므로 실행자는 적용 동안 다른 writer를 중지해야 한다. Preview 자체는 승인 근거가 아니며 사전 근거 생성과 명시적 승인이 필요하다.
+
 ### TAGO·GBIS 독립 수집 (Phase 3-B-2B-2B-2A)
 
 `collectTransitMetadata`는 Spring 애플리케이션을 시작하지 않는 명시적 Java one-shot이다. 공통 예산으로 GBIS와 TAGO의 요청 횟수, 응답·누적 바이트, 단조 시간, 요청 간격과 연결·응답 제한을 적용한다. 하나의 HTTP Client를 실행 동안 재사용하고 종료하며 Redirect와 숨겨진 재시도는 차단한다. 연결 실패·HTTP 5xx와 명확한 TAGO 세션 부족은 예산 안에서 요청별 최대 2회 재시도를 공유한다. 기존 완료 GBIS Bundle을 재생해 TAGO만 수집할 수 있다. 정상 응답 바이트는 기존 파서와 Bundle Writer에 전달하고 각 완료 Manifest 게시 전에도 시간·중단을 확인한다. TAGO 응답의 파싱·구조 실패 또는 세션 부족 최종 실패 시에는 인증정보가 포함될 수 있는 원본을 정상 Bundle과 별도로 사용자 전용 파일에 보존한다. 두 묶음과 오프라인 통합을 다시 재생해 결과를 비교하며 DB 이력·동기화·Preview·승인을 호출하지 않는다. 상세 실행 조건과 제한은 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다.

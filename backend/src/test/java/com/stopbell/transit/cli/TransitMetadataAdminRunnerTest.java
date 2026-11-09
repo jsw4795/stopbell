@@ -79,6 +79,14 @@ class TransitMetadataAdminRunnerTest {
         assertThatThrownBy(() -> runner.run(args("--metadata.command=preview", "--provider=SEOUL_BUS"))).isInstanceOf(IllegalArgumentException.class);
         verifyNoInteractions(preview, bootstrap, jdbc);
     }
+    @Test @DisplayName("오프라인 Bundle 명령은 명시적 확인과 승인 없이 적용하지 않는다")
+    void bundle_commands_require_confirmation_and_approval() {
+        when(environment.acceptsProfiles(any(org.springframework.core.env.Profiles.class))).thenReturn(true);
+        assertThatThrownBy(() -> runner.run(args("--metadata.command=bundle-apply", "--approval=1"))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> runner.run(args("--metadata.command=bundle-apply", "--confirm=APPLY"))).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> runner.run(args("--metadata.command=bundle-review"))).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(bootstrap);
+    }
     private static DefaultApplicationArguments args(String... command) {
         var values = new java.util.ArrayList<>(List.of("--spring.main.web-application-type=none", "--transit.metadata.admin.enabled=true"));
         values.addAll(List.of(command));

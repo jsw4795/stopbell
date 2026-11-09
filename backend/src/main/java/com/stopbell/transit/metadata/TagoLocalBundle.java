@@ -23,6 +23,7 @@ public final class TagoLocalBundle {
 
     public record Request(String operation, String cityCode, String routeId, int pageNo) { }
     public record Entry(Request request, String file, long size, String sha256) { }
+    public record ArchivedReplay(TagoMetadataSource.TagoSnapshot snapshot, Instant startedAt) { }
     public record Manifest(String id, String startedAt, String completedAt, boolean complete,
                            List<String> cities, List<Entry> responses) { }
 
@@ -85,6 +86,11 @@ public final class TagoLocalBundle {
     }
 
     public static TagoMetadataSource.TagoSnapshot replay(Path directory, String serviceKey) throws IOException {
+        return replayWithArchive(directory, serviceKey, (request, bytes) -> {}).snapshot();
+    }
+
+    public static ArchivedReplay replayWithArchive(Path directory, String serviceKey, java.util.function.BiConsumer<Request, byte[]> archive) throws IOException {
+        java.util.Objects.requireNonNull(archive);
         Path root = safeDirectory(directory);
         ensureOutsideGit(root);
         Path path = root.resolve(MANIFEST);
@@ -95,7 +101,8 @@ public final class TagoLocalBundle {
         if (manifest == null || manifest.cities() == null
                 || !Set.copyOf(manifest.cities()).equals(Set.copyOf(TagoMetadataSource.fullCityScope())))
             throw new IllegalStateException("Incomplete city scope");
-        return replay(root, manifest, safety(serviceKey));
+        var snapshot = replay(root, manifest, safety(serviceKey), archive);
+        return new ArchivedReplay(snapshot, Instant.parse(manifest.startedAt()));
     }
 
     static TagoMetadataSource.TagoSnapshot replayForTest(Path directory, String serviceKey) throws IOException {
@@ -107,6 +114,10 @@ public final class TagoLocalBundle {
     }
 
     private static TagoMetadataSource.TagoSnapshot replay(Path root, Manifest manifest, ArchiveContentSafety safety) throws IOException {
+        return replay(root, manifest, safety, (request, bytes) -> {});
+    }
+
+    private static TagoMetadataSource.TagoSnapshot replay(Path root, Manifest manifest, ArchiveContentSafety safety, java.util.function.BiConsumer<Request, byte[]> archive) throws IOException {
         if (manifest == null || !manifest.complete() || manifest.id() == null || !manifest.id().equals(root.getFileName().toString())
                 || manifest.startedAt() == null || manifest.completedAt() == null || manifest.responses() == null)
             throw new IllegalStateException("Incomplete manifest");
@@ -135,6 +146,7 @@ public final class TagoLocalBundle {
         var offline = new ReplayClient(manifest.responses(), bodies);
         var snapshot = new TagoMetadataSource(offline, cities).fetchSnapshotWithRawRows();
         if (offline.index != bodies.size()) throw new IllegalStateException("Unexpected response in bundle");
+        for (int i = 0; i < bodies.size(); i++) archive.accept(manifest.responses().get(i).request(), bodies.get(i));
         return snapshot;
     }
 

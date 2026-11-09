@@ -19,6 +19,7 @@ public final class GbisLocalBundle {
     private GbisLocalBundle() { }
     public enum Source { BASE_INFO, ROUTE, ROUTE_STATION }
     public record Entry(Source source, String file, long size, String sha256) { }
+    public record ArchivedReplay(GbisCollectedSnapshot snapshot, Instant startedAt) { }
     public record Manifest(String id, String startedAt, String completedAt, boolean complete,
                            String sourceSystem, String routeVersion, String routeStationVersion, List<Entry> files) { }
 
@@ -76,6 +77,10 @@ public final class GbisLocalBundle {
         }
     }
     public static GbisCollectedSnapshot replay(Path directory, String key) throws IOException {
+        return replayWithArchive(directory, key, (source, bytes) -> {}).snapshot();
+    }
+    public static ArchivedReplay replayWithArchive(Path directory, String key, java.util.function.BiConsumer<Source, byte[]> archive) throws IOException {
+        java.util.Objects.requireNonNull(archive);
         Path root = safeDirectory(directory);
         ensureOutsideGit(root);
         requireKey(key);
@@ -84,9 +89,13 @@ public final class GbisLocalBundle {
         Manifest manifest;
         try { manifest = MAPPER.readValue(Files.readAllBytes(file), Manifest.class); }
         catch (RuntimeException e) { throw new IllegalStateException("Invalid manifest"); }
-        return replay(root, manifest, key);
+        var snapshot = replay(root, manifest, key, archive);
+        return new ArchivedReplay(snapshot, Instant.parse(manifest.startedAt()));
     }
     private static GbisCollectedSnapshot replay(Path root, Manifest manifest, String key) throws IOException {
+        return replay(root, manifest, key, (source, bytes) -> {});
+    }
+    private static GbisCollectedSnapshot replay(Path root, Manifest manifest, String key, java.util.function.BiConsumer<Source, byte[]> archive) throws IOException {
         if (manifest == null || !manifest.complete() || !root.getFileName().toString().equals(manifest.id())
                 || !"GBIS".equals(manifest.sourceSystem()) || manifest.files() == null
                 || manifest.files().size() != Source.values().length) throw new IllegalStateException("Incomplete manifest");
@@ -108,6 +117,7 @@ public final class GbisLocalBundle {
             ArchiveContentSafety.checkField(name);
             safety.checkText(value);
         }));
+        for (Source source : Source.values()) archive.accept(source, bodies.get(source));
         return snapshot;
     }
     private static byte[] readEntry(Path root, Entry entry) throws IOException {

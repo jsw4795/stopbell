@@ -50,6 +50,18 @@ public class TransitMetadataAdminRunner implements ApplicationRunner {
             switch (option(args, "metadata.command")) {
                 case "preview" -> printPreview(args);
                 case "preflight" -> printPreflight(TransitProvider.valueOf(option(args, "provider")));
+                case "bundle-review" -> {
+                    requireConfirmation(args, "ANALYZE");
+                    bootstrap.reviewOfflineBundles(bundleDirectory(option(args, "tago-bundle")),
+                            bundleDirectory(option(args, "gbis-bundle")), environment.getRequiredProperty("transit.client.tago.service-key"));
+                }
+                case "bundle-apply" -> {
+                    requireConfirmation(args, "APPLY");
+                    long id = number(args, "approval");
+                    bootstrap.applyOfflineBundlesWithApproval(bundleDirectory(option(args, "tago-bundle")),
+                            bundleDirectory(option(args, "gbis-bundle")), environment.getRequiredProperty("transit.client.tago.service-key"), id);
+                    System.out.println(approvals.find(id));
+                }
                 case "review" -> printReview(number(args, "run"), integer(args, "page"), integer(args, "size"));
                 case "approve" -> {
                     long runId = number(args, "run");
@@ -101,6 +113,12 @@ public class TransitMetadataAdminRunner implements ApplicationRunner {
                 .skip((long) page * size).limit(size).forEach(System.out::println);
         System.out.println("상세는 동일한 입력으로 --page와 --size를 변경해 조회합니다. 현재 DB와 입력이 바뀌면 결과도 달라질 수 있습니다.");
         System.out.println("실제 적용하지 않았습니다. 현재 DB는 마지막 성공 Snapshot과 다를 수 있으며 실제 적용 시 Guard를 다시 실행해야 합니다.");
+    }
+    private static Path bundleDirectory(String value) {
+        Path path = Path.of(value);
+        if (!path.isAbsolute() || !java.nio.file.Files.isDirectory(path) || !java.nio.file.Files.isReadable(path))
+            throw new IllegalArgumentException("Readable absolute bundle directory required");
+        return path;
     }
     private static FileSystemResource localFile(String value) {
         Path path = Path.of(value);

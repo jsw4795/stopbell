@@ -455,6 +455,8 @@ TAGO는 정규화 snapshot과 같은 집합으로 검증된 ROUTE와 OCCURRENCE 
 
 GBIS ROUTE와 OCCURRENCE 원본은 전체 수집 결과를 출처별 키와 공식 source version으로 UPSERT한다. 검증된 TAGO traversal에만 각각 route_id와 occurrence_id를 연결하며, 현재 일치하지 않는 수집 행은 기존 연결도 NULL로 갱신한다. GBIS 전용 원본도 보존하고 STOP을 합성하지 않는다. TAGO 노선 저장 후 500건씩 별도 transaction으로 저장하며 실패 시 cleanup과 완료 시각 갱신을 차단한다. 동일 수집과 시각의 재처리는 원본 ID와 변경되지 않은 updated_at을 유지하고, 미수집 원본은 삭제하지 않는다.
 
+오프라인 Bundle 승인 적용에서는 TAGO와 GBIS의 각 Manifest 수집 시작 시각을 해당 Raw의 `collected_at`으로 사용한다. 두 시작 시각은 실행 시각이나 개별 응답 시각이 아니며, 승인 지문에도 포함되어 재검증된다. 미수집 Raw를 삭제하지 않는 기존 정책은 동일하다.
+
 ### Transit metadata 수집 이력 (Phase 3-A-3A-1)
 
 V34의 `transit_metadata_collection_runs`는 독립 실행 ID, `provider`(SEOUL_BUS/TAGO), 상태, UTC 의미의 시작·종료·생성·갱신 시각과 실패 단계·코드·고정 메시지를 저장한다. GBIS는 별도 Provider가 아니라 TAGO 실행의 일부다. 상태와 Provider, 종료 시각 및 실패 정보의 일관성에 CHECK를 두고 Provider/시작 시각과 상태를 색인한다. 원본 파일은 아래 별도 테이블에서 실행에 연결한다.

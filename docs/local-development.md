@@ -690,6 +690,22 @@ Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여�
 
 관리 프로필은 Flyway 자동 실행, Hibernate DDL, SQL 초기화, Scheduler와 다른 one-shot 실행을 차단한다. Preview는 수집 이력·아카이브·분석·위험 상세·승인·정규화·원본·완료 시각을 쓰지 않는다. 결과는 현재 DB 기준이며 마지막 성공 Snapshot과의 일치를 보장하지 않는다. ALLOW도 이후 적용 시 Guard를 생략할 권한이 아니다. TAGO와 GBIS Snapshot은 서비스 입력으로 지원하지만 Preview CLI는 서울 CSV만 지원한다. 별도의 수집 명령은 아래 실행 경계를 따른다. 3-B-2B-2에서는 서울 최신 파일, TAGO 31개 cityCode 수집 범위와 GBIS 기반정보·버전을 확보하고 최신성, 호출량 및 메모리를 검증한다. 검토된 실제 적용은 3-B-2C에서 별도로 결정한다.
 
+### TAGO·GBIS 완료 Bundle의 위험 검토와 승인 적용
+
+명령은 기존 완료 Bundle의 절대 경로와 별도로 준비된 아카이브 디렉터리를 사용한다. `bundle-review`는 원본 아카이브와 DB 이력·분석·위험 상세를 생성하므로 읽기 전용 Preview가 아니다. BLOCK이면 `UNSAFE_CHANGE`로 종료하며 출력된 실행 ID를 기존 `review`로 모든 페이지를 검토한다. ALLOW이면 승인 대상 위험 근거가 없어 `UNEXPECTED_FAILURE`로 종료하며 동기화하지 않는다. 실패 과정에서 이력과 부분 아카이브는 남을 수 있다.
+
+```bash
+./gradlew bootRun --args='--spring.profiles.active=local,metadata-admin --spring.main.web-application-type=none --transit.metadata.admin.enabled=true --notification.dispatch.enabled=false --transit.monitoring.enabled=false --metadata.command=bundle-review --tago-bundle=/absolute/tago-bundle --gbis-bundle=/absolute/gbis-bundle --transit.metadata.archive.directory=/absolute/archive --confirm=ANALYZE'
+```
+
+기존 `review`와 `approve` 절차로 모든 위험 상세와 두 지문을 검토해 명시적으로 승인한 뒤에만 아래 적용 명령을 별도로 실행한다. 실행 시 같은 Bundle을 재생하고 현재 DB에서 다시 분석해 승인의 두 지문과 수집 시작 시각을 검증한다. 하나라도 다르면 선점과 동기화를 차단한다. 승인 적용은 정규화·원본 데이터를 변경하고 삭제 후보를 정리할 수 있다. 적용 전 백업과 복구 절차 및 모든 직접 writer 중지를 확인하며 부분 commit과 완료 이력 불확실성은 기존 Bootstrap 정책을 따른다. 같은 입력의 미래 Preview와 승인 적용 결과가 동일하다고 가정하지 않는다.
+
+```bash
+./gradlew bootRun --args='--spring.profiles.active=local,metadata-admin --spring.main.web-application-type=none --transit.metadata.admin.enabled=true --notification.dispatch.enabled=false --transit.monitoring.enabled=false --metadata.command=bundle-apply --tago-bundle=/absolute/tago-bundle --gbis-bundle=/absolute/gbis-bundle --transit.metadata.archive.directory=/absolute/archive --approval=123 --confirm=APPLY'
+```
+
+두 명령은 Provider API를 호출하지 않는다. TAGO와 GBIS 수집 시작 시각을 각각 Raw 수집 시각으로 사용하며 각 Bundle의 수집 시점 차이를 보존한다. 현재 명령은 위험 변경 승인을 필요로 하는 BLOCK 경로를 제공하고 안전한 ALLOW Bundle의 승인 적용은 제공하지 않는다.
+
 ### TAGO 로컬 원본 묶음 (Phase 3-B-2B-2B-1A)
 
 `TagoLocalBundle.create(절대_디렉터리, serviceKey)`는 Git 저장소 밖의 이미 존재하는 실제 경로에서 묶음을 만든다. `cityOrder()` 순서대로 cityCode 목록, 도시별 Route 페이지, 각 Route의 정류장 페이지를 `Writer.add(Request, 원본바이트)`에 전달한다. operation은 각각 `getCtyCodeList`(city·route null, page 0), `getRouteNoList`(city·page), `getRouteAcctoThrghSttnList`(city·route·page)다. 모든 응답은 원본 그대로 보존한다. `complete()`가 기존 수집 검증을 끝내야 `manifest.json`이 생기며, 누락이나 실패 시 묶음은 재생할 수 없다. `TagoLocalBundle.replay(묶음_절대경로, serviceKey)`는 파일 무결성과 범위·순서를 재확인하고 네트워크 없이 `TagoSnapshot`을 반환한다. serviceKey는 내용 검사에만 사용하며 Manifest에 기록하지 않는다. 이 단계에서는 실제 Provider 수집을 실행하지 않았다.

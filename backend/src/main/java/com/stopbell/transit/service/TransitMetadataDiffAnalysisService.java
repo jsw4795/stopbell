@@ -61,10 +61,19 @@ public class TransitMetadataDiffAnalysisService {
         var complete = seoul.toCompleteSnapshot(snapshot.normalized());
         List<TransitRawMetadataDiff.Row> rows = new ArrayList<>(snapshot.rawRows().size());
         for (var row : snapshot.rawRows()) rows.add(raw(TransitSourceSystem.SEOUL_TDATA, row.dataKind(), row.sourceKey(), TransitRawMetadataDiff.fromMap(row.fields()), null));
-        return analyze(runId, complete, rows, Set.of(TransitSourceSystem.SEOUL_TDATA));
+        return analyze(runId, complete, rows, Set.of(TransitSourceSystem.SEOUL_TDATA), null, null);
     }
     @Transactional(isolation = Isolation.REPEATABLE_READ, propagation = Propagation.REQUIRES_NEW)
     public Analysis analyzeAndStore(long runId, TagoMetadataSource.TagoSnapshot snapshot) {
+        return analyzeTago(runId, snapshot, null, null);
+    }
+    @Transactional(isolation = Isolation.REPEATABLE_READ, propagation = Propagation.REQUIRES_NEW)
+    public Analysis analyzeAndStore(long runId, TagoMetadataSource.TagoSnapshot snapshot, Instant tagoStartedAt, Instant gbisStartedAt) {
+        java.util.Objects.requireNonNull(tagoStartedAt);
+        java.util.Objects.requireNonNull(gbisStartedAt);
+        return analyzeTago(runId, snapshot, tagoStartedAt, gbisStartedAt);
+    }
+    private Analysis analyzeTago(long runId, TagoMetadataSource.TagoSnapshot snapshot, Instant tagoStartedAt, Instant gbisStartedAt) {
         lockCollected(runId, TransitProvider.TAGO);
         sync.prepareTagoSnapshot(snapshot, clock.instant());
         List<TransitRawMetadataDiff.Row> rows = new ArrayList<>(snapshot.rawRows().size());
@@ -75,7 +84,7 @@ public class TransitMetadataDiffAnalysisService {
             for (var row : snapshot.gbis().rawRows()) rows.add(raw(row.sourceSystem(), row.dataKind(), row.sourceKey(),
                     TransitRawMetadataDiff.fromMap(row.fields()), snapshot.gbis().sourceVersion()));
         }
-        return analyze(runId, snapshot.normalized(), rows, sources);
+        return analyze(runId, snapshot.normalized(), rows, sources, tagoStartedAt, gbisStartedAt);
     }
     private void lockCollected(long runId, TransitProvider provider) {
         var rows = jdbc.query("select provider, status from transit_metadata_collection_runs where id = ? for update",
@@ -85,7 +94,7 @@ public class TransitMetadataDiffAnalysisService {
         if (!rows.getFirst().get(1).equals("COLLECTED")) throw new IllegalStateException("Collection run is not COLLECTED");
     }
     private Analysis analyze(long runId, CompleteBusMetadataSnapshot complete, List<TransitRawMetadataDiff.Row> incoming,
-            Set<TransitSourceSystem> sources) {
+            Set<TransitSourceSystem> sources, Instant tagoStartedAt, Instant gbisStartedAt) {
         if (complete.routes().stream().anyMatch(route -> route.occurrences().isEmpty()))
             throw new InvalidSnapshotException();
         var current = reader.read(complete.provider());
@@ -102,7 +111,7 @@ public class TransitMetadataDiffAnalysisService {
                 new Counts(normalized.addedOccurrences().size(), normalized.modifiedOccurrences().size(), normalized.removedOccurrences().size(), normalized.unchangedOccurrences().size(), 0, normalized.positionChanges().size()), rawDiff);
         var timestamps = jdbc.query("select last_complete_sync_at from bus_metadata_sync_states where provider = ?", (rs, n) -> rs.getTimestamp(1).toInstant(), complete.provider().name());
         Instant last = timestamps.isEmpty() ? null : timestamps.getFirst();
-        String fingerprint = fingerprint(normalized, current, complete, previous, incoming, sources, last);
+        String fingerprint = fingerprint(normalized, current, complete, previous, incoming, sources, last, tagoStartedAt, gbisStartedAt);
         var existing = find(runId);
         if (existing != null) {
             if (!existing.fingerprint().equals(fingerprint)) throw new IllegalStateException("Conflicting analysis for collection run");
@@ -128,7 +137,8 @@ public class TransitMetadataDiffAnalysisService {
     }
     private static String fingerprint(BusMetadataDiffService.Result result, BusMetadataDiffService.CurrentState current,
             CompleteBusMetadataSnapshot complete, List<TransitRawMetadataDiff.Row> old,
-            List<TransitRawMetadataDiff.Row> incoming, Set<TransitSourceSystem> sources, Instant last) {
+            List<TransitRawMetadataDiff.Row> incoming, Set<TransitSourceSystem> sources, Instant last,
+            Instant tagoStartedAt, Instant gbisStartedAt) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             update(digest, JSON.writeValueAsString(result)); update(digest, last == null ? null : last.toString());
@@ -141,6 +151,10 @@ public class TransitMetadataDiffAnalysisService {
                 update(digest, decimal(stop.latitude())); update(digest, decimal(stop.longitude())); }
             sources.stream().sorted().forEach(s -> update(digest, s.name()));
             appendRows(digest, old); appendRows(digest, incoming);
+            if (tagoStartedAt != null) {
+                update(digest, "offline-bundle-collection-times-v1");
+                update(digest, tagoStartedAt.toString()); update(digest, gbisStartedAt.toString());
+            }
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
     }

@@ -90,7 +90,12 @@ public class BusMetadataSyncService {
     }
 
     public Runnable prepareTagoSnapshot(TagoMetadataSource.TagoSnapshot collected, Instant collectedAt) {
+        return prepareTagoSnapshot(collected, collectedAt, collectedAt);
+    }
+
+    public Runnable prepareTagoSnapshot(TagoMetadataSource.TagoSnapshot collected, Instant collectedAt, Instant gbisCollectedAt) {
         Objects.requireNonNull(collectedAt, "Collection time must not be null");
+        Objects.requireNonNull(gbisCollectedAt, "GBIS collection time must not be null");
         CompleteBusMetadataSnapshot complete = Objects.requireNonNull(collected, "Snapshot must not be null").normalized();
         if (complete == null || complete.provider() != TransitProvider.TAGO) throw new IllegalArgumentException("Expected TAGO snapshot");
         Map<String, TagoMetadataSource.RawSourceRow> routes = new HashMap<>();
@@ -152,7 +157,7 @@ public class BusMetadataSyncService {
             routeMetadataSyncService.syncTagoRoute(route, new TagoRouteRawData(
                     JSON.writeValueAsString(routes.get(route.externalRouteId()).fields()), payloads, collectedAt));
         }, () -> {
-            if (gbis != null) saveGbis(gbis, verifiedMatches, collectedAt);
+            if (gbis != null) saveGbis(gbis, verifiedMatches, gbisCollectedAt);
         });
     }
 
