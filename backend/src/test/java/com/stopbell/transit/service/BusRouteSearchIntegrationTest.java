@@ -6,14 +6,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.dto.BusRouteSearchResponse;
 import com.stopbell.transit.entity.BusRoute;
+import com.stopbell.transit.entity.BusRouteStopOccurrence;
+import com.stopbell.transit.entity.BusStop;
 import com.stopbell.transit.repository.BusRouteRepository;
+import com.stopbell.transit.repository.TransitSourceMetadataRepository;
 import com.stopbell.user.auth.service.JwtTokenService;
+import jakarta.persistence.EntityManager;
+import org.hibernate.Session;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,7 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 @ExtendWith(SharedMySqlExtension.class)
-@SpringBootTest
+@SpringBootTest(properties = "spring.jpa.properties.hibernate.generate_statistics=true")
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -45,6 +53,12 @@ class BusRouteSearchIntegrationTest {
 
     @Autowired
     private BusRouteSearchService busRouteSearchService;
+
+    @Autowired
+    private TransitSourceMetadataRepository sourceMetadataRepository;
+
+    @Autowired
+    private EntityManager entityManager;
 
     @Autowired
     private JwtTokenService jwtTokenService;
@@ -121,12 +135,76 @@ class BusRouteSearchIntegrationTest {
                 .andExpect(jsonPath("$[0].regionName").value("수원시"))
                 .andExpect(jsonPath("$[0].provider").value("TAGO"))
                 .andExpect(jsonPath("$[0].routeType").value("CITY_LOCAL"))
+                .andExpect(jsonPath("$[0].regionCategory").value("경기"))
+                .andExpect(jsonPath("$[0].startStopName").value(Matchers.nullValue()))
+                .andExpect(jsonPath("$[0].endStopName").value(Matchers.nullValue()))
                 .andExpect(jsonPath("$[0].externalRouteId").doesNotExist())
                 .andExpect(jsonPath("$[0].cityCode").doesNotExist())
                 .andExpect(jsonPath("$[1].id").value(gimpo.getId()))
                 .andExpect(jsonPath("$[1].regionName").value("김포시"))
                 .andExpect(jsonPath("$[2].id").value(gapyeong.getId()))
                 .andExpect(jsonPath("$[2].regionName").value("가평군"));
+    }
+
+    @Test
+    @DisplayName("TAGO 원본의 공식 기종점을 표시하고 반복 방문·복귀 정류장과 destinationName을 사용하지 않는다")
+    void read_linked_tago_endpoints_for_round_trip() throws Exception {
+        var tago = route(TransitProvider.TAGO, "GGB200000006", "300", "31010");
+        var seoul = route(TransitProvider.SEOUL_BUS, "seoul-300", "300", null);
+        var start = stop("start", "수월암리공단");
+        var turn = stop("turn", "롯데백화점.범계역");
+        var depot = stop("depot", "수월암차고지");
+        entityManager.persist(new BusRouteStopOccurrence(tago, start, 1, "방향 표시용 이름"));
+        entityManager.persist(new BusRouteStopOccurrence(tago, turn, 82, depot.getStopName()));
+        entityManager.persist(new BusRouteStopOccurrence(tago, start, 162, depot.getStopName()));
+        entityManager.persist(new BusRouteStopOccurrence(tago, depot, 163, depot.getStopName()));
+        rawRoute("TAGO", "GGB200000006", tago.getId(), """
+                {"routeid":"GGB200000006","routeno":300,
+                 "startnodenm":"수월암리공단","endnodenm":"롯데백화점.범계역"}
+                """);
+
+        mockMvc.perform(get("/api/v1/bus-routes").param("query", "300")
+                        .header("Authorization", authorization()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(tago.getId()))
+                .andExpect(jsonPath("$[0].regionCategory").value("경기"))
+                .andExpect(jsonPath("$[0].startStopName").value("수월암리공단"))
+                .andExpect(jsonPath("$[0].endStopName").value("롯데백화점.범계역"))
+                .andExpect(jsonPath("$[1].id").value(seoul.getId()))
+                .andExpect(jsonPath("$[1].regionCategory").value("서울"))
+                .andExpect(jsonPath("$[1].startStopName").value(Matchers.nullValue()))
+                .andExpect(jsonPath("$[1].endStopName").value(Matchers.nullValue()));
+    }
+
+    @Test
+    @DisplayName("동일 명칭·누락·잘못 연결된 기종점은 추측하지 않는다")
+    void suppress_unverified_or_indistinguishable_endpoints() {
+        var sameName = route(TransitProvider.TAGO, "same", "165", "31130");
+        var partial = route(TransitProvider.TAGO, "partial", "165", "31230");
+        var unlinked = route(TransitProvider.TAGO, "unlinked", "165", "31010");
+        var stale = route(TransitProvider.TAGO, "stale", "165", "31010");
+        rawRoute("TAGO", sameName.getExternalRouteId(), sameName.getId(), """
+                {"routeid":"same","routeno":165,"startnodenm":"순환기점","endnodenm":"순환기점"}
+                """);
+        var start = stop("loop", "순환기점");
+        entityManager.persist(new BusRouteStopOccurrence(sameName, start, 1, "회차 안내"));
+        entityManager.persist(new BusRouteStopOccurrence(sameName, stop("mid", "중간 정류장"), 2, "순환기점"));
+        entityManager.persist(new BusRouteStopOccurrence(sameName, start, 3, "순환기점"));
+        rawRoute("TAGO", partial.getExternalRouteId(), partial.getId(), """
+                {"routeid":"partial","routeno":165,"startnodenm":"기점","endnodenm":null}
+                """);
+        rawRoute("TAGO", unlinked.getExternalRouteId(), null, """
+                {"routeid":"unlinked","routeno":165,"startnodenm":"기점","endnodenm":"종점"}
+                """);
+        rawRoute("TAGO", stale.getExternalRouteId(), stale.getId(), """
+                {"routeid":"stale","routeno":"165A","startnodenm":"기점","endnodenm":"종점"}
+                """);
+
+        assertThat(busRouteSearchService.search("165")).hasSize(4).allSatisfy(result -> {
+            assertThat(result.regionCategory()).isEqualTo("경기");
+            assertThat(result.startStopName()).isNull();
+            assertThat(result.endStopName()).isNull();
+        });
     }
 
     @Test
@@ -139,8 +217,11 @@ class BusRouteSearchIntegrationTest {
         BusRoute firstSameNumber = route(TransitProvider.TAGO, "route-same-first", "7799", "31010");
         BusRoute secondSameNumber = route(TransitProvider.TAGO, "route-same-second", "7799", "31230");
 
+        var statistics = entityManager.unwrap(Session.class).getSessionFactory().getStatistics();
+        long queryCount = statistics.getQueryExecutionCount();
         List<BusRouteSearchResponse> response = busRouteSearchService.search("77");
 
+        assertThat(statistics.getQueryExecutionCount() - queryCount).isEqualTo(2);
         assertThat(response).hasSize(50);
         assertThat(response).extracting(BusRouteSearchResponse::routeNumber)
                 .containsExactlyElementsOf(java.util.stream.IntStream.range(0, 50)
@@ -220,6 +301,19 @@ class BusRouteSearchIntegrationTest {
 
     private BusRoute route(TransitProvider provider, String externalRouteId, String routeNumber, String cityCode) {
         return busRouteRepository.saveAndFlush(new BusRoute(provider, externalRouteId, routeNumber, cityCode));
+    }
+
+    private BusStop stop(String externalStopId, String name) {
+        var stop = new BusStop(TransitProvider.TAGO, externalStopId, name,
+                new BigDecimal("37.5"), new BigDecimal("127.0"));
+        entityManager.persist(stop);
+        return stop;
+    }
+
+    private void rawRoute(String source, String sourceKey, Long routeId, String payload) {
+        Instant now = Instant.now();
+        sourceMetadataRepository.upsert(source, "ROUTE", sourceKey, routeId, null, null,
+                payload, null, now, now);
     }
 
     private String authorization() {

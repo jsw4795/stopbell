@@ -61,19 +61,29 @@ JWT Access Token이 필요한 Application API다. `query`는 trim한 뒤 노선�
     "routeNumber": "7000",
     "regionName": "수원시",
     "provider": "TAGO",
-    "routeType": "CITY_LOCAL"
+    "routeType": "CITY_EXPRESS_SEAT",
+    "regionCategory": "경기",
+    "startStopName": "사색의광장",
+    "endStopName": "사당역4번출구"
   },
   {
     "id": 1390,
     "routeNumber": "7000",
     "regionName": "김포시",
     "provider": "TAGO",
-    "routeType": null
+    "routeType": null,
+    "regionCategory": "경기",
+    "startStopName": null,
+    "endStopName": null
   }
 ]
 ```
 
 `id`는 `BusRoute.id`인 내부 selection reference다. `routeNumber`는 unique하지 않으므로 같은 번호의 복수 후보가 존재할 수 있으며, `regionName`은 이를 표시용으로 구분한다. `provider`는 `SEOUL_BUS` 또는 `TAGO`이며 `routeType`은 [Database의 정규화 유형](database.md#transit-원본-메타데이터-저장-phase-3-a-1) 또는 미확인 시 `null`이다. `externalRouteId`, `cityCode`는 노출하지 않는다. Client는 선택한 response의 `id`를 다음 Stop 조회 endpoint의 `{routeId}`로 사용한다.
+
+`regionCategory`는 Provider와 지원 지역 메타데이터로 검증한 광역 지역 표시명이다. 현재 `SEOUL_BUS`는 `서울`, 지원 경기 시·군의 `TAGO`는 `경기`를 반환한다. Client는 이 응답에 포함된 지역만 탭으로 표시하고 같은 결과 집합을 필터링한다.
+
+`startStopName`과 `endStopName`은 노선에 연결된 TAGO ROUTE 원본의 공식 `startnodenm`, `endnodenm` 표시 쌍이다. 내부 연결과 원본 노선 ID·번호가 일치하고 이름이 모두 유효하며 서로 다를 때 두 값을 반환한다. 서울 T Data CSV, 원본 누락·불일치, 동일한 기종점 표기의 경우 둘 다 `null`이다. 첫·마지막 occurrence나 정류장 응답의 방향별 `destinationName`으로 대체하지 않는다. 검색은 최대 50건을 먼저 선택하고 경기 노선 원본을 한 번에 읽는다.
 
 ### 버스 노선의 정류장 조회
 

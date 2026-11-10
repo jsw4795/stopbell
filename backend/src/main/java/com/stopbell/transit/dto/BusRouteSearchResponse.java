@@ -8,6 +8,9 @@ public record BusRouteSearchResponse(
         String routeNumber,
         String regionName,
         TransitProvider provider,
-        BusRouteType routeType
+        BusRouteType routeType,
+        String regionCategory,
+        String startStopName,
+        String endStopName
 ) {
 }

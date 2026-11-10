@@ -54,4 +54,11 @@ final class BusRouteRegionNameResolver {
         }
         throw new IllegalStateException("Unsupported transit provider: " + route.getProvider());
     }
+
+    String category(BusRoute route) {
+        return switch (route.getProvider()) {
+            case SEOUL_BUS -> "서울";
+            case TAGO -> TAGO_REGION_NAMES.containsKey(route.getCityCode()) ? "경기" : null;
+        };
+    }
 }

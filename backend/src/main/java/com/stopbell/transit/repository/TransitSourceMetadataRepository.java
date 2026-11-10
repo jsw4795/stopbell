@@ -1,6 +1,7 @@
 package com.stopbell.transit.repository;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import com.stopbell.transit.domain.TransitSourceDataKind;
@@ -15,6 +16,9 @@ public interface TransitSourceMetadataRepository extends JpaRepository<TransitSo
 
     Optional<TransitSourceMetadata> findBySourceSystemAndDataKindAndSourceKey(
             TransitSourceSystem sourceSystem, TransitSourceDataKind dataKind, String sourceKey);
+
+    List<TransitSourceMetadata> findAllBySourceSystemAndDataKindAndSourceKeyIn(
+            TransitSourceSystem sourceSystem, TransitSourceDataKind dataKind, List<String> sourceKeys);
 
     @Modifying(flushAutomatically = true)
     @Query(value = """

@@ -71,6 +71,9 @@ void main() {
                 'regionName': '수원시',
                 'provider': 'TAGO',
                 'routeType': 'CITY_LOCAL',
+                'regionCategory': '경기',
+                'startStopName': '사색의광장',
+                'endStopName': '사당역4번출구',
               },
               {
                 'id': 1390,
@@ -91,6 +94,8 @@ void main() {
       expect(routes.map((route) => route.regionName), ['수원시', '김포시']);
       expect(routes.map((route) => route.provider), ['TAGO', 'TAGO']);
       expect(routes.map((route) => route.routeType), ['CITY_LOCAL', null]);
+      expect(routes.map((route) => route.regionCategory), ['경기', null]);
+      expect(routes.map((route) => route.endpoints), ['사색의광장 ↔ 사당역4번출구', null]);
     },
   );
 

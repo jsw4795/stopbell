@@ -5,6 +5,9 @@ class BusRoute {
     required this.regionName,
     this.provider,
     this.routeType,
+    this.regionCategory,
+    this.startStopName,
+    this.endStopName,
   });
 
   final int id;
@@ -12,6 +15,16 @@ class BusRoute {
   final String regionName;
   final String? provider;
   final String? routeType;
+  final String? regionCategory;
+  final String? startStopName;
+  final String? endStopName;
+
+  String? get endpoints {
+    final start = startStopName;
+    final end = endStopName;
+    if (start == null || end == null || start == end) return null;
+    return '$start ↔ $end';
+  }
 
   factory BusRoute.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) throw const FormatException();
@@ -36,6 +49,15 @@ class BusRoute {
       routeType: value['routeType'] is String
           ? value['routeType'] as String
           : null,
+      regionCategory: _optionalText(value['regionCategory']),
+      startStopName: _optionalText(value['startStopName']),
+      endStopName: _optionalText(value['endStopName']),
     );
+  }
+
+  static String? _optionalText(Object? value) {
+    if (value is! String) return null;
+    final text = value.trim();
+    return text.isEmpty ? null : text;
   }
 }
