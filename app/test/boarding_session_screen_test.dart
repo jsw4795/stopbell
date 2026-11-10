@@ -21,8 +21,8 @@ void main() {
     'NOT_CREATED': '아직 생성되지 않음',
     'PENDING': '발송 대기 중',
     'ACCEPTED': '전송 서비스 접수 완료 · 기기 표시 미확인',
-    'NO_RECIPIENT': '알림 생성 · 수신 가능한 기기 없음',
-    'FAILED': '발송 종료 · 실패',
+    'NO_RECIPIENT': '수신 가능한 기기 없음',
+    'FAILED': '발송 실패',
     'EXPIRED': '발송 기한 만료',
   }.entries) {
     testWidgets(
@@ -43,7 +43,10 @@ void main() {
           ),
         );
         expect(find.text('목적 정류장'), findsOneWidget);
-        expect(find.text('알림 시점: 1정거장 전 · 세션당 한 번'), findsOneWidget);
+        expect(find.text('1개 지점 전'), findsOneWidget);
+        await tester.ensureVisible(find.text('상세 정보'));
+        await tester.tap(find.text('상세 정보'));
+        await tester.pumpAndSettle();
         expect(find.text('준비 알림: ${entry.value}'), findsOneWidget);
         expect(find.textContaining('목적지 알림: ON'), findsNothing);
       },
@@ -76,10 +79,45 @@ void main() {
         await tester.drag(find.byType(ListView), const Offset(0, -1500));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(find.text('하차 준비 알림'), findsOneWidget);
+        expect(find.text('하차 알림'), findsOneWidget);
       },
     );
   }
+  testWidgets('timeline uses only the supplied boarding context', (
+    tester,
+  ) async {
+    final session = BoardingSession.fromJson({
+      ...sessionJson(),
+      'targetName': '아주 긴 목표 정류장 이름과 환승센터 방면',
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(
+            children: [
+              BoardingSessionDetails(
+                session: session,
+                boardingName: '선택한 승차 정류장',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.text('선택한 승차 정류장'), findsOneWidget);
+    expect(find.text('아주 긴 목표 정류장 이름과 환승센터 방면'), findsOneWidget);
+    expect(find.text('승차 정류장 정보 없음'), findsNothing);
+    expect(find.textContaining('분 후'), findsNothing);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(children: [BoardingSessionDetails(session: session)]),
+        ),
+      ),
+    );
+    expect(find.text('승차 정류장 정보 없음'), findsOneWidget);
+    expect(find.text('선택한 승차 정류장'), findsNothing);
+  });
   testWidgets('uncertain response hides an otherwise valid gap', (
     tester,
   ) async {
@@ -97,7 +135,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('상태 확인 필요'), findsOneWidget);
+    expect(find.text('하차 알림 (확인 필요)'), findsOneWidget);
     expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
   });
   testWidgets('ready without a gap does not invent progress', (tester) async {
@@ -238,7 +276,8 @@ void main() {
       expect(api.creations.single, isNot(contains('candidateRef')));
       expect(find.byType(BoardingSessionView), findsOneWidget);
       expect(find.text('검증된 노선 방문 지점 간격: 3'), findsOneWidget);
-      expect(find.textContaining('기기 시간'), findsWidgets);
+      expect(find.text('상세 정보'), findsOneWidget);
+      expect(find.textContaining('승차 정류장 정보 없음'), findsNothing);
     },
   );
   testWidgets('notification offset is selected before direct registration', (
@@ -455,8 +494,8 @@ void main() {
       expect(api.requestCalls, 1);
       expect(api.currentCalls, 0);
       expect(api.creations, isEmpty);
-      expect(find.textContaining('추적 종료'), findsOneWidget);
-      expect(find.textContaining('실제 승객 하차 확인을 뜻하지'), findsOneWidget);
+      expect(find.text('하차 알림 (종료)'), findsOneWidget);
+      expect(find.textContaining('실제 하차 확인을 뜻하지'), findsOneWidget);
     },
   );
   testWidgets('storage failure prevents POST and explains recovery safety', (
@@ -502,9 +541,9 @@ void main() {
         await pump(tester);
         expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
         expect(find.textContaining('999'), findsNothing);
-        expect(find.textContaining('과거 검증 근거 시각'), findsOneWidget);
+        expect(find.text('상세 정보'), findsOneWidget);
         if (evaluation == 'HELD') {
-          expect(find.textContaining('새로운 정보를 기다리고'), findsOneWidget);
+          expect(find.textContaining('차량 정보 확인이 보류'), findsOneWidget);
           expect(find.text('동일 차량 다시 확인'), findsNothing);
         }
       },
@@ -524,9 +563,9 @@ void main() {
         await pump(tester);
         expect(
           find.text(switch (status) {
-            'COMPLETED' => '추적 종료',
-            'CANCELLED' => '사용자 취소로 종료',
-            _ => '세션 수명 만료',
+            'COMPLETED' => '하차 알림 (종료)',
+            'CANCELLED' => '하차 알림 (취소)',
+            _ => '하차 알림 (만료)',
           }),
           findsOneWidget,
         );
@@ -581,7 +620,7 @@ void main() {
       await pump(tester);
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
-      expect(find.textContaining('변경 결과 미확인'), findsOneWidget);
+      expect(find.textContaining('변경 결과를 확인하지 못했어요'), findsOneWidget);
       expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
       expect(
         tester

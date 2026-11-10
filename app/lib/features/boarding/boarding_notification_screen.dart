@@ -106,9 +106,14 @@ class _BoardingNotificationScreenState
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        TextButton(onPressed: widget.onBack, child: const Text('버스 도착 알림으로')),
-        Text('하차 알림 · 세션 상세', style: Theme.of(context).textTheme.titleLarge),
-        const Text('알림이 가리킨 세션의 서버 조회 결과예요. 알림 도착은 현재 추적·하차 성공을 뜻하지 않아요.'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: IconButton(
+            onPressed: widget.onBack,
+            tooltip: '버스 도착 알림으로',
+            icon: const Icon(Icons.arrow_back),
+          ),
+        ),
         if (_busy) const Text('서버 응답 확인 중...'),
         if (_error != null) Text(_error!),
         if (_session != null) BoardingSessionDetails(session: _session!),

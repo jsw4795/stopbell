@@ -540,12 +540,12 @@ void main() {
           expect(storage.records.values.single.toJson(), original.toJson());
           expect(
             find.textContaining(switch (status) {
-              'TRACKING' => '선택한 차량 추적 중',
-              'SUSPENDED' => '추적 보류',
-              'COMPLETED' => '추적 종료',
-              'CANCELLED' => '사용자 취소로 종료',
-              'EXPIRED' => '세션 수명 만료',
-              _ => '알 수 없는 세션 상태',
+              'TRACKING' => '하차 알림 (추적 중)',
+              'SUSPENDED' => '하차 알림 (보류)',
+              'COMPLETED' => '하차 알림 (종료)',
+              'CANCELLED' => '하차 알림 (취소)',
+              'EXPIRED' => '하차 알림 (만료)',
+              _ => '하차 알림 (확인 필요)',
             }),
             findsOneWidget,
           );
@@ -576,7 +576,7 @@ void main() {
           await tester.pump(const Duration(seconds: 2));
           await tester.pumpAndSettle();
         }
-        expect(find.textContaining('차량 서울'), findsNothing);
+        expect(find.text('서울70사1234'), findsNothing);
         expect(
           find.text(
             error == '404'
@@ -589,7 +589,7 @@ void main() {
             boardingJson(sessionJson(status: 'COMPLETED', evaluation: 'ENDED'));
         await tester.tap(find.text('다시 조회'));
         await tester.pumpAndSettle();
-        expect(find.textContaining('추적 종료'), findsOneWidget);
+        expect(find.text('하차 알림 (종료)'), findsOneWidget);
         expect(
           requests.map((r) => r.url.path),
           everyElement('/api/v1/boarding-sessions/123'),
@@ -679,7 +679,7 @@ void main() {
               });
               break;
             case 'home':
-              await tester.tap(find.text('버스 도착 알림으로'));
+              await tester.tap(find.byTooltip('버스 도착 알림으로'));
               break;
             case 'dispose':
               await tester.pumpWidget(const SizedBox());
@@ -702,7 +702,7 @@ void main() {
             expect(find.text('알람 상세'), findsOneWidget);
           } else if (order == 'session-session') {
             expect(requests.last.url.path, '/api/v1/boarding-sessions/200');
-            expect(find.textContaining('차량 서울'), findsOneWidget);
+            expect(find.text('서울70사1234'), findsOneWidget);
           } else {
             expect(find.byType(BoardingNotificationScreen), findsNothing);
           }
@@ -734,7 +734,7 @@ void main() {
         requests.last.headers['authorization'],
         'Bearer ${f.auth.accessToken}',
       );
-      expect(find.textContaining('선택한 차량 추적 중'), findsOneWidget);
+      expect(find.text('하차 알림 (추적 중)'), findsOneWidget);
     });
     testWidgets('refresh failure removes exact-ID detail before any retry', (
       tester,
@@ -744,7 +744,7 @@ void main() {
       response = (_) async => boardingJson({}, 401);
       await pump(tester);
       expect(f.auth.state, AuthState.unauthenticated);
-      expect(find.textContaining('차량 서울'), findsNothing);
+      expect(find.text('서울70사1234'), findsNothing);
       expect(requests, hasLength(1));
     });
   });

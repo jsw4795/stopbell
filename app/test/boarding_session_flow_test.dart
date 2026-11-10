@@ -136,7 +136,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('find-candidates')));
     await tester.pumpAndSettle();
     await tap(tester, '서울70사1234');
-    await tap(tester, '이 차량으로 하차 알림 설정');
   }
 
   testWidgets(
@@ -144,8 +143,8 @@ void main() {
     (tester) async {
       await pump(tester);
       await prepare(tester);
-      await tester.ensureVisible(find.text('노선 방문 지점 1개 전'));
-      await tester.tap(find.text('노선 방문 지점 1개 전'));
+      await tester.ensureVisible(find.text('1개 전'));
+      await tester.tap(find.text('1개 전'));
       await tester.pumpAndSettle();
       sessionResponse = (request) async {
         expect(jsonDecode(request.body)['notificationOffsetStops'], 1);
@@ -155,9 +154,9 @@ void main() {
           'notificationOffsetStops': 1,
         }, 201);
       };
-      await tap(tester, '하차 알림 등록');
+      await tap(tester, '이 차량으로 하차 알림 설정');
       await tap(tester, '알림 없이 계속');
-      expect(find.text('알림 시점: 1정거장 전 · 세션당 한 번'), findsOneWidget);
+      expect(find.text('1개 지점 전'), findsOneWidget);
     },
   );
 
@@ -166,12 +165,6 @@ void main() {
     (tester) async {
       await pump(tester);
       await prepare(tester);
-      expect(find.text('승차 정류장'), findsOneWidget);
-      expect(find.text('하차 목표 정류장'), findsOneWidget);
-      for (final stop in boardingStops.take(2)) {
-        expect(find.textContaining('노선 순서 ${stop.order}'), findsOneWidget);
-      }
-      expect(find.textContaining('종점 방면'), findsNWidgets(2));
       sessionResponse = (request) async {
         expect(jsonDecode(request.body)['notificationOffsetStops'], 2);
         return boardingJson({
@@ -184,11 +177,11 @@ void main() {
           'checkpointObservedAt': null,
         }, 201);
       };
-      await tap(tester, '하차 알림 등록');
+      await tap(tester, '이 차량으로 하차 알림 설정');
       await tap(tester, '알림 없이 계속');
       expect(find.byType(BoardingSessionView), findsOneWidget);
-      expect(find.textContaining('선택한 차량 추적 중'), findsOneWidget);
-      expect(find.textContaining('차량 위치 확인 중'), findsWidgets);
+      expect(find.textContaining('하차 알림 (추적 중)'), findsOneWidget);
+      expect(find.textContaining('차량 위치 확인 중'), findsOneWidget);
       expect(find.textContaining('VERIFYING'), findsNothing);
       expect(find.text('추적 취소'), findsOneWidget);
       expect(
@@ -224,7 +217,7 @@ void main() {
             ? boardingJson({}, 401)
             : boardingJson(sessionJson(revision: 7), 201);
       };
-      await tap(tester, '하차 알림 등록');
+      await tap(tester, '이 차량으로 하차 알림 설정');
       await tap(tester, '알림 없이 계속');
       expect(find.byType(BoardingSessionView), findsOneWidget);
       final posts = requests
@@ -245,7 +238,7 @@ void main() {
               )
               .body,
         )['confirmedVehicleNumber'],
-        isNull,
+        '서울70사1234',
       );
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
@@ -268,7 +261,7 @@ void main() {
       await prepare(tester);
       sessionResponse = (_) async =>
           throw http.ClientException('response lost');
-      await tap(tester, '하차 알림 등록');
+      await tap(tester, '이 차량으로 하차 알림 설정');
       await tap(tester, '알림 없이 계속');
       final original = storage.records.values.single;
       sessionResponse = (request) async {
@@ -299,7 +292,7 @@ void main() {
       await prepare(tester);
       final result = Completer<http.Response>();
       sessionResponse = (_) => result.future;
-      await tap(tester, '하차 알림 등록');
+      await tap(tester, '이 차량으로 하차 알림 설정');
       await tap(tester, '알림 없이 계속');
       await tap(tester, '로그아웃');
       result.complete(boardingJson(sessionJson(), 201));

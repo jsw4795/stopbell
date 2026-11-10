@@ -52,6 +52,8 @@ class _BoardingHomeState extends State<BoardingHome> {
   })?
   _draft;
   bool _reconfirm = false, _newSelection = false;
+  int? _boardingNameSessionId;
+  String? _boardingName;
   BoardingSelectionContext? _reconfirmContext;
   @override
   void initState() {
@@ -79,6 +81,8 @@ class _BoardingHomeState extends State<BoardingHome> {
           _route = null;
           _draft = null;
           _reconfirmContext = null;
+          _boardingNameSessionId = null;
+          _boardingName = null;
         }
       });
     }
@@ -134,8 +138,11 @@ class _BoardingHomeState extends State<BoardingHome> {
   Future<void> _create(
     BoardingCandidate candidate,
     BoardingSelectionContext selection,
+    String? boarding,
   ) async {
     final c = _controller!;
+    final previousSessionId = c.session?.id;
+    if (!c.canCreate) return;
     await c.create(
       candidate,
       candidate.vehicleNumber!,
@@ -146,7 +153,13 @@ class _BoardingHomeState extends State<BoardingHome> {
           prepareBoardingPush(context, null),
     );
     if (_current && c.creationState == BoardingCreationState.resolved) {
-      setState(() => _newSelection = false);
+      setState(() {
+        _newSelection = false;
+        if (c.session != null && c.session!.id != previousSessionId) {
+          _boardingNameSessionId = c.session!.id;
+          _boardingName = boarding;
+        }
+      });
     }
   }
 
@@ -246,6 +259,9 @@ class _BoardingHomeState extends State<BoardingHome> {
       if (c.session != null && !_reconfirm && !_newSelection) {
         return BoardingSessionView(
           controller: c,
+          boardingName: _boardingNameSessionId == c.session!.id
+              ? _boardingName
+              : null,
           onBack: widget.onBack,
           onNew: () => setState(() {
             _newSelection = true;
@@ -284,7 +300,7 @@ class _BoardingHomeState extends State<BoardingHome> {
                         boarding: boarding,
                       );
                     } else {
-                      _create(candidate, selection);
+                      _create(candidate, selection, boarding);
                     }
                   },
             onBack: () {
