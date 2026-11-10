@@ -148,18 +148,19 @@ void main() {
     },
   );
   testWidgets(
-    'candidate expires while permission/registration waits, no UUID or POST',
+    'vehicle number creation proceeds after permission wait with one UUID and POST',
     (tester) async {
       await initialize();
       f.provider.status = PushPermission.notDetermined;
       await pump(tester);
       now = sessionNow.add(const Duration(seconds: 61));
+      expect(api.creations, isEmpty);
+      expect(storage.records, isEmpty);
       await tester.tap(find.text('계속'));
       await tester.pumpAndSettle();
       expect(f.devices.enabled, isTrue);
-      expect(api.creations, isEmpty);
-      expect(storage.records, isEmpty);
-      expect(controller.message, contains('후보 정보가 오래됐어요'));
+      expect(api.creations, hasLength(1));
+      expect(api.creations.single['confirmedVehicleNumber'], '서울70사1234');
     },
   );
   testWidgets(

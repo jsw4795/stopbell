@@ -73,21 +73,7 @@ public class BoardingNotificationService {
     }
 
     /** A newly validated baseline can justify preparation without claiming progress across a suspension. */
-    public Long recordReconfirmedPreparation(BoardingSession session, BoardingTrackingSnapshot previous) {
-        var checkpoint = session.getCheckpoint();
-        var before = previous.checkpoint();
-        // Reconfirmation may reset a baseline, but conflicting old/new evidence cannot justify an immediate Push.
-        if (checkpoint.getObservedAt().isBefore(before.getObservedAt())
-                || checkpoint.getIndex() < before.getIndex()
-                || !java.util.Objects.equals(checkpoint.getDirectionContext(), before.getDirectionContext())
-                || (before.getProviderDataTime() != null && (checkpoint.getProviderDataTime() == null
-                    || checkpoint.getProviderDataTime().isBefore(before.getProviderDataTime())))
-                || (checkpoint.getIndex() != before.getIndex()
-                    && (checkpoint.getObservedAt().equals(before.getObservedAt())
-                        || (checkpoint.getProviderDataTime() != null
-                            && checkpoint.getProviderDataTime().equals(before.getProviderDataTime()))))) {
-            return null;
-        }
+    public Long recordReconfirmedPreparation(BoardingSession session) {
         return recordInitialPreparation(session);
     }
 
@@ -109,11 +95,9 @@ public class BoardingNotificationService {
         int offset = session.getNotificationOffsetStops() == null ? 2 : session.getNotificationOffsetStops();
         if (checkpoint == null || !checkpoint.equals(session.getCheckpoint())
                 || !checkpoint.getObservedAt().equals(decision.observedAt())
-                || (initial ? !expected.matches(session) || session.getNotificationOffsetStops() == null
-                    : !checkpoint.getObservedAt().isAfter(expected.checkpoint().getObservedAt()))
+                || (initial && (!expected.matches(session) || session.getNotificationOffsetStops() == null))
                 || expected.requiresConfirmation() || (destination ? gap > 0 : gap <= 0 || gap > offset)
-                || (destination && (session.getStateReason() != decision.reason()
-                    || expected.checkpoint().getIndex() > session.getTraversal().targetIndex()))
+                || (destination && session.getStateReason() != decision.reason())
                 || !Integer.valueOf(gap).equals(decision.remainingOccurrenceGap())) {
             throw new IllegalArgumentException("Notification requires newly verified current progress");
         }

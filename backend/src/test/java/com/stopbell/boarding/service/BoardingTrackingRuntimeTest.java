@@ -70,14 +70,14 @@ class BoardingTrackingRuntimeTest {
     }
 
     @Test
-    @DisplayName("freshness가 끝난 revision의 허용을 닫고 같은 관측의 늦은 검증 callback으로 다시 열지 않는다")
+    @DisplayName("세션 수명이 끝난 revision은 늦은 검증 callback으로 다시 열리지 않는다")
     void expired_evidence_cannot_reopen() {
         var session = session(new User(AuthProvider.GOOGLE, "owner"));
         ReflectionTestUtils.setField(session, "id", 1L);
         var snapshot = com.stopbell.boarding.domain.BoardingTrackingSnapshot.from(session);
         var runtime = new BoardingTrackingRuntime();
         runtime.verified(snapshot);
-        assertThat(runtime.isReady(snapshot, UTC_NOW.plusSeconds(61))).isFalse();
+        assertThat(runtime.isReady(snapshot, snapshot.expiresAt())).isFalse();
         runtime.verified(snapshot);
         assertThat(runtime.isReady(snapshot, UTC_NOW)).isFalse();
     }
@@ -118,7 +118,7 @@ class BoardingTrackingRuntimeTest {
         assertThat(runtime.readyWindow(second.cursor(), 2, UTC_NOW).ids()).containsExactly(2001L, 2002L);
         runtime.committed(2001L, 1, false);
         assertThat(runtime.readyWindow(0, 2, UTC_NOW).ids()).containsExactly(2002L, 2003L);
-        assertThat(runtime.readyWindow(0, 2, UTC_NOW.plusSeconds(61)).ids()).isEmpty();
+        assertThat(runtime.readyWindow(0, 2, UTC_NOW.plusHours(4)).ids()).isEmpty();
         assertThat(runtime.readyWindow(0, 2, UTC_NOW).ids()).isEmpty();
     }
 

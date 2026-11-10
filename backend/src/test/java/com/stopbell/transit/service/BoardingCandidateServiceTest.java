@@ -348,30 +348,37 @@ class BoardingCandidateServiceTest {
     }
 
     @Test
-    @DisplayName("서울 stale 및 future roster는 detail 호출 없이 보류한다")
+    @DisplayName("roster 제공시각이 오래되거나 미래여도 detail의 정확한 위치를 조회한다")
     void seoul_stale_and_future_roster() {
         useRoute(TransitProvider.SEOUL_BUS, 12L);
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(
                 roster("id1", "A", "20261019115859"), roster("id2", "B", "20261019120001")));
+        when(detailClient.fetchVehicleDetail("id1")).thenReturn(detailResponse(detail("id1", "A", "s2", 20, DATA_TIME)));
+        when(detailClient.fetchVehicleDetail("id2")).thenReturn(detailResponse(detail("id2", "B", "s2", 20, DATA_TIME)));
         var candidates = find(12L).candidates();
-        assertHeld(candidates.getFirst(), ReasonCode.STALE_OBSERVATION);
-        assertHeld(candidates.getLast(), ReasonCode.FUTURE_OBSERVATION);
-        verifyNoInteractions(detailClient);
+        assertThat(candidates).hasSize(2).allSatisfy(candidate -> {
+            assertThat(candidate.confirmationStatus()).isEqualTo(ConfirmationStatus.AVAILABLE);
+            assertThat(candidate.progress().order()).isEqualTo(20);
+        });
+        verify(detailClient).fetchVehicleDetail("id1");
+        verify(detailClient).fetchVehicleDetail("id2");
     }
 
     @Test
-    @DisplayName("서울 제공시각 누락과 불가능한 날짜는 정상 시각으로 보정하지 않고 보류한다")
+    @DisplayName("제공시각이 없거나 파싱되지 않아도 차량 식별 후보를 제공한다")
     void invalid_provider_time_is_held() {
         useRoute(TransitProvider.SEOUL_BUS, null);
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(
                 roster("id1", "A", null), roster("id2", "B", "20260230120000")));
         var candidates = find(null).candidates();
-        assertHeld(candidates.getFirst(), ReasonCode.PROVIDER_TIME_MISSING);
-        assertHeld(candidates.getLast(), ReasonCode.PROVIDER_TIME_INVALID);
+        assertThat(candidates).hasSize(2).allSatisfy(candidate -> {
+            assertThat(candidate.confirmationStatus()).isEqualTo(ConfirmationStatus.AVAILABLE);
+            assertThat(candidate.providerDataTime()).isNull();
+        });
     }
 
     @Test
-    @DisplayName("서울 stale 또는 future detail도 roster 성공으로 숨기지 않는다")
+    @DisplayName("detail 제공시각과 무관하게 정확히 대응한 위치를 표시한다")
     void invalid_detail_time_is_held() {
         useRoute(TransitProvider.SEOUL_BUS, 12L);
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(
@@ -379,12 +386,14 @@ class BoardingCandidateServiceTest {
         when(detailClient.fetchVehicleDetail("id1")).thenReturn(detailResponse(detail("id1", "A", "s2", 20, "20261019115859")));
         when(detailClient.fetchVehicleDetail("id2")).thenReturn(detailResponse(detail("id2", "B", "s2", 20, "20261019120001")));
         var candidates = find(12L).candidates();
-        assertHeld(candidates.getFirst(), ReasonCode.STALE_OBSERVATION);
-        assertHeld(candidates.getLast(), ReasonCode.FUTURE_OBSERVATION);
+        assertThat(candidates).hasSize(2).allSatisfy(candidate -> {
+            assertThat(candidate.confirmationStatus()).isEqualTo(ConfirmationStatus.AVAILABLE);
+            assertThat(candidate.progress().order()).isEqualTo(20);
+        });
     }
 
     @Test
-    @DisplayName("느린 detail 조회 중 roster 관측이 만료되면 새 시각으로 갱신하지 않고 보류한다")
+    @DisplayName("느린 detail 조회에서도 원래 roster 관측 시각을 보존한다")
     void slow_detail_does_not_refresh_roster_observation() {
         useRoute(TransitProvider.SEOUL_BUS, 12L);
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(roster("id", "A", DATA_TIME)));
@@ -394,7 +403,8 @@ class BoardingCandidateServiceTest {
         });
         var response = find(12L);
         assertThat(response.observedAt()).isEqualTo(NOW);
-        assertHeld(response.candidates().getFirst(), ReasonCode.STALE_OBSERVATION);
+        assertThat(response.candidates().getFirst().confirmationStatus()).isEqualTo(ConfirmationStatus.AVAILABLE);
+        assertThat(response.candidates().getFirst().observedAt()).isEqualTo(NOW);
     }
 
     @Test

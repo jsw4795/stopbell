@@ -207,10 +207,10 @@ class BoardingDispatchIntegrationTest {
         time.set(NOW.plusSeconds(10));
         // The real TrackingStore closes the old revision before committing completion.
         runtime.committed(fixture.sessionId(), snapshot(fixture).revision(), false);
-        assertThat(completeDestination(fixture)).isNull();
+        assertThat(completeDestination(fixture)).isNotNull();
         assertThat(attempts.allowsBeforeSend(attempt)).isFalse();
         assertThat(row(fixture).getStatus()).isEqualTo(NotificationDeliveryStatus.FAILED);
-        assertThat(events.findAll()).hasSize(1);
+        assertThat(events.findAll()).hasSize(2);
     }
 
     @ParameterizedTest
@@ -426,7 +426,7 @@ class BoardingDispatchIntegrationTest {
     }
 
     enum GateFailure { RECOVERY_PENDING, ADMITTED_ONLY, SUSPENDED, CANCELLED, COMPLETED, EXPIRED,
-        MISSING, OWNER, REVISION, CHECKPOINT, STALE, FUTURE_PROVIDER, MISSING_PROVIDER, AFTER_TARGET }
+        MISSING, OWNER, REVISION, CHECKPOINT, STALE, AFTER_TARGET }
 
     @ParameterizedTest
     @EnumSource(GateFailure.class)
@@ -442,13 +442,9 @@ class BoardingDispatchIntegrationTest {
             case CHECKPOINT -> jdbc.update("update boarding_sessions set checkpoint_observed_at=? where id=?",
                     UTC_NOW.minusSeconds(1), fixture.sessionId());
             case STALE -> time.set(NOW.plusSeconds(61));
-            case FUTURE_PROVIDER, MISSING_PROVIDER, AFTER_TARGET -> {
+            case AFTER_TARGET -> {
                 var original = snapshot(fixture);
-                var checkpoint = failure == GateFailure.AFTER_TARGET
-                        ? new BoardingCheckpoint("s3", 30, 2, BoardingCheckpoint.Evidence.ID_ORDER, null, UTC_NOW, UTC_NOW)
-                        : new BoardingCheckpoint("s1", 10, 0, BoardingCheckpoint.Evidence.ID_ORDER, null,
-                            failure == GateFailure.FUTURE_PROVIDER ? UTC_NOW.plusSeconds(1) : UTC_NOW,
-                            failure == GateFailure.MISSING_PROVIDER ? null : UTC_NOW.plusSeconds(1));
+                var checkpoint = new BoardingCheckpoint("s3", 30, 2, BoardingCheckpoint.Evidence.ID_ORDER, null, UTC_NOW, UTC_NOW);
                 var current = new BoardingTrackingSnapshot(original.id(), original.revision(), original.status(), original.reason(),
                         original.provider(), original.routeId(), original.cityCode(), original.vehicleId(), original.vehicleNumber(),
                         original.traversal(), checkpoint, original.expiresAt());

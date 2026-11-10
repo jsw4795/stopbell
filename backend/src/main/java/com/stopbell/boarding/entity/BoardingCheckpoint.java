@@ -54,8 +54,7 @@ public class BoardingCheckpoint {
                     || stopExternalId.length() > 255 : evidence == Evidence.VERIFIED_ORDER_ONLY ? stopExternalId != null
                     : stopExternalId != null && (stopExternalId.isBlank() || stopExternalId.length() > 255)))
                 || (directionContext != null && (directionContext.isBlank() || directionContext.length() > 255))
-                || (providerDataTime != null && (providerDataTime.getYear() < 1000 || providerDataTime.getYear() > 9999
-                    || providerDataTime.isAfter(observedAt)))) {
+                || (providerDataTime != null && (providerDataTime.getYear() < 1000 || providerDataTime.getYear() > 9999))) {
             throw new IllegalArgumentException("Invalid checkpoint evidence or time");
         }
     }

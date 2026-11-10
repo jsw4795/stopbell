@@ -22,8 +22,39 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class BoardingProgressEvaluatorTest {
-    private final BoardingProgressEvaluator evaluator = new BoardingProgressEvaluator(Duration.ofMinutes(2), Duration.ofSeconds(30));
+    private final BoardingProgressEvaluator evaluator = new BoardingProgressEvaluator(Duration.ofSeconds(30));
     static final List<Integer> ORDERS = List.of(10, 20, 40, 80, 100);
+
+    @Test
+    @DisplayName("오래된 제공시각 자체는 정확한 진행 관측을 차단하지 않는다")
+    void accepts_older_provider_time_for_forward_progress() {
+        var session = snapshot(0);
+        var input = observation(session, 1, Meaning.VERIFIED_REACHED, 20);
+        var vehicle = input.vehicle();
+        var older = new Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(), vehicle.order(), 0,
+                vehicle.observedAt(), NOW.minusSeconds(90), null, null);
+        assertThat(evaluator.evaluate(session, replace(input, older), UTC_NOW.plusSeconds(20)).outcome())
+                .isEqualTo(Outcome.PREPARE_ALIGHT);
+    }
+
+    @Test
+    @DisplayName("이전 위치 재수신과 긴 관측 공백도 정확히 대응하면 평가한다")
+    void accepts_previous_position_and_long_gap() {
+        var session = snapshot(1);
+        assertThat(evaluator.evaluate(session, observation(session, 0, Meaning.VERIFIED_REACHED, 20),
+                UTC_NOW.plusSeconds(20)).outcome()).isEqualTo(Outcome.NO_CANDIDATE);
+        assertThat(evaluator.evaluate(session, observation(session, 2, Meaning.VERIFIED_REACHED, 121),
+                UTC_NOW.plusSeconds(121)).outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
+    }
+
+    @Test
+    @DisplayName("이전 기준점도 목적지 이후여도 현재 간격으로 통과를 판단한다")
+    void passed_gap_does_not_depend_on_previous_index() {
+        var session = snapshot(4);
+        var result = evaluator.evaluate(session, observation(session, 4, Meaning.VERIFIED_REACHED, 20),
+                UTC_NOW.plusSeconds(20));
+        assertThat(result.outcome()).isEqualTo(Outcome.PASSED_OBSERVED);
+    }
 
     @Test
     void tago_repeated_receipts_preserve_continuity_without_creating_progress() {
@@ -31,7 +62,7 @@ class BoardingProgressEvaluatorTest {
         for (int seconds = 20; seconds <= 180; seconds += 20) {
             var result = evaluator.evaluate(session, tagoObservation(session, 0, seconds), UTC_NOW.plusSeconds(seconds));
             assertThat(result.outcome()).isEqualTo(Outcome.NO_CANDIDATE);
-            assertThat(result.checkpoint().getEvidence()).isEqualTo(BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE);
+            assertThat(result.checkpoint().getEvidence()).isEqualTo(BoardingCheckpoint.Evidence.ID_ORDER);
             assertThat(result.checkpoint().getObservedAt()).isEqualTo(UTC_NOW.plusSeconds(seconds));
             session = tagoSnapshot(0, result.checkpoint().getEvidence(), result.checkpoint().getObservedAt());
         }
@@ -42,11 +73,12 @@ class BoardingProgressEvaluatorTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"1,0,PROGRESS_REGRESSION", "0,3,TARGET_NOT_AHEAD"})
-    void tago_regression_and_unverified_destination_are_held(int previous, int next, BoardingStateReason reason) {
+    @CsvSource({"1,0,NO_CANDIDATE", "0,3,ARRIVAL_OBSERVED"})
+    void tago_previous_and_unverified_destination_use_current_gap(int previous, int next, Outcome expected) {
         var session = tagoSnapshot(previous, BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE, UTC_NOW);
-        assertThat(evaluator.evaluate(session, tagoObservation(session, next, 20), UTC_NOW.plusSeconds(20)).reason())
-                .isEqualTo(reason);
+        var result = evaluator.evaluate(session, tagoObservation(session, next, 20), UTC_NOW.plusSeconds(20));
+        assertThat(result.outcome()).isEqualTo(expected);
+        assertThat(result.checkpoint().getIndex()).isEqualTo(next);
     }
 
     @ParameterizedTest
@@ -162,10 +194,10 @@ class BoardingProgressEvaluatorTest {
                 base.traversal(), checkpoint, base.expiresAt(), true, offset);
         assertThat(evaluator.evaluate(session, observation(session, 2, Meaning.VERIFIED_REACHED, 20),
                 UTC_NOW.plusSeconds(20)).outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
-        for (int index : List.of(3, 4)) {
-            assertHeld(evaluator.evaluate(session, observation(session, index, Meaning.VERIFIED_REACHED, 20),
-                    UTC_NOW.plusSeconds(20)), BoardingStateReason.TARGET_NOT_AHEAD);
-        }
+        assertThat(evaluator.evaluate(session, observation(session, 3, Meaning.VERIFIED_REACHED, 20),
+                UTC_NOW.plusSeconds(20)).outcome()).isEqualTo(Outcome.ARRIVAL_OBSERVED);
+        assertThat(evaluator.evaluate(session, observation(session, 4, Meaning.VERIFIED_REACHED, 20),
+                UTC_NOW.plusSeconds(20)).outcome()).isEqualTo(Outcome.PASSED_OBSERVED);
     }
 
     @ParameterizedTest
@@ -244,7 +276,7 @@ class BoardingProgressEvaluatorTest {
         var base = snapshot(0);
         var session = new BoardingTrackingSnapshot(base.id(), base.revision(), base.status(), null, base.provider(), base.routeId(),
                 base.cityCode(), base.vehicleId(), base.vehicleNumber(), base.traversal(), base.checkpoint(), UTC_NOW.plusSeconds(35));
-        var configured = new BoardingProgressEvaluator(Duration.ofMinutes(2), Duration.ofSeconds(ttlSeconds));
+        var configured = new BoardingProgressEvaluator(Duration.ofSeconds(ttlSeconds));
         var result = configured.evaluate(session, observation(session, 1, Meaning.VERIFIED_REFERENCE, 20), UTC_NOW.plusSeconds(20));
         assertThat(result.outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
         assertThat(result.expiresAt()).isEqualTo(session.expiresAt());
@@ -256,17 +288,14 @@ class BoardingProgressEvaluatorTest {
     void original_ttl(int age) {
         var session = snapshot(0);
         var observation = observation(session, 1, Meaning.VERIFIED_REFERENCE, 20);
-        // Provider time is one second older, so age 60 also fails the observation freshness policy.
         var result = evaluator.evaluate(session, observation, UTC_NOW.plusSeconds(20 + age));
-        assertThat(result.outcome()).isEqualTo(age == 60 ? Outcome.HELD : Outcome.EXPIRED_CANDIDATE);
-        if (age < 60) {
-            assertThat(result.expiresAt()).isEqualTo(UTC_NOW.plusSeconds(50));
-            assertThat(result.checkpoint()).isNotNull();
-        }
+        assertThat(result.outcome()).isEqualTo(Outcome.EXPIRED_CANDIDATE);
+        assertThat(result.expiresAt()).isEqualTo(UTC_NOW.plusSeconds(50));
+        assertThat(result.checkpoint()).isNotNull();
     }
 
     @Test
-    @DisplayName("같은 제공시각의 반복 데이터는 checkpoint와 revision 갱신 입력이나 새 후보를 만들지 않는다")
+    @DisplayName("같은 제공시각의 반복 응답도 현재 occurrence의 후보를 계산한다")
     void repeated_source_data() {
         var session = snapshot(1);
         var observation = observation(session, 1, Meaning.VERIFIED_REFERENCE, 0);
@@ -274,17 +303,18 @@ class BoardingProgressEvaluatorTest {
         var receivedAgain = new Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(), vehicle.order(), 0,
                 NOW.plusSeconds(20), vehicle.providerDataTime(), null, null);
         var result = evaluator.evaluate(session, replace(observation, receivedAgain), UTC_NOW.plusSeconds(20));
-        assertThat(result.outcome()).isEqualTo(Outcome.NO_CANDIDATE);
-        assertThat(result.checkpoint()).isNull();
-        assertThat(result.observedAt()).isEqualTo(UTC_NOW);
+        assertThat(result.outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
+        assertThat(result.checkpoint().getIndex()).isEqualTo(1);
+        assertThat(result.observedAt()).isEqualTo(UTC_NOW.plusSeconds(20));
     }
 
     @Test
-    @DisplayName("같은 제공시각인데 진행 기준점이 달라진 응답은 충돌로 보류한다")
+    @DisplayName("같은 제공시각이라도 다른 정확한 occurrence를 평가한다")
     void same_time_conflict() {
         var session = snapshot(0);
         var result = evaluator.evaluate(session, observation(session, 1, Meaning.VERIFIED_REFERENCE, 0), UTC_NOW.plusSeconds(20));
-        assertHeld(result, BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+        assertThat(result.outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
+        assertThat(result.checkpoint().getIndex()).isEqualTo(1);
     }
 
     @Test
@@ -300,12 +330,12 @@ class BoardingProgressEvaluatorTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"0,TRAVERSAL_AMBIGUOUS", "1,STALE_PROGRESS", "2,STALE_PROGRESS", "3,PROGRESS_REGRESSION",
-            "4,PROGRESS_REGRESSION", "5,CONTINUITY_GAP_EXCEEDED", "6,TRAVERSAL_AMBIGUOUS", "7,TRAVERSAL_AMBIGUOUS",
+    @CsvSource({"0,TRAVERSAL_AMBIGUOUS", "1,EXPIRED_CANDIDATE", "2,PREPARE_ALIGHT", "3,NO_CANDIDATE",
+            "4,PREPARE_ALIGHT", "5,PREPARE_ALIGHT", "6,TRAVERSAL_AMBIGUOUS", "7,PREPARE_ALIGHT",
             "8,IDENTITY_CONFLICT", "9,IDENTITY_CONFLICT", "10,IDENTITY_CONFLICT", "11,IDENTITY_CONFLICT",
-            "12,STALE_PROGRESS", "13,STALE_PROGRESS", "14,TRAVERSAL_AMBIGUOUS", "15,TRAVERSAL_AMBIGUOUS"})
-    @DisplayName("검증되지 않은 의미와 stale·future·역행·공백·회차·차량 또는 Provider 문맥 충돌은 후보 없이 보류한다")
-    void reject_uncertain_observation(int scenario, BoardingStateReason reason) {
+            "12,PREPARE_ALIGHT", "13,PREPARE_ALIGHT", "14,TRAVERSAL_AMBIGUOUS", "15,TRAVERSAL_AMBIGUOUS"})
+    @DisplayName("정확한 occurrence는 시각과 이전 위치에 관계없이 평가하고 식별 불일치는 보류한다")
+    void reject_uncertain_observation(int scenario, String expected) {
         var session = snapshot(1);
         var observation = observation(session, 2, Meaning.VERIFIED_REFERENCE, 20);
         var v = observation.vehicle();
@@ -327,7 +357,12 @@ class BoardingProgressEvaluatorTest {
             case 14 -> replace(observation, new Vehicle(v.id(), v.number(), "wrong-stop", v.order(), 0, v.observedAt(), v.providerDataTime(), null, null));
             default -> replace(observation, new Vehicle(v.id(), v.number(), v.stopId(), 999, 0, v.observedAt(), v.providerDataTime(), null, null));
         };
-        assertHeld(evaluator.evaluate(session, observation, UTC_NOW.plusSeconds(scenario == 5 ? 121 : 20)), reason);
+        var result = evaluator.evaluate(session, observation, UTC_NOW.plusSeconds(scenario == 5 ? 121 : 20));
+        if (expected.equals("TRAVERSAL_AMBIGUOUS") || expected.equals("IDENTITY_CONFLICT")) {
+            assertHeld(result, BoardingStateReason.valueOf(expected));
+        } else {
+            assertThat(result.outcome()).isEqualTo(Outcome.valueOf(expected));
+        }
     }
 
     @ParameterizedTest
@@ -390,11 +425,9 @@ class BoardingProgressEvaluatorTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"PT0S", "PT-1S", "PT0.000000001S", "PT999999999999S"})
-    @DisplayName("준비 TTL과 공백 설정은 양수이며 MySQL UTC microsecond 범위에 들어야 한다")
+    @DisplayName("준비 TTL은 양수이며 MySQL UTC microsecond 범위에 들어야 한다")
     void validate_configuration(String value) {
-        assertThatThrownBy(() -> new BoardingProgressEvaluator(Duration.parse(value), Duration.ofSeconds(30)))
-                .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new BoardingProgressEvaluator(Duration.ofMinutes(2), Duration.parse(value)))
+        assertThatThrownBy(() -> new BoardingProgressEvaluator(Duration.parse(value)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

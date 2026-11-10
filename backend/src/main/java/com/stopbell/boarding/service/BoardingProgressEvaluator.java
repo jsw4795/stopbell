@@ -14,17 +14,12 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class BoardingProgressEvaluator {
-    public static final Duration FRESHNESS = Duration.ofSeconds(60);
-    private final Duration maxObservationGap;
     private final Duration prepareTtl;
 
-    public BoardingProgressEvaluator(@Value("${boarding.recovery.max-observation-gap:PT2M}") Duration maxObservationGap,
-            @Value("${notification.decision.ttl.prepare-alight:PT30S}") Duration prepareTtl) {
+    public BoardingProgressEvaluator(@Value("${notification.decision.ttl.prepare-alight:PT30S}") Duration prepareTtl) {
         // Same finite, positive microsecond validation as the existing Session lifetime.
         var validation = new BoardingSessionProperties();
-        validation.setMaxLifetime(maxObservationGap);
         validation.setMaxLifetime(prepareTtl);
-        this.maxObservationGap = maxObservationGap;
         this.prepareTtl = prepareTtl;
     }
 
@@ -84,10 +79,6 @@ public class BoardingProgressEvaluator {
         
         int gap = traversal.targetIndex() - index;
         
-        if (pending && index >= traversal.targetIndex()) {
-            // No trusted baseline before the target: never infer a missed destination.
-            return BoardingTrackingDecision.held(BoardingStateReason.TARGET_NOT_AHEAD);
-        }
         boolean verified = !pending || index >= 0 && (observation.meaning() == BoardingProgressObservation.Meaning.DIRECT_ARRIVAL
                     || observation.meaning() == BoardingProgressObservation.Meaning.VERIFIED_REACHED);
         var checkpoint = new BoardingCheckpoint(index < 0 ? null : vehicle.stopId(), index < 0 ? 0 : vehicle.order(), index,
@@ -108,7 +99,7 @@ public class BoardingProgressEvaluator {
             return new BoardingTrackingDecision(Outcome.ARRIVAL_OBSERVED, checkpoint,
                     BoardingStateReason.ARRIVAL_OBSERVED, gap, observedAt, expiry, now);
         }
-        if (gap < 0 && previous.getIndex() <= traversal.targetIndex()) {
+        if (gap < 0) {
             return new BoardingTrackingDecision(Outcome.PASSED_OBSERVED, checkpoint,
                     BoardingStateReason.PASSED_OBSERVED, gap, observedAt, expiry, now);
         }
@@ -119,11 +110,4 @@ public class BoardingProgressEvaluator {
         return new BoardingTrackingDecision(outcome, checkpoint, null, gap, observedAt, expiry, now);
     }
 
-    public boolean continuityExpired(BoardingTrackingSnapshot session, LocalDateTime now) {
-        return Duration.between(session.checkpoint().getObservedAt(), now).compareTo(maxObservationGap) > 0;
-    }
-
-    private static boolean invalidTime(LocalDateTime time, LocalDateTime now) {
-        return time == null || time.isAfter(now) || time.isBefore(now.minus(FRESHNESS));
-    }
 }

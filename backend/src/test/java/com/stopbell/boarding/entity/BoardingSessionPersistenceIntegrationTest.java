@@ -116,13 +116,14 @@ class BoardingSessionPersistenceIntegrationTest {
     }
 
     @Test
-    @DisplayName("복원된 checkpoint의 시각 모순은 Domain 검증에서 거부한다")
+    @DisplayName("수신보다 미래인 Provider 시각도 checkpoint에 보존한다")
     void reject_inconsistent_restored_checkpoint() {
         var saved = persist();
         jdbc.update("update boarding_sessions set checkpoint_provider_data_time=date_add(checkpoint_observed_at, interval 1 second) where id=?", saved.getId());
         em.clear();
-        assertThatThrownBy(() -> em.find(BoardingSession.class, saved.getId()).getTraversal())
-                .isInstanceOf(IllegalArgumentException.class);
+        var restored = em.find(BoardingSession.class, saved.getId());
+        assertThat(restored.getCheckpoint().getProviderDataTime())
+                .isEqualTo(restored.getCheckpoint().getObservedAt().plusSeconds(1));
     }
 
     @Test

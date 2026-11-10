@@ -116,10 +116,10 @@ class BoardingSessionTest {
     }
 
     @Test
-    @DisplayName("Provider 제공시각이 수신보다 미래이거나 상태 시각이 역행하면 거부한다")
+    @DisplayName("Provider 시각은 보존하고 세션 상태 시각의 역행은 거부한다")
     void reject_time_inconsistency() {
-        assertThatThrownBy(() -> new BoardingCheckpoint("s1", 10, 0, BoardingCheckpoint.Evidence.ID_ORDER,
-                null, UTC_NOW, UTC_NOW.plusSeconds(1))).isInstanceOf(IllegalArgumentException.class);
+        assertThat(new BoardingCheckpoint("s1", 10, 0, BoardingCheckpoint.Evidence.ID_ORDER,
+                null, UTC_NOW, UTC_NOW.plusSeconds(1)).getProviderDataTime()).isEqualTo(UTC_NOW.plusSeconds(1));
         assertThatThrownBy(() -> session(user).cancel(0, UTC_NOW.minusSeconds(1))).isInstanceOf(IllegalArgumentException.class);
     }
 

@@ -65,7 +65,7 @@ class BoardingCandidateRevalidationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"MISSING_ORDER", "MISMATCH", "REGRESSION", "TARGET", "MISSING_VEHICLE"})
-    void tago_start_rejects_invalid_current_position(String scenario) {
+    void tago_start_checks_identity_and_current_position(String scenario) {
         ReflectionTestUtils.setField(service, "tagoExperimentEnabled", true);
         var tagoRoute = route(TransitProvider.TAGO, 12L);
         var vehicle = BoardingCandidateMapper.tago(tago("경기1234", "s2", 20), NOW);
@@ -79,6 +79,10 @@ class BoardingCandidateRevalidationTest {
             default -> tago("다른차량", "s3", 30);
         };
         when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(next));
+        if (scenario.equals("REGRESSION")) {
+            assertThat(service.revalidateSelected(snapshot, tagoRoute, "경기1234").progressIndex()).isZero();
+            return;
+        }
         assertThatThrownBy(() -> service.revalidateSelected(snapshot, tagoRoute, "경기1234"))
                 .isInstanceOf(ApiException.class).extracting("errorCode").isEqualTo(ErrorCode.BOARDING_CANDIDATE_CHANGED);
     }
@@ -119,10 +123,10 @@ class BoardingCandidateRevalidationTest {
     }
 
     @Test
-    @DisplayName("같은 제공시각의 다른 occurrence는 시작 재검증에서도 새 진행으로 인정하지 않는다")
-    void reject_progress_change_with_same_provider_time() {
+    @DisplayName("같은 제공시각이어도 정확한 다른 occurrence를 확인한다")
+    void accept_progress_change_with_same_provider_time() {
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, DATA_TIME)));
-        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isEqualTo(1);
     }
 
     @Test
@@ -166,15 +170,15 @@ class BoardingCandidateRevalidationTest {
     @ParameterizedTest
     @ValueSource(strings = {DATA_TIME, "20261019120001"})
     @ExtendWith(OutputCaptureExtension.class)
-    @DisplayName("같은 source의 이동 재응답은 원래 시각을 유지하고 새 source만 최신 reference로 시작한다")
+    @DisplayName("같은 source도 최신 수신시각과 원본 제공시각을 보존한다")
     void reuse_stopped_baseline_without_refreshing_times(String latestTime, CapturedOutput output) {
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
                 "v1", "서울70사1234", "s1", 10, 0, latestTime, null, null)));
 
         var verified = service.revalidateSelected(original, route, "서울70사1234");
 
-        assertThat(verified.vehicle().stopFlag()).isEqualTo(latestTime.equals(DATA_TIME) ? 1 : 0);
-        assertThat(verified.vehicle().observedAt()).isEqualTo(NOW.plusSeconds(latestTime.equals(DATA_TIME) ? 0 : 1));
+        assertThat(verified.vehicle().stopFlag()).isZero();
+        assertThat(verified.vehicle().observedAt()).isEqualTo(NOW.plusSeconds(1));
         assertThat(verified.vehicle().providerDataTime()).isEqualTo(NOW.plusSeconds(latestTime.equals(DATA_TIME) ? 0 : 1));
         assertThat(verified.progressIndex()).isZero();
         assertThat(output.getAll())
@@ -186,8 +190,8 @@ class BoardingCandidateRevalidationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"ID", "NUMBER", "SOURCE_REGRESSION", "STALE_DETAIL", "STALE_BASELINE", "COARSE_CONFLICT"})
-    @DisplayName("같은 occurrence의 이동 응답도 식별·시각·원래 기준점 freshness·운행 문맥 검증을 통과해야 한다")
-    void reject_unsafe_moving_start(String issue) {
+    @DisplayName("이동 응답의 차량 식별 충돌은 거부하고 시각과 roster 구간은 위치 판단에 사용하지 않는다")
+    void validate_moving_start(String issue) {
         String id = issue.equals("ID") ? "other-vehicle" : "v1";
         String number = issue.equals("NUMBER") ? "다른 번호" : "서울70사1234";
         String time = issue.equals("SOURCE_REGRESSION") ? "20261019115959" : "20261019120001";
@@ -205,7 +209,11 @@ class BoardingCandidateRevalidationTest {
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
                 id, number, "s1", 10, 0, time, null, null)));
 
-        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        if (issue.equals("ID") || issue.equals("NUMBER")) {
+            expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        } else {
+            assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isZero();
+        }
     }
 
     @ParameterizedTest
@@ -213,7 +221,7 @@ class BoardingCandidateRevalidationTest {
             "ORIGINAL_STOP_FLAG_UNVERIFIED", "ORIGINAL_POSITION_UNVERIFIED", "CURRENT_POSITION_MISSING",
             "REPEATED_STOP_TRAVERSAL", "ORIGINAL_RUN_ENDED", "CURRENT_RUN_ENDED", "PROVIDER_UNVERIFIED"})
     @ExtendWith(OutputCaptureExtension.class)
-    @DisplayName("같은 미지원 오류의 서로 다른 차단 조건을 고정 사유로 구분하고 차량·정류장·reference를 기록하지 않는다")
+    @DisplayName("운행 종료와 미지원 Provider를 구분하고 위치가 확인되면 stopFlag 없이도 수용한다")
     void diagnose_other_unsupported_conditions(String reason, CapturedOutput output) {
         var previous = original.detailVehicle();
         switch (reason) {
@@ -253,8 +261,7 @@ class BoardingCandidateRevalidationTest {
             assertDiagnostic(output, reason);
         } else {
             var selected = service.revalidateSelected(original, route, "서울70사1234");
-            assertThat(selected.baselineVerified()).isEqualTo(!reason.equals("LATEST_STOP_FLAG_UNVERIFIED")
-                    && !reason.equals("CURRENT_POSITION_MISSING"));
+            assertThat(selected.baselineVerified()).isEqualTo(!reason.equals("CURRENT_POSITION_MISSING"));
         }
     }
 
@@ -266,12 +273,12 @@ class BoardingCandidateRevalidationTest {
     }
 
     @Test
-    @DisplayName("같은 제공시각에 roster 구간 문맥이 달라지면 sectOrd를 정류장 진행으로 해석하지 않고 거부한다")
-    void reject_conflicting_roster_at_same_provider_time() {
+    @DisplayName("roster 구간이 달라도 sectOrd 대신 detail의 정확한 occurrence를 사용한다")
+    void ignore_roster_section_for_stop_progress() {
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(
                 new com.stopbell.transit.dto.seoul.SeoulBusVehicleLocationItem("v1", "서울70사1234", 1000,
                         "different-section", 1, DATA_TIME, null, null, "different-next-stop", "1", null)));
-        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isEqualTo(1);
     }
 
     @ParameterizedTest
@@ -307,11 +314,11 @@ class BoardingCandidateRevalidationTest {
     }
 
     @Test
-    @DisplayName("서울 이동 중 의미와 order-only 및 ID/order 모순은 검증된 진행으로 취급하지 않는다")
+    @DisplayName("서울 이동 위치는 수용하고 ID 누락과 ID/order 모순은 구분한다")
     void reject_unverified_progress() {
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(new SeoulBusVehicleDetailItem(
                 "v1", "서울70사1234", "s2", 20, 0, DATA_TIME, null, null)));
-        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isEqualTo(1);
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", null, 20, DATA_TIME)));
         assertThat(service.revalidateSelected(original, route, "서울70사1234").baselineVerified()).isFalse();
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "wrong-id", 20, DATA_TIME)));
@@ -333,17 +340,17 @@ class BoardingCandidateRevalidationTest {
     }
 
     @Test
-    @DisplayName("진행과 Provider 시각 역행 및 미래 또는 stale 응답은 거부한다")
-    void reject_regression_and_invalid_time() {
+    @DisplayName("이전 위치와 Provider 시각에 관계없이 평가하고 reference 만료는 유지한다")
+    void accept_previous_position_and_provider_time() {
         original = new Snapshot(original.context(), route, route.fingerprint(), original.rosterVehicle(),
                 BoardingCandidateMapper.detail(detail("v1", "서울70사1234", "s3", 30, DATA_TIME), NOW), original.expiresAt());
-        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isEqualTo(1);
         original = new Snapshot(original.context(), route, route.fingerprint(), original.rosterVehicle(),
                 BoardingCandidateMapper.detail(detail("v1", "서울70사1234", "s1", 10, DATA_TIME), NOW), original.expiresAt());
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, "20261019115959")));
-        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isEqualTo(1);
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, "20261019120002")));
-        expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+        assertThat(service.revalidateSelected(original, route, "서울70사1234").progressIndex()).isEqualTo(1);
         clock.now = NOW.plusSeconds(61);
         when(details.fetchVehicleDetail("v1")).thenReturn(detailResponse(detail("v1", "서울70사1234", "s2", 20, DATA_TIME)));
         expect(ErrorCode.BOARDING_CANDIDATE_CHANGED);

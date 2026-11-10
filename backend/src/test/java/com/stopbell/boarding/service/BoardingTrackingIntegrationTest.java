@@ -181,7 +181,7 @@ class BoardingTrackingIntegrationTest {
             time.set(NOW.plusSeconds(80));
             polling.poll(cycle());
             assertThat(sessions.findById(selected.getId()).orElseThrow().getStatus()).isEqualTo(BoardingSessionStatus.COMPLETED);
-            assertThat(events.count()).isEqualTo(1);
+            assertThat(events.count()).isEqualTo(2);
         } finally {
             ReflectionTestUtils.setField(polling, "tagoExperimentEnabled", false);
         }
@@ -261,7 +261,7 @@ class BoardingTrackingIntegrationTest {
     }
 
     @Test
-    @DisplayName("일시적인 stopFlag 누락은 추적을 유지하고 새 이동 근거에서 자동 재검증해 준비 알림을 생성한다")
+    @DisplayName("stopFlag가 없어도 정확한 occurrence에서 준비 알림을 한 번 생성한다")
     void missing_flag_waits_for_trustworthy_moving_progress() {
         jdbc.update("update boarding_sessions set notification_offset_stops=2 where id=?", session.getId());
         device(session.getUser());
@@ -273,8 +273,8 @@ class BoardingTrackingIntegrationTest {
         polling.poll(cycle());
         var waiting = api.find(session.getUser().getId(), session.getId());
         assertThat(waiting.status()).isEqualTo(BoardingSessionStatus.TRACKING);
-        assertThat(waiting.reasonCode()).isEqualTo(BoardingStateReason.STALE_PROGRESS);
-        assertThat(events.count()).isZero();
+        assertThat(waiting.reasonCode()).isNull();
+        assertThat(events.count()).isEqualTo(1);
         time.set(NOW.plusSeconds(40));
         when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> movingDetail(1));
         polling.poll(cycle());
@@ -381,15 +381,14 @@ class BoardingTrackingIntegrationTest {
     }
 
     @Test
-    @DisplayName("신선한 새 occurrence 이동 응답도 마지막 검증 이후 2분 공백을 넘으면 재확인을 요구한다")
+    @DisplayName("긴 관측 공백 뒤에도 정확한 occurrence를 평가한다")
     void moving_forward_does_not_bridge_excessive_gap() {
         time.set(NOW.plusSeconds(160));
         when(detail.fetchVehicleDetail(anyString())).thenReturn(movingDetail(1));
         polling.poll(cycle());
-        assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
-        assertThat(store.findOpen().getFirst().requiresConfirmation()).isTrue();
-        assertThat(store.findOpen().getFirst().checkpoint().getIndex()).isZero();
-        assertThat(events.count()).isZero();
+        assertThat(store.findOpen().getFirst().reason()).isNull();
+        assertThat(store.findOpen().getFirst().checkpoint().getIndex()).isEqualTo(1);
+        assertThat(events.count()).isEqualTo(1);
     }
 
     private SeoulBusVehicleDetailResponse movingDetail(int index) {
@@ -519,20 +518,21 @@ class BoardingTrackingIntegrationTest {
         var loaded = sessions.findById(session.getId()).orElseThrow();
         assertThat(new BoardingTrackingRuntime().response(loaded, utc()).evaluationStatus()).isEqualTo(EvaluationStatus.RECOVERY_PENDING);
         time.set(NOW.plusSeconds(81));
-        assertThat(api.find(session.getUser().getId(), session.getId()).remainingOccurrenceGap()).isNull();
+        assertThat(api.find(session.getUser().getId(), session.getId()).remainingOccurrenceGap()).isEqualTo(2);
         assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(2);
     }
 
     @Test
-    @DisplayName("반복 제공 데이터는 checkpoint 관측시각과 revision을 늘리지 않고 새 후보로 재해석하지 않는다")
+    @DisplayName("같은 응답을 반복해도 checkpoint와 revision 및 Event는 중복되지 않는다")
     void repeat_keeps_original_checkpoint() {
         polling.poll(cycle());
         var first = sessions.findById(session.getId()).orElseThrow();
         var result = polling.poll(cycle()).getFirst();
-        assertThat(result.decision().outcome()).isEqualTo(Outcome.NO_CANDIDATE);
+        assertThat(result.decision().outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
         var repeated = sessions.findById(session.getId()).orElseThrow();
         assertThat(repeated.getRevision()).isEqualTo(first.getRevision());
         assertThat(repeated.getCheckpoint()).isEqualTo(first.getCheckpoint());
+        assertThat(events.count()).isEqualTo(1);
     }
 
     @Test
@@ -782,27 +782,25 @@ class BoardingTrackingIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(ints = {120, 121})
-    @DisplayName("재시작 복구 공백은 마지막 검증 관측부터 계산하며 2분 경계를 초과하면 재확인을 요구한다")
+    @DisplayName("재시작 후 관측 공백 길이와 관계없이 정확한 위치를 복구한다")
     void recovery_gap_boundary(int seconds) {
         runtime.forget(session.getId());
         time.set(NOW.plusSeconds(seconds));
         var result = polling.poll(cycle()).getFirst();
-        assertThat(result.status()).isEqualTo(seconds == 120 ? BoardingSessionStatus.TRACKING : BoardingSessionStatus.SUSPENDED);
-        if (seconds > 120) {
-            assertThat(result.decision().reason()).isEqualTo(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
-            assertThat(result.decision().checkpoint()).isNull();
-        }
+        assertThat(result.status()).isEqualTo(BoardingSessionStatus.TRACKING);
+        assertThat(result.decision().checkpoint().getIndex()).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("재시작 후 동일 제공시각의 과거 checkpoint 반복은 gate를 열거나 준비 후보를 만들지 않는다")
+    @DisplayName("재시작 후 동일 응답도 복구하며 알림 Event는 중복되지 않는다")
     void restart_repeated_checkpoint() {
         polling.poll(cycle());
         runtime.forget(session.getId());
         var result = polling.poll(cycle()).getFirst();
-        assertThat(result.decision().checkpoint()).isNull();
-        assertThat(result.decision().outcome()).isEqualTo(Outcome.NO_CANDIDATE);
-        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.RECOVERY_PENDING);
+        assertThat(result.decision().checkpoint().getIndex()).isEqualTo(1);
+        assertThat(result.decision().outcome()).isEqualTo(Outcome.PREPARE_ALIGHT);
+        assertThat(api.find(session.getUser().getId(), session.getId()).evaluationStatus()).isEqualTo(EvaluationStatus.READY);
+        assertThat(events.count()).isEqualTo(1);
     }
 
     @ParameterizedTest
@@ -818,7 +816,7 @@ class BoardingTrackingIntegrationTest {
     }
 
     @Test
-    @DisplayName("재시작 후 Provider 실패를 자동 재조회하다 공백을 초과하면 소실 대신 연속성 공백 사유를 저장한다")
+    @DisplayName("재시작 후 Provider 장애가 길어져도 복구 관측을 다시 시도한다")
     void restart_provider_failure_gap() {
         runtime.forget(session.getId());
         when(seoul.fetchVehicleLocations(any())).thenThrow(TransitProviderClientException.protocol(TransitProvider.SEOUL_BUS, "roster", null));
@@ -826,10 +824,10 @@ class BoardingTrackingIntegrationTest {
         assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
         time.set(NOW.plusSeconds(121));
         polling.poll(cycle());
-        assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
+        assertThat(store.findOpen().getFirst().reason()).isEqualTo(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
         time.set(NOW.plusSeconds(140));
         doAnswer(invocation -> roster()).when(seoul).fetchVehicleLocations(any());
-        assertThat(polling.poll(cycle())).isEmpty();
+        assertThat(polling.poll(cycle()).getFirst().status()).isEqualTo(BoardingSessionStatus.TRACKING);
     }
 
     @ParameterizedTest
@@ -887,9 +885,8 @@ class BoardingTrackingIntegrationTest {
     }
 
     @ParameterizedTest
-    @org.junit.jupiter.params.provider.CsvSource({"0,IDENTITY_CONFLICT", "1,IDENTITY_CONFLICT", "2,PROGRESS_REGRESSION",
-            "3,TRAVERSAL_AMBIGUOUS", "4,STALE_PROGRESS", "5,STALE_PROGRESS", "6,TRAVERSAL_AMBIGUOUS"})
-    @DisplayName("복구의 ID·번호 충돌과 제공시각 역행·상충·stale·future·다른 lap은 checkpoint와 허용을 갱신하지 않는다")
+    @org.junit.jupiter.params.provider.CsvSource({"0,IDENTITY_CONFLICT", "1,IDENTITY_CONFLICT", "6,TRAVERSAL_AMBIGUOUS"})
+    @DisplayName("복구의 차량 식별 충돌과 모호한 노선 대응은 checkpoint와 허용을 갱신하지 않는다")
     void restart_rejects_invalid_evidence(int scenario, BoardingStateReason reason) {
         runtime.forget(session.getId());
         var expected = store.findOpen().getFirst();
@@ -900,14 +897,6 @@ class BoardingTrackingIntegrationTest {
                     vehicle.order(), 0, vehicle.observedAt(), vehicle.providerDataTime(), null, null);
             case 1 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), "다른번호1234", vehicle.stopId(),
                     vehicle.order(), 0, vehicle.observedAt(), vehicle.providerDataTime(), null, null);
-            case 2 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(),
-                    vehicle.order(), 0, vehicle.observedAt(), NOW.minusSeconds(2), null, null);
-            case 3 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(),
-                    vehicle.order(), 0, vehicle.observedAt(), NOW.minusSeconds(1), null, null);
-            case 4 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(),
-                    vehicle.order(), 0, NOW.minusSeconds(61), NOW.minusSeconds(62), null, null);
-            case 5 -> new com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle(vehicle.id(), vehicle.number(), vehicle.stopId(),
-                    vehicle.order(), 0, NOW.plusSeconds(21), NOW.plusSeconds(20), null, null);
             default -> vehicle;
         };
         observation = new BoardingProgressObservation(expected.provider(), expected.routeId(), expected.cityCode(), vehicle,
@@ -1668,7 +1657,7 @@ class BoardingTrackingIntegrationTest {
     }
 
     @Test
-    @DisplayName("검증 대기 중 일시 장애와 지연은 알림 없이 유지하고 연속성 공백 초과는 안전하게 보류한다")
+    @DisplayName("검증 대기 중 Provider 장애가 지속되면 알림 없이 유지한다")
     void pending_provider_failure_is_closed() {
         pendingSession();
         when(seoul.fetchVehicleLocations(any())).thenThrow(TransitProviderClientException.transport(
@@ -1681,18 +1670,20 @@ class BoardingTrackingIntegrationTest {
         time.set(NOW.plusSeconds(121));
         polling.poll(cycle());
         assertThat(api.find(session.getUser().getId(), session.getId()).reasonCode())
-                .isEqualTo(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
+                .isEqualTo(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
         assertThat(events.count()).isZero();
     }
 
     @Test
-    @DisplayName("검증 대기에서 목적지까지의 진행을 먼저 관측해도 이전 미검증 관측으로 목적지 알림을 합성하지 않는다")
-    void pending_target_is_not_a_destination_event() {
+    @DisplayName("검증 대기 중 목적지 occurrence를 확인하면 목적지 Event를 한 번 생성한다")
+    void pending_target_creates_destination_event() {
         pendingSession();
         when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> detail(3));
         polling.poll(cycle());
-        assertThat(api.find(session.getUser().getId(), session.getId()).reasonCode()).isEqualTo(BoardingStateReason.TARGET_NOT_AHEAD);
-        assertThat(events.count()).isZero();
+        assertThat(api.find(session.getUser().getId(), session.getId()).reasonCode()).isEqualTo(BoardingStateReason.ARRIVAL_OBSERVED);
+        assertThat(events.count()).isEqualTo(1);
+        polling.poll(cycle());
+        assertThat(events.count()).isEqualTo(1);
         assertThat(deliveries.count()).isZero();
     }
 
@@ -1717,8 +1708,8 @@ class BoardingTrackingIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"CONFLICT", "MISSING", "REGRESSION", "RUN_ENDED", "STALE"})
-    @DisplayName("검증 대기 차량도 식별 충돌·소실·역행·운행 종료·오래된 관측에서 알림을 만들지 않는다")
+    @ValueSource(strings = {"CONFLICT", "MISSING", "RUN_ENDED"})
+    @DisplayName("검증 대기 차량의 식별 충돌·소실·운행 종료에서는 알림을 만들지 않는다")
     void pending_safety_guards(String issue) {
         pendingSession();
         if (issue.equals("CONFLICT")) {
@@ -1732,16 +1723,6 @@ class BoardingTrackingIntegrationTest {
             when(seoul.fetchVehicleLocations(any())).thenReturn(new SeoulBusVehicleLocationResponse(
                     new SeoulBusVehicleLocationResponse.Header("0", null), new SeoulBusVehicleLocationResponse.Body(List.of(
                     new SeoulBusVehicleLocationItem("vehicle-id", NUMBER, 1, "section", 0, dataTime(), null, null, null, "0", null)))));
-        } else if (issue.equals("REGRESSION")) {
-            time.set(NOW.plusSeconds(40));
-            when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> movingDetail(1));
-            polling.poll(cycle());
-            time.set(NOW.plusSeconds(60));
-            when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> movingDetail(0));
-        } else {
-            time.set(NOW.plusSeconds(90));
-            when(detail.fetchVehicleDetail(anyString())).thenReturn(detail(0));
-            time.set(NOW.plusSeconds(160));
         }
         polling.poll(cycle());
         var held = api.find(session.getUser().getId(), session.getId());
@@ -1749,11 +1730,10 @@ class BoardingTrackingIntegrationTest {
         assertThat(held.reasonCode()).isEqualTo(switch (issue) {
             case "CONFLICT" -> BoardingStateReason.IDENTITY_CONFLICT;
             case "MISSING" -> BoardingStateReason.VEHICLE_MISSING;
-            case "REGRESSION" -> BoardingStateReason.PROGRESS_REGRESSION;
             case "RUN_ENDED" -> BoardingStateReason.TRAVERSAL_AMBIGUOUS;
-            default -> BoardingStateReason.CONTINUITY_GAP_EXCEEDED;
+            default -> throw new AssertionError(issue);
         });
-        assertThat(events.count()).isEqualTo(issue.equals("REGRESSION") ? 1 : 0);
+        assertThat(events.count()).isZero();
         assertThat(deliveries.count()).isZero();
     }
 

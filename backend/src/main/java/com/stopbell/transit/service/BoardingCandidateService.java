@@ -113,10 +113,9 @@ public class BoardingCandidateService {
         includeDetailConflicts(vehicles, details, conflictingIds);
         references.replace(context);
         List<Candidate> candidates = new ArrayList<>();
-        Instant evaluatedAt = clock.instant();
         for (int index = 0; index < vehicles.size(); index++) {
             candidates.add(candidate(route, context, vehicles.get(index), details.get(index),
-                    conflictingIds, evaluatedAt));
+                    conflictingIds));
         }
         // Equal gaps have no preference. Vehicle numbers give a reproducible display order;
         // The stable input order breaks remaining ties without adding recommendation evidence.
@@ -349,7 +348,7 @@ public class BoardingCandidateService {
     }
 
     private Candidate candidate(BoardingRouteSnapshot route, Context context, Vehicle roster, Detail result,
-            Set<String> conflictingIds, Instant now) {
+            Set<String> conflictingIds) {
         ReasonCode held = identityIssue(roster, conflictingIds);
         Vehicle detail = result.vehicle();
         if (held == null && result.issue() != null && result.issue() != ReasonCode.DETAIL_NOT_REQUESTED
@@ -491,20 +490,6 @@ public class BoardingCandidateService {
                 }
             }
         }
-    }
-
-    private static ReasonCode timeIssue(Vehicle vehicle, Instant now) {
-        if (vehicle.timeIssue() != null) {
-            return vehicle.timeIssue();
-        }
-        if (vehicle.observedAt().isAfter(now)
-                || (vehicle.providerDataTime() != null && vehicle.providerDataTime().isAfter(now))) {
-            return ReasonCode.FUTURE_OBSERVATION;
-        }
-        Instant cutoff = now.minus(BoardingCandidateReferenceStore.FRESHNESS);
-        return vehicle.observedAt().isBefore(cutoff)
-                || (vehicle.providerDataTime() != null && vehicle.providerDataTime().isBefore(cutoff))
-                ? ReasonCode.STALE_OBSERVATION : null;
     }
 
     private boolean partial(Candidate candidate) {

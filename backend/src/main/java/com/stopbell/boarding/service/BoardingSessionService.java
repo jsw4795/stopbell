@@ -18,7 +18,6 @@ import com.stopbell.boarding.repository.BoardingSessionRepository;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.service.BoardingCandidateMetadataService;
-import com.stopbell.transit.service.BoardingCandidateReferenceStore;
 import com.stopbell.user.repository.UserRepository;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -142,11 +141,7 @@ public class BoardingSessionService {
                 throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
             }
             LocalDateTime now = now();
-            if (clock.instant().isAfter(start.referenceExpiresAt())
-                    || start.checkpoint().getObservedAt().isAfter(now)
-                    || start.checkpoint().getObservedAt().isBefore(now.minus(BoardingCandidateReferenceStore.FRESHNESS))
-                    || (start.checkpoint().getProviderDataTime() != null
-                        && start.checkpoint().getProviderDataTime().isBefore(now.minus(BoardingCandidateReferenceStore.FRESHNESS)))) {
+            if (clock.instant().isAfter(start.referenceExpiresAt()) || start.checkpoint().getObservedAt().isAfter(now)) {
                 throw new ApiException(request.currentVehicleRequest() ? ErrorCode.BOARDING_POSITION_UNAVAILABLE
                         : ErrorCode.BOARDING_CANDIDATE_CHANGED);
             }
@@ -267,13 +262,13 @@ public class BoardingSessionService {
                 }
                 var latest = metadata.read(start.metadata().routeId(), start.metadata().targetOccurrenceId(),
                         start.metadata().boardingOccurrenceId());
-                if (!latest.fingerprint().equals(start.metadata().fingerprint()) || !fresh(start, now())) {
+                if (!latest.fingerprint().equals(start.metadata().fingerprint()) || !referenceValid(start, now())) {
                     throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
                 }
                 runtime.committed(id, session.getRevision(), false);
                 session.reconfirm(request.expectedRevision(), start.checkpoint(), now());
                 sessions.flush();
-                Long eventId = notifications.recordReconfirmedPreparation(session, current);
+                Long eventId = notifications.recordReconfirmedPreparation(session);
                 sessions.flush();
                 var result = BoardingTrackingSnapshot.from(session);
                 attempted.set(new ReconfirmationCommit(result, eventId));
@@ -292,7 +287,7 @@ public class BoardingSessionService {
                 if (!original.snapshot().matches(current)
                         || (original.eventId() != null && !notifications.exists(id, original.eventId()))
                         || !latest.fingerprint().equals(start.metadata().fingerprint())
-                        || !fresh(start, now()) || !now().isBefore(current.getExpiresAt())) {
+                        || !referenceValid(start, now()) || !now().isBefore(current.getExpiresAt())) {
                     throw exception;
                 }
                 return BoardingTrackingSnapshot.from(current);
@@ -317,13 +312,9 @@ public class BoardingSessionService {
         }
     }
 
-    private boolean fresh(VerifiedBoardingStart start, LocalDateTime now) {
-        var checkpoint = start.checkpoint();
+    private boolean referenceValid(VerifiedBoardingStart start, LocalDateTime now) {
         return !clock.instant().isAfter(start.referenceExpiresAt())
-                && !checkpoint.getObservedAt().isAfter(now)
-                && !checkpoint.getObservedAt().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))
-                && (checkpoint.getProviderDataTime() == null || (!checkpoint.getProviderDataTime().isAfter(now)
-                    && !checkpoint.getProviderDataTime().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))));
+                && !start.checkpoint().getObservedAt().isAfter(now);
     }
 
     private void expire(BoardingSession session) {

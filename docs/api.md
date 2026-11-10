@@ -414,9 +414,9 @@ TASK-816/AUD-13은 ALARM PASSED의 표시 Body만 보강하며 위 네 string da
 
 다음은 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 승인된 계약이다. 후보 조회는 TASK-904, 세션 Persistence와 생성·조회·취소 API 경계는 TASK-905 1단계에서 구현했다. TASK-905는 특정 차량 polling·준비 후보·종료 판정, checkpoint 기반 재시작 자동 복구와 동일 차량 재확인 API까지 구현했다. TASK-906은 Backend Notification dispatch를 연결했으며 Flutter 후보·세션 조회/취소/재확인은 TASK-907 1·2단계에서 연결했고 TASK-908에서 번호 입력 없는 차량 선택·등록으로 변경했다. 세션 Push 수신/tap은 3단계에서 연결했다. 기존 Alarm API/DTO는 변경하지 않는다. 모든 endpoint는 JWT Principal의 User를 사용하고 userId·Provider raw ID·GPS·cityCode를 Client 입력으로 받지 않는다. lifecycle은 [Domain](domain-model.md#boardingsession)을 따른다.
 
-**지원 경계 (TASK-908 즉시 추적):** 서울 차량 선택은 최신 roster/detail의 유일한 vehId·전체 Provider 번호 대응, freshness, 노선 metadata·운행 종료·시각/진행 모순을 검증한다. 정차·이동·위치 근거 유무와 무관하게 즉시 TRACKING으로 접수한다. 위치 필드 누락과 정상 empty detail은 신선한 roster의 동일 ID/번호 대응이 확인되면 허용한다. empty detail에 원래 위치 reference가 있으면 두 원래 시각과 함께 미검증으로만 보존하며 새 도착 근거로 갱신하지 않는다. ID/order가 metadata와 모순되거나 차량 identity가 바뀌면 거부하며 다른 차량으로 대체하지 않는다. 목적지가 이미 현재/이후인 관측도 등록할 수 있으나 신뢰할 목적지 이전 기준점으로 승격하거나 소급 알림을 만들지 않는다. 최신 exact stId/stOrd가 하나의 occurrence로 대응한 정차·이동 detail을 검증 checkpoint로 사용한다. TAGO는 기본 OFF인 실험 설정에서만 유일한 nodeord와 차량을 재검증하여 미검증 기준점으로 등록하고, nodeid가 있으면 일치를 검사한다. 정상 응답을 최신으로 가정하므로 원본 최신성·동일 운행은 보장되지 않는다. 누락된 ID나 회차 의미는 추정하지 않는다. 이동 중 기준점도 최신 시각·단조성·연속성 검증이 필요하며 정차 응답을 기다리는 조건은 없다. flag별 의미는 실측 기반 가정이고 실제 무정차 stOrd 갱신은 미검증이다. 상세 진행 규칙과 위치 근거 부족·운행 모호성의 보류 조건은 [Domain](domain-model.md#snapshot-and-progress)을 따른다. 자동 테스트 성공과 실제 Provider/iPhone 성공은 구분한다.
+**지원 경계 (TASK-908 즉시 추적):** 서울은 차량 ID·전체 번호와 노선 metadata를 확인하고 정확한 `stId`/`stOrd` occurrence를 사용한다. `stopFlag` 값과 Provider 시각의 오래됨·반복·역행, 이전 위치나 관측 공백만으로 차단하지 않는다. 위치 누락은 미검증으로 유지하고 identity 또는 ID/order 모순은 거부한다. TAGO는 기본 OFF 실험 설정에서 유일한 차량과 nodeord를 확인하고 nodeid가 있으면 일치해야 한다. 명시적 운행 종료는 기존대로 처리한다. Provider의 오래된 응답이나 다른 운행 회차는 이 정보만으로 확실히 식별할 수 없다. 자동 테스트와 실제 Provider/iPhone 검증은 구분한다.
 
-조회는 Provider 재호출이나 polling을 실행하지 않는다. 현재 프로세스에서 최신 생성 baseline 또는 polling·복구·재확인의 관측 검증·commit을 확인하고 허용 revision/checkpoint가 현재 DB 상태와 일치하며 시각이 유효한 TRACKING만 `evaluationStatus=READY`와 검증된 `remainingOccurrenceGap`을 반환한다. TRACKING 중 검증된 위치 기준점이 없으면 null과 VERIFICATION_PENDING, 기준점은 있으나 생성 검증 commit이 이 프로세스에 공개되지 않았거나 재시작 후 미복구·일시 장애·freshness 만료이면 null과 RECOVERY_PENDING, SUSPENDED는 null과 HELD, terminal은 null과 ENDED다. VERIFICATION_PENDING은 세션 상태가 아니라 위치 근거 상태이며 TRACKING을 유지한다. 과거 checkpoint 시각은 마지막 검증 근거로 보존하며 현재 위치를 뜻하지 않는다. 조회·취소·중복 요청 확인·생성 transaction과 enabled Scheduler cycle은 수명이 끝난 세션을 EXPIRED로 반영한다. 재시작 직후에는 기존 TRACKING을 일괄 변경하지 않고 RECOVERY_PENDING으로 반환한다. 기존 Scheduler에서 새 관측의 자동 복구 검증·commit이 확인된 뒤 READY가 될 수 있다. GET 자체는 복구를 실행하지 않는다.
+조회는 Provider 재호출이나 polling을 실행하지 않는다. 현재 프로세스에서 최신 생성 baseline 또는 polling·복구·재확인의 관측 검증·commit을 확인하고 허용 revision/checkpoint가 현재 DB 상태와 일치하고 수명이 유효한 TRACKING만 `evaluationStatus=READY`와 검증된 `remainingOccurrenceGap`을 반환한다. TRACKING 중 검증된 위치 기준점이 없으면 null과 VERIFICATION_PENDING, 기준점은 있으나 생성 검증 commit이 이 프로세스에 공개되지 않았거나 재시작 후 미복구·일시 장애이면 null과 RECOVERY_PENDING, SUSPENDED는 null과 HELD, terminal은 null과 ENDED다. VERIFICATION_PENDING은 세션 상태가 아니라 위치 근거 상태이며 TRACKING을 유지한다. 과거 checkpoint 시각은 마지막 검증 근거로 보존하며 현재 위치를 뜻하지 않는다. 조회·취소·중복 요청 확인·생성 transaction과 enabled Scheduler cycle은 수명이 끝난 세션을 EXPIRED로 반영한다. 재시작 직후에는 기존 TRACKING을 일괄 변경하지 않고 RECOVERY_PENDING으로 반환한다. 기존 Scheduler에서 새 관측의 자동 복구 검증·commit이 확인된 뒤 READY가 될 수 있다. GET 자체는 복구를 실행하지 않는다.
 
 #### 후보 조회
 
@@ -428,21 +428,21 @@ routeId/occurrence ID는 기존 선택 API의 양의 내부 ID다. 목적 occurr
 
 정상 200 response는 `observedAt`, `providerDataTime`(nullable), `candidateSetStatus`(AVAILABLE/EMPTY/PARTIAL), `candidates`를 갖는다. 각 항목은 `candidateRef`, `selectionKey`(nullable), 전체 `vehicleNumber`, `confirmationStatus`(AVAILABLE/HELD), `reasonCode`(nullable), 검증된 진행 설명/occurrence 간격(nullable), 준비 추적 지원 여부·보류 사유를 제공한다. 세부 추천 순서는 ADR-011을 따른다. partial은 item/detail 검증의 불확실 범위를 드러내고 유일성을 주장하지 않는다. 전체 목록 실패/불완전은 정상 empty/AVAILABLE로 반환하지 않는다.
 
-candidateRef는 User·Route·target/optional boarding occurrence·차량 ID/번호 대응·구조 fingerprint·원래 관측 시각에 묶인 opaque reference다. index/번호만으로 대체하지 않는다. 임시 reference의 재시작/eviction/원래 관측 freshness 만료는 재조회 사유다. 검증 불가 항목을 정상 확정 대상으로 표시하지 않으며, 목록에서 사용자가 명시적으로 선택하며 번호 입력을 요구하지 않는다.
+candidateRef는 User·Route·target/optional boarding occurrence·차량 ID/번호 대응·구조 fingerprint·원래 관측 시각에 묶인 opaque reference다. index/번호만으로 대체하지 않는다. 임시 reference의 재시작/eviction/발급 기한 만료는 재조회 사유다. 검증 불가 항목을 정상 확정 대상으로 표시하지 않으며, 목록에서 사용자가 명시적으로 선택하며 번호 입력을 요구하지 않는다.
 
 TASK-904의 후보 응답 상세는 다음과 같다. `confirmationStatus=AVAILABLE`은 식별 가능한 선택 후보라는 의미이며 차량 확정·세션 생성·추적 시작 성공을 뜻하지 않는다. 추적 시작의 지원 범위는 `trackingSupport`와 `trackingReasonCode`를 별도로 확인한다. HELD 항목도 목록에 보존하며 `candidateRef`는 null이다.
 
 | 후보 필드 | 의미 |
 | --- | --- |
 | `candidateRef` | 서버 발급 opaque reference. 확인 가능한 후보만 발급하며 HELD는 null |
-| `selectionKey` | Provider/Route/차량 ID/전체 번호의 opaque hash. 후보 재조회 시 동일 선택만 찾는 보조 키이며 인증·freshness·candidateRef를 대체하지 않음 |
+| `selectionKey` | Provider/Route/차량 ID/전체 번호의 opaque hash. 후보 재조회 시 동일 선택만 찾는 보조 키이며 인증·reference 기한·candidateRef를 대체하지 않음 |
 | `vehicleNumber` | 전체 차량번호. 누락 항목은 null이며 raw ID로 대체하지 않음 |
 | `confirmationStatus`, `reasonCode` | AVAILABLE/HELD와 식별·시각·위치/detail 불확실 사유(nullable) |
 | `progress` | nullable. exact ID/order로 metadata에 대응한 `occurrenceId`, `stopName`, `order`, `kind` |
 | `progress.kind` | TAGO/flag 미확인은 ROUTE_PROGRESS, 서울 flag=1은 ARRIVAL_OBSERVED, flag=0은 MOVING_REFERENCE. 정확한 물리 정차/탑승 사실이 아님 |
 | `boardingOccurrenceGap` | nullable signed 배열 index 간격(boardingIndex-progressIndex). 양수=승차 이전의 관측 기준, 0=같은 기준, 음수=승차 이후 기준. 실제 도착·방향·ETA 보장 아님 |
-| `observedAt`, `providerDataTime` | 원래 roster 수신 시각, nullable 제공시각. 서울 detail 사용 시 제공시각은 detail의 값이며 reference 만료는 roster/detail 양쪽 시각을 검증 |
-| `trackingSupport`, `trackingReasonCode` | CONDITIONAL/HELD. 서울 식별 가능한 후보는 진행 기준점 부족 시에도 CONDITIONAL이며 등록 시 최신 식별·freshness 재검증 필수. TAGO는 기본적으로 TAGO_ALIGHT_UNVERIFIED와 HELD이며 실험 기능 ON이면 유일한 차량과 유일한 목적지 이전 순서에 한해 CONDITIONAL. `nodeid`가 있으면 순서에 대응하는 ID와 일치해야 하며 누락 ID를 합성하지 않는다 |
+| `observedAt`, `providerDataTime` | 원래 roster 수신 시각, nullable 제공시각. 서울 detail 사용 시 제공시각은 detail의 값이며 reference 기한은 발급 시각 기준 |
+| `trackingSupport`, `trackingReasonCode` | CONDITIONAL/HELD. 서울 식별 가능한 후보는 진행 기준점 부족 시에도 CONDITIONAL이며 등록 시 차량 식별과 occurrence 재검증 필수. TAGO는 기본적으로 TAGO_ALIGHT_UNVERIFIED와 HELD이며 실험 기능 ON이면 유일한 차량과 유일한 목적지 이전 순서에 한해 CONDITIONAL. `nodeid`가 있으면 순서에 대응하는 ID와 일치해야 하며 누락 ID를 합성하지 않는다 |
 | `limitations` | 복수 불확실성·지원 제한 reason code 배열. 위치가 없다는 이유만으로 식별 가능한 번호 후보를 제거하지 않음 |
 
 최상위 `observedAt`은 roster 수신 시각이다. 최상위 `providerDataTime`은 모든 후보의 제공시각이 같을 때만 그 값이며, 서로 다르거나 후보가 없으면 null이다. 차량별 시각은 각 후보에서 확인한다. TAGO는 원본 생성시각이 없어 null이며 upstream age·물리 위치 시각을 보장하지 않는다. `candidateSetStatus=PARTIAL`은 보류 항목 또는 요청한 detail의 실패/empty와 deadline에 따른 미시작·미완료를 포함한다. PARTIAL은 전체 detail 조회 완료를 의미하지 않으며 비어 있지 않은 roster의 모든 차량이 HELD여도 EMPTY로 바꾸지 않는다. 정상적으로 요청할 필요가 없는 detail(DETAIL_NOT_REQUESTED)이나 단순 위치 누락은 그 사실만으로 PARTIAL을 만들지 않는다. 목록 전체 실패·TAGO 개수 불일치는 503 `TRANSIT_TEMPORARILY_UNAVAILABLE`이다.
@@ -463,13 +463,13 @@ TASK-904의 후보 응답 상세는 다음과 같다. `confirmationStatus=AVAILA
 | `DETAIL_DEADLINE_NOT_STARTED` | 정상 roster의 detail 대상이지만 남은 전체 예산/후보 전용 실행 자리 대기 때문에 조회를 시작하지 못함 |
 | `DETAIL_DEADLINE_INCOMPLETE` | detail을 시작했지만 deadline 전 유효한 결과를 확보하지 못함. 늦은 완료는 해당 응답에 반영하지 않음 |
 
-두 사유는 `confirmationStatus=HELD`, `trackingSupport=HELD`, `candidateRef=null`, `selectionKey=null`, `progress=null`, `boardingOccurrenceGap=null`로 반환한다. 전체 차량번호, roster의 원래 `observedAt`·`providerDataTime`은 보존한다. DETAIL_NOT_REQUESTED는 정상적으로 detail을 요구하지 않은 경우에만 유지하고, deadline 전 실제 확인한 HTTP/transport/provider/protocol 실패는 기존 개별 실패 코드로 반환한다. deadline 전 확보한 정상 후보는 최종 identity/collision/metadata/60초 freshness 검증을 통과한 경우 기존 reference/selectionKey와 함께 보존한다. 정상 empty roster는 EMPTY, roster 자체 실패는 기존 503이며 일부 또는 전체 HELD를 정상 empty로 위장하지 않는다. 후보 자동 확정은 없고 세션 생성·재확인은 기존 최신 roster/detail 재검증을 유지한다.
+두 사유는 `confirmationStatus=HELD`, `trackingSupport=HELD`, `candidateRef=null`, `selectionKey=null`, `progress=null`, `boardingOccurrenceGap=null`로 반환한다. 전체 차량번호, roster의 원래 `observedAt`·`providerDataTime`은 보존한다. DETAIL_NOT_REQUESTED는 정상적으로 detail을 요구하지 않은 경우에만 유지하고, deadline 전 실제 확인한 HTTP/transport/provider/protocol 실패는 기존 개별 실패 코드로 반환한다. deadline 전 확보한 정상 후보는 최종 identity/collision/metadata 검증을 통과한 경우 기존 reference/selectionKey와 함께 보존한다. 정상 empty roster는 EMPTY, roster 자체 실패는 기존 503이며 일부 또는 전체 HELD를 정상 empty로 위장하지 않는다. 후보 자동 확정은 없고 세션 생성·재확인은 기존 최신 roster/detail 재검증을 유지한다.
 
 위치 미확인 후보는 간격이 있는 후보 뒤에 표시하고 같은 간격은 번호 순으로 표시한다. 이 순서는 탑승 가능성·신뢰도 우열이나 자동 선택을 뜻하지 않는다. raw Provider ID/GPS/fingerprint는 응답에 노출하지 않는다. 같은 Route 소속이 아닌 occurrence는 400 INVALID_REQUEST, 존재하지 않는 목적/승차 occurrence는 기존 404 TARGET_STOP_OCCURRENCE_NOT_FOUND다.
 
-서울 번호 확인만 필요한 승차 occurrence 미입력 조회는 roster 1회이며 detail을 요청하지 않는다. 승차 occurrence가 있으면 간격 표시를 위해 roster에서 식별·시각 검증을 통과한 고유 차량만 전체 예산 안에서 각각 detail 최대 1회 조회한다. 충돌·누락·stale 차량에는 detail을 호출하지 않고 동일 item의 중복은 합친다. 일부 detail이 실패해도 정상 후보를 제공하며 전체 유일성을 주장하지 않는다. 후보 API 자체는 재시도·추가 polling·관측 캐시를 도입하지 않는다.
+서울 번호 확인만 필요한 승차 occurrence 미입력 조회는 roster 1회이며 detail을 요청하지 않는다. 승차 occurrence가 있으면 간격 표시를 위해 roster에서 식별 검증을 통과한 고유 차량만 전체 예산 안에서 각각 detail 최대 1회 조회한다. 식별 충돌·누락 차량에는 detail을 호출하지 않고 동일 item의 중복은 합친다. 일부 detail이 실패해도 정상 후보를 제공하며 전체 유일성을 주장하지 않는다. 후보 API 자체는 재시도·추가 polling·관측 캐시를 도입하지 않는다.
 
-reference의 메모리 상한·eviction은 [Architecture](architecture.md#확정과-평가-transaction)를 따른다. 동일 User·Route·목적/선택 승차 occurrence 재조회는 기존 문맥의 reference를 교체한다. 실패한 전체 roster 조회는 기존 관측을 새로 갱신하지 않는다. 원래 관측 및 제공시각의 60초 freshness를 넘거나 restart/eviction된 reference는 재조회가 필요하며 화면 선택 자체로 세션을 만들지 않는다. TASK-905의 내부 resolve는 인증 User와 reference로 원래 roster/detail·typed Route·구조 fingerprint snapshot을 찾아 원래 노선/목적 문맥을 서버에서 복원한다. 문맥을 이미 가진 호출자는 User·Route·목적/승차 occurrence 전체 일치도 요구할 수 있다. 실제 확정에는 최신 metadata와 Provider 재검증이 여전히 필요하다.
+reference의 메모리 상한·eviction은 [Architecture](architecture.md#확정과-평가-transaction)를 따른다. 동일 User·Route·목적/선택 승차 occurrence 재조회는 기존 문맥의 reference를 교체한다. 실패한 전체 roster 조회는 기존 관측을 새로 갱신하지 않는다. 발급 시각부터 60초를 초과하거나 restart/eviction된 reference는 재조회가 필요하며 화면 선택 자체로 세션을 만들지 않는다. TASK-905의 내부 resolve는 인증 User와 reference로 원래 roster/detail·typed Route·구조 fingerprint snapshot을 찾아 원래 노선/목적 문맥을 서버에서 복원한다. 문맥을 이미 가진 호출자는 User·Route·목적/승차 occurrence 전체 일치도 요구할 수 있다. 실제 확정에는 최신 metadata와 Provider 재검증이 여전히 필요하다.
 
 #### 차량 확정과 즉시 추적
 
@@ -499,7 +499,7 @@ Content-Type: application/json
 }
 ```
 
-세 ID는 양의 정수이며 차량번호는 목록에서 선택한 전체 번호다. 서버는 해당 노선의 현재 Provider 응답에서 번호와 추적 ID를 유일하게 확인하고 현재 진행이 목표 이전인지 검증한다. 이전 후보 reference, 차량 ID, 관측 시각 및 위치는 비교하지 않는다. 현재 관측이 오래됐거나 위치 근거가 부족하면 `BOARDING_POSITION_UNAVAILABLE`, 차량이 없거나 식별이 모호하면 `BOARDING_VEHICLE_UNIDENTIFIABLE`, 목표에 도달·통과했으면 `BOARDING_TARGET_NOT_AHEAD`를 반환한다. Provider 장애는 `TRANSIT_TEMPORARILY_UNAVAILABLE`이다. 현재 관측의 신선도, 정류장 선택과 metadata는 저장 시에도 검사한다. 기존 candidateRef 요청은 기존 규칙으로 계속 처리하며 재확인 API는 변경되지 않는다. 신규 형식의 fingerprint는 UUID·노선·승차/목표 occurrence·전체 번호·알림 시점에 기반한다. 동일 UUID의 다른 요청은 409이며 동일 요청은 기존 세션을 반환한다.
+세 ID는 양의 정수이며 차량번호는 목록에서 선택한 전체 번호다. 서버는 해당 노선의 현재 Provider 응답에서 번호와 추적 ID를 유일하게 확인하고 현재 진행이 목표 이전인지 검증한다. 이전 후보 reference, 차량 ID, 관측 시각 및 위치는 비교하지 않는다. 위치 근거가 부족하면 `BOARDING_POSITION_UNAVAILABLE`, 차량이 없거나 식별이 모호하면 `BOARDING_VEHICLE_UNIDENTIFIABLE`, 목표에 도달·통과했으면 `BOARDING_TARGET_NOT_AHEAD`를 반환한다. Provider 장애는 `TRANSIT_TEMPORARILY_UNAVAILABLE`이다. 정류장 선택과 metadata는 저장 시에도 검사한다. Provider 시각이나 관측 공백 자체는 진행 차단 조건이 아니다. 기존 candidateRef 요청은 기존 규칙으로 계속 처리하며 재확인 API는 변경되지 않는다. 신규 형식의 fingerprint는 UUID·노선·승차/목표 occurrence·전체 번호·알림 시점에 기반한다. 동일 UUID의 다른 요청은 409이며 동일 요청은 기존 세션을 반환한다.
 
 `notificationOffsetStops`는 선택 정수이며 생략 시 2, 허용값은 1과 2다. null·실수·문자열·boolean·그 외 정수는 400이다. 목적지는 요청 형식별 target occurrence로 보존한다. 생성 뒤 설정 변경은 없으며 같은 UUID에서 오프셋 변경은 409 BOARDING_REQUEST_CONFLICT다. 기존 prepareNotificationEnabled body는 이미 저장된 레거시 요청의 동일 fingerprint 복구에만 허용하고 새 세션 생성에는 400을 반환한다. 이전 body에 설정 자체가 없던 요청도 기존 UUID에서 원래 fingerprint로 복구하며 정책과 수명을 바꾸지 않는다.
 
@@ -528,7 +528,7 @@ POST /api/v1/boarding-sessions/{sessionId}/reconfirm
 POST /api/v1/boarding-sessions/{sessionId}/cancel
 ```
 
-reconfirm body는 `expectedRevision`, 최신 `candidateRef`다. legacy `confirmedVehicleNumber`는 optional이며 검증 입력으로 쓰지 않는다. SUSPENDED인 동일 ID/번호·Route·목적지의 최신 검증 성공 시 200 TRACKING으로 관측을 재개한다. 다른 차량·목적지를 이 endpoint로 변경하지 않는다. 원래 expiresAt과 준비 Event 소비는 유지하고 불확실 공백과 연결하지 않는 checkpoint를 저장한다. 새 정책에서는 재확인으로 검증된 현재 위치가 목적지 이전의 설정 알림 구간(2/1 및 허용된 대체 구간)에 있고 이전 checkpoint와 충돌하지 않으며 Event가 미소비·미만료이면 같은 transaction에서 준비 Event·최초 eligible Device별 Delivery를 생성한다. 다음 Polling이나 이전 checkpoint와의 새 물리적 진행을 필수로 요구하지 않으며, 미검증·충돌 근거와 목적지 현재/이후에서는 소급 알림을 만들지 않는다. NULL offset 세션에는 이 즉시 판단을 적용하지 않는다. 별도 Start 호출은 없다. 소유권·상태/revision 조회 → transaction 밖의 기존 후보/Provider 재검증 → 짧은 Session lock transaction의 동일 snapshot/revision·metadata·관측 유효성 재확인 → commit 확인 후 runtime 허용 순서다. 반영 중 취소·만료가 확인되면 재활성화하지 않으며 409로 현재 상태 조회를 요구한다. DB commit 응답이 불확실하면 새 transaction에서 원래 결과와 정확히 같은 baseline 및 해당 판단에서 반환한 Event ID의 존재를 한 번 재조회하고, rollback된 요청을 blind replay하지 않는다.
+reconfirm body는 `expectedRevision`, 최신 `candidateRef`다. legacy `confirmedVehicleNumber`는 optional이며 검증 입력으로 쓰지 않는다. SUSPENDED인 동일 ID/번호·Route·목적지의 최신 검증 성공 시 200 TRACKING으로 관측을 재개한다. 다른 차량·목적지를 이 endpoint로 변경하지 않는다. 원래 expiresAt과 준비 Event 소비는 유지하고 불확실 공백과 연결하지 않는 checkpoint를 저장한다. 새 정책에서는 재확인으로 검증된 현재 위치가 목적지 이전의 설정 알림 구간(2/1 및 허용된 대체 구간)에 있고 Event가 미소비·미만료이면 같은 transaction에서 준비 Event·최초 eligible Device별 Delivery를 생성한다. 다음 Polling이나 이전 checkpoint와의 새 물리적 진행을 필수로 요구하지 않으며, 미검증·충돌 근거와 목적지 현재/이후에서는 소급 알림을 만들지 않는다. NULL offset 세션에는 이 즉시 판단을 적용하지 않는다. 별도 Start 호출은 없다. 소유권·상태/revision 조회 → transaction 밖의 기존 후보/Provider 재검증 → 짧은 Session lock transaction의 동일 snapshot/revision·metadata·관측 유효성 재확인 → commit 확인 후 runtime 허용 순서다. 반영 중 취소·만료가 확인되면 재활성화하지 않으며 409로 현재 상태 조회를 요구한다. DB commit 응답이 불확실하면 새 transaction에서 원래 결과와 정확히 같은 baseline 및 해당 판단에서 반환한 Event ID의 존재를 한 번 재조회하고, rollback된 요청을 blind replay하지 않는다.
 
 cancel body는 `expectedRevision`이다. current revision이 일치하는 미종료 세션을 CANCELLED로 만들고 관련 PENDING 종료를 원자 반영한 뒤 200 Session response를 반환한다. 이미 CANCELLED/COMPLETED/EXPIRED이면 무변경 현재 response를 반환하며 실제 취소된 것으로 위장하지 않는다. 그 외 revision 불일치는 409다. reconfirm의 응답 유실 후 stale revision도 409+GET으로 현재 상태를 복구하며 재요청이 baseline/Event를 다시 초기화하지 않는다. 소유권 검증은 모든 상태보다 먼저 적용한다.
 
@@ -563,7 +563,7 @@ TASK-906의 Backend FCM data payload는 아래처럼 기존 ALARM_EVENT와 구�
 }
 ```
 
-모두 string navigation hint이며 userId·Auth Token·FID·Provider external ID·GPS·내부 revision을 포함하지 않는다. 새 정책의 eventType은 PREPARE_ALIGHT만 생성한다. DESTINATION_REACHED는 기존 세션·대기 알림·tap의 호환 타입이다. 준비 문구는 실제 목적지 이름을 넣은 “{목적지}이(가) 가까워졌어요. 하차를 준비해 주세요.”이며 기존 목적지 문구는 “버스가 선택한 정류장에 도달하거나 통과했어요.”이며 정확한 정차 수·물리 위치·도착 시각을 단정하지 않는다. APNs alert/sound와 원래 Event/Delivery 기한의 apns-expiration을 보존한다. TASK-907 3단계에서 Client 수신/tap을 연결했다. initial/opened/foreground 모두 현재 Auth Session에 묶고 tap 후 정확한 `GET /api/v1/boarding-sessions/{boardingSessionId}`로 소유권·응답 ID·상태·수명·evaluationStatus를 재검증한다. 다른 미종료 세션을 여는 `scope=current`로 대체하지 않는다. Foreground는 안내 후 사용자 선택에서만 조회하며, 미인증 시작의 알림을 이후 로그인에 이전하지 않는다. 읽기 전용 상세와 인증·중복·경쟁·Push 준비의 구현 경계는 [Architecture](architecture.md#flutter-세션-알림-수신과-상세-이동-task-907-3단계)를 따른다. 종료·취소·만료·접근 불가는 정상 stale 안내이며 추적을 재개하지 않는다. 기존 Device owner/generation·registration·FCM 결과·retry 의미는 보존한다. OS 표시 exactly-once·접수된 알림 회수·도착 전 표시를 보장하지 않는다.
+모두 string navigation hint이며 userId·Auth Token·FID·Provider external ID·GPS·내부 revision을 포함하지 않는다. eventType은 준비의 PREPARE_ALIGHT와 목적지 도달·통과의 DESTINATION_REACHED이며 각각 세션당 최대 한 번 생성한다. 준비 문구는 실제 목적지 이름을 넣은 “{목적지}이(가) 가까워졌어요. 하차를 준비해 주세요.”이며 기존 목적지 문구는 “버스가 선택한 정류장에 도달하거나 통과했어요.”이며 정확한 정차 수·물리 위치·도착 시각을 단정하지 않는다. APNs alert/sound와 원래 Event/Delivery 기한의 apns-expiration을 보존한다. TASK-907 3단계에서 Client 수신/tap을 연결했다. initial/opened/foreground 모두 현재 Auth Session에 묶고 tap 후 정확한 `GET /api/v1/boarding-sessions/{boardingSessionId}`로 소유권·응답 ID·상태·수명·evaluationStatus를 재검증한다. 다른 미종료 세션을 여는 `scope=current`로 대체하지 않는다. Foreground는 안내 후 사용자 선택에서만 조회하며, 미인증 시작의 알림을 이후 로그인에 이전하지 않는다. 읽기 전용 상세와 인증·중복·경쟁·Push 준비의 구현 경계는 [Architecture](architecture.md#flutter-세션-알림-수신과-상세-이동-task-907-3단계)를 따른다. 종료·취소·만료·접근 불가는 정상 stale 안내이며 추적을 재개하지 않는다. 기존 Device owner/generation·registration·FCM 결과·retry 의미는 보존한다. OS 표시 exactly-once·접수된 알림 회수·도착 전 표시를 보장하지 않는다.
 
 ## 5. 오류 형식
 

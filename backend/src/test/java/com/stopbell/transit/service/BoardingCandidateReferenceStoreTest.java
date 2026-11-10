@@ -43,12 +43,14 @@ class BoardingCandidateReferenceStoreTest {
     }
 
     @Test
-    @DisplayName("서울의 더 오래된 roster 제공시각을 detail 성공으로 연장하지 않는다")
+    @DisplayName("오래된 roster 제공시각과 관계없이 reference는 발급 시각을 기준으로 만료된다")
     void expiry_uses_original_provider_time() {
         var roster = BoardingCandidateMapper.roster(roster("id", "A", "20261019115930"), NOW);
         var detail = BoardingCandidateMapper.detail(detail("id", "A", "s2", 20, DATA_TIME), NOW);
         String ref = store.issue(context, route(TransitProvider.SEOUL_BUS, 12L), roster, detail);
         clock.now = NOW.plusSeconds(31);
+        assertThat(store.resolve(ref, context)).isPresent();
+        clock.now = NOW.plusSeconds(60).plusNanos(1);
         assertThat(store.resolve(ref, context)).isEmpty();
     }
 
@@ -97,12 +99,17 @@ class BoardingCandidateReferenceStoreTest {
     }
 
     @Test
-    @DisplayName("미래와 만료 관측으로는 사용할 수 있는 reference를 발급하지 않는다")
+    @DisplayName("관측 시각과 관계없이 reference는 발급 기한을 가지며 만료 후 사용할 수 없다")
     void invalid_observation_cannot_issue_reference() {
         var future = BoardingCandidateMapper.tago(tago("A", "s1", 10), NOW.plusSeconds(1));
-        assertThat(store.issue(context, route, future, null)).isNull();
+        var futureRef = store.issue(context, route, future, null);
         var stale = BoardingCandidateMapper.tago(tago("A", "s1", 10), NOW.minusSeconds(61));
-        assertThat(store.issue(context, route, stale, null)).isNull();
+        var staleRef = store.issue(context, route, stale, null);
+        assertThat(store.resolve(futureRef, context)).isPresent();
+        assertThat(store.resolve(staleRef, context)).isPresent();
+        clock.now = NOW.plusSeconds(60).plusNanos(1);
+        assertThat(store.resolve(futureRef, context)).isEmpty();
+        assertThat(store.resolve(staleRef, context)).isEmpty();
     }
 
     @Test

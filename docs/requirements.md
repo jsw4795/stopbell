@@ -143,16 +143,16 @@ TASK-908의 사전 등록과 하차 전 단일 알림 요구사항을 반영한�
 
 TASK-903의 설계에 TASK-908의 현행 정책을 반영한 요구사항이다. Backend·DB·Flutter 및 Notification 연결은 TASK-905~907과 TASK-908의 변경 구현에 반영됐으며, 실제 버스/iPhone 최종 E2E는 미완료다. [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)의 당시 결정과 후행 변경, [세션 API의 Provider 지원 경계](api.md#탑승-세션-api-task-903)를 구분한다.
 
-- 차량 선택 요청에서 최신 차량 ID·Provider 전체 번호·노선·후보 freshness와 목적 occurrence를 검증한다. 정차·이동·위치 근거 유무와 관계없이 즉시 TRACKING으로 등록하고 선택한 같은 차량을 관측한다. TRACKING은 관측 시작을 뜻하며 실제 탑승·정확한 현재 위치 검증을 뜻하지 않는다. 일시적 위치 부족·Provider 장애는 TRACKING을 유지하며 다음 관측을 기다리고, 신뢰할 진행 근거가 없으면 NotificationEvent·Delivery를 생성하지 않는다. 별도 Start API/CONFIRMED 상태는 없다.
+- 차량 선택 요청에서 차량 ID·Provider 전체 번호·노선·목적 occurrence를 확인한다. 후보 reference의 만료와 Provider 관측 시각은 별개다. 정차·이동·위치 근거 유무와 관계없이 즉시 TRACKING으로 등록하고 선택한 같은 차량을 관측한다. TRACKING은 관측 시작을 뜻하며 실제 탑승·정확한 현재 위치 검증을 뜻하지 않는다. 일시적 위치 부족·Provider 장애는 TRACKING을 유지하며 다음 관측을 기다리고, 진행 근거가 없으면 NotificationEvent·Delivery를 생성하지 않는다. 별도 Start API/CONFIRMED 상태는 없다.
 - User당 미종료 세션은 하나이며 확정 차량만 추적한다. 다른 차량·노선·목적지로 자동 전환하지 않는다. 후보 조회나 화면 선택 자체는 추적을 시작하지 않는다.
-- 사용자는 실제 내리고 싶은 정확한 목적 occurrence를 선택한다. 목적지 도달·통과 근거는 세션 완료에만 사용하며 새 세션은 목적지 Push를 별도로 발송하지 않는다. 하차 허용 여부와 무관하게 미정차·경유 occurrence도 선택할 수 있다. 실제 정차·승객 하차를 확인한 것으로 표현하지 않는다.
+- 사용자는 실제 내리고 싶은 정확한 목적 occurrence를 선택한다. 목적지 도달·통과 시 세션을 완료하고 목적지 Event를 최대 한 번 생성한다. 하차 허용 여부와 무관하게 미정차·경유 occurrence도 선택할 수 있다. 실제 정차·승객 하차를 확인한 것으로 표현하지 않는다.
 - 새 세션은 알림 시점을 2정거장 전(기본) 또는 1정거장 전으로 선택하며 ON/OFF는 없다. 불변 traversal의 실제 occurrence 배열에서 목적지의 2개/1개 앞까지 진행했음을 확인하고 아직 목적지 이전일 때 하차 준비 알림을 한 번 생성한다. 2개 앞 관측을 놓치면 1개 앞에서 대체할 수 있다. 목적지 현재·이후에서는 소급 생성하지 않는다. 미정차·경유 지점도 간격에 포함하며 실제 정차 횟수·거리·남은 시간으로 표현하지 않는다. stopFlag=1은 준비 판단의 필수 조건이 아니다.
-- 서울의 이동 중 진행은 N51·143번 실측에 기반한 `stopFlag=0`의 마지막 보고 도달/통과 occurrence와 `stopFlag=1`의 현재 도착 occurrence 가정을 사용한다. 정확한 stId/stOrd 대응·freshness·단조성·운행 연속성 검증은 필수다. 공식 API 보장이나 실제 무정차 갱신 검증 완료를 뜻하지 않는다.
+- 서울은 `stopFlag` 값과 무관하게 정확한 stId/stOrd 대응을 사용한다. Provider 시각의 오래됨·역행·반복, 이전 occurrence 대비 역행 또는 관측 공백만으로 위치를 차단하지 않는다. 이 정보만으로 동일 운행 회차나 응답의 실제 최신성을 보장할 수 없다.
 - PREPARE_ALIGHT logical Event는 세션당 최대 한 번이다. 최초 저장 시 원래 관측 기반 TTL이 지났으면 Event·Delivery를 생성하지 않고 이후 새 유효 관측에서 다시 판단할 수 있다. 이미 저장된 Event의 실패·만료·recipient 없음은 새 알림 기회를 만들지 않는다.
-- 도착·이후 진행·회차·관측 누락을 구분한다. 근거가 부족하면 판단을 보류하고 놓친 준비 알림이나 실제 정차·사용자 하차 사실을 추측하지 않는다. 하차 가능 여부는 추적 시작·알림 판정 조건이 아니다. 차량 식별·목적 occurrence·freshness·진행 방향·운행 연속성 검증은 유지한다.
-- 세션 snapshot과 마지막 검증 checkpoint를 보존하고, 새 관측과 조건부 자동 복구한다. 재시작이나 같은 ID만으로 동일 운행을 확정하지 않으며 소실·식별 변경·회차·공백으로 연속성이 불명확하면 보류·재확인한다.
-- 추적 중 준비 알림은 복구 검증 전 전송을 차단한다. V20 이전 세션의 기존 목적지 알림에 한해 불변 완료 근거·원래 기한을 재검증하여 전송한다. 기존 ON/OFF·대기 Event/Delivery는 기존 정책으로 보존한다. 복구 후에도 현재 Session 상태/revision과 Event 기한을 검증한다. 복구 대기 Delivery가 기존 Alarm의 조회 batch를 점유하지 않으며 만료 정리는 gate와 무관하게 수행한다. 메모리 gate는 단일 Backend만 지원한다.
-- 초기 세션 수명·복구 공백·준비 알림 TTL은 각각 PT4H/PT2M/PT30S이며 검증된 정확도 기준이 아닌 조정 가능한 운영값이다. 새 설정으로 기존 저장 기한을 늘리지 않는다. 정확한 설정·만료 실행은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
+- 목표와 현재 occurrence의 index 차이로 준비·도달·통과를 판정한다. 차량·노선·occurrence 식별 충돌과 Provider 오류는 기존대로 처리한다. 정확한 물리 위치나 회차를 확인한 것으로 표현하지 않는다.
+- 세션 snapshot과 checkpoint를 보존하고, 재시작 후 관측을 다시 반영해 복구한다. 같은 ID와 occurrence만으로 다른 운행 회차를 구별할 수 없는 한계가 있다.
+- 추적 중 준비 알림은 복구 검증 전 전송을 차단한다. 목적지 Event는 완료 근거와 원래 기한을 검증하여 전송한다. 복구 후에도 현재 Session 상태/revision과 Event 기한을 검증한다. 복구 대기 Delivery가 기존 Alarm의 조회 batch를 점유하지 않으며 만료 정리는 gate와 무관하게 수행한다. 메모리 gate는 단일 Backend만 지원한다.
+- 초기 세션 수명과 알림 TTL은 각각 PT4H와 PT30S이며 조정 가능한 운영값이다. 새 설정으로 기존 저장 기한을 늘리지 않는다. 정확한 설정·만료 실행은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
 - GPS 비의존과 서울 조건부 지원을 유지한다. TAGO는 기본 OFF 실험 기능에서 정상 응답을 최신 가용 위치로 가정하며 원본 최신성과 동일 운행은 보장하지 않는다. 기존 Alarm/Notification 계약을 보존하며 구현과 실제 iPhone 현장 검증을 구분한다. 기존 도착 Alarm의 미정차 개선은 별도 후속 범위다.
 
 ### V1 Push Notification 계약

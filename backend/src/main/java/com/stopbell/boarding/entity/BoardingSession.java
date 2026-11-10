@@ -209,9 +209,6 @@ public class BoardingSession {
             throw new IllegalArgumentException("Live checkpoint is required");
         }
         next.validateAgainst(getTraversal());
-        if (checkpoint.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE && completion != null) {
-            throw new IllegalArgumentException("Initial verification cannot complete a destination notification");
-        }
         if (completion != null && completion != BoardingStateReason.ARRIVAL_OBSERVED
                 && completion != BoardingStateReason.PASSED_OBSERVED) {
             throw new IllegalArgumentException("Invalid completion reason");

@@ -154,7 +154,7 @@ class BoardingSessionApiIntegrationTest {
             assertThat(events.count()).isZero();
             time.set(NOW.plusSeconds(20));
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
-            assertThat(events.count()).isZero();
+            assertThat(events.count()).isEqualTo(1);
             position.set(28);
             time.set(NOW.plusSeconds(40));
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
@@ -166,7 +166,7 @@ class BoardingSessionApiIntegrationTest {
             time.set(NOW.plusSeconds(60));
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
             assertThat(service.find(owner.getId(), created.response().id()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
-            assertThat(events.count()).isEqualTo(1);
+            assertThat(events.count()).isEqualTo(2);
         } finally {
             org.springframework.test.util.ReflectionTestUtils.setField(candidates, "tagoExperimentEnabled", false);
             org.springframework.test.util.ReflectionTestUtils.setField(polling, "tagoExperimentEnabled", false);
@@ -235,7 +235,8 @@ class BoardingSessionApiIntegrationTest {
         when(detail.fetchVehicleDetail("vehicle-id")).thenAnswer(invocation -> liveProgress("s1", 40, 0));
         polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
         assertThat(service.find(owner.getId(), created.response().id()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
-        assertThat(jdbc.queryForList("select boarding_event_type from notification_events", String.class)).containsExactly("PREPARE_ALIGHT");
+        assertThat(jdbc.queryForList("select boarding_event_type from notification_events order by id", String.class))
+                .containsExactly("PREPARE_ALIGHT", "DESTINATION_REACHED");
     }
 
     @Test
@@ -539,8 +540,9 @@ class BoardingSessionApiIntegrationTest {
             time.set(NOW.plusSeconds(61));
             return liveProgress("s1", 10, 1);
         });
-        currentError(currentBody(REQUEST_ID, NUMBER), ErrorCode.BOARDING_POSITION_UNAVAILABLE, 409);
-        assertThat(sessions.count()).isZero();
+        mvc.perform(auth(post("/api/v1/boarding-sessions").contentType("application/json")
+                .content(currentBody(REQUEST_ID, NUMBER)), owner)).andExpect(status().isCreated());
+        assertThat(sessions.count()).isEqualTo(1);
     }
 
     @Test
@@ -552,7 +554,7 @@ class BoardingSessionApiIntegrationTest {
         when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress("s4", 40, 0));
         currentError(body, ErrorCode.BOARDING_TARGET_NOT_AHEAD, 409);
         time.set(NOW.plusSeconds(61));
-        currentError(body, ErrorCode.BOARDING_POSITION_UNAVAILABLE, 409);
+        currentError(body, ErrorCode.BOARDING_TARGET_NOT_AHEAD, 409);
         assertThat(sessions.count()).isZero();
     }
 
@@ -667,14 +669,14 @@ class BoardingSessionApiIntegrationTest {
     }
 
     @Test
-    @DisplayName("같은 제공시각의 occurrence 변경은 실제 시작 검증에서 세션과 알림을 저장하지 않는다")
+    @DisplayName("같은 제공시각이어도 다른 정확한 occurrence로 세션을 생성한다")
     void conflicting_progress_does_not_create_session() throws Exception {
         String reference = candidateRef();
         time.set(NOW.plusSeconds(1));
         doReturn(progress("s2", 20, 1)).when(detail).fetchVehicleDetail("vehicle-id");
-        expectError(reference, "BOARDING_CANDIDATE_CHANGED", 409);
-        assertThat(sessions.count()).isZero();
-        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
+        mvc.perform(auth(postSession(REQUEST_ID, reference), owner)).andExpect(status().isCreated());
+        assertThat(sessions.count()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(1);
         assertThat(jdbc.queryForObject("select count(*) from notification_deliveries", Long.class)).isZero();
     }
 
@@ -1091,8 +1093,8 @@ class BoardingSessionApiIntegrationTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"identity", "occurrence", "stale", "provider-regression", "same-provider", "same-received", "run-end"})
-    @DisplayName("AUD-08 실제 후보 재검증의 식별·occurrence·freshness·제공/수신시각·운행 모순은 재확인 알림 근거가 되지 않는다")
+    @ValueSource(strings = {"identity", "occurrence", "stale", "run-end"})
+    @DisplayName("재확인의 식별·occurrence 오류와 만료 reference 및 명시적 운행 종료를 거부한다")
     void aud08_real_validator_rejects_unsafe_evidence(String scenario) {
         long id = aud08Suspended(2);
         liveObservation(1);
@@ -1138,7 +1140,7 @@ class BoardingSessionApiIntegrationTest {
     @ParameterizedTest
     @ValueSource(strings = {"old-received", "old-provider", "same-received-conflict", "same-provider-conflict",
             "regressed-index", "direction-conflict", "unverified", "stale", "future"})
-    @DisplayName("AUD-08 과거 checkpoint와 충돌하거나 미검증·오래된 재확인 근거로 즉시 알림을 만들지 않는다")
+    @DisplayName("재확인한 occurrence와 준비 TTL에 따라 알림을 판단한다")
     void aud08_conflicting_evidence_does_not_notify(String scenario) {
         long id = aud08Suspended(2);
         var start = aud08Start(1);
@@ -1168,12 +1170,13 @@ class BoardingSessionApiIntegrationTest {
         doReturn(changed).when(validator).validate(anyLong(), anyString(), nullable(String.class));
         long revision = sessions.findById(id).orElseThrow().getRevision();
         var request = new ReconfirmBoardingSessionRequest(revision, "ref", null);
-        if (scenario.equals("stale") || scenario.equals("future")) {
+        if (scenario.equals("future")) {
             assertThatThrownBy(() -> service.reconfirm(owner.getId(), id, request)).isInstanceOf(ApiException.class);
         } else {
             service.reconfirm(owner.getId(), id, request);
         }
-        assertThat(events.count()).isZero();
+        boolean notify = !scenario.equals("unverified") && !scenario.equals("stale") && !scenario.equals("future");
+        assertThat(events.count()).isEqualTo(notify ? 1 : 0);
         assertThat(deliveries.count()).isZero();
     }
 
@@ -1194,7 +1197,7 @@ class BoardingSessionApiIntegrationTest {
             time.set(sessionExpiry ? NOW.plusSeconds(21) : NOW.plusSeconds(50));
             return invocation.callRealMethod();
         }).when(targetNotifications)
-                .recordReconfirmedPreparation(any(BoardingSession.class), any(BoardingTrackingSnapshot.class));
+                .recordReconfirmedPreparation(any(BoardingSession.class));
         service.reconfirm(owner.getId(), id, new ReconfirmBoardingSessionRequest(1, "ref", null));
         assertThat(events.count()).isZero();
         assertThat(deliveries.count()).isZero();
@@ -1603,8 +1606,8 @@ class BoardingSessionApiIntegrationTest {
             var completed = service.find(owner.getId(), id);
             assertThat(completed.status()).isEqualTo(BoardingSessionStatus.COMPLETED);
             assertThat(completed.reasonCode()).isEqualTo(endStop == 3 ? BoardingStateReason.ARRIVAL_OBSERVED : BoardingStateReason.PASSED_OBSERVED);
-            assertThat(jdbc.queryForObject("select count(*) from notification_events where boarding_event_type='DESTINATION_REACHED'", Long.class)).isZero();
-            assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(1L);
+            assertThat(jdbc.queryForObject("select count(*) from notification_events where boarding_event_type='DESTINATION_REACHED'", Long.class)).isEqualTo(1L);
+            assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(2L);
         } finally {
             jdbc.update("delete from notification_deliveries");
             jdbc.update("delete from notification_events");
@@ -1640,7 +1643,7 @@ class BoardingSessionApiIntegrationTest {
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
             assertThat(service.find(owner.getId(), created.response().id()).reasonCode()).isEqualTo(BoardingStateReason.ARRIVAL_OBSERVED);
             assertThat(jdbc.queryForList("select boarding_event_type from notification_events order by id", String.class))
-                    .containsExactly("PREPARE_ALIGHT");
+                    .containsExactly("PREPARE_ALIGHT", "DESTINATION_REACHED");
         } finally {
             jdbc.update("delete from notification_deliveries");
             jdbc.update("delete from notification_events");
