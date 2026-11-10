@@ -29,23 +29,27 @@ public final class TagoLocalBundle {
 
     /** The caller supplies an existing absolute directory outside Git and the ordered collection scope. */
     public static Writer create(Path parent, String serviceKey) throws IOException {
-        return new Writer(parent, TagoMetadataSource.fullCityScope(), serviceKey);
+        return create(parent, serviceKey, Instant.now());
+    }
+    static Writer create(Path parent, String key, Instant startedAt) throws IOException {
+        return new Writer(parent, TagoMetadataSource.fullCityScope(), key, startedAt);
     }
     static Writer create(Path parent, List<String> orderedCities, String serviceKey) throws IOException {
-        return new Writer(parent, orderedCities, serviceKey);
+        return new Writer(parent, orderedCities, serviceKey, Instant.now());
     }
 
     public static final class Writer {
         private final Path directory;
         private final String id = UUID.randomUUID().toString();
-        private final String startedAt = Instant.now().toString();
+        private final String startedAt;
         private final List<String> cities;
         private final ArchiveContentSafety safety;
         private final List<Entry> entries = new ArrayList<>();
         private final Set<Request> requests = new HashSet<>();
         private boolean closed;
 
-        private Writer(Path parent, List<String> orderedCities, String key) throws IOException {
+        private Writer(Path parent, List<String> orderedCities, String key, Instant startedAt) throws IOException {
+            this.startedAt = startedAt.toString();
             Path root = safeDirectory(parent);
             ensureOutsideGit(root);
             this.cities = checkedCities(orderedCities);

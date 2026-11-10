@@ -8,7 +8,14 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
@@ -86,8 +93,22 @@ class TransitMetadataCollectionTest {
         return new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, budget, mock);
     }
     @Test void collects_full_scope_pages_and_replays_identical_files() throws Exception {
-        var budget = new CollectionBudget(limits(100, 10000, 100000, 10000)); var mock = new Mock();
-        var result = collector(budget, mock).collect();
+        var mock = new Mock();
+        Instant gbisStart = Instant.parse("2020-11-09T14:59:59.900Z");
+        Instant tagoStart = Instant.parse("2020-11-09T15:00:00.100Z");
+        var clock = org.mockito.Mockito.mock(Clock.class);
+        org.mockito.Mockito.when(clock.instant()).thenReturn(gbisStart, tagoStart);
+        var result = collector(mock, clock).collect();
+        assertThat(result.gbisPath().getParent()).isEqualTo(temp.toRealPath().resolve("2020-11-09/GBIS/235959"));
+        assertThat(result.tagoPath().getParent()).isEqualTo(temp.toRealPath().resolve("2020-11-10/TAGO/000000"));
+        assertThat(GbisLocalBundle.replayWithArchive(result.gbisPath(), KEY, (source, body) -> {}).startedAt())
+                .isEqualTo(gbisStart);
+        assertThat(TagoLocalBundle.replayWithArchive(result.tagoPath(), KEY, (request, body) -> {}).startedAt())
+                .isEqualTo(tagoStart);
+        try (var staged = Files.walk(temp.resolve("incomplete"))) {
+            assertThat(staged.map(p -> p.getFileName().toString())).containsExactlyInAnyOrder(
+                    "incomplete", "2020-11-09", "2020-11-10");
+        }
         assertThat(result.requests()).isEqualTo(40);
         assertThat(mock.sent).hasValue(40);
         assertThat(result.gbisRoutes()).isEqualTo(1); assertThat(result.tagoRoutes()).isEqualTo(2);
@@ -105,6 +126,7 @@ class TransitMetadataCollectionTest {
         writer.add(GbisLocalBundle.Source.ROUTE, bytes(ROUTE));
         writer.add(GbisLocalBundle.Source.ROUTE_STATION, bytes(STATIONS));
         writer.complete();
+        byte[] originalManifest = Files.readAllBytes(writer.directory().resolve("manifest.json"));
         var mock = new Mock(); var attempts = new AtomicInteger();
         CollectionHttp.Transport transientFirst = (uri, budget) -> {
             assertThat(uri.getHost()).isEqualTo("apis.data.go.kr");
@@ -114,6 +136,8 @@ class TransitMetadataCollectionTest {
         var budget = new CollectionBudget(limits(100, 10000, 100000, 10000));
         var result = new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, budget, transientFirst, writer.directory()).collect();
         assertThat(result.gbisPath()).isEqualTo(writer.directory());
+        assertThat(Files.readAllBytes(result.gbisPath().resolve("manifest.json"))).isEqualTo(originalManifest);
+        assertThat(result.tagoPath().getParent().getParent().getFileName().toString()).isEqualTo("TAGO");
         assertThat(result.requests()).isEqualTo(39);
         assertThat(mock.sent).hasValue(37);
         assertThat(TagoGbisOfflineSnapshotAssembler.withGbis(result.tagoPath(), result.gbisPath(), KEY).normalized().routes()).hasSize(2);
@@ -139,7 +163,7 @@ class TransitMetadataCollectionTest {
         assertThat(result.requests()).isEqualTo(41);
         assertThat(TagoLocalBundle.replay(result.tagoPath(), KEY).normalized().routes()).hasSize(2);
         try (var files = Files.list(result.tagoPath())) { assertThat(files.filter(p -> p.toString().endsWith(".json")).count()).isEqualTo(38); }
-        try (var files = Files.list(temp)) { assertThat(files.noneMatch(p -> p.getFileName().toString().startsWith("tago-diagnostic-"))).isTrue(); }
+        try (var files = Files.walk(temp)) { assertThat(files.noneMatch(p -> p.getFileName().toString().startsWith("tago-diagnostic-"))).isTrue(); }
     }
     @Test
     @org.junit.jupiter.api.DisplayName("세션 부족 재시도 소진 시 마지막 원본만 보존한다")
@@ -225,7 +249,10 @@ class TransitMetadataCollectionTest {
                 assertThat(Files.readAllBytes(response)).isEqualTo(bytes(scenario.getKey()));
                 assertThat(Files.getPosixFilePermissions(response)).isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
                 assertThat(Files.getPosixFilePermissions(response.getParent())).isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
-                assertThat(Files.readString(response.getParent().resolve("request.txt")))
+                Path request = response.getParent().resolve("request.txt");
+                assertThat(Files.getPosixFilePermissions(request))
+                        .isEqualTo(java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+                assertThat(Files.readString(request))
                         .contains("routeId=GGB200", "pageNo=1", "failure=" + scenario.getValue(), "diagnosticFile=" + response.toRealPath())
                         .doesNotContain(KEY, scenario.getKey());
             }
@@ -238,10 +265,12 @@ class TransitMetadataCollectionTest {
         Path root = Files.createDirectory(temp.resolve("root"));
         var mock = new Mock(); mock.stopBody = "{";
         mock.beforeStop = () -> {
-            try { Files.move(root, temp.resolve("moved")); Files.writeString(root, "not a directory"); }
+            try { Files.writeString(root.resolve("2020-11-09/diagnostics"), "not a directory"); }
             catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
         };
-        var c = new TransitMetadataCollector(root.toRealPath(), KEY, TAGO, GBIS, new CollectionBudget(limits(50, 10000, 100000, 10000)), mock);
+        var budget = new CollectionBudget(limits(50, 10000, 100000, 10000));
+        var c = new TransitMetadataCollector(root.toRealPath(), KEY, TAGO, GBIS, budget, mock, null,
+                budget::pause, Clock.fixed(START, ZoneOffset.UTC));
         assertThatThrownBy(c::collect).hasMessage("INVALID_RESPONSE");
         assertThat(c.failureSummary(CollectionBudget.Code.INVALID_RESPONSE)).contains("detail=JSON_PARSE", "diagnosticFile=none", "diagnosticStatus=storage_failed");
     }
@@ -306,6 +335,7 @@ class TransitMetadataCollectionTest {
         assertThat(TransitMetadataCollectionCli.run(new String[]{path, "--max-requests=0"}, env, new PrintStream(output), new PrintStream(errors), mock)).isEqualTo(2);
         assertThat(TransitMetadataCollectionCli.run(new String[]{"--directory=relative"}, env, new PrintStream(output), new PrintStream(errors), mock)).isEqualTo(2);
         assertThat(mock.sent).hasValue(0);
+        try (var entries = Files.list(temp)) { assertThat(entries.toList()).isEmpty(); }
     }
     @Test void explicit_live_collects_only_through_mock() throws Exception {
         var out = new ByteArrayOutputStream(); var err = new ByteArrayOutputStream(); var mock = new Mock();
@@ -323,6 +353,164 @@ class TransitMetadataCollectionTest {
         assertThat(mock.sent).hasValue(1);
         assertThat(c.failureSummary(CollectionBudget.Code.INVALID_RESPONSE)).contains("gbisComplete=false").doesNotContain(KEY);
     }
+    private static final Instant START = Instant.parse("2020-11-09T14:59:59Z");
+
+    private TransitMetadataCollector collector(Mock mock, Clock clock) throws Exception {
+        var budget = new CollectionBudget(limits(100, 10000, 100000, 10000));
+        return new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, budget, mock, null, budget::pause, clock);
+    }
+
+    private static Path onlyChild(Path directory) throws Exception {
+        try (var children = Files.list(directory)) {
+            var paths = children.toList();
+            assertThat(paths).hasSize(1);
+            return paths.getFirst();
+        }
+    }
+
+    @Test void simultaneous_runs_in_the_same_second_publish_distinct_uuids() throws Exception {
+        var clock = Clock.fixed(START, ZoneOffset.UTC);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var first = executor.submit(() -> collector(new Mock(), clock).collect());
+            var second = executor.submit(() -> collector(new Mock(), clock).collect());
+            var a = first.get(15, TimeUnit.SECONDS);
+            var b = second.get(15, TimeUnit.SECONDS);
+            for (var pair : List.of(List.of(a.gbisPath(), b.gbisPath()), List.of(a.tagoPath(), b.tagoPath()))) {
+                assertThat(pair.getFirst().getParent()).isEqualTo(pair.getLast().getParent());
+                assertThat(pair.getFirst().getFileName()).isNotEqualTo(pair.getLast().getFileName());
+                for (Path path : pair) assertThat(path.resolve("manifest.json")).isRegularFile();
+            }
+        }
+    }
+
+    @Test void cli_reuses_gbis_from_the_new_structure_without_publishing_another_copy() throws Exception {
+        var gbis = collector(new Mock(), Clock.fixed(START, ZoneOffset.UTC)).collect().gbisPath();
+        byte[] manifest = Files.readAllBytes(gbis.resolve("manifest.json"));
+        var output = new ByteArrayOutputStream();
+        var errors = new ByteArrayOutputStream();
+        var mock = new Mock();
+        String[] args = {"--directory=" + temp.toRealPath(), "--live", "--confirm=COLLECT", "--max-requests=50",
+                "--interval-ms=1", "--gbis-bundle=" + gbis};
+        assertThat(TransitMetadataCollectionCli.run(args, Map.of("PUBLIC_DATA_SERVICE_KEY", KEY),
+                new PrintStream(output), new PrintStream(errors), mock)).isZero();
+        assertThat(output.toString()).contains("gbisBundle=" + gbis + " gbisComplete=true");
+        assertThat(errors.toString()).isEmpty();
+        assertThat(mock.sent).hasValue(37);
+        assertThat(onlyChild(gbis.getParent())).isEqualTo(gbis);
+        assertThat(Files.readAllBytes(gbis.resolve("manifest.json"))).isEqualTo(manifest);
+    }
+
+    @Test void failed_tago_remains_staged_and_diagnostics_use_the_failure_date() throws Exception {
+        var clock = org.mockito.Mockito.mock(Clock.class);
+        org.mockito.Mockito.when(clock.instant()).thenReturn(START, START, START.plusSeconds(1));
+        var mock = new Mock();
+        mock.stopBody = "{";
+        var collector = collector(mock, clock);
+        assertThatThrownBy(collector::collect).hasMessage("INVALID_RESPONSE");
+        var gbis = onlyChild(temp.toRealPath().resolve("2020-11-09/GBIS/235959"));
+        var tago = onlyChild(temp.toRealPath().resolve("incomplete/2020-11-09"));
+        assertThat(tago.resolve("manifest.json")).doesNotExist();
+        assertThat(GbisLocalBundle.replay(gbis, KEY).sourceVersion()).isEqualTo("v1");
+        var diagnostic = onlyChild(temp.toRealPath().resolve("2020-11-10/diagnostics"));
+        assertThat(Files.readAllBytes(diagnostic.resolve("response.bin"))).isEqualTo(bytes("{"));
+        assertThat(collector.failureSummary(CollectionBudget.Code.INVALID_RESPONSE))
+                .contains("tagoBundle=" + tago, "tagoComplete=false", "tagoPublished=false",
+                        "gbisBundle=" + gbis, "gbisComplete=true", "gbisPublished=true");
+    }
+
+    @Test void destination_collision_preserves_staged_manifest_and_existing_empty_directory() throws Exception {
+        Path root = temp.toRealPath();
+        Path parent = root.resolve("2020-11-09/TAGO/235959");
+        var mock = new Mock();
+        mock.beforeCity = () -> {
+            try {
+                Path staged = onlyChild(root.resolve("incomplete/2020-11-09"));
+                Files.createDirectories(parent.resolve(staged.getFileName()));
+            } catch (Exception e) { throw new AssertionError(e); }
+        };
+        var collector = collector(mock, Clock.fixed(START, ZoneOffset.UTC));
+        assertThatThrownBy(collector::collect).hasMessage("STORAGE_FAILURE");
+        Path staged = onlyChild(root.resolve("incomplete/2020-11-09"));
+        assertThat(TagoLocalBundle.replay(staged, KEY).normalized().routes()).hasSize(2);
+        try (var children = Files.list(parent.resolve(staged.getFileName()))) {
+            assertThat(children.toList()).isEmpty();
+        }
+        assertThat(collector.failureSummary(CollectionBudget.Code.STORAGE_FAILURE))
+                .contains("stage=PUBLISH", "detail=OUTPUT_COLLISION", "tagoBundle=" + staged,
+                        "tagoComplete=true", "tagoManifest=true", "tagoPublished=false", "gbisPublished=true");
+    }
+
+    @Test void concurrent_publication_to_the_same_uuid_preserves_the_losing_source() throws Exception {
+        Path root = temp.toRealPath();
+        String uuid = java.util.UUID.randomUUID().toString();
+        Path first = Files.createDirectories(root.resolve("first").resolve(uuid));
+        Path second = Files.createDirectories(root.resolve("second").resolve(uuid));
+        Files.writeString(first.resolve("marker"), "first");
+        Files.writeString(second.resolve("marker"), "second");
+        var ready = new CountDownLatch(2);
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var results = List.of(first, second).stream().map(source -> executor.submit(() -> {
+                ready.countDown();
+                assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+                try {
+                    new CollectionOutput(root).publish(source, "TAGO", START);
+                    return true;
+                } catch (java.nio.file.FileAlreadyExistsException expected) {
+                    return false;
+                }
+            })).toList();
+            boolean firstWon = results.getFirst().get(10, TimeUnit.SECONDS);
+            assertThat(results.getLast().get(10, TimeUnit.SECONDS)).isNotEqualTo(firstWon);
+            assertThat(Files.readString(root.resolve("2020-11-09/TAGO/235959").resolve(uuid).resolve("marker")))
+                    .isEqualTo(firstWon ? "first" : "second");
+            assertThat(Files.readString((firstWon ? second : first).resolve("marker")))
+                    .isEqualTo(firstWon ? "second" : "first");
+        }
+    }
+
+    @Test void unsupported_atomic_move_keeps_source_and_clears_the_empty_reservation() throws Exception {
+        Path root = temp.toRealPath();
+        String uuid = java.util.UUID.randomUUID().toString();
+        var zipUri = URI.create("jar:" + root.resolve("other-filesystem.zip").toUri());
+        try (var zip = java.nio.file.FileSystems.newFileSystem(zipUri, Map.of("create", "true"))) {
+            Path staged = Files.createDirectory(zip.getPath("/").resolve(uuid));
+            Path manifest = Files.writeString(staged.resolve("manifest.json"), "staged");
+            assertThatThrownBy(() -> new CollectionOutput(root).publish(staged, "TAGO", START))
+                    .isInstanceOf(java.nio.file.AtomicMoveNotSupportedException.class);
+            assertThat(Files.readString(manifest)).isEqualTo("staged");
+            assertThat(root.resolve("2020-11-09/TAGO/235959").resolve(uuid)).doesNotExist();
+        }
+    }
+
+    @Test void symlinked_output_parent_is_rejected_and_staged_bundle_is_preserved() throws Exception {
+        Path root = temp.toRealPath();
+        Path outside = Files.createDirectory(root.resolve("redirected"));
+        Files.createSymbolicLink(root.resolve("2020-11-09"), outside);
+        var collector = collector(new Mock(), Clock.fixed(START, ZoneOffset.UTC));
+        assertThatThrownBy(collector::collect).hasMessage("STORAGE_FAILURE");
+        var staged = onlyChild(root.resolve("incomplete/2020-11-09"));
+        assertThat(GbisLocalBundle.replay(staged, KEY).sourceVersion()).isEqualTo("v1");
+        assertThat(collector.failureSummary(CollectionBudget.Code.STORAGE_FAILURE))
+                .contains("stage=PUBLISH", "detail=OUTPUT_IO_FAILURE", "gbisPublished=false", "gbisBundle=" + staged);
+        try (var children = Files.list(outside)) { assertThat(children.toList()).isEmpty(); }
+    }
+
+    @Test void combined_replay_failure_preserves_independently_published_bundles() throws Exception {
+        Path root = temp.toRealPath();
+        var collector = collector(new Mock(), Clock.fixed(START, ZoneOffset.UTC));
+        try (var assembler = org.mockito.Mockito.mockStatic(TagoGbisOfflineSnapshotAssembler.class)) {
+            assembler.when(() -> TagoGbisOfflineSnapshotAssembler.withGbis(
+                    org.mockito.ArgumentMatchers.any(Path.class), org.mockito.ArgumentMatchers.any(Path.class),
+                    org.mockito.ArgumentMatchers.eq(KEY))).thenThrow(new java.io.IOException());
+            assertThatThrownBy(collector::collect).hasMessage("INTEGRITY_FAILURE");
+        }
+        var gbis = onlyChild(root.resolve("2020-11-09/GBIS/235959"));
+        var tago = onlyChild(root.resolve("2020-11-09/TAGO/235959"));
+        assertThat(collector.failureSummary(CollectionBudget.Code.INTEGRITY_FAILURE))
+                .contains("provider=COMBINED", "stage=REPLAY", "tagoPublished=true", "gbisPublished=true");
+        assertThat(TagoGbisOfflineSnapshotAssembler.withGbis(tago, gbis, KEY).normalized().routes()).hasSize(2);
+    }
+
     @Test void socket_transport_rejects_redirect_and_stops_oversized_body() throws Exception {
         var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         var hits = new AtomicInteger();
@@ -490,8 +678,9 @@ class TransitMetadataCollectionTest {
     @Test void storage_failure_never_publishes_partial_tago_bundle() throws Exception {
         var mock = new Mock();
         mock.beforeCity = () -> {
-            try (var children = Files.list(temp)) {
-                Path tago = children.filter(Files::isDirectory).filter(p -> !Files.exists(p.resolve("manifest.json"))).findFirst().orElseThrow();
+            try (var children = Files.walk(temp.resolve("incomplete"))) {
+                Path tago = children.filter(Files::isDirectory).filter(p -> p.getFileName().toString().length() == 36)
+                        .findFirst().orElseThrow();
                 Files.writeString(tago.resolve("00000000.json"), "occupied");
             } catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
         };

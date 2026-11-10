@@ -26,7 +26,7 @@ public final class TransitMetadataCollectionCli {
             if (!live && options.containsKey("confirm")) throw new IllegalArgumentException();
             String key = env.get("PUBLIC_DATA_SERVICE_KEY");
             if (key == null || key.isBlank()) throw new IllegalArgumentException();
-            Path directory = checkDirectory(options.get("directory"), key);
+            Path directory = checkDirectory(options.get("directory"), key, live);
             String tago = endpoint(env.getOrDefault("TAGO_METADATA_BASE_URL", TAGO_DEFAULT));
             String gbis = endpoint(env.getOrDefault("GBIS_METADATA_BASE_URL", GBIS_DEFAULT));
             Path existingGbis = options.containsKey("gbis-bundle") ? Path.of(options.get("gbis-bundle")) : null;
@@ -101,7 +101,7 @@ public final class TransitMetadataCollectionCli {
                 || uri.getPort() != -1 || uri.getRawPath() == null || uri.getRawPath().isBlank()) throw new IllegalArgumentException();
         return value;
     }
-    private static Path checkDirectory(String value, String key) throws java.io.IOException {
+    private static Path checkDirectory(String value, String key, boolean live) throws java.io.IOException {
         if (value == null) throw new IllegalArgumentException();
         Path path = Path.of(value);
         if (!path.isAbsolute() || !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException();
@@ -110,6 +110,7 @@ public final class TransitMetadataCollectionCli {
         for (Path p = path; p != null; p = p.getParent())
             if (Files.exists(p.resolve(".git"), LinkOption.NOFOLLOW_LINKS)) throw new IllegalArgumentException();
         new ArchiveContentSafety(key).checkText(path.toString());
+        if (!live) return path;
         Path temp = Files.createTempFile(path, ".collection-check-", ".tmp");
         Path link = temp.resolveSibling(temp.getFileName() + ".link");
         try { Files.createLink(link, temp); }

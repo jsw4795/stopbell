@@ -23,15 +23,21 @@ public final class GbisLocalBundle {
     public record Manifest(String id, String startedAt, String completedAt, boolean complete,
                            String sourceSystem, String routeVersion, String routeStationVersion, List<Entry> files) { }
 
-    public static Writer create(Path parent, String key) throws IOException { return new Writer(parent, key); }
+    public static Writer create(Path parent, String key) throws IOException {
+        return create(parent, key, Instant.now());
+    }
+    static Writer create(Path parent, String key, Instant startedAt) throws IOException {
+        return new Writer(parent, key, startedAt);
+    }
     public static final class Writer {
         private final String id = UUID.randomUUID().toString();
-        private final String startedAt = Instant.now().toString();
+        private final String startedAt;
         private final Path directory;
         private final String key;
         private final Map<Source, Entry> entries = new HashMap<>();
         private boolean closed;
-        private Writer(Path parent, String key) throws IOException {
+        private Writer(Path parent, String key, Instant startedAt) throws IOException {
+            this.startedAt = startedAt.toString();
             Path root = safeDirectory(parent);
             ensureOutsideGit(root);
             requireKey(key);

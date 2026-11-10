@@ -5,7 +5,9 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 
@@ -17,7 +19,8 @@ import org.springframework.web.util.UriComponentsBuilder;
 final class TransitMetadataCollector {
     record Report(Path tagoPath, Path gbisPath, int tagoRoutes, int tagoStops, int occurrences,
                   int gbisRoutes, String version, int enriched, int skipped, int requests, long bytes, long elapsedMillis) { }
-    private final Path root;
+    private final CollectionOutput output;
+    private final Clock clock;
     private final String key;
     private final String tagoUrl;
     private final String gbisUrl;
@@ -28,7 +31,7 @@ final class TransitMetadataCollector {
     private String provider = "GBIS", stage = "CREATE";
     private Path tagoPath, gbisPath;
     private int responses;
-    private boolean tagoComplete, gbisComplete;
+    private boolean tagoManifest, gbisManifest, tagoComplete, gbisComplete, tagoPublished, gbisPublished;
     private GbisBaseInfoValidationException.Code validationCode;
     private GbisBaseInfoValidationException.Field validationField;
     private String failureDetail;
@@ -49,7 +52,13 @@ final class TransitMetadataCollector {
     TransitMetadataCollector(Path root, String key, String tagoUrl, String gbisUrl,
                              CollectionBudget budget, CollectionHttp.Transport transport, Path existingGbis,
                              java.util.function.Consumer<Duration> retryWait) {
-        this.root = root; this.key = key; this.tagoUrl = tagoUrl; this.gbisUrl = gbisUrl;
+        this(root, key, tagoUrl, gbisUrl, budget, transport, existingGbis, retryWait, Clock.systemUTC());
+    }
+    TransitMetadataCollector(Path root, String key, String tagoUrl, String gbisUrl,
+                             CollectionBudget budget, CollectionHttp.Transport transport, Path existingGbis,
+                             java.util.function.Consumer<Duration> retryWait, Clock clock) {
+        this.output = new CollectionOutput(root); this.clock = clock;
+        this.key = key; this.tagoUrl = tagoUrl; this.gbisUrl = gbisUrl;
         this.budget = budget; this.transport = transport; this.existingGbis = existingGbis; this.retryWait = retryWait;
     }
     Report collect() {
@@ -59,10 +68,11 @@ final class TransitMetadataCollector {
             if (existingGbis != null) {
                 gbisPath = existingGbis;
                 stage = "REPLAY";
-                try { gbis = GbisLocalBundle.replay(gbisPath, key); gbisComplete = true; }
+                try { gbis = GbisLocalBundle.replay(gbisPath, key); gbisManifest = true; gbisComplete = true; }
                 catch (IOException | RuntimeException e) { throw new CollectionBudget.Failure(CollectionBudget.Code.INTEGRITY_FAILURE); }
             } else {
-                GbisLocalBundle.Writer gbisWriter = GbisLocalBundle.create(root, key);
+                Instant startedAt = clock.instant();
+                var gbisWriter = GbisLocalBundle.create(output.incomplete(startedAt), key, startedAt);
                 gbisPath = gbisWriter.directory();
                 stage = "BASE_INFO";
                 URI base = UriComponentsBuilder.fromUriString(gbisUrl).queryParam("format", "json")
@@ -76,15 +86,19 @@ final class TransitMetadataCollector {
                 gbisWriter.add(GbisLocalBundle.Source.ROUTE_STATION, get(URI.create(item.routeStationDownloadUrl()))); responses++;
                 stage = "COMPLETE";
                 budget.check();
-                gbis = gbisWriter.complete(budget::check); gbisComplete = true;
+                gbis = gbisWriter.complete(budget::check); gbisManifest = true;
                 budget.check();
                 stage = "REPLAY";
                 try {
                     if (!gbis.equals(GbisLocalBundle.replay(gbisPath, key))) throw new IllegalStateException();
                 } catch (IOException | RuntimeException e) { throw new CollectionBudget.Failure(CollectionBudget.Code.INTEGRITY_FAILURE); }
+                gbisComplete = true;
+                gbisPath = publish(gbisPath, startedAt);
+                gbisPublished = true;
             }
             provider = "TAGO"; stage = "CREATE";
-            var writer = TagoLocalBundle.create(root, key);
+            Instant startedAt = clock.instant();
+            var writer = TagoLocalBundle.create(output.incomplete(startedAt), key, startedAt);
             tagoPath = writer.directory();
             var properties = new TransitClientProperties.Tago(tagoUrl, tagoUrl, key);
             var client = new CapturingTagoClient(properties, writer);
@@ -92,13 +106,16 @@ final class TransitMetadataCollector {
             var captured = source.fetchSnapshotWithRawRows();
             stage = "COMPLETE";
             budget.check();
-            var saved = writer.complete(budget::check); tagoComplete = true;
+            var saved = writer.complete(budget::check); tagoManifest = true;
             budget.check();
             stage = "REPLAY";
             try {
                 var replay = TagoLocalBundle.replay(tagoPath, key);
                 if (!captured.equals(saved) || !captured.equals(replay)) throw new IllegalStateException();
             } catch (IOException | RuntimeException e) { throw new CollectionBudget.Failure(CollectionBudget.Code.INTEGRITY_FAILURE); }
+            tagoComplete = true;
+            tagoPath = publish(tagoPath, startedAt);
+            tagoPublished = true;
             provider = "COMBINED"; stage = "REPLAY";
             budget.check();
             TagoMetadataSource.TagoSnapshot combined;
@@ -130,6 +147,23 @@ final class TransitMetadataCollector {
             throw new CollectionBudget.Failure(CollectionBudget.Code.INVALID_RESPONSE);
         }
     }
+    private Path publish(Path staged, Instant startedAt) throws IOException {
+        stage = "PUBLISH";
+        budget.check();
+        try {
+            return output.publish(staged, provider, startedAt);
+        } catch (java.nio.file.FileAlreadyExistsException e) {
+            failureDetail = "OUTPUT_COLLISION";
+            throw e;
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            failureDetail = "ATOMIC_MOVE_UNAVAILABLE";
+            throw e;
+        } catch (IOException e) {
+            failureDetail = "OUTPUT_IO_FAILURE";
+            throw e;
+        }
+    }
+
     private byte[] get(URI uri) {
         for (int attempt = 0; ; attempt++) {
             try { return transport.get(uri, budget); }
@@ -143,7 +177,9 @@ final class TransitMetadataCollector {
                 + (failureDetail == null ? "" : " detail=" + failureDetail) + " requests=" + budget.requests()
                 + ("TAGO".equals(provider) && requestOperation != null ? requestSummary() : "")
                 + " bytes=" + budget.bytes() + " responses=" + responses + " tagoBundle=" + tagoPath
-                + " tagoComplete=" + tagoComplete + " gbisBundle=" + gbisPath + " gbisComplete=" + gbisComplete;
+                + " tagoComplete=" + tagoComplete + " tagoManifest=" + tagoManifest + " tagoPublished=" + tagoPublished
+                + " gbisBundle=" + gbisPath + " gbisComplete=" + gbisComplete + " gbisManifest=" + gbisManifest
+                + " gbisPublished=" + gbisPublished + " gbisReused=" + (existingGbis != null && gbisComplete);
     }
     private String requestSummary() {
         return " operation=" + requestOperation + " cityCode=" + safeId(requestCity)
@@ -158,10 +194,10 @@ final class TransitMetadataCollector {
         try { new ArchiveContentSafety(key).checkText(value); return value; }
         catch (RuntimeException e) { return "redacted"; }
     }
-    private void saveDiagnostic(byte[] bytes) {
+    private void saveDiagnostic(byte[] bytes, Instant failedAt) {
         diagnosticStatus = "storage_failed";
         try {
-            var directory = Files.createTempDirectory(root, "tago-diagnostic-",
+            var directory = Files.createTempDirectory(output.diagnostics(failedAt), "tago-diagnostic-",
                     PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
             var response = directory.resolve("response.bin");
             Files.createFile(response, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
@@ -210,17 +246,18 @@ final class TransitMetadataCollector {
                     save(new RequestWithBytes(new TagoLocalBundle.Request(op, city, route, page == null ? 0 : page), bytes));
                     return result;
                 } catch (TransitProviderClientException e) {
+                    Instant failedAt = clock.instant();
                     boolean sessionUnavailable = e.failureKind() == com.stopbell.transit.client.TransitProviderClientFailureKind.PROVIDER
                             && isSessionUnavailable(bytes);
                     if (sessionUnavailable && attempt < 2) {
                         budget.check(); retryWait.accept(Duration.ofSeconds(attempt == 0 ? 5 : 15)); budget.check();
                         continue;
                     }
-                    if (sessionUnavailable) { failureDetail = "SESSION_UNAVAILABLE"; saveDiagnostic(bytes); }
+                    if (sessionUnavailable) { failureDetail = "SESSION_UNAVAILABLE"; saveDiagnostic(bytes, failedAt); }
                     else if (e.failureKind() != com.stopbell.transit.client.TransitProviderClientFailureKind.PROVIDER) {
                         try { new tools.jackson.databind.ObjectMapper().readTree(bytes); failureDetail = "TAGO_STRUCTURE"; }
                         catch (RuntimeException invalidJson) { failureDetail = "JSON_PARSE"; }
-                        saveDiagnostic(bytes);
+                        saveDiagnostic(bytes, failedAt);
                     }
                     throw e;
                 }

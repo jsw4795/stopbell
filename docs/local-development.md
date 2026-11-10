@@ -773,20 +773,27 @@ Provider는 `SEOUL_BUS` 또는 `TAGO`다. 미완료 수집 이력은 실행 여�
 Backend 디렉터리에서 환경변수 `PUBLIC_DATA_SERVICE_KEY`에 키를 주입하고, Git 밖의 기존 실제 절대 디렉터리를 지정한다. 기존 기본 Provider 주소를 사용하며 `TAGO_METADATA_BASE_URL`과 `GBIS_METADATA_BASE_URL`을 지정할 경우 HTTPS 공식 `apis.data.go.kr` 호스트만 허용한다. 기본은 Dry Run이며 키 값이나 Provider URL을 출력하지 않는다. 아래는 요청을 보내지 않는 예다.
 
 ```bash
-./gradlew --offline collectTransitMetadata --args='--directory=/absolute/path/to/bundles --max-requests=5000 --interval-ms=1000'
+./gradlew --offline collectTransitMetadata --args='--directory=/absolute/path/to/stopbell-collections --max-requests=5000 --interval-ms=1000'
 ```
 
 실제 Live 실행은 **사용자의 별도 승인 후에만** 수행한다. 명시적 `--live`, `--confirm=COLLECT`, 양의 `--max-requests`가 모두 필요하다. 다음은 형식 예시이며 이번 단계에서 실제 실행하지 않았다.
 
 ```bash
-./gradlew --offline collectTransitMetadata --args='--directory=/absolute/path/to/bundles --live --confirm=COLLECT --max-requests=5000 --interval-ms=1000 --max-response-bytes=50000000 --max-total-bytes=500000000 --max-duration-ms=3600000 --connect-timeout-ms=2000 --response-timeout-ms=30000'
+./gradlew --offline collectTransitMetadata --args='--directory=/absolute/path/to/stopbell-collections --live --confirm=COLLECT --max-requests=5000 --interval-ms=1000 --max-response-bytes=50000000 --max-total-bytes=500000000 --max-duration-ms=3600000 --connect-timeout-ms=2000 --response-timeout-ms=30000'
 ```
 
-`--offline`은 Gradle의 의존성 네트워크 접근을 제한할 뿐 Live Provider 요청을 차단하지 않는다. 기본값은 개별 응답 50,000,000바이트, 전체 응답 500,000,000바이트, 전체 3,600,000ms, 간격 1,000ms, 연결 2,000ms, 응답 30,000ms다. 모든 값은 유한한 양수여야 한다. Dry Run의 기본 최대 요청은 1,000회지만 Live에서는 반드시 별도 지정한다. 최소 요청은 GBIS 3회와 TAGO 도시 목록·31개 도시 Route 각 1회로 35회이며 추가 페이지와 Route별 정류장 때문에 전체 횟수는 수집 전 확정할 수 없다. 제한을 높이는 일은 실행자의 요청량·저장 공간 검토가 필요하다.
+`--offline`은 Gradle의 의존성 네트워크 접근을 제한할 뿐 Live Provider 요청을 차단하지 않는다. 기본값은 개별 응답 50,000,000바이트, 전체 응답 500,000,000바이트, 전체 3,600,000ms, 간격 100ms, 연결 2,000ms, 응답 30,000ms다. 위 예시의 `--interval-ms=1000`은 기본 간격을 명시적으로 덮어쓴다. 모든 값은 유한한 양수여야 한다. Dry Run의 기본 최대 요청은 1,000회지만 Live에서는 반드시 별도 지정한다. 최소 요청은 GBIS 3회와 TAGO 도시 목록·31개 도시 Route 각 1회로 35회이며 추가 페이지와 Route별 정류장 때문에 전체 횟수는 수집 전 확정할 수 없다. 제한을 높이는 일은 실행자의 요청량·저장 공간 검토가 필요하다.
 
 별도 JVM은 Java 21 JDK HTTP Client의 숨겨진 재시도 제한 속성을 시작 시 설정하고 Redirect를 따르지 않는다. 하나의 Client를 수집 실행 동안 재사용한 뒤 닫는다. 두 속성이 JVM 시작 인수에 없거나 현재 값이 다르면 요청 예산 선점과 네트워크 전송 전에 실패한다. 연결 실패·HTTP 5xx 및 `resultCode=99`와 확인된 세션 부족 메시지가 함께 있는 경우 요청별 최대 2회 재시도를 공유하며 매 시도는 요청·시간 예산과 간격을 따른다. 세션 부족 재시도 대기는 첫 번째 5초, 두 번째 15초다. 인증 오류, 다른 Provider 오류, 잘못된 응답, 무결성·저장 오류는 재시도하지 않는다. `--gbis-bundle=/절대/완료/경로`를 지정하면 기존 GBIS 묶음을 검증·재생하고 TAGO만 새로 수집한다. 각 수집은 새 디렉터리를 사용하고 저장 성공한 원본은 바꾸지 않는다. 실패 시 Provider·단계·오류·요청/수신량·응답 수와 각 경로/완료 상태를 출력하며 예외 원문과 인증정보는 출력하지 않는다. GBIS 완료 후 TAGO가 실패하면 GBIS 묶음은 독립 완료 상태로 남을 수 있지만 전체 수집은 실패다. 완료 Manifest가 없는 부분 묶음은 재생하지 않으며 자동 재개·삭제하지 않는다. 실행자는 파일 접근 권한과 보존을 관리한다. 파일 무결성 해시는 서명이 아니다.
 
-TAGO에서 성공 HTTP 본문을 받은 뒤 JSON 파싱 또는 응답 구조 검사가 실패하거나 세션 부족 재시도가 소진되면 수집 루트의 새 `tago-diagnostic-*` 디렉터리에 `response.bin` 원본과 `request.txt` 요청·실패 정보를 별도로 저장한다. 디렉터리는 `0700`, 파일은 `0600`이며 기존 Bundle에는 포함하지 않는다. 원본은 인증정보를 포함할 수 있으므로 민감한 로컬 파일로 취급하고 실행자가 접근과 보존을 관리한다. CLI는 본문이나 키 대신 요청 식별자와 저장 경로를 출력한다. 현재 HTTP 전송 경계는 정확한 성공 상태 코드를 전달하지 않아 `2xx`로만 표시한다. 저장이 실패하거나 본문을 받지 못하면 그 상태를 표시하고 원래 실패 코드를 유지한다. 클라이언트 재사용이 Provider 세션 부족을 해결한다는 보장은 없다.
+`--directory`는 이미 존재하는 수집 루트다. Dry Run은 수집 폴더나 Manifest를 만들지 않는다. Live는 Provider별 시작 시각을 UTC로 Manifest에 기록하고, 같은 시각을 `Asia/Seoul`로 변환해 아래 경로를 정한다.
+
+- 수집 중 및 게시 실패 결과는 `incomplete/YYYY-MM-DD/<UUID>/`에 남는다.
+- 수집과 기존 검증이 끝나면 Manifest를 기록하고 개별 Replay를 확인한 뒤 `YYYY-MM-DD/{TAGO,GBIS}/HHmmss/<UUID>/`에 게시한다. UUID 목적지를 먼저 확보하고 같은 파일시스템에서 디렉터리를 원자적으로 이동한다. 같은 초의 수집도 UUID로 구분된다. 기존 목적지가 있거나 원자적 이동이 불가능하면 실패하고 원본을 유지한다.
+- 실패 요약의 Provider별 `Manifest`, `Complete`, `Published` 필드는 각각 Manifest 기록, 개별 Replay 검증, 최종 경로 게시를 표시한다. Manifest가 있는 게시 실패 결과는 보고된 staging 경로에 보존된다. 프로세스가 목적지 확보 직후 중단되면 빈 목적지가 남을 수 있으며, 완료 판정에는 Manifest와 Replay 검증이 필요하다.
+- GBIS는 TAGO 시작 전에 독립 게시된다. 통합 Replay가 실패해도 이미 게시된 Bundle은 보존한다. `--gbis-bundle`은 기존 구조와 새 구조의 완료 Bundle을 현재 경로에서 읽고, 재사용한 GBIS에는 이동·복사·수정을 수행하지 않는다. 기존 수집 데이터와 DB 아카이브는 현재 경로에 유지한다.
+
+TAGO에서 성공 HTTP 본문을 받은 뒤 JSON 파싱 또는 응답 구조 검사가 실패하거나 세션 부족 재시도가 소진되면 실패 시각의 KST 날짜 아래 `YYYY-MM-DD/diagnostics/tago-diagnostic-*/`에 `response.bin` 원본과 `request.txt` 요청·실패 정보를 별도로 저장한다. 디렉터리는 `0700`, 파일은 `0600`이며 기존 Bundle에는 포함하지 않는다. 원본은 인증정보를 포함할 수 있으므로 민감한 로컬 파일로 취급하고 실행자가 접근과 보존을 관리한다. CLI는 본문이나 키 대신 요청 식별자와 저장 경로를 출력한다. 현재 HTTP 전송 경계는 정확한 성공 상태 코드를 전달하지 않아 `2xx`로만 표시한다. 저장이 실패하거나 본문을 받지 못하면 그 상태를 표시하고 원래 실패 코드를 유지한다. 클라이언트 재사용이 Provider 세션 부족을 해결한다는 보장은 없다.
 
 이 명령은 웹 서버, Scheduler, FCM, Flyway, Hibernate, DB 연결 및 Bootstrap을 시작하지 않는다. 정상 수집 후 기존 Bundle 및 통합 Snapshot 재생을 검증하지만 DB Preview나 적용은 하지 않는다. 이 단계에서는 Mock Provider와 로컬 HTTP fixture만 사용했으며 실제 Provider·개발/운영 DB는 사용하지 않았다. 실제 GBIS URL·최신성, API quota와 수집 결과 및 DB Preview는 Live 수집 전에 별도로 검토한다.
 
