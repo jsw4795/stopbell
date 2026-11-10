@@ -456,24 +456,37 @@ V33은 기존 `bus_routes`에 nullable `route_type VARCHAR(24)`를 추가하고 
 | 서울 순환 | 순환 | CIRCULAR | 노랑 |
 | 서울 공항 | 공항 | AIRPORT | 미확인: 회색 |
 | 서울 관광 | 관광 | TOUR | 미확인: 회색 |
-| GBIS 11 | 직행좌석형시내 | CITY_EXPRESS_SEAT | 회색 |
-| GBIS 12 | 좌석형시내 | CITY_SEAT | 회색 |
-| GBIS 13 | 일반형시내 | CITY_LOCAL | 회색 |
-| GBIS 14 | 광역급행형시내 | CITY_METRO_EXPRESS | 회색 |
-| GBIS 15 | 따복형시내 | CITY_DDABOK | 회색 |
-| GBIS 16 | 경기순환 | GYEONGGI_CIRCULAR | 회색 |
-| GBIS 21 | 직행좌석형농어촌 | RURAL_EXPRESS_SEAT | 회색 |
-| GBIS 22 | 좌석형농어촌 | RURAL_SEAT | 회색 |
-| GBIS 23 | 일반형농어촌 | RURAL_LOCAL | 회색 |
-| GBIS 30 | 마을 | VILLAGE | 회색 |
-| GBIS 41 | 고속형시외 | INTERCITY_EXPRESS | 회색 |
-| GBIS 42 | 좌석형시외 | INTERCITY_SEAT | 회색 |
-| GBIS 43 | 일반형시외 | INTERCITY_LOCAL | 회색 |
-| GBIS 51 | 리무진공항 | AIRPORT_LIMOUSINE | 회색 |
-| GBIS 52 | 좌석형공항 | AIRPORT_SEAT | 회색 |
-| GBIS 53 | 일반형공항 | AIRPORT_LOCAL | 회색 |
+| GBIS 11 | 직행좌석형시내 | CITY_EXPRESS_SEAT | 빨강 |
+| GBIS 12 | 좌석형시내 | CITY_SEAT | 파랑 |
+| GBIS 13 | 일반형시내 | CITY_LOCAL | 초록 |
+| GBIS 14 | 광역급행형시내 | CITY_METRO_EXPRESS | 빨강 |
+| GBIS 15 | 따복형시내 | CITY_DDABOK | 회색 (현행 유형 공통색 미확인) |
+| GBIS 16 | 경기순환 | GYEONGGI_CIRCULAR | 빨강 |
+| GBIS 21 | 직행좌석형농어촌 | RURAL_EXPRESS_SEAT | 회색 (시내 색상 적용 범위 미확인) |
+| GBIS 22 | 좌석형농어촌 | RURAL_SEAT | 회색 (시내 색상 적용 범위 미확인) |
+| GBIS 23 | 일반형농어촌 | RURAL_LOCAL | 회색 (시내 색상 적용 범위 미확인) |
+| GBIS 30 | 마을 | VILLAGE | 노랑 |
+| GBIS 41 | 고속형시외 | INTERCITY_EXPRESS | 회색 (유형 공통색 미확인) |
+| GBIS 42 | 좌석형시외 | INTERCITY_SEAT | 회색 (유형 공통색 미확인) |
+| GBIS 43 | 일반형시외 | INTERCITY_LOCAL | 회색 (유형 공통색 미확인) |
+| GBIS 51 | 리무진공항 | AIRPORT_LIMOUSINE | 회색 (현행 유형 공통색 미확인) |
+| GBIS 52 | 좌석형공항 | AIRPORT_SEAT | 회색 (현행 유형 공통색 미확인) |
+| GBIS 53 | 일반형공항 | AIRPORT_LOCAL | 회색 (현행 유형 공통색 미확인) |
 
-Flutter 검색 화면은 이 표시 정책을 적용하며, 경기는 별도 확인 전 회색을 사용한다. `LOCAL`은 기존 호환 타입이고 현재 원본 매핑에서는 생성하지 않는다. GBIS는 노선명과 전체 정류장 순번·ID가 일치한 TAGO 노선에만 유형을 부여한다. GBIS 필드가 수집되지 않은 TAGO 단독 동기화는 기존 유형을 보존하며 수집된 미지원 값은 NULL로 갱신한다. 유형은 비교 및 승인 지문에 포함되므로 변경 전 승인 지문은 새 지문과 일치하지 않는다.
+`LOCAL`은 기존 호환 타입이고 현재 원본 매핑에서는 생성하지 않는다. GBIS는 노선명과 전체 정류장 순번·ID가 일치한 TAGO 노선에만 유형을 부여한다. GBIS 필드가 수집되지 않은 TAGO 단독 동기화는 기존 유형을 보존하며 수집된 미지원 값은 NULL로 갱신한다. 유형은 비교 및 승인 지문에 포함되므로 변경 전 승인 지문은 새 지문과 일치하지 않는다.
+
+#### Flutter 노선 검색 색상 근거 (2026-11-10 검증)
+
+카드는 응답의 `provider`와 `routeType`으로 위 표시색을 선택한다. 미확인 유형도 유형명은 표시하며, null·알 수 없는 유형 또는 제공자는 중립 회색을 사용한다. Light/Dark용 색상은 카드에서 읽기 쉽게 조정한 앱 RGB 값이다. 아래 Pantone은 차량 브랜드 자료의 표기다.
+
+- **11·12·13·30:** 2006년 경기도 브랜드 정책과 관악구 공개본(2020년 PDF 생성)의 AS 01이 각각 빨강(Pantone 1788 C), 파랑(Process Blue C), 초록(334 C), 노랑(130 C)을 명시한다. 경기도 현행 G-Bus 안내의 일반형·좌석형·직행좌석형 아이콘도 같은 색상 계열이다. [2006년 경기도 정책](https://gnews.gg.go.kr/briefing/brief_gongbo_view.do?BS_CODE=S017&number=415), [경기버스 브랜드 디자인 매뉴얼 AS 01](https://gwanak.go.kr/common/files/Download.do?cfGroup=ABBOARD&cfIdx=CF00103172&cfRename=c4e28ccf-d877-4995-be5f-a8452e555d65.pdf#page=12), [경기도 G-Bus 요금 안내](https://web1.gg.go.kr/contents/contents.do?ciIdx=629&menuId=2344)
+- **14:** 현행 GBIS 광역급행 목록과 남양주시 인허가 노선표를 대조했다. 인허가 표의 광역 표시와 M2352 번호는 빨간색이다. 도청 요금 안내의 광역급행 차량 아이콘은 파랑 계열이므로 카드의 빨강은 GBIS 노선 안내의 분류색으로 적용한다. [GBIS 광역급행 목록](https://www.gbis.go.kr/service/busInfo/wideExprBus.action?cmd=wideExprAuto), [GBIS 남양주시 인허가 노선표](https://www.gbis.go.kr/service/busInfo/metroBus.action?centerId=4136000000&cmd=metroBusList), [경기도 G-Bus 요금 안내](https://web1.gg.go.kr/contents/contents.do?ciIdx=629&menuId=2344)
+- **16:** 도청 현행 요금 안내에서 경기순환은 별도 유형이며 직행좌석과 같은 빨간 아이콘을 사용한다. 2014년 기준 경기순환 목록에 있는 8106은 현행 성남시 GBIS 인허가 표와 개발 DB에서는 직행좌석형이다. 앱은 8106에 실제 저장된 `CITY_EXPRESS_SEAT`를 사용한다. [경기도 G-Bus 요금 안내](https://web1.gg.go.kr/contents/contents.do?ciIdx=629&menuId=2344), [GBIS 경기순환 과거 목록](https://www.gbis.go.kr/service/busInfo/loopBus.action?cmd=loop), [GBIS 성남시 인허가 노선표](https://www.gbis.go.kr/service/busInfo/metroBus.action?centerId=4113000000&cmd=metroBusList)
+- **15:** 2015년 따복버스 자료는 당시 시범 차량을 보여준다. 현행 코드 15 전체에 자주·보라 계열을 적용하는 기준은 확인하지 못했다. [2015년 경기도 따복버스 시범운행](https://gnews.gg.go.kr/news/news_detail.do?number=201508131656527055C048&s_code=)
+- **21·22·23:** GBIS는 농어촌 유형에 별도 코드를 부여한다. 위 브랜드 자료의 빨강·파랑·초록 지정은 시내 유형에 한정되며 농어촌의 각 대응 유형에 확대하는 경기도 공통 지침은 확인하지 못했다. [GBIS 기반정보 명세](https://www.gbis.go.kr/gbis2014/publicService.action?cmd=mBaseInfo), [경기버스 브랜드 디자인 매뉴얼 AS 01](https://gwanak.go.kr/common/files/Download.do?cfGroup=ABBOARD&cfIdx=CF00103172&cfRename=c4e28ccf-d877-4995-be5f-a8452e555d65.pdf#page=12)
+- **41·42·43:** GBIS 명세는 세 가지 시외 운행 유형을 구분하지만, 현행 노선 안내는 도착정보 대상 시외버스를 공통 표기 `R`로 묶는다. 각 코드에 적용되는 경기도 통일색은 확인하지 못했다. [GBIS 기반정보 명세](https://www.gbis.go.kr/gbis2014/publicService.action?cmd=mBaseInfo), [GBIS 시외 노선 안내](https://www.gbis.go.kr/service/busInfo/outBus.action?cmd=outBusList2)
+- **51·52·53:** 2006년 매뉴얼 AS 01에 공항버스용 Premium Brown이 있으나, 이후 디자인 매뉴얼 AS 01에는 공항 유형이 없고 현행 GBIS 공항 노선 안내에도 세 유형을 통틀어 적용하는 갈색 기준이 없다. 2006년 차량 디자인의 현행 적용 범위는 미확인이다. [2006년 경기버스 브랜드 적용 매뉴얼](https://memory.library.kr/files/original/8339897d6a2d45c233e6d3d6184b4b81.pdf#page=18), [경기버스 브랜드 디자인 매뉴얼 AS 01](https://gwanak.go.kr/common/files/Download.do?cfGroup=ABBOARD&cfIdx=CF00103172&cfRename=c4e28ccf-d877-4995-be5f-a8452e555d65.pdf#page=12), [GBIS 공항 노선 안내](https://www.gbis.go.kr/service/busInfo/airpGimpoBus.action?cmd=airpGimpo)
+- **별도 브랜드:** 2026년 경기 편하G버스 보라색은 좌석예약 서비스의 외관 개편이다. GBIS `routeTypeCd`와 앱의 정규화 유형에는 해당 브랜드를 식별하는 코드가 없어 브랜드 색상을 적용하지 않는다. [경기도 편하G버스 보도자료](https://gnews.gg.go.kr/briefing/brief_gongbo_view.do?BS_CODE=s017&number=71655), [GBIS 기반정보 명세](https://www.gbis.go.kr/gbis2014/publicService.action?cmd=mBaseInfo)
 
 원본 행은 `source_system`(SEOUL_TDATA/TAGO/GBIS), `data_kind`(ROUTE/STOP/OCCURRENCE), `source_key` 복합 UNIQUE로 식별한다. JSON 객체, nullable 원본 버전, 수집 시각과 갱신 시각을 저장한다. 기존 Route/Stop/Occurrence 중 같은 종류의 nullable FK 하나로 연결하며 FK 삭제 시 연결만 NULL이 되고 원본은 보존된다. 경유 source key는 제공기관의 노선과 순번을 모호하지 않게 인코딩해야 하며 내부 occurrence ID로 취급하지 않는다. 서울 서비스 범위 밖의 원본은 연결 없이 저장할 수 있다.
 

@@ -2,6 +2,21 @@ import 'package:flutter/material.dart';
 
 import 'bus_route.dart';
 
+// Search accents based on the official color families, adjusted for card text.
+const _gyeonggiRed = (light: Color(0xffb92232), dark: Color(0xffffa8ad));
+const _gyeonggiBlue = (light: Color(0xff006493), dark: Color(0xff87ceff));
+const _gyeonggiGreen = (light: Color(0xff007351), dark: Color(0xff79deb4));
+const _gyeonggiYellow = (light: Color(0xff876000), dark: Color(0xffffd26f));
+
+const _gyeonggiRouteColors = {
+  'CITY_EXPRESS_SEAT': _gyeonggiRed,
+  'CITY_SEAT': _gyeonggiBlue,
+  'CITY_LOCAL': _gyeonggiGreen,
+  'CITY_METRO_EXPRESS': _gyeonggiRed,
+  'GYEONGGI_CIRCULAR': _gyeonggiRed,
+  'VILLAGE': _gyeonggiYellow,
+};
+
 /// Presentation of normalized types; colors are only assigned where verified.
 class BusRoutePresentation {
   const BusRoutePresentation(this.label, this.color);
@@ -56,7 +71,11 @@ class BusRoutePresentation {
         'AIRPORT_LOCAL' => '일반형공항',
         _ => null,
       };
-      return BusRoutePresentation(label, neutral);
+      final colors = _gyeonggiRouteColors[route.routeType];
+      return BusRoutePresentation(
+        label,
+        (dark ? colors?.dark : colors?.light) ?? neutral,
+      );
     }
     return BusRoutePresentation(null, neutral);
   }

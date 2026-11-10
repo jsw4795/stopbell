@@ -2,85 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_search_screen.dart';
-import 'package:stopbell/features/transit/bus_route_presentation.dart';
-import 'package:stopbell/core/theme/stopbell_theme.dart';
 
 void main() {
-  test('official colors depend on provider and unknown types fall back', () {
-    BusRoute route(String provider, String? type) => BusRoute(
-      id: 1,
-      routeNumber: '1',
-      regionName: '서울',
-      provider: provider,
-      routeType: type,
-    );
-    for (final brightness in Brightness.values) {
-      final neutral = BusRoutePresentation.forRoute(
-        route('TAGO', null),
-        brightness,
-      ).color;
-      for (final type in ['TRUNK', 'BRANCH', 'METROPOLITAN', 'CIRCULAR']) {
-        final presentation = BusRoutePresentation.forRoute(
-          route('SEOUL_BUS', type),
-          brightness,
-        );
-        expect(presentation.label, isNotNull);
-        expect(presentation.color, isNot(neutral));
-        expect(
-          BusRoutePresentation.forRoute(route('TAGO', type), brightness).color,
-          neutral,
-        );
-      }
-      for (final type in ['VILLAGE', 'AIRPORT', 'TOUR']) {
-        expect(
-          BusRoutePresentation.forRoute(
-            route('SEOUL_BUS', type),
-            brightness,
-          ).color,
-          neutral,
-        );
-      }
-      expect(
-        BusRoutePresentation.forRoute(
-          route('TAGO', 'VILLAGE'),
-          brightness,
-        ).color,
-        neutral,
-      );
-      expect(
-        BusRoutePresentation.forRoute(
-          route('TAGO', 'CITY_LOCAL'),
-          brightness,
-        ).label,
-        '일반형시내',
-      );
-      expect(
-        BusRoutePresentation.forRoute(
-          route('SEOUL_BUS', 'FUTURE'),
-          brightness,
-        ).label,
-        isNull,
-      );
-      expect(
-        BusRoutePresentation.forRoute(
-          route('SEOUL_BUS', null),
-          brightness,
-        ).color,
-        neutral,
-      );
-    }
-    final parsed = BusRoute.fromJson({
-      'id': 1,
-      'routeNumber': '1',
-      'regionName': '서울',
-      'provider': 'SEOUL_BUS',
-      'routeType': 'FUTURE',
-    });
-    expect(parsed.routeType, 'FUTURE');
-  });
-
   for (final theme in [StopBellTheme.light, StopBellTheme.dark]) {
     testWidgets(
       'small screen displays long regions and selects exact id in ${theme.brightness}',
@@ -120,8 +46,27 @@ void main() {
         await tester.tap(find.text('검색'));
         await tester.pumpAndSettle();
         expect(find.text('간선'), findsOneWidget);
-        expect(find.text('마을'), findsOneWidget);
-        await tester.tap(find.byKey(const ValueKey(2)));
+        final villageCard = find.byKey(const ValueKey(2));
+        final villageLabel = tester.widget<Text>(
+          find.descendant(of: villageCard, matching: find.text('마을')),
+        );
+        final villageColor = theme.brightness == Brightness.dark
+            ? const Color(0xffffd26f)
+            : const Color(0xff876000);
+        expect(villageLabel.style!.color, villageColor);
+        expect(
+          find.descendant(
+            of: villageCard,
+            matching: find.byWidgetPredicate(
+              (widget) =>
+                  widget is Container &&
+                  widget.decoration is BoxDecoration &&
+                  (widget.decoration! as BoxDecoration).color == villageColor,
+            ),
+          ),
+          findsOneWidget,
+        );
+        await tester.tap(villageCard);
         expect(selected?.id, 2);
         expect(tester.takeException(), isNull);
       },

@@ -67,7 +67,8 @@
 
 수집 CLI 진행 표시와 결과 요약을 구현했다. Provider별 Replay·게시, TAGO 완료 도시·노선 수, HTTP 시도와 저장 응답 수를 구분한다. [로컬 실행 지침](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)
 
-1. Flutter UI-2 공식 노선 유형·색상 및 검색 화면 구현과 관련 자동 검증을 완료했다. 서울 원본 공란과 GBIS 코드 `50`은 미분류로 유지하고 노선번호로 추정하지 않는다. 실제 iPhone 확인은 남아 있다.
+1. Flutter UI-2 공식 노선 유형·색상 및 검색 화면 구현을 완료했다. 경기도 16개 유형을 검토해 근거가 확인된 6개 유형의 색상을 적용했으며 관련 Flutter 테스트 79개를 통과했다. [표시색 근거](database.md#flutter-노선-검색-색상-근거-2026-11-10-검증)
+   - 개발 DB에서 경기 165번(광주시·남양주시)은 `CITY_LOCAL` 초록, 남양주시 M2352는 `CITY_METRO_EXPRESS` 빨강, 성남시 8106은 `CITY_EXPRESS_SEAT` 빨강, 파주시 101번은 `CITY_SEAT` 파랑으로 대조했다. 경기 `VILLAGE` 노랑은 현재 개발 DB에 해당 행이 없어 자동 테스트로 확인했다. 서울 원본 공란과 GBIS 코드 `50`은 미분류로 유지한다. 실제 iPhone 확인은 남아 있다.
 2. Flutter UI-3~UI-8을 순차 진행하고 통합 검증한다. Phase 3-B의 운영 적용과 별도 검증 책임은 남는다.
 
 ### Flutter UI/UX 전면 리뉴얼 유지
