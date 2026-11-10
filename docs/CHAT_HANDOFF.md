@@ -35,6 +35,8 @@
 
 2026-11-10 개발 DB에 공식 유형만 보강했다. 사용자 승인 후 동일 트랜잭션에서 Preview와 후보별 검증을 다시 수행하고 `bus_routes.route_type` 2,809건(서울 705, TAGO 2,104)을 갱신·commit했다. 전체 Route 2,888개 중 서울 원본 공란 15개와 GBIS 미지원 코드 `50` 64개는 NULL로 유지했다. Route의 다른 필드와 비대상 테이블을 트랜잭션 전후 지문 및 commit 후 주요 테이블 체크섬으로 확인했고 Raw·Stop·Occurrence·Alarm·BoardingSession·동기화 완료 시각은 변경하지 않았다. 적용 전 백업 `~/GPT_Codex_Project/stopbell-db-backups/stopbell-route-type-preflight-20261110-014037.sql.gz`는 SHA-256 `ad6e45a3362c677ff69d6b825b4b719370c8e2b3cfbb82e899a7a6f0b94185fc`이며 gzip과 격리 MySQL 복원을 검증했다.
 
+4단계 최종 확인에서는 유형 보강용 백업 파일이 지정된 백업 폴더에 없었다. 위 해시와 복원 결과는 생성 당시 기록이다. 현재 같은 폴더에서 확인한 백업은 `stopbell-20261110-001404.sql.gz`와 `stopbell-20261110-025545.sql.gz` 두 개다.
+
 위 유형 보강 당시에는 서울 전체 동기화를 수행하지 않았으며 `SEOUL_BUS` 완료 시각도 유지됐다. 이후 아래 별도 실행으로 서울 개발 DB를 최신화했다.
 
 ### 서울버스 개발 DB 전체 동기화 (2026-11-10)
@@ -53,12 +55,19 @@
 
 적용 전 백업 `~/GPT_Codex_Project/stopbell-db-backups/stopbell-20261110-025545.sql.gz`는 약 14 MB, SHA-256 `25cabf44039131e4fd3cec9ec36e71c3e5cdca48ba037b50735a3c49ee5e0d83`이다. Docker MySQL 내부 root `mysqldump`와 gzip 무결성 검사는 성공했으나 격리 MySQL 복원 테스트는 미실행이다. 백업 절차는 [Local Development](local-development.md)를 따른다.
 
+### 수집 데이터 폴더 정리 완료
+
+1단계에서 로컬 파일과 코드의 경로 의존성을 조사했다. 2단계에서 TAGO·GBIS 완료 Bundle, 미완료 7개와 진단 1개를 새 구조에 복사했다. 3단계(`26b3f10`)에서 Provider별 KST 시작 시각을 기준으로 임시 저장·Replay 검증 후 최종 게시를 자동화하고 진단 경로를 분리했다. Codex 보고 기준 집중 테스트 71개가 통과했다.
+
+4단계에서 원본과 사본 2,525개(43,905,809 B)의 파일 목록·권한·크기·SHA-256과 Manifest를 재확인했다. 현재 코드로 기존 경로와 새 경로의 TAGO·GBIS 개별 및 통합 Offline Replay가 모두 일치했다. 원본 `2026-11-09-live/`, DB 아카이브 4,407개 및 서울 CSV 3종은 보존했다. DB 행 전체 대조, 새 구조의 실제 Live 수집, 프로세스 강제 종료 테스트는 수행하지 않았다.
+
+수집 루트는 `~/GPT_Codex_Project/stopbell-collections/`다. TAGO의 새 경로는 `2026-11-09/TAGO/185909/02cf0436-9b59-4afb-a796-7c41737a1218/`, GBIS는 `2026-11-09/GBIS/174820/90f6ce9d-c9d7-4a2d-a3ec-238961d8f1e7/`다. 같은 루트의 저장소 외부 `README.md`에서 구조와 보존 지침을 확인할 수 있다.
+
 ### 현재 우선순위와 남은 작업
 
-1. 수집 데이터 폴더 구조를 정리한다. 기존 TAGO·GBIS 완료 Bundle, diagnostics, 미완료 결과와 서울 Bootstrap 원본 아카이브를 대상으로 한다. 목표와 보존 제약은 [로드맵](roadmap.md#저장-구조와-기존-bundle-이전)을 따른다.
-2. 수집기 편의 기능을 개선한다.
-3. Flutter UI-2 공식 노선 유형·색상 및 검색 화면을 진행한다. 서울 원본 공란과 GBIS 코드 `50`은 미분류로 유지하고 노선번호로 추정하지 않는다.
-4. Flutter UI-3~UI-8을 순차 진행하고 통합 검증한다. Phase 3-B의 운영 적용과 별도 검증 책임은 남는다.
+1. 수집기 편의 기능을 개선한다.
+2. Flutter UI-2 공식 노선 유형·색상 및 검색 화면을 진행한다. 서울 원본 공란과 GBIS 코드 `50`은 미분류로 유지하고 노선번호로 추정하지 않는다.
+3. Flutter UI-3~UI-8을 순차 진행하고 통합 검증한다. Phase 3-B의 운영 적용과 별도 검증 책임은 남는다.
 
 ### Flutter UI/UX 전면 리뉴얼 유지
 

@@ -38,13 +38,13 @@ TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 �
 
 ## 향후 수집 데이터 관리 개선 계획
 
-서울·경기 개발 DB 최신화는 완료됐다. 다음은 수집 데이터 폴더 구조 정리, 수집기 편의 기능 개선, Flutter UI-2, UI-3~UI-8 순서다. 기존 Bundle 생성·재생 및 안전성 경계는 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다. 아래는 미구현 계획이며 세부 구현과 검증은 착수 시 결정한다.
+서울·경기 개발 DB 최신화와 로컬 수집 폴더 구조 정리를 완료했다. 다음은 수집기 편의 기능 개선, Flutter UI-2, UI-3~UI-8 순서다. Bundle 생성·재생과 실패 처리 계약은 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다.
 
 ### 저장 구조와 기존 Bundle 이전
 
-- `stopbell-collections/<날짜>/<TAGO 또는 GBIS>/<수집 시작 시각>/<고유 ID>/` 순서로 관리한다. 마지막 Bundle 디렉터리 이름은 Manifest ID와 정확히 일치시킨다. 시각 표기와 시간대는 구현 시 정한다.
-- 목표 경로는 `stopbell-collections/YYYY-MM-DD/{TAGO,GBIS}/HHmmss/<Bundle UUID>/`이며 날짜별 `diagnostics/`, 최상위 `README.md`, `incomplete/`, `metadata-admin-archive/`를 유지한다. 진단 파일의 민감 파일 접근·보존 경계도 유지한다.
-- 기존 TAGO·GBIS 완료 Bundle, diagnostics, 미완료 결과와 서울 Bootstrap 원본 아카이브를 대상으로 한다. 원본을 보존한 채 복사하고 Bundle UUID·Manifest ID, 파일 SHA-256과 오프라인 replay를 검증하며 DB 수집 이력과 아카이브 참조를 보존한다. 검증 전 원본을 삭제하지 않고 기존 파일을 덮어쓰지 않으며 Provider API를 재호출하지 않는다. 참조와 이전 결과 검증 후에만 기존 사본의 정리 여부를 결정한다.
+- 신규 수집은 `stopbell-collections/YYYY-MM-DD/{TAGO,GBIS}/HHmmss/<Bundle UUID>/`에 게시한다. 날짜와 시각은 Provider별 시작 시각을 KST로 변환하며 마지막 디렉터리 이름은 Manifest ID와 일치한다. 날짜별 `diagnostics/`, 최상위 `README.md`, `incomplete/`, `metadata-admin-archive/`를 유지한다.
+- 기존 완료 Bundle 2개, 미완료 7개, 진단 1개를 원본 보존 후 복사했다. 파일 SHA-256, UUID·Manifest 일치, 기존·새 경로 Offline Replay를 확인했다. 진단 원본의 접근 제한을 유지하고, 원본 정리는 별도 승인을 거친다.
+- 서울 공식 CSV와 백업은 각각 기존 외부 폴더에 유지한다. DB 아카이브의 파일명·루트를 보존했으며 DB 참조 전체 대조와 운영 적용은 이번 검증 범위 밖이다.
 
 ### 수집기 개선 범위
 

@@ -791,7 +791,7 @@ Backend 디렉터리에서 환경변수 `PUBLIC_DATA_SERVICE_KEY`에 키를 주�
 - 수집 중 및 게시 실패 결과는 `incomplete/YYYY-MM-DD/<UUID>/`에 남는다.
 - 수집과 기존 검증이 끝나면 Manifest를 기록하고 개별 Replay를 확인한 뒤 `YYYY-MM-DD/{TAGO,GBIS}/HHmmss/<UUID>/`에 게시한다. UUID 목적지를 먼저 확보하고 같은 파일시스템에서 디렉터리를 원자적으로 이동한다. 같은 초의 수집도 UUID로 구분된다. 기존 목적지가 있거나 원자적 이동이 불가능하면 실패하고 원본을 유지한다.
 - 실패 요약의 Provider별 `Manifest`, `Complete`, `Published` 필드는 각각 Manifest 기록, 개별 Replay 검증, 최종 경로 게시를 표시한다. Manifest가 있는 게시 실패 결과는 보고된 staging 경로에 보존된다. 프로세스가 목적지 확보 직후 중단되면 빈 목적지가 남을 수 있으며, 완료 판정에는 Manifest와 Replay 검증이 필요하다.
-- GBIS는 TAGO 시작 전에 독립 게시된다. 통합 Replay가 실패해도 이미 게시된 Bundle은 보존한다. `--gbis-bundle`은 기존 구조와 새 구조의 완료 Bundle을 현재 경로에서 읽고, 재사용한 GBIS에는 이동·복사·수정을 수행하지 않는다. 기존 수집 데이터와 DB 아카이브는 현재 경로에 유지한다.
+- GBIS는 TAGO 시작 전에 독립 게시된다. 통합 Replay가 실패해도 이미 게시된 Bundle은 보존한다. `--gbis-bundle`은 기존 구조와 새 구조의 완료 Bundle을 현재 경로에서 읽고, 재사용한 GBIS에는 이동·복사·수정을 수행하지 않는다. 기존 수집 데이터와 DB 아카이브는 현재 경로에 유지한다. 로컬 수집 루트의 `README.md`는 완료 Bundle 경로와 보존 절차를 안내하며 Git 저장소 밖에 있다.
 
 TAGO에서 성공 HTTP 본문을 받은 뒤 JSON 파싱 또는 응답 구조 검사가 실패하거나 세션 부족 재시도가 소진되면 실패 시각의 KST 날짜 아래 `YYYY-MM-DD/diagnostics/tago-diagnostic-*/`에 `response.bin` 원본과 `request.txt` 요청·실패 정보를 별도로 저장한다. 디렉터리는 `0700`, 파일은 `0600`이며 기존 Bundle에는 포함하지 않는다. 원본은 인증정보를 포함할 수 있으므로 민감한 로컬 파일로 취급하고 실행자가 접근과 보존을 관리한다. CLI는 본문이나 키 대신 요청 식별자와 저장 경로를 출력한다. 현재 HTTP 전송 경계는 정확한 성공 상태 코드를 전달하지 않아 `2xx`로만 표시한다. 저장이 실패하거나 본문을 받지 못하면 그 상태를 표시하고 원래 실패 코드를 유지한다. 클라이언트 재사용이 Provider 세션 부족을 해결한다는 보장은 없다.
 
