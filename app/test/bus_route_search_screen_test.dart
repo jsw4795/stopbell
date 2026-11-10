@@ -127,7 +127,7 @@ void main() {
         ),
       );
       Finder tab(String label) => find.widgetWithText(ChoiceChip, label);
-      expect(tester.widget<ChoiceChip>(tab('전체')).selected, isTrue);
+      expect(find.byType(ChoiceChip), findsNothing);
       await tester.enterText(find.byType(TextField), '165');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
@@ -168,7 +168,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byTooltip('검색어 지우기'), findsNothing);
       expect(find.text('노선번호를 입력해 검색하세요.'), findsOneWidget);
-      expect(tab('서울'), findsNothing);
+      expect(find.byType(ChoiceChip), findsNothing);
       expect(queries, ['165', '16']);
 
       await tester.enterText(find.byType(TextField), '999');
@@ -258,6 +258,7 @@ void main() {
       await tester.tap(find.text('검색'));
       await tester.pump();
       expect(find.text('노선 검색 중...'), findsOneWidget);
+      expect(find.byType(ChoiceChip), findsNothing);
       expect(
         tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
         isNull,
@@ -291,7 +292,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('검색 결과가 없습니다.'), findsOneWidget);
     expect(find.text('노선 검색에 실패했습니다.'), findsNothing);
-    expect(find.byType(ChoiceChip), findsOneWidget);
+    expect(find.byType(ChoiceChip), findsNothing);
   });
 
   testWidgets('network failure shows retry with the last normalized query', (
@@ -324,6 +325,7 @@ void main() {
     await tester.tap(find.text('검색'));
     await tester.pumpAndSettle();
     expect(find.text('노선 검색에 실패했습니다.'), findsOneWidget);
+    expect(find.byType(ChoiceChip), findsNothing);
     expect(find.textContaining('internal detail'), findsNothing);
 
     await tester.enterText(find.byType(TextField), 'N26');

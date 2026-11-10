@@ -114,31 +114,33 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
             onPressed: loading ? null : _search,
             child: const Text('검색'),
           ),
-          const SizedBox(height: StopBellSpacing.xs),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final category in _categories)
-                  Padding(
-                    padding: const EdgeInsets.only(right: StopBellSpacing.sm),
-                    child: ChoiceChip(
-                      key: ValueKey(category),
-                      label: Text(category ?? '전체'),
-                      selected: category == _selectedCategory,
-                      selectedColor: Theme.of(context)
-                          .colorScheme
-                          .primaryContainer,
-                      showCheckmark: false,
-                      onSelected: (_) => setState(() {
-                        _selectedCategory = category;
-                      }),
+          if (_state == _SearchState.success) ...[
+            const SizedBox(height: StopBellSpacing.xs),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final category in _categories)
+                    Padding(
+                      padding: const EdgeInsets.only(right: StopBellSpacing.sm),
+                      child: ChoiceChip(
+                        key: ValueKey(category),
+                        label: Text(category ?? '전체'),
+                        selected: category == _selectedCategory,
+                        selectedColor: Theme.of(context)
+                            .colorScheme
+                            .primaryContainer,
+                        showCheckmark: false,
+                        onSelected: (_) => setState(() {
+                          _selectedCategory = category;
+                        }),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: StopBellSpacing.xs),
+            const SizedBox(height: StopBellSpacing.xs),
+          ],
           Expanded(child: _buildResults()),
         ],
       ),
