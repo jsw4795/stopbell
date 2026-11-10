@@ -325,7 +325,7 @@ void main() {
     await tester.enterText(find.byType(TextField), '7000');
     await tester.tap(find.text('검색'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('수원시'));
+    await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pumpAndSettle();
     expect(ids, [754]);
     expect(find.text('7000'), findsOneWidget);
@@ -356,7 +356,7 @@ void main() {
     await tester.enterText(find.byType(TextField), '7000');
     await tester.tap(find.text('검색'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('수원시'));
+    await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pump();
     expect(find.text('정류장 조회 중...'), findsOneWidget);
     await tester.tap(find.text('로그아웃'));
@@ -523,7 +523,7 @@ void main() {
         await tester.enterText(find.byType(TextField), '7000');
         await tester.tap(find.text('검색'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('수원시'));
+        await tester.tap(find.byKey(const ValueKey(754)));
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const ValueKey(12345)));
         await tester.pump();
@@ -640,7 +640,7 @@ void main() {
     await tester.enterText(find.byType(TextField), '7000');
     await tester.tap(find.text('검색'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('수원시'));
+    await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey(12345)));
     await tester.pump();

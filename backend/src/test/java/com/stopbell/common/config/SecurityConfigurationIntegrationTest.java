@@ -38,6 +38,7 @@ import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
 import com.stopbell.transit.repository.BusStopRepository;
 import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
 import com.stopbell.transit.repository.TransitMetadataCollectionRunRepository;
+import com.stopbell.transit.repository.TransitSourceMetadataRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -335,6 +336,11 @@ class SecurityConfigurationIntegrationTest {
         @Bean
         BusRouteRepository busRouteRepository() {
             return mock(BusRouteRepository.class);
+        }
+
+        @Bean
+        TransitSourceMetadataRepository transitSourceMetadataRepository() {
+            return mock(TransitSourceMetadataRepository.class);
         }
 
         @Bean

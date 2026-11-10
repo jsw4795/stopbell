@@ -20,6 +20,7 @@ import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
 import com.stopbell.transit.repository.BusStopRepository;
 import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
 import com.stopbell.transit.repository.TransitMetadataCollectionRunRepository;
+import com.stopbell.transit.repository.TransitSourceMetadataRepository;
 
 import static org.mockito.Mockito.mock;
 
@@ -98,6 +99,11 @@ class StopBellApplicationTests {
         @Bean
         BusRouteRepository busRouteRepository() {
             return mock(BusRouteRepository.class);
+        }
+
+        @Bean
+        TransitSourceMetadataRepository transitSourceMetadataRepository() {
+            return mock(TransitSourceMetadataRepository.class);
         }
 
         @Bean
