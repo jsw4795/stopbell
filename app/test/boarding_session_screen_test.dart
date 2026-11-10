@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
+import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
 import 'package:stopbell/features/boarding/boarding_candidates.dart';
 import 'package:stopbell/features/boarding/boarding_candidate_client.dart';
@@ -34,16 +35,85 @@ void main() {
         });
         await tester.pumpWidget(
           MaterialApp(
-            home: Scaffold(body: BoardingSessionDetails(session: s)),
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: BoardingSessionDetails(session: s),
+              ),
+            ),
           ),
         );
-        expect(find.text('목적지 목적 정류장 · 노선 순서 9'), findsOneWidget);
+        expect(find.text('목적 정류장'), findsOneWidget);
         expect(find.text('알림 시점: 1정거장 전 · 세션당 한 번'), findsOneWidget);
         expect(find.text('준비 알림: ${entry.value}'), findsOneWidget);
         expect(find.textContaining('목적지 알림: ON'), findsNothing);
       },
     );
   }
+  for (final theme in [StopBellTheme.light, StopBellTheme.dark]) {
+    testWidgets(
+      'detail fits a narrow screen with large text in ${theme.brightness}',
+      (tester) async {
+        tester.view.physicalSize = const Size(320, 600);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: theme,
+            home: MediaQuery(
+              data: const MediaQueryData(
+                size: Size(320, 600),
+                textScaler: TextScaler.linear(2),
+              ),
+              child: Scaffold(
+                body: ListView(
+                  children: [BoardingSessionDetails(session: sessionFixture())],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.drag(find.byType(ListView), const Offset(0, -1500));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('하차 준비 알림'), findsOneWidget);
+      },
+    );
+  }
+  testWidgets('uncertain response hides an otherwise valid gap', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(
+            children: [
+              BoardingSessionDetails(
+                session: sessionFixture(gap: 3),
+                stateUncertain: true,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.text('상태 확인 필요'), findsOneWidget);
+    expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
+  });
+  testWidgets('ready without a gap does not invent progress', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(
+            children: [
+              BoardingSessionDetails(session: sessionFixture(gap: null)),
+            ],
+          ),
+        ),
+      ),
+    );
+    expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
+  });
   late AuthSession auth;
   late FakeBoardingSessions api;
   late MemoryBoardingIntents storage;
@@ -283,7 +353,7 @@ void main() {
           sessionFixture(status: 'EXPIRED', evaluation: 'ENDED', gap: null);
       await tap(tester, '원래 생성 요청 그대로 재시도');
       expect(api.creations.last, original);
-      expect(find.textContaining('EXPIRED ·'), findsOneWidget);
+      expect(find.textContaining('세션 수명 만료'), findsOneWidget);
     },
   );
   testWidgets(
@@ -299,7 +369,7 @@ void main() {
       expect(api.requestCalls, 1);
       expect(api.currentCalls, 0);
       expect(api.creations, isEmpty);
-      expect(find.textContaining('COMPLETED ·'), findsOneWidget);
+      expect(find.textContaining('추적 종료'), findsOneWidget);
       expect(find.textContaining('실제 승객 하차 확인을 뜻하지'), findsOneWidget);
     },
   );
@@ -329,7 +399,7 @@ void main() {
       );
       await tap(tester, '결과 다시 조회');
       expect(find.byType(BoardingSessionView), findsOneWidget);
-      expect(find.textContaining('RECOVERY_PENDING'), findsOneWidget);
+      expect(find.textContaining('현재 차량 진행 정보를 다시 확인'), findsOneWidget);
       expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
     },
   );
@@ -366,7 +436,14 @@ void main() {
           gap: null,
         );
         await pump(tester);
-        expect(find.textContaining('$status ·'), findsOneWidget);
+        expect(
+          find.text(switch (status) {
+            'COMPLETED' => '추적 종료',
+            'CANCELLED' => '사용자 취소로 종료',
+            _ => '세션 수명 만료',
+          }),
+          findsOneWidget,
+        );
         expect(find.text('추적 취소'), findsNothing);
         expect(find.text('동일 차량 다시 확인'), findsNothing);
       },
@@ -384,7 +461,7 @@ void main() {
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
       expect(api.cancellations, [(123, 8)]);
-      expect(find.textContaining('CANCELLED ·'), findsOneWidget);
+      expect(find.textContaining('사용자 취소로 종료'), findsOneWidget);
     },
   );
   testWidgets(
@@ -403,8 +480,8 @@ void main() {
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
       expect(api.detailCalls, 1);
-      expect(find.textContaining('EXPIRED ·'), findsOneWidget);
-      expect(find.textContaining('CANCELLED ·'), findsNothing);
+      expect(find.textContaining('세션 수명 만료'), findsOneWidget);
+      expect(find.textContaining('사용자 취소로 종료'), findsNothing);
     },
   );
   testWidgets(
@@ -448,7 +525,7 @@ void main() {
       await confirm(tester, reconfirm: true);
       expect(api.reconfirmations, [(123, 5, 'fresh-reference', '서울70사1234')]);
       expect(api.creations, isEmpty);
-      expect(find.textContaining('RECOVERY_PENDING'), findsOneWidget);
+      expect(find.textContaining('현재 차량 진행 정보를 다시 확인'), findsOneWidget);
     },
   );
   testWidgets(
@@ -495,7 +572,7 @@ void main() {
       await tap(tester, '추적 취소 확인');
       old.complete(sessionFixture(revision: 5));
       await tester.pumpAndSettle();
-      expect(find.textContaining('CANCELLED ·'), findsOneWidget);
+      expect(find.textContaining('사용자 취소로 종료'), findsOneWidget);
     },
   );
   testWidgets('logout during POST and disposal never show late old session', (

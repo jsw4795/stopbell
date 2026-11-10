@@ -150,10 +150,10 @@ void main() {
           ),
         ),
       );
-      expect(find.textContaining('TRACKING · 선택한 차량 추적 중'), findsOneWidget);
-      expect(find.textContaining('차량 위치 확인 중 · 선택한 차량'), findsOneWidget);
+      expect(find.textContaining('선택한 차량 추적 중'), findsOneWidget);
+      expect(find.textContaining('차량 위치 확인 중 · 위치 근거'), findsOneWidget);
       expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
-      expect(find.textContaining('마지막 검증 checkpoint 관측 시각'), findsNothing);
+      expect(find.textContaining('마지막 검증 관측 시각'), findsNothing);
     },
   );
   testWidgets(

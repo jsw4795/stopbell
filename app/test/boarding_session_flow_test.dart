@@ -187,7 +187,7 @@ void main() {
       await tap(tester, '하차 알림 등록');
       await tap(tester, '알림 없이 계속');
       expect(find.byType(BoardingSessionView), findsOneWidget);
-      expect(find.textContaining('TRACKING · 선택한 차량 추적 중'), findsOneWidget);
+      expect(find.textContaining('선택한 차량 추적 중'), findsOneWidget);
       expect(find.textContaining('차량 위치 확인 중'), findsWidgets);
       expect(find.textContaining('VERIFYING'), findsNothing);
       expect(find.text('추적 취소'), findsOneWidget);
@@ -249,7 +249,7 @@ void main() {
       );
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
-      expect(find.textContaining('CANCELLED ·'), findsOneWidget);
+      expect(find.textContaining('사용자 취소로 종료'), findsOneWidget);
       notifications.receive({
         'type': 'ALARM_EVENT',
         'alarmId': '15',
@@ -282,7 +282,7 @@ void main() {
       };
       await tap(tester, '버스 도착 알림으로');
       await tap(tester, '하차 알림 · 차량 후보 찾기');
-      expect(find.textContaining('EXPIRED ·'), findsOneWidget);
+      expect(find.textContaining('세션 수명 만료'), findsOneWidget);
       expect(
         requests.where(
           (r) =>

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_colors.dart';
 import 'boarding_candidates_view.dart';
 import 'boarding_session.dart';
 import 'boarding_session_controller.dart';
@@ -111,80 +112,160 @@ class BoardingSessionDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = session;
+    final theme = Theme.of(context);
+    final colors = StopBellColors.of(context);
+    final status = switch (s.status) {
+      BoardingSessionStatus.tracking => '선택한 차량 추적 중',
+      BoardingSessionStatus.suspended => '추적 보류',
+      BoardingSessionStatus.completed => '추적 종료',
+      BoardingSessionStatus.cancelled => '사용자 취소로 종료',
+      BoardingSessionStatus.expired => '세션 수명 만료',
+      BoardingSessionStatus.unknown => '알 수 없는 세션 상태 · 확인 필요',
+    };
+    final statusColor =
+        stateUncertain || s.status == BoardingSessionStatus.suspended
+        ? colors.heldTracking
+        : s.status == BoardingSessionStatus.tracking
+        ? colors.activeTracking
+        : theme.colorScheme.onSurfaceVariant;
+    final progress =
+        !stateUncertain &&
+        s.status == BoardingSessionStatus.tracking &&
+        s.evaluationStatus == BoardingEvaluation.ready &&
+        s.remainingOccurrenceGap != null;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('노선 ${s.routeNumber}'),
-        Text('차량 ${s.vehicleNumber}'),
-        Text('목적지 ${s.targetName} · 노선 순서 ${s.targetOrder}'),
-        Text(
-          s.notificationOffsetStops == null
-              ? '기존 정책 · 사전 알림: ${s.prepareNotificationEnabled ? 'ON' : 'OFF'} · 목적지 알림: ON'
-              : '알림 시점: ${s.notificationOffsetStops}정거장 전 · 세션당 한 번',
+        _DetailCard(
+          children: [
+            Text('하차 추적', style: theme.textTheme.labelLarge),
+            const SizedBox(height: 8),
+            Text('노선 ${s.routeNumber}', style: theme.textTheme.headlineSmall),
+            Text('차량 ${s.vehicleNumber}', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 16),
+            Text(
+              stateUncertain ? '상태 확인 필요' : status,
+              style: theme.textTheme.titleMedium!.copyWith(color: statusColor),
+            ),
+            const SizedBox(height: 4),
+            if (stateUncertain)
+              const Text('변경 결과 미확인 · 아래 정보는 마지막 확인 응답이에요. 상태를 다시 조회해 주세요.')
+            else
+              Text(switch (s.evaluationStatus) {
+                BoardingEvaluation.verificationPending =>
+                  '차량 위치 확인 중 · 위치 근거가 확보되면 알림을 판단해요.',
+                BoardingEvaluation.ready => '서버에서 관측 정보를 검증했어요.',
+                BoardingEvaluation.recoveryPending =>
+                  '현재 차량 진행 정보를 다시 확인하고 있어요.',
+                BoardingEvaluation.held => '차량 진행 검증을 보류했어요.',
+                BoardingEvaluation.ended => '실제 승객 하차 확인을 뜻하지 않아요.',
+                BoardingEvaluation.unknown => '현재 진행 검증 상태를 확인할 수 없어요.',
+              }),
+            if (s.status == BoardingSessionStatus.suspended) ...[
+              const SizedBox(height: 8),
+              Text(
+                s.reasonCode?.needsReconfirmation == true
+                    ? '기존 차량의 연속성을 확인할 수 없어요. 목록에서 동일 차량을 다시 선택해 주세요.'
+                    : s.reasonCode == BoardingReason.unknown ||
+                          s.reasonCode == null
+                    ? '보류 사유를 확인할 수 없어요. 상태를 다시 확인해 주세요.'
+                    : '차량 정보 확인이 일시적으로 중단됐어요. 새로운 정보를 기다리고 있어요.',
+              ),
+            ],
+            if (s.reasonCode != null) Text('사유: ${_reason(s.reasonCode!)}'),
+          ],
         ),
-        Text(
-          '준비 알림: ${switch (s.preparationNotificationStatus) {
-            'NOT_CREATED' => '아직 생성되지 않음',
-            'PENDING' => '발송 대기 중',
-            'ACCEPTED' => '전송 서비스 접수 완료 · 기기 표시 미확인',
-            'NO_RECIPIENT' => '알림 생성 · 수신 가능한 기기 없음',
-            'FAILED' => '발송 종료 · 실패',
-            'EXPIRED' => '발송 기한 만료',
-            _ => '발송 여부 확인 중',
-          }}',
+        _DetailCard(
+          children: [
+            Text(
+              '목표 정류장',
+              style: theme.textTheme.labelLarge!.copyWith(
+                color: colors.targetStop,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(s.targetName, style: theme.textTheme.titleLarge),
+            Text('노선 순서 ${s.targetOrder}', style: theme.textTheme.bodySmall),
+            if (progress) ...[
+              const Divider(height: 32),
+              Text(
+                '검증된 노선 방문 지점 간격: ${s.remainingOccurrenceGap}',
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              const Text('실제 남은 정차 수·거리·정확한 위치·도착 시간이 아니에요.'),
+            ],
+          ],
         ),
-        Text(
-          '상태: ${switch (s.status) {
-            BoardingSessionStatus.tracking => 'TRACKING · 선택한 차량 추적 중',
-            BoardingSessionStatus.suspended => 'SUSPENDED · 추적 보류',
-            BoardingSessionStatus.completed => 'COMPLETED · 추적 종료',
-            BoardingSessionStatus.cancelled => 'CANCELLED · 사용자 취소로 종료',
-            BoardingSessionStatus.expired => 'EXPIRED · 세션 수명 만료',
-            BoardingSessionStatus.unknown => '알 수 없는 세션 상태 · 확인 필요',
-          }}',
+        _DetailCard(
+          children: [
+            Text('하차 준비 알림', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(
+              s.notificationOffsetStops == null
+                  ? '기존 정책 · 사전 알림: ${s.prepareNotificationEnabled ? 'ON' : 'OFF'} · 목적지 알림: ON'
+                  : '알림 시점: ${s.notificationOffsetStops}정거장 전 · 세션당 한 번',
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '준비 알림: ${switch (s.preparationNotificationStatus) {
+                'NOT_CREATED' => '아직 생성되지 않음',
+                'PENDING' => '발송 대기 중',
+                'ACCEPTED' => '전송 서비스 접수 완료 · 기기 표시 미확인',
+                'NO_RECIPIENT' => '알림 생성 · 수신 가능한 기기 없음',
+                'FAILED' => '발송 종료 · 실패',
+                'EXPIRED' => '발송 기한 만료',
+                _ => '발송 여부 확인 중',
+              }}',
+            ),
+          ],
         ),
-        Text(switch (s.evaluationStatus) {
-          BoardingEvaluation.verificationPending =>
-            '차량 위치 확인 중 · 선택한 차량을 계속 관측하고 있어요. 위치 근거가 확보되면 알림을 판단해요.',
-          BoardingEvaluation.ready => 'READY · 서버의 새 관측 검증 응답',
-          BoardingEvaluation.recoveryPending =>
-            'RECOVERY_PENDING · 현재 차량 진행 정보를 다시 확인하고 있어요.',
-          BoardingEvaluation.held => 'HELD · 차량 진행 검증을 보류했어요.',
-          BoardingEvaluation.ended =>
-            'ENDED · 세션이 종료됐어요. 실제 승객 하차 확인을 뜻하지 않아요.',
-          BoardingEvaluation.unknown => '현재 진행 검증 상태를 확인할 수 없어요.',
-        }),
-        if (stateUncertain)
-          const Text('변경 결과 미확인 · 아래 정보는 마지막 확인 응답이에요. 상태를 다시 조회해 주세요.'),
-        if (!stateUncertain &&
-            s.status == BoardingSessionStatus.tracking &&
-            s.evaluationStatus == BoardingEvaluation.ready &&
-            s.remainingOccurrenceGap != null) ...[
-          Text('검증된 노선 방문 지점 간격: ${s.remainingOccurrenceGap}'),
-          const Text('실제 남은 정차 수·거리·정확한 위치·도착 시간이 아니에요.'),
-        ],
-        if (s.status == BoardingSessionStatus.suspended)
-          Text(
-            s.reasonCode?.needsReconfirmation == true
-                ? '기존 차량의 연속성을 확인할 수 없어요. 목록에서 동일 차량을 다시 선택해 주세요.'
-                : s.reasonCode == BoardingReason.unknown || s.reasonCode == null
-                ? '보류 사유를 확인할 수 없어요. 상태를 다시 확인해 주세요.'
-                : '차량 정보 확인이 일시적으로 중단됐어요. 새로운 정보를 기다리고 있어요.',
-          ),
-        if (s.reasonCode != null) Text('사유: ${_reason(s.reasonCode!)}'),
-        if (s.checkpointObservedAt != null)
-          Text(
-            '마지막 검증 checkpoint 관측 시각: ${boardingTime(s.checkpointObservedAt!)}',
-          ),
-        const Text('과거 검증 근거 시각이며 현재 버스 위치 시각이 아니에요.'),
-        Text(
-          'Provider 제공 시각: ${s.providerDataTime == null ? '알 수 없음' : boardingTime(s.providerDataTime!)}',
+        _DetailCard(
+          children: [
+            Text('마지막 검증 관측', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(
+              s.checkpointObservedAt == null
+                  ? '검증된 관측 시각 없음'
+                  : '마지막 검증 관측 시각: ${boardingTime(s.checkpointObservedAt!)}',
+            ),
+            const Text('과거 검증 근거 시각이며 현재 버스 위치 시각이 아니에요.'),
+            const SizedBox(height: 8),
+            Text(
+              'Provider 제공 시각: ${s.providerDataTime == null ? '알 수 없음' : boardingTime(s.providerDataTime!)}',
+              style: theme.textTheme.bodySmall,
+            ),
+            Text(
+              '세션 종료 예정 시각: ${boardingTime(s.expiresAt)}',
+              style: theme.textTheme.bodySmall,
+            ),
+            if (s.endedAt != null)
+              Text(
+                '세션 종료 시각: ${boardingTime(s.endedAt!)}',
+                style: theme.textTheme.bodySmall,
+              ),
+          ],
         ),
-        Text('세션 종료 예정 시각: ${boardingTime(s.expiresAt)}'),
-        if (s.endedAt != null) Text('세션 종료 시각: ${boardingTime(s.endedAt!)}'),
       ],
     );
   }
+}
+
+class _DetailCard extends StatelessWidget {
+  const _DetailCard({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    margin: const EdgeInsets.only(bottom: 12),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    ),
+  );
 }
 
 String _reason(BoardingReason reason) => switch (reason) {

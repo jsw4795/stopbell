@@ -539,9 +539,14 @@ void main() {
           ]);
           expect(storage.records.values.single.toJson(), original.toJson());
           expect(
-            find.textContaining(
-              status == 'FUTURE' ? '알 수 없는 세션 상태' : '$status ·',
-            ),
+            find.textContaining(switch (status) {
+              'TRACKING' => '선택한 차량 추적 중',
+              'SUSPENDED' => '추적 보류',
+              'COMPLETED' => '추적 종료',
+              'CANCELLED' => '사용자 취소로 종료',
+              'EXPIRED' => '세션 수명 만료',
+              _ => '알 수 없는 세션 상태',
+            }),
             findsOneWidget,
           );
           expect(find.text('추적 취소'), findsNothing);
@@ -584,7 +589,7 @@ void main() {
             boardingJson(sessionJson(status: 'COMPLETED', evaluation: 'ENDED'));
         await tester.tap(find.text('다시 조회'));
         await tester.pumpAndSettle();
-        expect(find.textContaining('COMPLETED ·'), findsOneWidget);
+        expect(find.textContaining('추적 종료'), findsOneWidget);
         expect(
           requests.map((r) => r.url.path),
           everyElement('/api/v1/boarding-sessions/123'),
@@ -729,7 +734,7 @@ void main() {
         requests.last.headers['authorization'],
         'Bearer ${f.auth.accessToken}',
       );
-      expect(find.textContaining('TRACKING ·'), findsOneWidget);
+      expect(find.textContaining('선택한 차량 추적 중'), findsOneWidget);
     });
     testWidgets('refresh failure removes exact-ID detail before any retry', (
       tester,
