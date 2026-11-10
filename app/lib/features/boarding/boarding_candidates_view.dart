@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_colors.dart';
+import '../../core/theme/stopbell_spacing.dart';
 import 'boarding_candidates.dart';
 
 String boardingTime(DateTime time) {
@@ -21,137 +23,236 @@ class BoardingCandidatesView extends StatelessWidget {
   final ValueChanged<BoardingCandidate>? onSelect;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Text(switch (result.candidateSetStatus) {
-        CandidateSetStatus.available => '차량 후보 비교',
-        CandidateSetStatus.empty => '현재 확인 가능한 차량 후보가 없어요.',
-        CandidateSetStatus.partial => '일부 차량 정보는 확인되지 않았어요. 전체 목록이 아닐 수 있어요.',
-        CandidateSetStatus.unknown => '후보 목록의 상태를 확인할 수 없어요. 다시 조회해 주세요.',
-      }, style: Theme.of(context).textTheme.titleMedium),
-      Text('서버 관측 시각: ${boardingTime(result.observedAt)}'),
-      Text(
-        'Provider 제공 시각: ${result.providerDataTime == null ? '알 수 없음' : boardingTime(result.providerDataTime!)}',
-      ),
-      Text('화면 수신 시각: ${boardingTime(receivedAt)}'),
-      if (result.candidateSetStatus != CandidateSetStatus.unknown &&
-          result.candidates.isNotEmpty)
-        Text(
-          result.candidates.any(canConfirmBoardingCandidate)
-              ? '원하는 차량을 목록에서 선택하세요. 차량번호 입력 없이 버스 도착 전에도 등록할 수 있어요.'
-              : '현재 선택 가능한 차량이 없어요. 차량별 보류 사유를 확인해 주세요.',
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final status = result.candidateSetStatus;
+    final canChoose = status != CandidateSetStatus.unknown;
+    final statusMessage = switch (status) {
+      CandidateSetStatus.available => null,
+      CandidateSetStatus.empty => '현재 확인 가능한 차량 후보가 없어요.',
+      CandidateSetStatus.partial => '일부 차량 정보는 확인되지 않았어요. 전체 목록이 아닐 수 있어요.',
+      CandidateSetStatus.unknown => '후보 목록의 상태를 확인할 수 없어요. 다시 조회해 주세요.',
+    };
+    final providerTime = result.providerDataTime;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: StopBellSpacing.md,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: StopBellSpacing.xs,
+          children: [
+            Text('차량 후보 선택', style: theme.textTheme.headlineSmall),
+            if (statusMessage != null)
+              Semantics(liveRegion: true, child: Text(statusMessage)),
+            if (canChoose && result.candidates.isNotEmpty)
+              Text(
+                result.candidates.any(canConfirmBoardingCandidate)
+                    ? '전체 차량번호를 보고 원하는 차량을 직접 선택하세요.'
+                    : '현재 선택 가능한 차량이 없어요. 차량별 보류 사유를 확인해 주세요.',
+                style: theme.textTheme.bodySmall,
+              ),
+          ],
         ),
-      const Text(
-        '진행 정보는 정확한 현재 위치·실제 정차·탑승 사실을 보장하지 않아요. 원본 갱신 시각이 없거나 정보가 지연될 수 있어요.',
-      ),
-      for (var index = 0; index < result.candidates.length; index++)
-        _CandidateCard(
-          candidate: result.candidates[index],
-          index: index,
-          onSelect: result.candidateSetStatus == CandidateSetStatus.unknown
-              ? null
-              : onSelect,
+        for (final (index, candidate) in result.candidates.indexed)
+          _CandidateCard(
+            candidate: candidate,
+            index: index,
+            canChoose: canChoose,
+            onSelect: onSelect,
+          ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: StopBellSpacing.xs,
+          children: [
+            Text(
+              '목록 서버 관측 시각 · ${boardingTime(result.observedAt)}',
+              style: theme.textTheme.bodySmall,
+            ),
+            if (providerTime != null)
+              Text(
+                '목록 공통 제공 시각 · ${boardingTime(providerTime)}',
+                style: theme.textTheme.bodySmall,
+              ),
+            Text(
+              '화면 수신 시각 · ${boardingTime(receivedAt)}',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
         ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _CandidateCard extends StatelessWidget {
   const _CandidateCard({
     required this.candidate,
     required this.index,
+    required this.canChoose,
     this.onSelect,
   });
+
   final ValueChanged<BoardingCandidate>? onSelect;
   final BoardingCandidate candidate;
   final int index;
+  final bool canChoose;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final semantic = StopBellColors.of(context);
     final item = candidate;
-    final canSelect = canConfirmBoardingCandidate(item);
+    final canSelect = canChoose && canConfirmBoardingCandidate(item);
+    final accent = canSelect ? semantic.success : semantic.warning;
     final canIdentify =
         item.confirmationStatus == ConfirmationStatus.available &&
         item.vehicleNumber != null &&
-        item.candidateRef != null;
+        item.candidateRef?.trim().isNotEmpty == true;
     final progress = item.progress;
+    final gap = item.boardingOccurrenceGap;
+    final providerTime = item.providerDataTime;
     final reason = item.reasonCode;
     final trackingReason = item.trackingReasonCode;
-    final details = item.limitations.toSet()
-      ..remove(reason)
-      ..remove(trackingReason);
-    final identityNote = reason != null
-        ? _reasonMessage(reason)
-        : item.vehicleNumber == null
-        ? _reasonMessage('VEHICLE_NUMBER_MISSING')
-        : !canIdentify
-        ? '차량을 확인할 수 없어요. 후보를 다시 조회해 주세요.'
-        : null;
-    final trackingNote = trackingReason != null
-        ? _reasonMessage(trackingReason)
-        : item.trackingSupport != TrackingSupport.conditional
-        ? '하차 추적 지원을 확인할 수 없어요.'
-        : null;
+    final notes = {
+      if (reason != null)
+        _reasonMessage(reason)
+      else if (item.vehicleNumber == null)
+        _reasonMessage('VEHICLE_NUMBER_MISSING')
+      else if (!canIdentify)
+        '차량을 확인할 수 없어요. 후보를 다시 조회해 주세요.',
+      if (trackingReason != null) _reasonMessage(trackingReason),
+      for (final detail in item.limitations)
+        if (detail != 'PROVIDER_TIME_MISSING' || providerTime != null)
+          _reasonMessage(detail),
+    };
+
     return Card(
       key: ValueKey('candidate-$index'),
-      color: canSelect
-          ? null
-          : Theme.of(context).colorScheme.surfaceContainerHighest,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(StopBellRadius.card),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(StopBellSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: StopBellSpacing.md,
           children: [
-            Text(
-              item.vehicleNumber ?? '차량번호 없음 · 식별 불가',
-              style: Theme.of(context).textTheme.titleLarge,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: StopBellSpacing.xs,
+              children: [
+                Text(
+                  item.vehicleNumber ?? '차량번호 확인 불가',
+                  style: theme.textTheme.headlineSmall,
+                ),
+                Text('후보 ${index + 1}', style: theme.textTheme.labelMedium),
+                Row(
+                  children: [
+                    Icon(
+                      canSelect
+                          ? Icons.check_circle_outline
+                          : Icons.info_outline,
+                      color: accent,
+                      size: 18,
+                    ),
+                    const SizedBox(width: StopBellSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        canSelect ? '선택 가능' : '선택 보류',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: accent,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            Text(
-              '차량 정보: ${canIdentify
-                  ? '확인 가능'
-                  : item.confirmationStatus == ConfirmationStatus.unknown
-                  ? '상태 미확인 · 확인 보류'
-                  : '확인 보류'}',
-            ),
-            if (identityNote != null) Text(identityNote),
-            Text(
-              '하차 추적 지원: ${switch (item.trackingSupport) {
-                TrackingSupport.conditional => '등록 후 진행 검증 · 대기할 수 있음',
-                TrackingSupport.held => '보류',
-                TrackingSupport.unknown => '알 수 없음 · 보류',
-              }}',
-            ),
-            if (trackingNote != null &&
-                (trackingReason == null || trackingReason != reason))
-              Text(trackingNote),
-            for (final detail in details) Text('참고: ${_reasonMessage(detail)}'),
-            Text(
-              progress == null
-                  ? '진행 참고: 위치 정보 없음'
-                  : '진행 참고: ${progress.stopName} · 노선 순서 ${progress.order}\n${switch (progress.kind) {
-                      ProgressKind.routeProgress => '노선 진행 참고 정보',
-                      ProgressKind.arrivalObserved => '제공자가 도착 상태를 관측한 참고 정보',
-                      ProgressKind.movingReference => '이동 중 제공된 진행 기준 정보',
-                      ProgressKind.unknown => '진행 정보의 의미를 확인할 수 없음',
-                    }}',
-            ),
-            if (item.boardingOccurrenceGap != null) ...[
-              Text(
-                item.boardingOccurrenceGap! > 0
-                    ? '승차 지점 이전에 관측된 차량'
-                    : item.boardingOccurrenceGap! < 0
-                    ? '승차 지점 이후에 관측된 차량 · 이미 지났을 수 있음'
-                    : '승차 지점과 같은 관측 기준 · 실제 도착 여부는 미확정',
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.surfaceContainer,
+                borderRadius: BorderRadius.circular(StopBellRadius.field),
               ),
-              Text(
-                '선택한 승차 정류장과 관측된 진행 지점의 노선상 간격: ${item.boardingOccurrenceGap!.abs()}',
+              child: Padding(
+                padding: const EdgeInsets.all(StopBellSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  spacing: StopBellSpacing.xs,
+                  children: [
+                    Text('최근 진행 참고', style: theme.textTheme.labelSmall),
+                    if (progress == null)
+                      Text('진행 위치 미확인', style: theme.textTheme.bodySmall)
+                    else ...[
+                      Text(
+                        '${progress.stopName} · 노선 순서 ${progress.order}',
+                        style: theme.textTheme.titleSmall,
+                      ),
+                      Text(switch (progress.kind) {
+                        ProgressKind.routeProgress => '노선 진행 참고 정보',
+                        ProgressKind.arrivalObserved => '제공기관의 도착 관측 기록',
+                        ProgressKind.movingReference => '이동 중 제공된 진행 기준 정보',
+                        ProgressKind.unknown => '진행 정보의 의미 미확인',
+                      }, style: theme.textTheme.bodySmall),
+                    ],
+                    if (gap != null) ...[
+                      Text(switch (gap) {
+                        > 0 => '승차 지점 이전의 관측 기준',
+                        < 0 => '승차 지점 이후의 관측 기준',
+                        _ => '승차 지점과 같은 관측 기준',
+                      }, style: theme.textTheme.bodySmall),
+                      Text(
+                        '노선상 간격 ${gap.abs()} · 노선 방문 지점 배열 기준',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                    if (progress != null || gap != null)
+                      Text(
+                        '관측 기준이며 실제 위치·정차 여부나 도착 예정 시간을 알 수 없어요.',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                  ],
+                ),
               ),
-              const Text('노선 방문 지점 배열의 간격이며 실제 정차 수·거리·남은 시간이 아니에요.'),
-            ],
-            Text('서버 관측 시각: ${boardingTime(item.observedAt)}'),
-            Text(
-              'Provider 제공 시각: ${item.providerDataTime == null ? '알 수 없음' : boardingTime(item.providerDataTime!)}',
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: StopBellSpacing.xs,
+              children: [
+                Text(
+                  '서버 관측 시각 · ${boardingTime(item.observedAt)}',
+                  style: theme.textTheme.bodySmall,
+                ),
+                Text(
+                  '제공기관 원본 시각 · ${providerTime == null ? '미확인' : boardingTime(providerTime)}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: StopBellSpacing.xs,
+              children: [
+                if (!canIdentify ||
+                    item.trackingSupport != TrackingSupport.conditional)
+                  Text(
+                    '차량 식별 · ${canIdentify ? '확인 가능' : '확인 보류'}',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                Text(
+                  '하차 추적 지원 · ${switch (item.trackingSupport) {
+                    TrackingSupport.conditional => '조건부 지원',
+                    TrackingSupport.held => '보류',
+                    TrackingSupport.unknown => '미확인',
+                  }}',
+                  style: theme.textTheme.bodySmall,
+                ),
+                for (final note in notes)
+                  Text(note, style: theme.textTheme.bodySmall),
+              ],
             ),
             if (onSelect != null)
               OutlinedButton(

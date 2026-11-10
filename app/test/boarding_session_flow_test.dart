@@ -143,8 +143,8 @@ void main() {
     (tester) async {
       await pump(tester);
       await prepare(tester);
-      await tester.ensureVisible(find.text('1정거장 전'));
-      await tester.tap(find.text('1정거장 전'));
+      await tester.ensureVisible(find.text('노선 방문 지점 1개 전'));
+      await tester.tap(find.text('노선 방문 지점 1개 전'));
       await tester.pumpAndSettle();
       sessionResponse = (request) async {
         expect(jsonDecode(request.body)['notificationOffsetStops'], 1);
@@ -165,15 +165,24 @@ void main() {
     (tester) async {
       await pump(tester);
       await prepare(tester);
-      sessionResponse = (request) async => boardingJson({
-        ...sessionJson(
-          status: 'TRACKING',
-          evaluation: 'VERIFICATION_PENDING',
-          reason: 'BASELINE_UNVERIFIED',
-          gap: null,
-        ),
-        'checkpointObservedAt': null,
-      }, 201);
+      expect(find.text('승차 정류장'), findsOneWidget);
+      expect(find.text('하차 목표 정류장'), findsOneWidget);
+      for (final stop in boardingStops.take(2)) {
+        expect(find.textContaining('노선 순서 ${stop.order}'), findsOneWidget);
+      }
+      expect(find.textContaining('종점 방면'), findsNWidgets(2));
+      sessionResponse = (request) async {
+        expect(jsonDecode(request.body)['notificationOffsetStops'], 2);
+        return boardingJson({
+          ...sessionJson(
+            status: 'TRACKING',
+            evaluation: 'VERIFICATION_PENDING',
+            reason: 'BASELINE_UNVERIFIED',
+            gap: null,
+          ),
+          'checkpointObservedAt': null,
+        }, 201);
+      };
       await tap(tester, '하차 알림 등록');
       await tap(tester, '알림 없이 계속');
       expect(find.byType(BoardingSessionView), findsOneWidget);

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/boarding/boarding_candidates.dart';
 import 'package:stopbell/features/boarding/boarding_candidates_view.dart';
 
@@ -104,10 +105,10 @@ void main() {
           ),
         ),
       );
-      expect(find.text('차량 정보: 확인 가능'), findsOneWidget);
-      expect(find.text('하차 추적 지원: 보류'), findsOneWidget);
+      expect(find.text('차량 식별 · 확인 가능'), findsOneWidget);
+      expect(find.text('하차 추적 지원 · 보류'), findsOneWidget);
       expect(find.textContaining('이 노선의 하차 알림 추적은 아직 검증되지 않아'), findsOneWidget);
-      expect(find.textContaining('참고: 원본 정보의 갱신 시각'), findsOneWidget);
+      expect(find.text('제공기관 원본 시각 · 미확인'), findsOneWidget);
       expect(find.textContaining('현재 선택 가능한 차량이 없어요'), findsOneWidget);
       final button = find.widgetWithText(OutlinedButton, '선택 불가');
       expect(tester.widget<OutlinedButton>(button).onPressed, isNull);
@@ -133,16 +134,16 @@ void main() {
         tester.getTopLeft(find.text('서울70사9999')).dy,
         lessThan(tester.getTopLeft(find.text('서울70사1234')).dy),
       );
-      expect(find.text('차량 정보: 확인 가능'), findsNWidgets(2));
-      expect(find.textContaining('등록 후 진행 검증 · 대기할 수 있음'), findsNWidgets(2));
-      expect(find.textContaining('차량번호 입력 없이 버스 도착 전에도 등록'), findsOneWidget);
-      expect(find.textContaining('실제 정차 수·거리·남은 시간이 아니에요'), findsNWidgets(2));
+      expect(find.text('선택 가능'), findsNWidgets(2));
+      expect(find.textContaining('조건부 지원'), findsNWidgets(2));
+      expect(find.textContaining('원하는 차량을 직접 선택'), findsOneWidget);
+      expect(find.textContaining('노선 방문 지점 배열 기준'), findsNWidgets(2));
       expect(find.textContaining('private-reference'), findsNothing);
       expect(find.byType(RadioListTile<int>), findsNothing);
       expect(find.byType(FilledButton), findsNothing);
       await tester.tap(find.text('서울70사1234'));
       await tester.pump();
-      expect(find.text('차량 정보: 확인 가능'), findsNWidgets(2));
+      expect(find.text('선택 가능'), findsNWidgets(2));
     },
   );
 
@@ -173,10 +174,10 @@ void main() {
         ),
       );
       expect(find.textContaining('일부 차량 정보는 확인되지 않았어요'), findsOneWidget);
-      expect(find.text('차량번호 없음 · 식별 불가'), findsOneWidget);
-      expect(find.text('차량 정보: 확인 보류'), findsOneWidget);
-      expect(find.text('하차 추적 지원: 보류'), findsOneWidget);
-      expect(find.text('진행 참고: 위치 정보 없음'), findsOneWidget);
+      expect(find.text('차량번호 확인 불가'), findsOneWidget);
+      expect(find.text('차량 식별 · 확인 보류'), findsOneWidget);
+      expect(find.text('하차 추적 지원 · 보류'), findsOneWidget);
+      expect(find.text('진행 위치 미확인'), findsOneWidget);
       for (final text in ['서로 일치하지 않아요', '오래되어 다시 확인', '추적은 아직 검증되지']) {
         expect(find.textContaining(text), findsOneWidget);
       }
@@ -195,8 +196,8 @@ void main() {
         ),
       );
       expect(find.textContaining('목록의 상태를 확인할 수 없어요'), findsOneWidget);
-      expect(find.text('차량 정보: 상태 미확인 · 확인 보류'), findsOneWidget);
-      expect(find.text('하차 추적 지원: 알 수 없음 · 보류'), findsOneWidget);
+      expect(find.text('선택 보류'), findsOneWidget);
+      expect(find.text('하차 추적 지원 · 미확인'), findsOneWidget);
       await show(tester, candidatesJson(status: 'EMPTY'));
       expect(find.text('현재 확인 가능한 차량 후보가 없어요.'), findsOneWidget);
       await show(tester, candidatesJson(status: 'PARTIAL', candidates: []));
@@ -231,24 +232,76 @@ void main() {
         ),
       );
       expect(find.textContaining('노선 진행 참고 정보'), findsOneWidget);
-      expect(find.textContaining('제공자가 도착 상태를 관측한 참고 정보'), findsOneWidget);
+      expect(find.textContaining('제공기관의 도착 관측 기록'), findsOneWidget);
       expect(find.textContaining('이동 중 제공된 진행 기준 정보'), findsOneWidget);
       expect(
         find.text(
-          '서버 관측 시각: ${boardingTime(DateTime.utc(2026, 10, 20, 1, 2, 3))}',
-        ),
-        findsNWidgets(4),
-      );
-      expect(
-        find.text(
-          'Provider 제공 시각: ${boardingTime(DateTime.utc(2026, 10, 20, 0, 59))}',
+          '서버 관측 시각 · ${boardingTime(DateTime.utc(2026, 10, 20, 1, 2, 3))}',
         ),
         findsNWidgets(3),
       );
       expect(
-        find.text('화면 수신 시각: ${boardingTime(DateTime.utc(2026, 10, 20, 2))}'),
+        find.text(
+          '제공기관 원본 시각 · ${boardingTime(DateTime.utc(2026, 10, 20, 0, 59))}',
+        ),
+        findsNWidgets(3),
+      );
+      expect(
+        find.text('화면 수신 시각 · ${boardingTime(DateTime.utc(2026, 10, 20, 2))}'),
         findsOneWidget,
       );
+    },
+  );
+
+  testWidgets(
+    'freshness and identity holds block selection without hiding same-number candidates',
+    (tester) async {
+      final selected = <BoardingCandidate>[];
+      final result = BoardingCandidates.fromJson(
+        candidatesJson(
+          candidates: [
+            for (final reason in [
+              'IDENTITY_CONFLICT',
+              'FUTURE_OBSERVATION',
+              'STALE_OBSERVATION',
+            ])
+              {
+                ...candidateJson(),
+                'candidateRef': reason,
+                'limitations': [reason],
+              },
+          ],
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StopBellTheme.light,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: BoardingCandidatesView(
+                result: result,
+                receivedAt: DateTime.utc(2026),
+                onSelect: selected.add,
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('서울70사1234'), findsNWidgets(3));
+      expect(find.text('선택 보류'), findsNWidgets(3));
+      for (var index = 0; index < 3; index++) {
+        expect(find.text('후보 ${index + 1}'), findsOneWidget);
+      }
+      for (final reason in ['일치하지 않아요', '시각이 미래', '오래되어 다시 확인']) {
+        expect(find.textContaining(reason), findsOneWidget);
+      }
+      expect(
+        tester
+            .widgetList<OutlinedButton>(find.byType(OutlinedButton))
+            .every((button) => button.onPressed == null),
+        isTrue,
+      );
+      expect(selected, isEmpty);
     },
   );
 
@@ -282,6 +335,9 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
+          theme: StopBellTheme.light,
+          darkTheme: StopBellTheme.dark,
+          themeMode: ThemeMode.dark,
           home: MediaQuery(
             data: const MediaQueryData(textScaler: TextScaler.linear(2)),
             child: Scaffold(

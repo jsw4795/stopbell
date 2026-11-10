@@ -48,6 +48,7 @@ class _BoardingHomeState extends State<BoardingHome> {
     BoardingSelectionContext selection,
     String route,
     String target,
+    String? boarding,
   })?
   _draft;
   bool _reconfirm = false, _newSelection = false;
@@ -95,8 +96,9 @@ class _BoardingHomeState extends State<BoardingHome> {
     BoardingCandidate candidate,
     BoardingSelectionContext selection,
     String route,
-    String target,
-  ) {
+    String target, {
+    String? boarding,
+  }) {
     if (!_current || _controller!.busy || _controller!.needsRecovery) return;
     _notificationOffsetStops = 2;
     setState(
@@ -105,6 +107,7 @@ class _BoardingHomeState extends State<BoardingHome> {
         selection: selection,
         route: route,
         target: target,
+        boarding: boarding,
       ),
     );
   }
@@ -192,6 +195,8 @@ class _BoardingHomeState extends State<BoardingHome> {
                 key: ValueKey(draft.candidate.candidateRef),
                 candidate: draft.candidate,
                 routeNumber: draft.route,
+                route: _route,
+                boardingName: draft.boarding,
                 targetName: draft.target,
                 onConfirm: _confirm,
                 onNotificationOffsetChanged: (value) =>
@@ -251,8 +256,18 @@ class _BoardingHomeState extends State<BoardingHome> {
             findCandidates: widget.findCandidates,
             onSelectCandidate: c == null
                 ? null
-                : (candidate, selection, target) =>
-                      _select(candidate, selection, route.routeNumber, target),
+                : (
+                    candidate,
+                    selection, {
+                    required boarding,
+                    required target,
+                  }) => _select(
+                    candidate,
+                    selection,
+                    route.routeNumber,
+                    target,
+                    boarding: boarding,
+                  ),
             onBack: () {
               if (_current) setState(() => _route = null);
             },

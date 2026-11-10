@@ -31,7 +31,8 @@ TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 �
 | 3-C | Flutter 공식 유형별 색상 적용 | UI-2 검색 화면에 적용 완료. GBIS 16개 유형의 표시 근거 검토 완료 |
 | UI-0 / UI-1 | 공통 디자인 시스템 / 세로 타임라인 | 주요 부분 구현; 보완 범위 확인 |
 | UI-2 | 공식 유형 및 검색 화면 | 경기 유형색 보완과 관련 자동 검증 완료. iPhone 확인 잔여 |
-| UI-3~UI-8 | 차량 후보부터 실시간 다중 차량 표시·통합 검증 | 예정; 아래 로드맵 참조 |
+| UI-3 | 차량 후보 조회·탑승 확정 | Flutter 구현 및 관련 자동 검증 완료. iPhone 확인 잔여 |
+| UI-4~UI-8 | 하차 추적부터 실시간 다중 차량·좌석 표시와 통합 검증 | 예정. 아래 로드맵 참조 |
 
 원본 필드 보존 → DB 저장 → 수집 이력 → 파일 아카이브 → 수집 경로 연결 → 변경분 분석 → 안전한 최신화 → 공식 유형 저장·API 제공의 순서다. `bus_routes.route_type`의 존재는 공식 유형 매핑 완료를 뜻하지 않는다. 상세 저장·동기화 계약은 [Database](database.md)와 [ADR-009](adr/ADR-009-bus-transit-metadata-persistence-and-diff-sync-strategy.md)를 따른다.
 
@@ -39,7 +40,7 @@ TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 �
 
 ## 향후 수집 데이터 관리 개선 계획
 
-서울·경기 개발 DB 최신화와 로컬 수집 폴더 구조 정리를 완료했다. 수집 CLI 진행 표시와 결과 요약을 완료했다. Flutter UI-2를 완료했으며 다음은 UI-3~UI-8 순서다. Bundle 생성·재생과 실패 처리 계약은 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다.
+서울·경기 개발 DB 최신화와 로컬 수집 폴더 구조 정리를 완료했다. 수집 CLI 진행 표시와 결과 요약을 완료했다. Flutter UI-3을 완료했으며 다음은 UI-4 하차 추적 화면이다. Bundle 생성·재생과 실패 처리 계약은 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다.
 
 ### 저장 구조와 기존 Bundle 이전
 
@@ -72,7 +73,7 @@ UI-0 → UI-1 → UI-2 → UI-3 → UI-4 → UI-5 → UI-6 → UI-7 → UI-8 순
 
 ### UI-3 — 차량 후보 조회 및 탑승 확정
 
-후보 목록의 차량번호, 관측 시각·신선도, 선택 차량, 승차·목표 요약과 2 occurrence 전 기본/1 occurrence 전 선택을 보여준다. 확정 정보 위계는 차량번호 → 승차·목표 → 알림 시점이다. 단일 후보도 자동 선택하지 않고 `candidateRef`·`selectionKey`, 최신 재검증과 Provider 오류/차량 없음 구분을 지킨다. 실제 탑승 확인을 주장하지 않으며 확정 즉시 TRACKING으로 별도 Start 버튼은 없다. [API](api.md#탑승-세션-api-task-903)와 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다.
+후보 카드에 전체 차량번호, 선택 가능·보류 상태, 진행 참고, 서버 관측·제공기관 원본 시각과 제한 사유를 표시한다. 확정 화면은 선택 차량 → 승차·목표 정류장 → 알림 시점 순서로 구성한다. 2 occurrence 전이 기본이며 1 occurrence 전으로 바꿀 수 있다. 명시적 선택, `candidateRef`·`selectionKey`, 최신 재검증, Provider 오류와 후보 없음 구분, 등록 성공 시 즉시 TRACKING을 유지한다. 기존 Backend 후보 응답을 사용하며 좌석 표시는 UI-7에서 다룬다. Flutter 구현과 관련 자동 검증을 완료했으며 실제 iPhone 확인은 남아 있다. [API](api.md#탑승-세션-api-task-903)와 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다.
 
 ### UI-4 — 하차 추적 화면
 
@@ -88,11 +89,13 @@ UI-0 → UI-1 → UI-2 → UI-3 → UI-4 → UI-5 → UI-6 → UI-7 → UI-8 순
 
 ### UI-7 — 실시간 다중 차량 위치 표시
 
-필수 후속 목표이며 아직 미구현이다. 정류장 선택의 세로 타임라인에 여러 차량 마커와 선택 차량을 표시하고 관측 시각·신선도, 위치 불확실성, 반복 정류장·순환 노선 및 Light/Dark를 다룬다. 지도 대체가 아니다. 별도의 읽기 전용 노선 전체 차량 위치 API, Provider 조사, 식별자·실시간 관측 검증, occurrence 매핑, polling·캐싱·호출량 제한과 오류·stale 정책의 선행 설계가 필요하다. 기존 후보 API의 고주기 반복으로 대체하지 않으며 하차 판정이나 TRACKING 세션을 변경하지 않는다. 세부 정책은 아직 확정되지 않았다.
+필수 후속 목표이며 아직 미구현이다. 정류장 선택의 세로 타임라인에 여러 차량 마커, 선택 차량, 확인 가능한 차량별 잔여 좌석 수를 표시한다. 반복 정류장·회차와 관측 시각·위치 불확실성 및 Light/Dark를 다룬다. TAGO 차량 위치 응답에는 좌석 정보가 없으며 현재 Backend에는 GBIS 실시간 위치·좌석을 제공하는 경로가 없다. 좌석 값 해석과 공식 제공 유형은 [요구사항](requirements.md#ui-7-세로-노선도의-실시간-차량-위치와-잔여-좌석)을 따른다.
+
+별도의 읽기 전용 노선 전체 차량 위치 API, GBIS 실시간 위치 연동, TAGO와 GBIS 간 동일 차량 식별 검증, occurrence 매핑, 관측 신선도, polling·캐싱·Provider 호출량 제한, 오류·오래된 관측·좌석 미제공 fallback을 UI-7에서 설계·구현한다. 기존 후보 API는 사용자의 후보 조회에 사용하며 고주기 반복 호출로 차량 위치 API를 대체하지 않는다. 하차 판정과 TRACKING 계약은 유지한다. 식별 기준·갱신 주기 등 세부 정책은 UI-7에서 검증 후 확정한다.
 
 ### UI-8 — 전체 통합 검증
 
-서울·경기 검색과 공식 색상, 반복 정류장·회차, 승차·목표 선택, 후보·확정·TRACKING·준비 알림·복구, 기존 도착 Alarm, 홈·계정, Light/Dark, 다중 차량 타임라인과 실제 iPhone을 검증한다. 기존 [TASK-908](task-list.md) 및 TASK-710 등 실기기 책임을 연결하며 이 계획만으로 완료 처리하지 않는다.
+서울·경기 검색과 공식 색상, 반복 정류장·회차, 승차·목표 선택, 후보·확정·TRACKING·준비 알림·복구, 기존 도착 Alarm, 홈·계정, Light/Dark, 다중 차량 타임라인의 좌석 제공·미제공 상태와 실제 iPhone을 검증한다. 기존 [TASK-908](task-list.md) 및 TASK-710 등 실기기 책임을 연결하며 이 계획만으로 완료 처리하지 않는다.
 
 ## Phase 0 — 조사 및 PoC
 

@@ -31,7 +31,12 @@ class BoardingStopScreen extends StatefulWidget {
   final Future<List<BusRouteStopOccurrence>> Function(int) findStops;
   final FindBoardingCandidates findCandidates;
   final VoidCallback onBack;
-  final void Function(BoardingCandidate, BoardingSelectionContext, String)?
+  final void Function(
+    BoardingCandidate,
+    BoardingSelectionContext, {
+    required String boarding,
+    required String target,
+  })?
   onSelectCandidate;
 
   @override
@@ -212,10 +217,10 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     }
   }
 
-  String _stopLabel(BusRouteStopOccurrence stop) =>
-      '${stop.name} · 노선 순서 ${stop.order}\n'
-      '${stop.destinationName == null ? '방면 정보 없음' : '${stop.destinationName} 방면'}\n'
-      '이전: ${stop.previousStopName ?? '없음'} · 다음: ${stop.nextStopName ?? '없음'}';
+  String _stopLabel(BusRouteStopOccurrence stop) {
+    final details = selectedStopContext(stop, _stops);
+    return details == null ? stop.name : '${stop.name}\n$details';
+  }
 
   void _reselectStops() {
     if (!_current || _staleStops) return;
@@ -312,39 +317,32 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         SingleChildScrollView(
           key: const ValueKey('boarding-candidate-results'),
           primary: false,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              BoardingCandidatesView(
-                result: _result!,
-                receivedAt: _receivedAt!,
-                onSelect: widget.onSelectCandidate == null
-                    ? null
-                    : (candidate) {
-                        if (!_current ||
-                            _target == null ||
-                            !(_result?.candidates.contains(candidate) ??
-                                false)) {
-                          return;
-                        }
-                        widget.onSelectCandidate!(
-                          candidate,
-                          BoardingSelectionContext(
-                            routeId: widget.route.id,
-                            targetId: _target!.id,
-                            boardingId: _boarding?.id,
-                          ),
-                          _stopLabel(_target!),
-                        );
-                      },
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                '목적지 2정거장 전(기본) 또는 1정거장 전(선택)에 하차 준비 알림을 받을 수 있어요. 목록에서 차량을 직접 선택해 등록하세요. '
-                "등록 후 바로 추적을 시작하며, 위치를 확인하는 동안에는 '차량 위치 확인 중'으로 표시해요.",
-              ),
-            ],
+          padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
+          child: BoardingCandidatesView(
+            result: _result!,
+            receivedAt: _receivedAt!,
+            onSelect: widget.onSelectCandidate == null
+                ? null
+                : (candidate) {
+                    final target = _target;
+                    final boarding = _boarding;
+                    if (!_current ||
+                        target == null ||
+                        boarding == null ||
+                        !(_result?.candidates.contains(candidate) ?? false)) {
+                      return;
+                    }
+                    widget.onSelectCandidate!(
+                      candidate,
+                      BoardingSelectionContext(
+                        routeId: widget.route.id,
+                        targetId: target.id,
+                        boardingId: boarding.id,
+                      ),
+                      boarding: _stopLabel(boarding),
+                      target: _stopLabel(target),
+                    );
+                  },
           ),
         ),
     ],
@@ -408,7 +406,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
             const LinearProgressIndicator(),
             const Text('차량 후보를 조회하고 있어요.'),
           ],
-          if (_error != null) Text(_error!),
+          if (_error case final error?)
+            StopSelectionNotice(error, icon: Icons.error_outline),
           if (_staleStops)
             OutlinedButton(
               onPressed: _loadStops,

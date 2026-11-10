@@ -145,7 +145,7 @@ void main() {
       expect(find.byType(BoardingConfirmationView), findsNothing);
       await select(tester);
       expect(api.creations, isEmpty);
-      expect(find.textContaining('등록하면 선택한 차량을 바로 추적'), findsOneWidget);
+      expect(find.textContaining('등록하면 바로 추적을 시작해요'), findsOneWidget);
       expect(find.byType(TextField), findsNothing);
       await confirm(tester);
       expect(api.creations, hasLength(1));
