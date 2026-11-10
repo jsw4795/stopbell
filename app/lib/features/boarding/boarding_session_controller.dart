@@ -137,15 +137,15 @@ class BoardingSessionController extends ChangeNotifier {
     String number,
     BoardingSelectionContext context, {
     Future<bool> Function()? preparePush,
-    Future<BoardingCandidate?> Function(BoardingCandidate)? refreshSelected,
     int notificationOffsetStops = 2,
   }) async {
     if (!const [1, 2].contains(notificationOffsetStops)) {
       throw ArgumentError('notificationOffsetStops');
     }
     if (!canCreate) return;
-    if (!validCandidate(candidate, number)) {
-      message = '후보가 오래됐어요. 차량 정보를 다시 조회해 주세요.';
+    creationState = BoardingCreationState.notStarted;
+    if (!candidate.canCreateWithNumber || context.boardingId == null) {
+      message = '선택한 차량번호를 확인할 수 없어요. 차량 정보를 다시 확인해 주세요.';
       _emit();
       return;
     }
@@ -165,32 +165,9 @@ class BoardingSessionController extends ChangeNotifier {
         }
       }
       if (!current || !allowed) return;
-      // Permission/registration may outlive candidate freshness. No UUID exists yet.
-      if (!validCandidate(candidate, number)) {
-        busy = true;
-        _emit();
-        BoardingCandidate? refreshed;
-        try {
-          refreshed = await refreshSelected?.call(candidate);
-        } catch (_) {
-          // A failed refresh cannot select a replacement or create a new request.
-        }
-        if (!current) return;
-        busy = false;
-        if (candidate.selectionKey == null ||
-            refreshed?.selectionKey != candidate.selectionKey ||
-            refreshed == null ||
-            !validCandidate(refreshed, number)) {
-          message = '후보 정보가 오래됐어요. 선택한 차량을 다시 조회해 주세요.';
-          _emit();
-          return;
-        }
-        candidate = refreshed;
-      }
     }
     final intent = BoardingCreationIntent(
       clientRequestId: newBoardingRequestId(),
-      candidateRef: candidate.candidateRef!,
       selectedVehicleNumber: candidate.vehicleNumber!,
       userIdentity: userIdentity!,
       sessionIdentity: sessionIdentity!,
@@ -215,22 +192,6 @@ class BoardingSessionController extends ChangeNotifier {
     if (!current) return;
     pending = intent;
     selectionContext = context;
-    if (!validCandidate(candidate, number)) {
-      // Storage can outlive the reference freshness window. No POST has been
-      // sent yet, so this draft can safely be discarded after durable cleanup.
-      try {
-        await storage.delete(sessionIdentity!);
-        if (!current) return;
-        pending = null;
-      } catch (_) {
-        if (!current) return;
-        creationState = BoardingCreationState.outcomeUnknown;
-      }
-      busy = false;
-      message = '저장 중 후보 정보가 오래됐어요. 새 후보를 조회해 주세요.';
-      _emit();
-      return;
-    }
     await _submit(retry: false);
   }
 
@@ -263,11 +224,16 @@ class BoardingSessionController extends ChangeNotifier {
       // Once an earlier POST was uncertain, even a later 4xx cannot prove that
       // earlier request did not commit. Keep the original UUID/body recoverable.
       if (retry ||
-          error.uncertain ||
+          (error.uncertain &&
+              !(error.failure == SessionFailure.http &&
+                  error.code == 'TRANSIT_TEMPORARILY_UNAVAILABLE')) ||
           error.code == 'BOARDING_REQUEST_CONFLICT' ||
           !const {
             'INVALID_REQUEST',
             'BOARDING_CANDIDATE_CHANGED',
+            'BOARDING_VEHICLE_UNIDENTIFIABLE',
+            'BOARDING_POSITION_UNAVAILABLE',
+            'TRANSIT_TEMPORARILY_UNAVAILABLE',
             'BOARDING_SESSION_CONFLICT',
             'BOARDING_TARGET_NOT_AHEAD',
             'BOARDING_TRACKING_UNSUPPORTED',
@@ -522,27 +488,30 @@ class BoardingSessionController extends ChangeNotifier {
   }
 }
 
-String boardingSessionError(BoardingSessionException error) =>
-    switch (error.code) {
-      'BOARDING_CANDIDATE_CHANGED' =>
-        '차량 후보가 변경되었거나 오래됐어요. 새 후보를 조회해 다시 선택해 주세요.',
-      'BOARDING_SESSION_CONFLICT' => '이미 진행 중인 세션이 있어요. 현재 세션을 확인해 주세요.',
-      'BOARDING_REQUEST_CONFLICT' =>
-        '원래 생성 요청과 내용이 일치하지 않아요. 요청을 바꾸지 않고 원래 결과를 확인해 주세요.',
-      'BOARDING_REVISION_CONFLICT' => '세션 상태가 변경되어 현재 상태를 다시 조회했어요.',
-      'BOARDING_TARGET_NOT_AHEAD' => '목적지가 차량 진행 방향의 앞쪽인지 확인할 수 없어요.',
-      'BOARDING_TRACKING_UNSUPPORTED' =>
-        '현재 이 차량의 하차 알림 추적은 아직 지원되지 않아요. 차량번호를 확인했더라도 실제 추적을 시작할 수 없어요.',
-      'BOARDING_RECONFIRM_REQUIRED' =>
-        '현재 세션에서 재확인 조건을 충족하지 못했어요. 현재 상태와 차량 정보를 다시 확인해 주세요.',
-      'BOARDING_SESSION_NOT_FOUND' => '세션이 없거나 접근할 수 없어요.',
-      'TRANSIT_TEMPORARILY_UNAVAILABLE' =>
-        '차량 정보를 일시적으로 확인할 수 없어요. 잠시 후 다시 확인해 주세요.',
-      'INVALID_REQUEST' => '요청 형식 또는 선택한 정보가 유효하지 않아요. 다시 확인해 주세요.',
-      _ => switch (error.failure) {
-        SessionFailure.timeout => '응답 시간이 초과되어 결과를 확정할 수 없어요.',
-        SessionFailure.network => '통신 오류로 결과를 확인하지 못했어요.',
-        SessionFailure.parsing => '응답 형식을 확인할 수 없어 결과를 확정할 수 없어요.',
-        SessionFailure.http => '서버 응답을 확인하지 못했어요. 현재 상태를 다시 확인해 주세요.',
-      },
-    };
+String boardingSessionError(
+  BoardingSessionException error,
+) => switch (error.code) {
+  'BOARDING_CANDIDATE_CHANGED' => '차량 후보가 변경되었거나 오래됐어요. 새 후보를 조회해 다시 선택해 주세요.',
+  'BOARDING_SESSION_CONFLICT' => '이미 진행 중인 세션이 있어요. 현재 세션을 확인해 주세요.',
+  'BOARDING_REQUEST_CONFLICT' =>
+    '원래 생성 요청과 내용이 일치하지 않아요. 요청을 바꾸지 않고 원래 결과를 확인해 주세요.',
+  'BOARDING_REVISION_CONFLICT' => '세션 상태가 변경되어 현재 상태를 다시 조회했어요.',
+  'BOARDING_VEHICLE_UNIDENTIFIABLE' => '선택한 차량을 현재 확인할 수 없어요. 차량 정보를 확인해 주세요.',
+  'BOARDING_POSITION_UNAVAILABLE' =>
+    '차량의 현재 진행 위치를 확인할 수 없어요. 잠시 후 다시 시도해 주세요.',
+  'BOARDING_TARGET_NOT_AHEAD' => '차량이 목표 정류장에 도달했거나 이미 통과했어요.',
+  'BOARDING_TRACKING_UNSUPPORTED' =>
+    '현재 이 차량의 하차 알림 추적은 아직 지원되지 않아요. 차량번호를 확인했더라도 실제 추적을 시작할 수 없어요.',
+  'BOARDING_RECONFIRM_REQUIRED' =>
+    '현재 세션에서 재확인 조건을 충족하지 못했어요. 현재 상태와 차량 정보를 다시 확인해 주세요.',
+  'BOARDING_SESSION_NOT_FOUND' => '세션이 없거나 접근할 수 없어요.',
+  'TRANSIT_TEMPORARILY_UNAVAILABLE' =>
+    '차량 정보를 일시적으로 확인할 수 없어요. 잠시 후 다시 확인해 주세요.',
+  'INVALID_REQUEST' => '요청 형식 또는 선택한 정보가 유효하지 않아요. 다시 확인해 주세요.',
+  _ => switch (error.failure) {
+    SessionFailure.timeout => '응답 시간이 초과되어 결과를 확정할 수 없어요.',
+    SessionFailure.network => '통신 오류로 결과를 확인하지 못했어요.',
+    SessionFailure.parsing => '응답 형식을 확인할 수 없어 결과를 확정할 수 없어요.',
+    SessionFailure.http => '서버 응답을 확인하지 못했어요. 현재 상태를 다시 확인해 주세요.',
+  },
+};

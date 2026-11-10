@@ -72,6 +72,22 @@ void main() {
       },
     );
   }
+  test('current-number body reaches transport unchanged', () async {
+    const currentBody = <String, Object>{
+      'clientRequestId': uuid,
+      'routeId': 754,
+      'boardingStopOccurrenceId': 11,
+      'targetStopOccurrenceId': 22,
+      'confirmedVehicleNumber': '서울70사1234',
+      'notificationOffsetStops': 2,
+    };
+    await client.create(
+      currentBody,
+      generation: auth.generation,
+      current: current,
+    );
+    expect(jsonDecode(requests.single.body), currentBody);
+  });
   test(
     'detail, current, and request lookup use separate exact endpoints',
     () async {

@@ -77,6 +77,18 @@ class BoardingCandidate {
   late final String? trackingReasonCode;
   late final List<String> limitations;
 
+  bool get canCreateWithNumber =>
+      confirmationStatus == ConfirmationStatus.available &&
+      trackingSupport == TrackingSupport.conditional &&
+      vehicleNumber?.trim().isNotEmpty == true &&
+      ![reasonCode, ...limitations, trackingReasonCode].any(
+        (reason) => const {
+          'IDENTITY_CONFLICT',
+          'DETAIL_ID_MISMATCH',
+          'DETAIL_NUMBER_MISMATCH',
+        }.contains(reason),
+      );
+
   /// CONDITIONAL permits server revalidation, never tracking success.
   bool get canRequestConfirmation =>
       confirmationStatus == ConfirmationStatus.available &&

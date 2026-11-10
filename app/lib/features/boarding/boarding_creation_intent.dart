@@ -45,7 +45,7 @@ String newBoardingRequestId() {
 class BoardingCreationIntent {
   const BoardingCreationIntent({
     required this.clientRequestId,
-    required this.candidateRef,
+    this.candidateRef,
     required this.selectedVehicleNumber,
     required this.userIdentity,
     required this.sessionIdentity,
@@ -56,25 +56,31 @@ class BoardingCreationIntent {
     this.legacyConfirmedVehicleNumber,
   });
   final String clientRequestId,
-      candidateRef,
       selectedVehicleNumber,
       userIdentity,
       sessionIdentity;
-  final String? legacyConfirmedVehicleNumber;
+  final String? candidateRef, legacyConfirmedVehicleNumber;
   final BoardingSelectionContext context;
   final DateTime observedAt;
   final bool prepareNotificationEnabled; // Stored legacy intent only.
   final int? notificationOffsetStops;
-  Map<String, Object> get body => {
-    'clientRequestId': clientRequestId,
-    'candidateRef': candidateRef,
-    'confirmedVehicleNumber': ?legacyConfirmedVehicleNumber,
-    'notificationOffsetStops': ?notificationOffsetStops,
-    // Make the legacy policy explicit so an unresolved old default-ON intent
-    // cannot create a new-policy session when its UUID is absent on the server.
-    if (notificationOffsetStops == null)
-      'prepareNotificationEnabled': prepareNotificationEnabled,
-  };
+  Map<String, Object> get body => candidateRef == null
+      ? {
+          'clientRequestId': clientRequestId,
+          'routeId': context.routeId,
+          'boardingStopOccurrenceId': context.boardingId!,
+          'targetStopOccurrenceId': context.targetId,
+          'confirmedVehicleNumber': selectedVehicleNumber,
+          'notificationOffsetStops': notificationOffsetStops!,
+        }
+      : {
+          'clientRequestId': clientRequestId,
+          'candidateRef': candidateRef!,
+          'confirmedVehicleNumber': ?legacyConfirmedVehicleNumber,
+          'notificationOffsetStops': ?notificationOffsetStops,
+          if (notificationOffsetStops == null)
+            'prepareNotificationEnabled': prepareNotificationEnabled,
+        };
   Map<String, Object?> toJson() => {
     ...body,
     'selectedVehicleNumber': selectedVehicleNumber,
@@ -98,16 +104,30 @@ class BoardingCreationIntent {
     }
     final uuid = boardingText(value['clientRequestId']);
     if (!isBoardingUuid(uuid)) throw const FormatException();
+    final context = BoardingSelectionContext.fromJson(value['context']);
+    final legacy = value.containsKey('candidateRef');
+    if (!legacy &&
+        (offset == null ||
+            context.boardingId == null ||
+            value['routeId'] != context.routeId ||
+            value['boardingStopOccurrenceId'] != context.boardingId ||
+            value['targetStopOccurrenceId'] != context.targetId ||
+            value['confirmedVehicleNumber'] !=
+                value['selectedVehicleNumber'])) {
+      throw const FormatException();
+    }
     return BoardingCreationIntent(
       clientRequestId: uuid,
-      candidateRef: boardingText(value['candidateRef']),
+      candidateRef: legacy ? boardingText(value['candidateRef']) : null,
       selectedVehicleNumber: boardingText(
         value['selectedVehicleNumber'] ?? value['confirmedVehicleNumber'],
       ),
-      legacyConfirmedVehicleNumber: value['confirmedVehicleNumber'] as String?,
+      legacyConfirmedVehicleNumber: legacy
+          ? value['confirmedVehicleNumber'] as String?
+          : null,
       userIdentity: boardingText(value['userIdentity']),
       sessionIdentity: boardingText(value['sessionIdentity']),
-      context: BoardingSelectionContext.fromJson(value['context']),
+      context: context,
       observedAt: boardingInstant(value['observedAt']),
       notificationOffsetStops: offset as int?,
       prepareNotificationEnabled:

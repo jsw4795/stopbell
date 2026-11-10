@@ -42,7 +42,7 @@ void main() {
             },
             {
               ...candidateJson(number: '서울70사5678'),
-              'limitations': ['STALE_OBSERVATION'],
+              'limitations': ['IDENTITY_CONFLICT'],
             },
           ],
         ),
@@ -89,7 +89,7 @@ void main() {
       expect(find.textContaining('서버 조회 기준'), findsOneWidget);
       expect(find.textContaining('제공기관 원본 시각'), findsNothing);
       expect(find.textContaining('일부 차량 정보'), findsOneWidget);
-      expect(find.text('선택 보류 · 오래된 관측'), findsOneWidget);
+      expect(find.text('선택 보류 · 차량 식별 정보 불일치'), findsOneWidget);
       expect(find.text('최근 관측 · 검증된 참고 지점'), findsOneWidget);
       expect(find.text('남은 지점 확인 필요'), findsOneWidget);
       expect(find.text('진행 위치 미확인'), findsOneWidget);

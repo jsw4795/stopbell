@@ -76,7 +76,7 @@ class BoardingSessionApiClient implements BoardingSessionClient {
     required int generation,
     required bool Function() current,
   }) async {
-    if ((body.length < 2 || body.length > 4) ||
+    if ((body.length < 2 || body.length > 6) ||
         (body.containsKey('notificationOffsetStops') &&
             (body['notificationOffsetStops'] is! int ||
                 !const [1, 2].contains(body['notificationOffsetStops']))) ||
@@ -88,6 +88,9 @@ class BoardingSessionApiClient implements BoardingSessionClient {
           (key) => !const {
             'clientRequestId',
             'candidateRef',
+            'routeId',
+            'boardingStopOccurrenceId',
+            'targetStopOccurrenceId',
             'confirmedVehicleNumber',
             'prepareNotificationEnabled',
             'notificationOffsetStops',
@@ -97,7 +100,34 @@ class BoardingSessionApiClient implements BoardingSessionClient {
         !isBoardingUuid(body['clientRequestId'] as String)) {
       throw ArgumentError('clientRequestId');
     }
-    _reference(body['candidateRef'], body['confirmedVehicleNumber']);
+    if (body.containsKey('candidateRef')) {
+      if (body.keys.any(
+        (key) => const {
+          'routeId',
+          'boardingStopOccurrenceId',
+          'targetStopOccurrenceId',
+        }.contains(key),
+      )) {
+        throw ArgumentError('mixed creation body');
+      }
+      _reference(body['candidateRef'], body['confirmedVehicleNumber']);
+    } else {
+      for (final key in const [
+        'routeId',
+        'boardingStopOccurrenceId',
+        'targetStopOccurrenceId',
+      ]) {
+        final id = body[key];
+        if (id is! int || id <= 0) throw ArgumentError(key);
+      }
+      final number = body['confirmedVehicleNumber'];
+      if (number is! String ||
+          number.trim().isEmpty ||
+          number.length > 255 ||
+          body.containsKey('prepareNotificationEnabled')) {
+        throw ArgumentError('confirmedVehicleNumber');
+      }
+    }
     try {
       return BoardingSession.fromJson(
         await _request(

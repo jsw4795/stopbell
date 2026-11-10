@@ -132,29 +132,26 @@ void main() {
       expect(storage.records, isEmpty);
     },
   );
-  test(
-    'candidate expiring during durable save is discarded before POST',
-    () async {
-      c.dispose();
-      var time = sessionNow;
-      c = BoardingSessionController(
-        auth: auth,
-        client: api,
-        storage: storage,
-        now: () => time,
-      );
-      await start();
-      final saved = Completer<void>();
-      storage.beforeSave = () => saved.future;
-      final result = create();
-      time = sessionNow.add(const Duration(seconds: 61));
-      saved.complete();
-      await result;
-      expect(api.creations, isEmpty);
-      expect(storage.records, isEmpty);
-      expect(c.creationState, BoardingCreationState.notStarted);
-    },
-  );
+  test('candidate expiry during durable save does not prevent POST', () async {
+    c.dispose();
+    var time = sessionNow;
+    c = BoardingSessionController(
+      auth: auth,
+      client: api,
+      storage: storage,
+      now: () => time,
+    );
+    await start();
+    final saved = Completer<void>();
+    storage.beforeSave = () => saved.future;
+    final result = create();
+    time = sessionNow.add(const Duration(seconds: 61));
+    saved.complete();
+    await result;
+    expect(api.creations, hasLength(1));
+    expect(storage.records, isEmpty);
+    expect(c.creationState, BoardingCreationState.resolved);
+  });
   test(
     'unrecognized 4xx cannot erase a possibly accepted creation intent',
     () async {
@@ -201,38 +198,7 @@ void main() {
       expect(c.session, isNull);
     },
   );
-  test('permission expiry refreshes only the identical selected vehicle before a new request', () async {
-    c.dispose();
-    var time = sessionNow;
-    c = BoardingSessionController(
-      auth: auth,
-      client: api,
-      storage: storage,
-      now: () => time,
-    );
-    await start();
-    var refreshes = 0;
-    await c.create(
-      sessionCandidate(),
-      '',
-      sessionContext,
-      preparePush: () async {
-        time = time.add(const Duration(seconds: 61));
-        return true;
-      },
-      refreshSelected: (selected) async {
-        refreshes++;
-        return sessionCandidate(
-          reference: 'refreshed-selected',
-          observedAt: time,
-        );
-      },
-    );
-    expect(refreshes, 1);
-    expect(api.creations.single['candidateRef'], 'refreshed-selected');
-    expect(api.creations.single, isNot(contains('confirmedVehicleNumber')));
-  });
-  test('permission expiry cannot substitute a different vehicle with the same display number', () async {
+  test('permission delay does not trigger candidate refresh', () async {
     c.dispose();
     var time = sessionNow;
     c = BoardingSessionController(
@@ -250,15 +216,41 @@ void main() {
         time = time.add(const Duration(seconds: 61));
         return true;
       },
-      refreshSelected: (selected) async => sessionCandidate(
-        selectionKey: 'different-provider-vehicle-id',
-        reference: 'different-ref',
-        observedAt: time,
-      ),
     );
-    expect(api.creations, isEmpty);
-    expect(storage.records, isEmpty);
+    expect(
+      api.creations.single,
+      containsPair('confirmedVehicleNumber', '서울70사1234'),
+    );
+    expect(api.creations.single, isNot(contains('candidateRef')));
   });
+  test(
+    'restart preserves new request UUID and exact body for explicit retry',
+    () async {
+      await start();
+      api.onCreate = () async =>
+          throw const BoardingSessionException(SessionFailure.timeout);
+      await create();
+      final original = Map<String, Object>.of(api.creations.single);
+      final stored = BoardingCreationIntent.fromJson(
+        storage.records.values.single.toJson(),
+      );
+      expect(stored.body, original);
+      c.dispose();
+      c = BoardingSessionController(
+        auth: auth,
+        client: api,
+        storage: storage,
+        now: () => sessionNow,
+      );
+      await c.initialize();
+      expect(c.needsRecovery, isTrue);
+      expect(api.creations, hasLength(1));
+      api.onCreate = () async => sessionFixture();
+      await c.retryCreation();
+      expect(api.creations.last, original);
+      expect(c.session, isNotNull);
+    },
+  );
   test('registered pending state is restored after screen disposal without a duplicate POST', () async {
     await start();
     api.onCreate = () async => sessionFixture(
@@ -297,21 +289,21 @@ void main() {
       await start();
       await c.create(sessionCandidate(), '', sessionContext);
       expect(api.creations, hasLength(1));
-      expect(api.creations.single, isNot(contains('confirmedVehicleNumber')));
+      expect(
+        api.creations.single,
+        containsPair('confirmedVehicleNumber', '서울70사1234'),
+      );
+      expect(api.creations.single, isNot(contains('candidateRef')));
       expect(c.session!.vehicleNumber, '서울70사1234');
     },
   );
-  test('HELD, UNKNOWN, unsupported and stale references are blocked', () async {
+  test('HELD, UNKNOWN and unsupported candidates are blocked', () async {
     await start();
     for (final candidate in [
       sessionCandidate(confirmation: 'HELD'),
       sessionCandidate(confirmation: 'FUTURE'),
       sessionCandidate(tracking: 'HELD'),
       sessionCandidate(tracking: 'FUTURE'),
-      sessionCandidate(
-        observedAt: sessionNow.subtract(const Duration(seconds: 61)),
-      ),
-      sessionCandidate(observedAt: sessionNow.add(const Duration(seconds: 1))),
     ]) {
       await c.create(candidate, '서울70사1234', sessionContext);
     }

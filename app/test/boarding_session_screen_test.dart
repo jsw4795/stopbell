@@ -203,11 +203,10 @@ void main() {
 
   Future<void> select(WidgetTester tester) async {
     await tap(tester, '서울70사1234');
-    await tap(tester, '이 차량으로 하차 알림 설정');
   }
 
   Future<void> confirm(WidgetTester tester, {bool reconfirm = false}) async {
-    await tap(tester, reconfirm ? '동일 차량 재확인 요청' : '하차 알림 등록');
+    await tap(tester, reconfirm ? '동일 차량 재확인 요청' : '이 차량으로 하차 알림 설정');
   }
 
   testWidgets(
@@ -224,16 +223,61 @@ void main() {
       expect(api.creations, isEmpty);
       expect(tester.widget<FilledButton>(next).onPressed, isNotNull);
       await tap(tester, '이 차량으로 하차 알림 설정');
-      expect(api.creations, isEmpty);
-      expect(find.textContaining('등록하면 바로 추적을 시작해요'), findsOneWidget);
-      expect(find.byType(TextField), findsNothing);
-      await confirm(tester);
       expect(api.creations, hasLength(1));
+      expect(find.byType(BoardingConfirmationView), findsNothing);
+      expect(api.creations.single, containsPair('routeId', 754));
+      expect(
+        api.creations.single,
+        containsPair('boardingStopOccurrenceId', 11),
+      );
+      expect(api.creations.single, containsPair('targetStopOccurrenceId', 22));
+      expect(
+        api.creations.single,
+        containsPair('confirmedVehicleNumber', '서울70사1234'),
+      );
+      expect(api.creations.single, isNot(contains('candidateRef')));
       expect(find.byType(BoardingSessionView), findsOneWidget);
       expect(find.text('검증된 노선 방문 지점 간격: 3'), findsOneWidget);
       expect(find.textContaining('기기 시간'), findsWidgets);
     },
   );
+  testWidgets('notification offset is selected before direct registration', (
+    tester,
+  ) async {
+    api.onCreate = () async => BoardingSession.fromJson({
+      ...sessionJson(),
+      'notificationOffsetStops': 1,
+    });
+    await pump(tester);
+    await candidates(tester);
+    await tap(tester, '1개 전');
+    await select(tester);
+    await confirm(tester);
+    expect(api.creations.single['notificationOffsetStops'], 1);
+    expect(find.byType(BoardingSessionView), findsOneWidget);
+  });
+
+  testWidgets('duplicate numbers cannot be selected', (tester) async {
+    candidateValues = [
+      freshCandidate(),
+      {...freshCandidate(), 'candidateRef': 'other'},
+    ];
+    await pump(tester);
+    await candidates(tester);
+    expect(find.text('선택 보류 · 차량번호 중복'), findsNWidgets(2));
+    await tester.tap(find.byKey(const ValueKey('candidate-0')));
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('continue-boarding-candidate')),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(api.creations, isEmpty);
+  });
+
   testWidgets(
     'HELD and missing full number stay visible but cannot be selected',
     (tester) async {
@@ -252,34 +296,11 @@ void main() {
       expect(api.creations, isEmpty);
     },
   );
-  testWidgets(
-    'changing draft candidate/context discards selection without POST',
-    (tester) async {
-      await pump(tester);
-      await candidates(tester);
-      await select(tester);
-      await tap(tester, '다른 후보 선택 · 다시 조회');
-      await tester.tap(find.byKey(const ValueKey('occurrence-11')));
-      await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('occurrence-22')));
-      await tester.pump();
-      candidateValues = [
-        {...freshCandidate(), 'candidateRef': 'second-reference'},
-      ];
-      await tester.tap(find.byKey(const ValueKey('find-candidates')));
-      await tester.pumpAndSettle();
-      await select(tester);
-      expect(find.byType(TextField), findsNothing);
-      expect(contexts.last, (754, 22, 11));
-      expect(api.creations, isEmpty);
-    },
-  );
-  testWidgets('stale selected candidate cannot POST after entry', (
-    tester,
-  ) async {
+  testWidgets('old candidate is sent without a reference', (tester) async {
     candidateValues = [
       {
         ...freshCandidate(),
+        'candidateRef': null,
         'observedAt': DateTime.now()
             .toUtc()
             .subtract(const Duration(seconds: 61))
@@ -290,9 +311,74 @@ void main() {
     await candidates(tester);
     await select(tester);
     await confirm(tester);
-    expect(api.creations, isEmpty);
-    expect(find.textContaining('후보가 오래됐어요'), findsOneWidget);
+    expect(api.creations.single, isNot(contains('candidateRef')));
+    expect(find.byType(BoardingSessionView), findsOneWidget);
   });
+  for (final (code, message) in [
+    ('BOARDING_TARGET_NOT_AHEAD', '도달했거나 이미 통과'),
+    ('BOARDING_VEHICLE_UNIDENTIFIABLE', '선택한 차량을 현재 확인할 수 없어요'),
+    ('BOARDING_POSITION_UNAVAILABLE', '현재 진행 위치를 확인할 수 없어요'),
+    ('TRANSIT_TEMPORARILY_UNAVAILABLE', '일시적으로 확인할 수 없어요'),
+  ]) {
+    testWidgets('$code preserves selection for retry', (tester) async {
+      api.onCreate = () async => throw BoardingSessionException(
+        SessionFailure.http,
+        statusCode: code == 'TRANSIT_TEMPORARILY_UNAVAILABLE' ? 503 : 409,
+        code: code,
+      );
+      await pump(tester);
+      await candidates(tester);
+      await select(tester);
+      await confirm(tester);
+      expect(find.textContaining(message), findsOneWidget);
+      expect(find.byType(BoardingSessionView), findsNothing);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('continue-boarding-candidate')),
+            )
+            .onPressed,
+        isNotNull,
+      );
+      expect(contexts, [(754, 22, 11)]);
+      expect(storage.records, isEmpty);
+      api.onCreate = () async => sessionFixture();
+      await confirm(tester);
+      expect(api.creations, hasLength(2));
+      expect(find.byType(BoardingSessionView), findsOneWidget);
+    });
+  }
+  testWidgets(
+    'new request failure after a terminal session keeps the selection',
+    (tester) async {
+      await storage.save(intentFixture(auth));
+      api.requestSession = sessionFixture(
+        status: 'COMPLETED',
+        evaluation: 'ENDED',
+        gap: null,
+      );
+      await pump(tester);
+      await tap(tester, '새 차량 후보 찾기');
+      await candidates(tester);
+      api.onCreate = () async => throw const BoardingSessionException(
+        SessionFailure.http,
+        statusCode: 409,
+        code: 'BOARDING_VEHICLE_UNIDENTIFIABLE',
+      );
+      await select(tester);
+      await confirm(tester);
+      expect(find.textContaining('선택한 차량을 현재 확인할 수 없어요'), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('continue-boarding-candidate')),
+            )
+            .onPressed,
+        isNotNull,
+      );
+    },
+  );
+
   testWidgets(
     'unsupported production code never displays fabricated TRACKING',
     (tester) async {
@@ -318,13 +404,13 @@ void main() {
       await pump(tester);
       await candidates(tester);
       await select(tester);
-      await tap(tester, '하차 알림 등록');
+      await tap(tester, '이 차량으로 하차 알림 설정');
       expect(api.creations, hasLength(1));
       expect(storage.records, hasLength(1));
       expect(
         tester
             .widget<FilledButton>(
-              find.widgetWithText(FilledButton, '원래 생성 요청 그대로 재시도'),
+              find.byKey(const ValueKey('continue-boarding-candidate')),
             )
             .onPressed,
         isNull,

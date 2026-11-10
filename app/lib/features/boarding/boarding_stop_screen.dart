@@ -28,13 +28,18 @@ class BoardingStopScreen extends StatefulWidget {
     required this.onBack,
     this.onSelectCandidate,
     this.reconfirm = false,
+    this.creationBusy = false,
+    this.notificationOffsetStops = 2,
+    this.onNotificationOffsetChanged,
   });
   final BusRoute route;
   final AuthSession authSession;
   final Future<List<BusRouteStopOccurrence>> Function(int) findStops;
   final FindBoardingCandidates findCandidates;
   final VoidCallback onBack;
-  final bool reconfirm;
+  final bool reconfirm, creationBusy;
+  final int notificationOffsetStops;
+  final ValueChanged<int>? onNotificationOffsetChanged;
   final void Function(
     BoardingCandidate,
     BoardingSelectionContext, {
@@ -164,6 +169,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   Future<void> _findCandidates() async {
     final target = _target;
     if (!_current ||
+        widget.creationBusy ||
         target == null ||
         _boarding == null ||
         !_validTarget(target) ||
@@ -229,7 +235,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   }
 
   void _reselectStops() {
-    if (!_current || _staleStops) return;
+    if (!_current || widget.creationBusy || _staleStops) return;
     setState(() {
       _boarding = null;
       _target = null;
@@ -247,7 +253,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   }
 
   void _back() {
-    if (!_current) return;
+    if (!_current || widget.creationBusy) return;
     if (_showingCandidates) {
       setState(_invalidateCandidates);
     } else if (_picker == _Picker.target) {
@@ -308,7 +314,18 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       _current &&
       _result?.candidateSetStatus != CandidateSetStatus.unknown &&
       (_result?.candidates.contains(candidate) ?? false) &&
-      canConfirmBoardingCandidate(candidate);
+      !widget.creationBusy &&
+      (widget.reconfirm
+          ? canConfirmBoardingCandidate(candidate)
+          : candidate.canCreateWithNumber &&
+                _result!.candidates
+                        .where(
+                          (item) =>
+                              item.vehicleNumber != null &&
+                              item.vehicleNumber == candidate.vehicleNumber,
+                        )
+                        .length ==
+                    1);
 
   void _openConfirmation(BoardingCandidate candidate) {
     final target = _target;
@@ -377,12 +394,12 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         children: [
           TextButton(
             key: const ValueKey('reselect-stops'),
-            onPressed: _reselectStops,
+            onPressed: widget.creationBusy ? null : _reselectStops,
             child: const Text('정류장 다시 선택'),
           ),
           TextButton(
             key: const ValueKey('find-candidates'),
-            onPressed: _findCandidates,
+            onPressed: widget.creationBusy ? null : _findCandidates,
             child: const Text('차량 후보 다시 조회'),
           ),
         ],
@@ -406,6 +423,26 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
                 }
               },
       ),
+      const SizedBox(height: StopBellSpacing.md),
+      Row(
+        children: [
+          const Text('알림 시점'),
+          const SizedBox(width: 12),
+          Expanded(
+            child: SegmentedButton<int>(
+              segments: const [
+                ButtonSegment(value: 2, label: Text('2개 전')),
+                ButtonSegment(value: 1, label: Text('1개 전')),
+              ],
+              selected: {widget.notificationOffsetStops},
+              onSelectionChanged: widget.creationBusy
+                  ? null
+                  : (values) =>
+                        widget.onNotificationOffsetChanged?.call(values.single),
+            ),
+          ),
+        ],
+      ),
     ],
   );
 
@@ -420,7 +457,10 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
                 _canUseCandidate(selected)
             ? () => _openConfirmation(selected)
             : null,
-        child: const Text('이 차량으로 하차 알림 설정', textAlign: TextAlign.center),
+        child: Text(
+          widget.creationBusy ? '등록 중…' : '이 차량으로 하차 알림 설정',
+          textAlign: TextAlign.center,
+        ),
       );
     }
     final boarding = _boarding;
@@ -460,7 +500,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
             StopSelectionPair(
               first: OutlinedButton(
                 key: const ValueKey('reselect-stops'),
-                onPressed: _reselectStops,
+                onPressed: widget.creationBusy ? null : _reselectStops,
                 child: const Text('정류장 다시 선택', textAlign: TextAlign.center),
               ),
               second: FilledButton(

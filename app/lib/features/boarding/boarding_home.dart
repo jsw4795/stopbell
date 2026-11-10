@@ -120,31 +120,6 @@ class _BoardingHomeState extends State<BoardingHome> {
     final c = _controller!;
     if (_reconfirm) {
       await c.reconfirm(draft.candidate, number, draft.selection);
-    } else {
-      await c.create(
-        draft.candidate,
-        number,
-        draft.selection,
-        refreshSelected: (selected) async {
-          if (selected.selectionKey == null) return null;
-          final result = await widget.findCandidates(
-            routeId: draft.selection.routeId,
-            targetStopOccurrenceId: draft.selection.targetId,
-            boardingStopOccurrenceId: draft.selection.boardingId,
-            expectedGeneration: _generation,
-            isRequestCurrent: () => _current && identical(_draft, draft),
-          );
-          if (!_current) return null;
-          final matches = result.candidates
-              .where((item) => item.selectionKey == selected.selectionKey)
-              .toList();
-          return matches.length == 1 ? matches.single : null;
-        },
-        notificationOffsetStops: _notificationOffsetStops,
-        preparePush: () =>
-            widget.beforeCreate?.call(context) ??
-            prepareBoardingPush(context, null),
-      );
     }
     if (_current) {
       setState(() {
@@ -156,12 +131,34 @@ class _BoardingHomeState extends State<BoardingHome> {
     }
   }
 
+  Future<void> _create(
+    BoardingCandidate candidate,
+    BoardingSelectionContext selection,
+  ) async {
+    final c = _controller!;
+    await c.create(
+      candidate,
+      candidate.vehicleNumber!,
+      selection,
+      notificationOffsetStops: _notificationOffsetStops,
+      preparePush: () =>
+          widget.beforeCreate?.call(context) ??
+          prepareBoardingPush(context, null),
+    );
+    if (_current && c.creationState == BoardingCreationState.resolved) {
+      setState(() => _newSelection = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_current) return const SizedBox.shrink();
     final c = _controller;
     if (c != null) {
-      if (!c.initialized || c.lookupFailed || c.needsRecovery) {
+      if (!c.initialized ||
+          c.lookupFailed ||
+          (c.needsRecovery &&
+              c.creationState != BoardingCreationState.submitting)) {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -174,12 +171,28 @@ class _BoardingHomeState extends State<BoardingHome> {
             if (c.busy) const Text('서버 응답 확인 중...'),
             if (!c.busy)
               OutlinedButton(
-                onPressed: c.needsRecovery ? c.recover : c.initialize,
+                onPressed: c.needsRecovery
+                    ? () async {
+                        await c.recover();
+                        if (_current &&
+                            c.creationState == BoardingCreationState.resolved) {
+                          setState(() => _newSelection = false);
+                        }
+                      }
+                    : c.initialize,
                 child: const Text('결과 다시 조회'),
               ),
             if (c.needsRecovery)
               FilledButton(
-                onPressed: c.busy ? null : c.retryCreation,
+                onPressed: c.busy
+                    ? null
+                    : () async {
+                        await c.retryCreation();
+                        if (_current &&
+                            c.creationState == BoardingCreationState.resolved) {
+                          setState(() => _newSelection = false);
+                        }
+                      },
                 child: const Text('원래 생성 요청 그대로 재시도'),
               ),
           ],
@@ -255,20 +268,25 @@ class _BoardingHomeState extends State<BoardingHome> {
             findStops: widget.findStops,
             findCandidates: widget.findCandidates,
             reconfirm: _reconfirm,
+            creationBusy: c?.busy ?? false,
+            notificationOffsetStops: _notificationOffsetStops,
+            onNotificationOffsetChanged: (value) =>
+                setState(() => _notificationOffsetStops = value),
             onSelectCandidate: c == null
                 ? null
-                : (
-                    candidate,
-                    selection, {
-                    required boarding,
-                    required target,
-                  }) => _select(
-                    candidate,
-                    selection,
-                    route.routeNumber,
-                    target,
-                    boarding: boarding,
-                  ),
+                : (candidate, selection, {required boarding, required target}) {
+                    if (_reconfirm) {
+                      _select(
+                        candidate,
+                        selection,
+                        route.routeNumber,
+                        target,
+                        boarding: boarding,
+                      );
+                    } else {
+                      _create(candidate, selection);
+                    }
+                  },
             onBack: () {
               if (_current) setState(() => _route = null);
             },

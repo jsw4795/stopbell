@@ -65,7 +65,20 @@ class BoardingCandidatesView extends StatelessWidget {
               Semantics(liveRegion: true, child: Text(statusMessage)),
             if (canChoose && result.candidates.isNotEmpty)
               Text(
-                result.candidates.any(canConfirmBoardingCandidate)
+                result.candidates.any(
+                      (candidate) => compactLabel == null
+                          ? canConfirmBoardingCandidate(candidate)
+                          : candidate.canCreateWithNumber &&
+                                result.candidates
+                                        .where(
+                                          (other) =>
+                                              other.vehicleNumber != null &&
+                                              other.vehicleNumber ==
+                                                  candidate.vehicleNumber,
+                                        )
+                                        .length ==
+                                    1,
+                    )
                     ? '전체 차량번호를 보고 원하는 차량을 직접 선택하세요.'
                     : '현재 선택 가능한 차량이 없어요. 차량별 보류 사유를 확인해 주세요.',
                 style: theme.textTheme.bodySmall,
@@ -84,6 +97,16 @@ class BoardingCandidatesView extends StatelessWidget {
               candidate: candidate,
               progress: compactLabel(candidate),
               selected: identical(candidate, selected),
+              duplicate:
+                  candidate.vehicleNumber != null &&
+                  result.candidates
+                          .where(
+                            (other) =>
+                                other.vehicleNumber != null &&
+                                other.vehicleNumber == candidate.vehicleNumber,
+                          )
+                          .length >
+                      1,
               canChoose: canChoose,
               onSelect: onSelect,
             )
@@ -126,12 +149,13 @@ class _CompactCandidateCard extends StatelessWidget {
     required this.progress,
     required this.selected,
     required this.canChoose,
+    required this.duplicate,
     this.onSelect,
   });
 
   final BoardingCandidate candidate;
   final BoardingCandidateProgressLabel progress;
-  final bool selected, canChoose;
+  final bool selected, canChoose, duplicate;
   final ValueChanged<BoardingCandidate>? onSelect;
 
   @override
@@ -139,8 +163,12 @@ class _CompactCandidateCard extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final semantic = StopBellColors.of(context);
-    final canSelect = canChoose && canConfirmBoardingCandidate(candidate);
-    final holdReason = canSelect ? null : _holdReason(candidate, canChoose);
+    final canSelect = canChoose && !duplicate && candidate.canCreateWithNumber;
+    final holdReason = canSelect
+        ? null
+        : duplicate
+        ? '선택 보류 · 차량번호 중복'
+        : _holdReason(candidate, canChoose);
     final onTap = canSelect && onSelect != null
         ? () => onSelect!(candidate)
         : null;

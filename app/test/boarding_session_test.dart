@@ -14,14 +14,21 @@ void main() {
     () {
       final intent = BoardingCreationIntent(
         clientRequestId: newBoardingRequestId(),
-        candidateRef: 'opaque',
         selectedVehicleNumber: '서울70사1234',
         userIdentity: '1',
         sessionIdentity: 'offset-default',
         context: sessionContext,
         observedAt: sessionNow,
       );
-      expect(intent.body['notificationOffsetStops'], 2);
+      expect(intent.body, {
+        'clientRequestId': intent.clientRequestId,
+        'routeId': sessionContext.routeId,
+        'boardingStopOccurrenceId': sessionContext.boardingId,
+        'targetStopOccurrenceId': sessionContext.targetId,
+        'confirmedVehicleNumber': '서울70사1234',
+        'notificationOffsetStops': 2,
+      });
+      expect(intent.body, isNot(contains('candidateRef')));
       expect(intent.body, isNot(contains('prepareNotificationEnabled')));
       expect(
         BoardingCreationIntent.fromJson(intent.toJson()).body,
