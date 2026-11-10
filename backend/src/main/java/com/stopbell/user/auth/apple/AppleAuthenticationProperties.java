@@ -11,6 +11,7 @@ public record AppleAuthenticationProperties(
         String teamId,
         String keyId,
         String privateKeyPem,
+        String privateKeyFile,
         String credentialKeyId,
         Map<String, String> credentialKeys
 ) {

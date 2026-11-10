@@ -659,7 +659,15 @@ Monitoring, notification dispatch, FCM, TAGO 하차 추적 실험, Apple 인증,
 
 기본 local profile은 저장소 밖 `.env`를 읽으며 기존 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET`, `GOOGLE_SERVER_CLIENT_ID`, `PUBLIC_DATA_SERVICE_KEY`, `FCM_PROJECT_ID`, `GOOGLE_APPLICATION_CREDENTIALS`를 사용한다. FCM 경로는 저장소 밖 Service Account JSON을 가리켜야 한다. 기본 dispatch는 FCM 정적 설정이 유효하지 않으면 시작을 차단하며 파일 내용과 실제 전송은 실행 시 검증된다.
 
-Apple 인증에는 Spring 설정 `apple.authentication.client-id`, `team-id`, `key-id`, `private-key-pem`, `credential-key-id`, `credential-keys`가 필요하다. 서버 알림은 `apple.notifications.client-id`도 요구하며 누락 시 시작이 실패한다. 비밀은 외부에서 주입한다. Apple Developer에 HTTPS server-to-server notification URL을 등록해야 실제 알림을 수신할 수 있다. Flutter의 Apple 로그인 버튼 설정은 별도다.
+Apple 인증에는 Spring 설정 `apple.authentication.client-id`, `team-id`, `key-id`, 개인 키, `credential-key-id`, `credential-keys`가 필요하다. 개인 키는 `private-key-pem`으로 직접 주입하거나 `private-key-file`로 외부 PKCS#8 `.p8` 파일을 지정한다. 두 설정을 동시에 지정하거나 키가 없거나 유효하지 않으면 시작이 실패한다. 서버 알림은 `apple.notifications.client-id`도 요구하며 누락 시 시작이 실패한다. 비밀은 외부에서 주입한다. Apple Developer에 HTTPS server-to-server notification URL을 등록해야 실제 알림을 수신할 수 있다. Flutter의 Apple 로그인 버튼 설정은 별도다.
+
+예를 들어 저장소 밖 `.env`에 다음을 추가한다. 경로는 서버 프로세스가 읽을 수 있는 저장소 외부 파일을 가리켜야 하며 실제 경로로 교체한다. 기존 Apple ID와 credential 암호화 설정도 유지한다.
+
+```dotenv
+APPLE_AUTHENTICATION_PRIVATE_KEY_FILE=/absolute/path/outside/repository/AuthKey_example.p8
+```
+
+Docker에서는 파일을 별도로 마운트하고 컨테이너 내부 경로를 지정하며 실행 사용자 UID 10001에 읽기 권한을 부여한다. `.p8` 파일과 개인 키 원문은 저장소에 넣지 않는다.
 
 필수 설정을 준비한 뒤 `backend`에서 `env -u JAVA_HOME ./gradlew bootRun --args='--server.address=127.0.0.1'`로 실행한다. 기존 `.env`나 환경변수의 명시적 false는 기본값보다 우선한다.
 

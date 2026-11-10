@@ -1,5 +1,9 @@
 package com.stopbell.user.auth.apple;
 
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -25,7 +29,21 @@ public class AppleAuthenticationConfiguration {
     @Bean
     AppleClientSecret appleClientSecret(AppleAuthenticationProperties properties, Clock jwtClock) {
         return new AppleClientSecret(properties.clientId(), properties.teamId(), properties.keyId(),
-                properties.privateKeyPem(), jwtClock);
+                privateKey(properties), jwtClock);
+    }
+
+    private static String privateKey(AppleAuthenticationProperties properties) {
+        String pem = properties.privateKeyPem();
+        String file = properties.privateKeyFile();
+        if (file == null || file.isBlank()) return pem;
+        if (pem != null && !pem.isBlank()) throw new IllegalArgumentException("Invalid Apple client configuration");
+        try (InputStream input = Files.newInputStream(Path.of(file))) {
+            byte[] bytes = input.readNBytes(8193);
+            if (bytes.length > 8192) throw new IllegalArgumentException("Invalid Apple client configuration");
+            return new String(bytes, StandardCharsets.UTF_8);
+        } catch (Exception failure) {
+            throw new IllegalArgumentException("Invalid Apple client configuration");
+        }
     }
 
     @Bean
