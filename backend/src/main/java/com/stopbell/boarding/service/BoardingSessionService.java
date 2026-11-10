@@ -85,7 +85,10 @@ public class BoardingSessionService {
             throw new ApiException(ErrorCode.INVALID_REQUEST);
         }
         // All Provider I/O occurs here, before either User or Session lock is acquired.
-        VerifiedBoardingStart start = validator.validate(userId, request.candidateRef(), request.confirmedVehicleNumber());
+        VerifiedBoardingStart start = request.currentVehicleRequest()
+                ? validator.validateCurrent(request.routeId(), request.boardingStopOccurrenceId(),
+                    request.targetStopOccurrenceId(), request.confirmedVehicleNumber())
+                : validator.validate(userId, request.candidateRef(), request.confirmedVehicleNumber());
         CreationResult result;
         try {
             result = createTransaction(userId, request, start);
@@ -144,7 +147,8 @@ public class BoardingSessionService {
                     || start.checkpoint().getObservedAt().isBefore(now.minus(BoardingCandidateReferenceStore.FRESHNESS))
                     || (start.checkpoint().getProviderDataTime() != null
                         && start.checkpoint().getProviderDataTime().isBefore(now.minus(BoardingCandidateReferenceStore.FRESHNESS)))) {
-                throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+                throw new ApiException(request.currentVehicleRequest() ? ErrorCode.BOARDING_POSITION_UNAVAILABLE
+                        : ErrorCode.BOARDING_CANDIDATE_CHANGED);
             }
             BoardingSession session = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(),
                     request.fingerprint(), start.vehicleTrackingId(), start.vehicleNumber(), start.routeNumber(),
@@ -158,7 +162,7 @@ public class BoardingSessionService {
     }
 
     private BoardingSessionResponse existing(BoardingSession session, CreateBoardingSessionRequest request) {
-        if (!session.getRequestFingerprint().equals(session.getNotificationOffsetStops() == null
+        if (!session.getRequestFingerprint().equals(!request.currentVehicleRequest() && session.getNotificationOffsetStops() == null
                 && request.notificationOffsetStops() == null ? request.legacyFingerprint() : request.fingerprint())) {
             throw new ApiException(ErrorCode.BOARDING_REQUEST_CONFLICT);
         }

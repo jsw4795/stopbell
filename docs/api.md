@@ -486,13 +486,28 @@ Content-Type: application/json
 }
 ```
 
-`notificationOffsetStops`는 선택 정수이며 생략 시 2, 허용값은 1과 2다. null·실수·문자열·boolean·그 외 정수는 400이다. 목적지 자체는 candidateRef의 실제 목적 occurrence로 보존한다. 생성 뒤 설정 변경은 없으며 같은 UUID에서 오프셋 변경은 409 BOARDING_REQUEST_CONFLICT다. 기존 prepareNotificationEnabled body는 이미 저장된 레거시 요청의 동일 fingerprint 복구에만 허용하고 새 세션 생성에는 400을 반환한다. 이전 body에 설정 자체가 없던 요청도 기존 UUID에서 원래 fingerprint로 복구하며 정책과 수명을 바꾸지 않는다.
+현재 차량번호로 신규 생성하는 요청도 지원한다. 두 요청 형식을 섞을 수 없다.
 
-Client는 목록의 명시적 차량 선택과 알림 시점 선택 후 요청한다. 전체 차량번호 입력은 없다. `confirmedVehicleNumber`는 기존 저장 요청의 동일 body/fingerprint 재시도 호환을 위해 optional 문자열로만 수용하며 수동 대조·차량 식별 검증 입력으로 사용하지 않는다. 새 Client는 보내지 않는다. Backend는 reference의 서버 보관 차량 ID·전체 Provider 번호와 최신 roster/detail을 비교한다. 성공은 201과 TRACKING이다. 새 정책에서 최신 검증 baseline이 있는 등록은 commit 확인 뒤 READY이며, 이미 알림 구간이면 원래 관측 TTL 안에서 준비 Event를 같은 transaction에 즉시 생성한다. 검증 전 등록은 VERIFICATION_PENDING이며 실제 탑승·기기 알림 수신 성공을 뜻하지 않는다. CONFIRMED·별도 Start API는 없다.
+```json
+{
+  "clientRequestId": "8be1dffa-8e2c-4547-b136-d99bfd84e45c",
+  "routeId": 1,
+  "boardingStopOccurrenceId": 10,
+  "targetStopOccurrenceId": 20,
+  "confirmedVehicleNumber": "서울70사1234",
+  "notificationOffsetStops": 2
+}
+```
 
-같은 User/clientRequestId와 동일 원래 요청은 200으로 원래 Session의 **현재 상태**를 반환하며 baseline·기한·Event를 초기화하지 않는다. fingerprint 비교는 candidateRef와 대조 번호 등 원래 body의 canonical 값으로 수행한다. 중복 확인은 ephemeral reference 조회보다 먼저 DB에서 수행해 성공 응답 유실 후 reference 만료/restart에도 복구한다. 같은 key의 다른 내용은 409다. 다른 요청으로 미종료 세션이 이미 있으면 자동 대체하지 않고 409다.
+세 ID는 양의 정수이며 차량번호는 목록에서 선택한 전체 번호다. 서버는 해당 노선의 현재 Provider 응답에서 번호와 추적 ID를 유일하게 확인하고 현재 진행이 목표 이전인지 검증한다. 이전 후보 reference, 차량 ID, 관측 시각 및 위치는 비교하지 않는다. 현재 관측이 오래됐거나 위치 근거가 부족하면 `BOARDING_POSITION_UNAVAILABLE`, 차량이 없거나 식별이 모호하면 `BOARDING_VEHICLE_UNIDENTIFIABLE`, 목표에 도달·통과했으면 `BOARDING_TARGET_NOT_AHEAD`를 반환한다. Provider 장애는 `TRANSIT_TEMPORARILY_UNAVAILABLE`이다. 현재 관측의 신선도, 정류장 선택과 metadata는 저장 시에도 검사한다. 기존 candidateRef 요청은 기존 규칙으로 계속 처리하며 재확인 API는 변경되지 않는다. 신규 형식의 fingerprint는 UUID·노선·승차/목표 occurrence·전체 번호·알림 시점에 기반한다. 동일 UUID의 다른 요청은 409이며 동일 요청은 기존 세션을 반환한다.
 
-화면 순위 변경·일관된 차량 진행만으로 다른 차량을 고르지 않는다. ID/번호 대응·target 의미·관련 구조 변경/소실/충돌이면 재확인 요구다. Client는 timeout 시 원래 UUID/body와 원래 Auth Session으로만 재전송한다. 계정 전환 뒤 새 JWT로 이전 요청을 재작성하지 않는다.
+`notificationOffsetStops`는 선택 정수이며 생략 시 2, 허용값은 1과 2다. null·실수·문자열·boolean·그 외 정수는 400이다. 목적지는 요청 형식별 target occurrence로 보존한다. 생성 뒤 설정 변경은 없으며 같은 UUID에서 오프셋 변경은 409 BOARDING_REQUEST_CONFLICT다. 기존 prepareNotificationEnabled body는 이미 저장된 레거시 요청의 동일 fingerprint 복구에만 허용하고 새 세션 생성에는 400을 반환한다. 이전 body에 설정 자체가 없던 요청도 기존 UUID에서 원래 fingerprint로 복구하며 정책과 수명을 바꾸지 않는다.
+
+기존 candidateRef 형식의 Client는 목록의 명시적 차량 선택과 알림 시점 선택 후 요청한다. 전체 차량번호 입력은 없다. `confirmedVehicleNumber`는 기존 저장 요청의 동일 body/fingerprint 재시도 호환을 위해 optional 문자열로만 수용하며 수동 대조·차량 식별 검증 입력으로 사용하지 않는다. 기존 reference 형식의 새 Client는 보내지 않는다. Backend는 reference의 서버 보관 차량 ID·전체 Provider 번호와 최신 roster/detail을 비교한다. 성공은 201과 TRACKING이다. 새 정책에서 최신 검증 baseline이 있는 등록은 commit 확인 뒤 READY이며, 이미 알림 구간이면 원래 관측 TTL 안에서 준비 Event를 같은 transaction에 즉시 생성한다. 검증 전 등록은 VERIFICATION_PENDING이며 실제 탑승·기기 알림 수신 성공을 뜻하지 않는다. CONFIRMED·별도 Start API는 없다.
+
+같은 User/clientRequestId와 동일 원래 요청은 200으로 원래 Session의 **현재 상태**를 반환하며 baseline·기한·Event를 초기화하지 않는다. fingerprint 비교는 요청 형식별 원래 body의 canonical 값으로 수행한다. 중복 확인은 ephemeral reference 조회보다 먼저 DB에서 수행해 성공 응답 유실 후 reference 만료/restart에도 복구한다. 같은 key의 다른 내용은 409다. 다른 요청으로 미종료 세션이 이미 있으면 자동 대체하지 않고 409다.
+
+기존 reference 형식은 화면 순위 변경·일관된 차량 진행만으로 다른 차량을 고르지 않으며 ID/번호 대응·target 의미·관련 구조 변경/소실/충돌이면 재확인을 요구한다. Client는 timeout 시 원래 UUID/body와 원래 Auth Session으로만 재전송한다. 계정 전환 뒤 새 JWT로 이전 요청을 재작성하지 않는다.
 
 #### 세션 조회와 응답 유실 복구
 

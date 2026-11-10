@@ -135,6 +135,71 @@ public class BoardingCandidateService {
         return new BoardingCandidatesResponse(roster.observedAt(), commonProviderTime, status, candidates);
     }
 
+    /** Resolve the selected number against current provider evidence, without a candidate snapshot. */
+    public CurrentVehicle findCurrentVehicle(BoardingRouteSnapshot route, String number) {
+        if (route.provider() == TransitProvider.TAGO && !tagoExperimentEnabled) {
+            throw unsupported(route, "PROVIDER_UNVERIFIED");
+        }
+        Roster roster;
+        try {
+            roster = fetchRoster(route);
+        } catch (TransitProviderClientException exception) {
+            throw new ApiException(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE);
+        }
+        var vehicles = roster.vehicles();
+        var matches = vehicles.stream().filter(vehicle -> number.equals(vehicle.number())).toList();
+        if (matches.size() != 1 || identityIssue(matches.getFirst(), conflictingIds(vehicles)) != null) {
+            throw new ApiException(ErrorCode.BOARDING_VEHICLE_UNIDENTIFIABLE);
+        }
+        var selected = matches.getFirst();
+        if (selected.runEnded()) {
+            throw unsupported(route, "CURRENT_RUN_ENDED");
+        }
+        if (timeIssue(selected, clock.instant()) != null) {
+            throw new ApiException(ErrorCode.BOARDING_POSITION_UNAVAILABLE);
+        }
+        Vehicle progress = selected;
+        if (route.provider() == TransitProvider.SEOUL_BUS) {
+            var detail = fetchDetail(selected);
+            if (detail.issue() != null) {
+                throw new ApiException(switch (detail.issue()) {
+                    case DETAIL_HTTP_FAILURE, DETAIL_TRANSPORT_FAILURE, DETAIL_PROVIDER_FAILURE, DETAIL_PROTOCOL_FAILURE
+                            -> ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE;
+                    case DETAIL_ID_MISMATCH, DETAIL_NUMBER_MISMATCH, IDENTITY_CONFLICT
+                            -> ErrorCode.BOARDING_VEHICLE_UNIDENTIFIABLE;
+                    default -> ErrorCode.BOARDING_POSITION_UNAVAILABLE;
+                });
+            }
+            progress = detail.vehicle();
+            if (timeIssue(progress, clock.instant()) != null || progress.providerDataTime() == null
+                    || progress.providerDataTime().isAfter(progress.observedAt())
+                    || (!Integer.valueOf(0).equals(progress.stopFlag()) && !Integer.valueOf(1).equals(progress.stopFlag()))) {
+                throw new ApiException(ErrorCode.BOARDING_POSITION_UNAVAILABLE);
+            }
+        }
+        int index = progressIndex(route, progress);
+        if (index < 0) {
+            throw new ApiException(ErrorCode.BOARDING_POSITION_UNAVAILABLE);
+        }
+        if (index >= route.indexOf(route.targetOccurrenceId())) {
+            throw new ApiException(ErrorCode.BOARDING_TARGET_NOT_AHEAD);
+        }
+        Instant now = clock.instant();
+        if (timeIssue(selected, now) != null || timeIssue(progress, now) != null) {
+            throw new ApiException(ErrorCode.BOARDING_POSITION_UNAVAILABLE);
+        }
+        Instant expiresAt = selected.observedAt().plus(BoardingCandidateReferenceStore.FRESHNESS);
+        if (selected.providerDataTime() != null) {
+            Instant sourceExpiry = selected.providerDataTime().plus(BoardingCandidateReferenceStore.FRESHNESS);
+            if (sourceExpiry.isBefore(expiresAt)) expiresAt = sourceExpiry;
+        }
+        return new CurrentVehicle(new VerifiedCandidate(route, progress, index,
+                route.provider() == TransitProvider.SEOUL_BUS), expiresAt);
+    }
+
+    public record CurrentVehicle(VerifiedCandidate candidate, Instant identityExpiresAt) {
+    }
+
     /** Reuses candidate mapping and identity checks without issuing/replacing screen references. */
     public VerifiedCandidate revalidateSelected(BoardingCandidateReferenceStore.Snapshot original,
             BoardingRouteSnapshot route, String expectedVehicleNumber) {

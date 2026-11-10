@@ -27,6 +27,8 @@ public enum ErrorCode {
     BOARDING_SESSION_CONFLICT(HttpStatus.CONFLICT, "An open boarding session already exists."),
     BOARDING_REQUEST_CONFLICT(HttpStatus.CONFLICT, "Boarding request conflicts with the original request."),
     BOARDING_REVISION_CONFLICT(HttpStatus.CONFLICT, "Boarding session revision has changed."),
+    BOARDING_VEHICLE_UNIDENTIFIABLE(HttpStatus.CONFLICT, "Selected vehicle cannot be uniquely identified."),
+    BOARDING_POSITION_UNAVAILABLE(HttpStatus.CONFLICT, "Current vehicle progress cannot be verified."),
     BOARDING_TARGET_NOT_AHEAD(HttpStatus.CONFLICT, "Boarding target cannot be verified ahead."),
     BOARDING_RECONFIRM_REQUIRED(HttpStatus.CONFLICT, "A suspended session with the same vehicle and target is required."),
     BOARDING_TRACKING_UNSUPPORTED(HttpStatus.CONFLICT, "Boarding tracking is not supported by verified evidence."),

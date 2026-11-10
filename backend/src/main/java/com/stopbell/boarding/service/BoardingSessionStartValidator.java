@@ -1,5 +1,6 @@
 package com.stopbell.boarding.service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 
@@ -10,6 +11,7 @@ import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.service.BoardingCandidateMetadataService;
 import com.stopbell.transit.service.BoardingCandidateReferenceStore;
 import com.stopbell.transit.service.BoardingCandidateService;
+import com.stopbell.transit.service.BoardingRouteSnapshot;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -31,6 +33,18 @@ public class BoardingSessionStartValidator {
         var context = original.context();
         var current = metadata.read(context.routeId(), context.targetOccurrenceId(), context.boardingOccurrenceId());
         var verified = candidates.revalidateSelected(original, current, original.rosterVehicle().number());
+        return build(current, verified, original.expiresAt());
+    }
+
+    public VerifiedBoardingStart validateCurrent(Long routeId, Long boardingId, Long targetId, String number) {
+        var current = metadata.read(routeId, targetId, boardingId);
+        current.validateSelectionOrder();
+        var verified = candidates.findCurrentVehicle(current, number);
+        return build(current, verified.candidate(), verified.identityExpiresAt());
+    }
+
+    private VerifiedBoardingStart build(BoardingRouteSnapshot current,
+            BoardingCandidateService.VerifiedCandidate verified, Instant expiresAt) {
         var vehicle = verified.vehicle();
         var checkpoint = new BoardingCheckpoint(verified.progressIndex() < 0 ? null : vehicle.stopId(),
                 verified.progressIndex() < 0 ? 0 : vehicle.order(),
@@ -43,7 +57,7 @@ public class BoardingSessionStartValidator {
                 current.traversal().stream().map(item -> new BoardingTraversalSnapshot.Occurrence(
                         item.id(), item.externalStopId(), item.order())).toList(),
                 current.indexOf(current.targetOccurrenceId()), BoardingTraversalSnapshot.AlightAvailability.UNKNOWN, null);
-        return new VerifiedBoardingStart(current, traversal, checkpoint, original.expiresAt(),
+        return new VerifiedBoardingStart(current, traversal, checkpoint, expiresAt,
                 vehicle.id(), vehicle.number(), current.routeNumber(),
                 current.traversal().get(current.indexOf(current.targetOccurrenceId())).stopName());
     }

@@ -457,6 +457,117 @@ class BoardingSessionApiIntegrationTest {
     }
 
     @Test
+    void current_number_creates_after_old_candidate_expires_and_replays_idempotently() throws Exception {
+        candidateRef();
+        time.set(NOW.plusSeconds(70));
+        when(seoul.fetchVehicleLocations(any())).thenAnswer(invocation -> roster(new SeoulBusVehicleLocationItem(
+                "new-id", NUMBER, 999, "coarse", 1, liveDataTime(), null, null, null, null, null)));
+        when(detail.fetchVehicleDetail("new-id")).thenAnswer(invocation -> new SeoulBusVehicleDetailResponse(
+                new SeoulBusVehicleDetailResponse.Header("0", null), new SeoulBusVehicleDetailResponse.Body(List.of(
+                new SeoulBusVehicleDetailItem("new-id", NUMBER, "s2", 20, 0, liveDataTime(), null, null)))));
+        String body = currentBody(REQUEST_ID, NUMBER);
+        mvc.perform(auth(post("/api/v1/boarding-sessions").contentType("application/json").content(body), owner))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("TRACKING"))
+                .andExpect(jsonPath("$.remainingOccurrenceGap").value(1));
+        time.set(NOW.plusSeconds(200));
+        mvc.perform(auth(post("/api/v1/boarding-sessions").contentType("application/json").content(body), owner))
+                .andExpect(status().isOk());
+        mvc.perform(auth(post("/api/v1/boarding-sessions").contentType("application/json")
+                .content(currentBody(REQUEST_ID, "different")), owner))
+                .andExpect(status().isConflict()).andExpect(apiError(ErrorCode.BOARDING_REQUEST_CONFLICT));
+        assertThat(sessions.count()).isEqualTo(1);
+        verify(seoul, times(2)).fetchVehicleLocations(any());
+    }
+
+    @Test
+    void current_number_rejects_mixed_and_invalid_requests() throws Exception {
+        String valid = currentBody(REQUEST_ID, NUMBER);
+        for (String body : List.of(valid.replace("}", ",\"candidateRef\":\"ref\"}"),
+                valid.replace("\"routeId\":" + route.getId(), "\"routeId\":0"),
+                valid.replace("\"confirmedVehicleNumber\":\"" + NUMBER + "\"", "\"confirmedVehicleNumber\":null"),
+                valid.replace("\"boardingStopOccurrenceId\":" + first.getId(), "\"boardingStopOccurrenceId\":\"1\""))) {
+            currentError(body, ErrorCode.INVALID_REQUEST, 400);
+        }
+        verifyNoInteractions(seoul, detail, tago);
+        assertThat(sessions.count()).isZero();
+    }
+
+    @Test
+    void current_number_supports_tago_order_only_progress() throws Exception {
+        org.springframework.test.util.ReflectionTestUtils.setField(candidates, "tagoExperimentEnabled", true);
+        try {
+            route = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "tago-route", "7001", "31130"));
+            first = occurrence("t1", 10);
+            target = occurrence("t2", 20);
+            when(tago.fetchVehicleLocations(any())).thenReturn(new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse(
+                    new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Response(
+                            new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Header("00", null),
+                            new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Body(
+                                    new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Items(List.of(
+                                            new com.stopbell.transit.dto.tago.TagoVehicleLocationItem(NUMBER, null, 10, null, null))), 1, 1, 1000))));
+            mvc.perform(auth(post("/api/v1/boarding-sessions").contentType("application/json")
+                    .content(currentBody(REQUEST_ID, NUMBER)), owner))
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.status").value("TRACKING"));
+            assertThat(sessions.findAll()).singleElement().satisfies(session ->
+                    assertThat(session.getCheckpoint().getStopOrder()).isEqualTo(10));
+        } finally {
+            org.springframework.test.util.ReflectionTestUtils.setField(candidates, "tagoExperimentEnabled", false);
+        }
+    }
+
+    @Test
+    void current_number_rejects_missing_duplicate_and_unknown_progress() throws Exception {
+        String body = currentBody(REQUEST_ID, NUMBER);
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster());
+        currentError(body, ErrorCode.BOARDING_VEHICLE_UNIDENTIFIABLE, 409);
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster(
+                new SeoulBusVehicleLocationItem("a", NUMBER, 1, "x", 1, "20261020120000", null, null, null, null, null),
+                new SeoulBusVehicleLocationItem("b", NUMBER, 1, "x", 1, "20261020120000", null, null, null, null, null)));
+        currentError(body, ErrorCode.BOARDING_VEHICLE_UNIDENTIFIABLE, 409);
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster(new SeoulBusVehicleLocationItem(
+                "vehicle-id", NUMBER, 1, "x", 1, "20261020120000", null, null, null, null, null)));
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(liveProgress(null, null, 0));
+        currentError(body, ErrorCode.BOARDING_POSITION_UNAVAILABLE, 409);
+        when(detail.fetchVehicleDetail("vehicle-id")).thenThrow(TransitProviderClientException.http(TransitProvider.SEOUL_BUS, "detail", 503, null));
+        currentError(body, ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE, 503);
+        assertThat(sessions.count()).isZero();
+    }
+
+    @Test
+    void current_number_rejects_roster_that_expires_during_detail_lookup() throws Exception {
+        when(detail.fetchVehicleDetail("vehicle-id")).thenAnswer(invocation -> {
+            time.set(NOW.plusSeconds(61));
+            return liveProgress("s1", 10, 1);
+        });
+        currentError(currentBody(REQUEST_ID, NUMBER), ErrorCode.BOARDING_POSITION_UNAVAILABLE, 409);
+        assertThat(sessions.count()).isZero();
+    }
+
+    @Test
+    void current_number_rejects_target_and_stale_current_observation() throws Exception {
+        String body = currentBody(REQUEST_ID, NUMBER);
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress("s3", 30, 1));
+        currentError(body, ErrorCode.BOARDING_TARGET_NOT_AHEAD, 409);
+        occurrence("s4", 40);
+        when(detail.fetchVehicleDetail("vehicle-id")).thenReturn(progress("s4", 40, 0));
+        currentError(body, ErrorCode.BOARDING_TARGET_NOT_AHEAD, 409);
+        time.set(NOW.plusSeconds(61));
+        currentError(body, ErrorCode.BOARDING_POSITION_UNAVAILABLE, 409);
+        assertThat(sessions.count()).isZero();
+    }
+
+    private String currentBody(String id, String number) {
+        return "{\"clientRequestId\":\"" + id + "\",\"routeId\":" + route.getId()
+                + ",\"boardingStopOccurrenceId\":" + first.getId() + ",\"targetStopOccurrenceId\":" + target.getId()
+                + ",\"confirmedVehicleNumber\":\"" + number + "\",\"notificationOffsetStops\":2}";
+    }
+
+    private void currentError(String body, ErrorCode code, int statusCode) throws Exception {
+        mvc.perform(auth(post("/api/v1/boarding-sessions").contentType("application/json").content(body), owner))
+                .andExpect(status().is(statusCode)).andExpect(apiError(code));
+    }
+
+    @Test
     @DisplayName("타 User와 만료 reference는 새 세션 없이 거부한다")
     void reject_invalid_reference_and_number() throws Exception {
         String reference = candidateRef();
