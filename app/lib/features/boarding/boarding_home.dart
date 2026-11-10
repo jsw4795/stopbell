@@ -254,6 +254,7 @@ class _BoardingHomeState extends State<BoardingHome> {
             authSession: widget.authSession,
             findStops: widget.findStops,
             findCandidates: widget.findCandidates,
+            reconfirm: _reconfirm,
             onSelectCandidate: c == null
                 ? null
                 : (

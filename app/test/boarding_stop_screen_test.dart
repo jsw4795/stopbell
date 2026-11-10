@@ -6,11 +6,13 @@ import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:http/http.dart' as http;
+import 'package:stopbell/core/theme/stopbell_colors.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
 import 'package:stopbell/features/boarding/boarding_candidate_client.dart';
 import 'package:stopbell/features/boarding/boarding_candidates.dart';
 import 'package:stopbell/features/boarding/boarding_candidates_view.dart';
+import 'package:stopbell/features/boarding/boarding_creation_intent.dart';
 import 'package:stopbell/features/boarding/boarding_stop_screen.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
@@ -58,6 +60,13 @@ void main() {
   Widget screen({
     BusRoute route = boardingRoute,
     Future<List<BusRouteStopOccurrence>> Function(int)? stops,
+    void Function(
+      BoardingCandidate,
+      BoardingSelectionContext, {
+      required String boarding,
+      required String target,
+    })?
+    onSelectCandidate,
   }) => MaterialApp(
     theme: StopBellTheme.light,
     darkTheme: StopBellTheme.dark,
@@ -66,6 +75,7 @@ void main() {
         route: route,
         authSession: auth,
         findStops: stops ?? (_) async => boardingStops,
+        onSelectCandidate: onSelectCandidate,
         findCandidates:
             ({
               required routeId,
@@ -102,6 +112,119 @@ void main() {
     await tap(tester, 'occurrence-22');
     await tap(tester, 'find-candidates');
     await tester.pumpAndSettle();
+  }
+
+  for (final brightness in Brightness.values) {
+    testWidgets(
+      'compact result compares and changes one selection in $brightness',
+      (tester) async {
+        await setup(tester);
+        tester.view.physicalSize = const Size(390, 710);
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final candidateData = [
+          for (final (number, id, order, gap) in [
+            ('경기74아3363', 10, 5, 1),
+            ('경기74아3491', 12, 24, -1),
+          ])
+            {
+              ...candidateJson(number: number),
+              'candidateRef': 'test-reference-$id',
+              'progress': {
+                'occurrenceId': id,
+                'order': order,
+                'stopName': '표시용 정류장',
+                'kind': 'ROUTE_PROGRESS',
+              },
+              'boardingOccurrenceGap': gap,
+            },
+        ];
+        final result = BoardingCandidates.fromJson(
+          candidatesJson(candidates: candidateData),
+        );
+        respond = () async => result;
+        final forwarded = <(BoardingCandidate, int?, int)>[];
+        await tester.pumpWidget(
+          screen(
+            stops: (_) async => [
+              for (final (id, order, name) in [
+                (10, 5, '출발 정류장'),
+                (11, 19, '승차 정류장 이름'),
+                (12, 24, '중간 정류장'),
+                (22, 90, '목표 정류장 이름'),
+              ])
+                BusRouteStopOccurrence(
+                  id: id,
+                  name: name,
+                  order: order,
+                  canNotifyOneStopBefore: true,
+                  canNotifyOneStopAfter: true,
+                ),
+            ],
+            onSelectCandidate:
+                (candidate, selection, {required boarding, required target}) {
+                  forwarded.add((
+                    candidate,
+                    selection.boardingId,
+                    selection.targetId,
+                  ));
+                },
+          ),
+        );
+        await tester.pumpAndSettle();
+        await query(tester);
+        final first = find.byKey(const ValueKey('candidate-0'));
+        final second = find.byKey(const ValueKey('candidate-1'));
+        final next = find.byKey(const ValueKey('continue-boarding-candidate'));
+        expect(first.hitTestable(), findsOneWidget);
+        expect(second.hitTestable(), findsOneWidget);
+        expect(tester.getSize(first).height, lessThan(105));
+        expect(find.text('이 차량 선택'), findsNothing);
+        expect(find.text('후보 1'), findsNothing);
+        expect(find.text('조건부 지원'), findsNothing);
+        final semantic = StopBellColors.of(tester.element(first));
+        expect(Theme.of(tester.element(first)).brightness, brightness);
+        expect(
+          tester.widget<Text>(find.text('승차까지 약 1개 지점')).style?.color,
+          semantic.boardingStop,
+        );
+        expect(
+          tester.widget<Text>(find.text('목표까지 약 1개 지점')).style?.color,
+          semantic.targetStop,
+        );
+        expect(tester.widget<FilledButton>(next).onPressed, isNull);
+        await tap(tester, 'candidate-0');
+        expect(find.byIcon(Icons.radio_button_checked), findsOneWidget);
+        await tap(tester, 'candidate-1');
+        expect(
+          find.descendant(
+            of: second,
+            matching: find.byIcon(Icons.radio_button_checked),
+          ),
+          findsOneWidget,
+        );
+        expect(forwarded, isEmpty);
+        expect(queries, hasLength(1));
+        await tap(tester, 'continue-boarding-candidate');
+        expect(forwarded, [(result.candidates[1], 11, 22)]);
+
+        // A new response must reset selection even if it returns the same objects.
+        await tap(tester, 'find-candidates');
+        await tester.pumpAndSettle();
+        expect(tester.widget<FilledButton>(next).onPressed, isNull);
+        expect(find.byIcon(Icons.radio_button_checked), findsNothing);
+        await tap(tester, 'candidate-0');
+        await tester.tap(find.byTooltip('정류장 선택으로'));
+        await tester.pumpAndSettle();
+        await tap(tester, 'find-candidates');
+        await tester.pumpAndSettle();
+        expect(tester.widget<FilledButton>(next).onPressed, isNull);
+        await tap(tester, 'candidate-0');
+        await tap(tester, 'reselect-stops');
+        await query(tester);
+        expect(tester.widget<FilledButton>(next).onPressed, isNull);
+      },
+    );
   }
 
   testWidgets('selection locks and reselect starts from boarding', (
@@ -497,7 +620,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('새 차량'), findsOneWidget);
       expect(find.text('이전 차량'), findsNothing);
-      expect(find.textContaining('목표 정류장 · 새 목표'), findsOneWidget);
+      expect(find.textContaining('목표 · 새 목표'), findsOneWidget);
       expect(queries[1], (754, 33, 22));
       await tap(tester, 'find-candidates');
       expect(requestChecks[1](), isFalse);
@@ -572,13 +695,20 @@ void main() {
     'already displayed candidates disappear immediately at logout and do not return for another account',
     (tester) async {
       await setup(tester);
-      await tester.pumpWidget(screen());
+      await tester.pumpWidget(
+        screen(
+          onSelectCandidate: (_, _, {required boarding, required target}) {},
+        ),
+      );
       await tester.pumpAndSettle();
       await query(tester);
       expect(find.text('서울70사1234'), findsOneWidget);
+      await tap(tester, 'candidate-0');
+      expect(find.byIcon(Icons.radio_button_checked), findsOneWidget);
       await auth.logout();
       await tester.pumpAndSettle();
       expect(find.text('서울70사1234'), findsNothing);
+      expect(find.byIcon(Icons.radio_button_checked), findsNothing);
       await auth.login();
       await tester.pumpAndSettle();
       expect(find.byType(BoardingCandidatesView), findsNothing);
@@ -623,6 +753,9 @@ void main() {
       tester.view.physicalSize = const Size(320, 568);
       tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
       addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+      final forwarded = <BoardingCandidate>[];
+      var empty = true;
+      const number = '경기차량번호가매우길어도생략하지않음1234567890';
       await tester.pumpWidget(
         MaterialApp(
           darkTheme: StopBellTheme.dark,
@@ -644,9 +777,17 @@ void main() {
                     expectedGeneration,
                     isRequestCurrent,
                   }) async => BoardingCandidates.fromJson(
-                    candidatesJson(status: 'EMPTY'),
+                    empty
+                        ? candidatesJson(status: 'EMPTY')
+                        : candidatesJson(
+                            candidates: [candidateJson(number: number)],
+                          ),
                   ),
               onBack: () {},
+              onSelectCandidate:
+                  (candidate, _, {required boarding, required target}) {
+                    forwarded.add(candidate);
+                  },
             ),
           ),
         ),
@@ -676,6 +817,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('현재 확인 가능한 차량 후보가 없어요.'));
       expect(find.text('현재 확인 가능한 차량 후보가 없어요.').hitTestable(), findsOneWidget);
+      empty = false;
+      await tap(tester, 'find-candidates');
+      await tester.pumpAndSettle();
+      await tap(tester, 'candidate-0');
+      expect(find.text(number).hitTestable(), findsOneWidget);
+      final next = find.byKey(const ValueKey('continue-boarding-candidate'));
+      expect(next.hitTestable(), findsOneWidget);
+      expect(forwarded, isEmpty);
+      await tap(tester, 'continue-boarding-candidate');
+      expect(forwarded.single.vehicleNumber, number);
       expect(tester.takeException(), isNull);
     },
   );

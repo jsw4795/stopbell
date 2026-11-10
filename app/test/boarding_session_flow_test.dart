@@ -135,7 +135,8 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('find-candidates')));
     await tester.pumpAndSettle();
-    await tap(tester, '이 차량 선택');
+    await tap(tester, '서울70사1234');
+    await tap(tester, '이 차량으로 하차 알림 설정');
   }
 
   testWidgets(

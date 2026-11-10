@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
 import '../../core/theme/stopbell_spacing.dart';
+import 'boarding_candidate_progress_label.dart';
 import 'boarding_candidates.dart';
+
+typedef BoardingCandidateProgressLabelBuilder =
+    BoardingCandidateProgressLabel Function(BoardingCandidate);
 
 String boardingTime(DateTime time) {
   final local = time.toLocal();
@@ -17,10 +21,23 @@ class BoardingCandidatesView extends StatelessWidget {
     required this.result,
     required this.receivedAt,
     this.onSelect,
+  }) : progressLabel = null,
+       selected = null;
+
+  const BoardingCandidatesView.compact({
+    super.key,
+    required this.result,
+    required this.receivedAt,
+    required BoardingCandidateProgressLabelBuilder this.progressLabel,
+    required this.selected,
+    this.onSelect,
   });
+
   final BoardingCandidates result;
   final DateTime receivedAt;
   final ValueChanged<BoardingCandidate>? onSelect;
+  final BoardingCandidateProgressLabelBuilder? progressLabel;
+  final BoardingCandidate? selected;
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +51,7 @@ class BoardingCandidatesView extends StatelessWidget {
       CandidateSetStatus.unknown => '후보 목록의 상태를 확인할 수 없어요. 다시 조회해 주세요.',
     };
     final providerTime = result.providerDataTime;
+    final compactLabel = progressLabel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: StopBellSpacing.md,
@@ -54,35 +72,195 @@ class BoardingCandidatesView extends StatelessWidget {
               ),
           ],
         ),
-        for (final (index, candidate) in result.candidates.indexed)
-          _CandidateCard(
-            candidate: candidate,
-            index: index,
-            canChoose: canChoose,
-            onSelect: onSelect,
+        if (compactLabel != null && result.candidates.isNotEmpty)
+          Text(
+            '시각은 서버 관측 기준이에요. 노선상 간격에는 미정차·경유 지점이 포함될 수 있어요.',
+            style: theme.textTheme.bodySmall,
           ),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          spacing: StopBellSpacing.xs,
-          children: [
-            Text(
-              '목록 서버 관측 시각 · ${boardingTime(result.observedAt)}',
-              style: theme.textTheme.bodySmall,
+        for (final (index, candidate) in result.candidates.indexed)
+          if (compactLabel != null)
+            _CompactCandidateCard(
+              key: ValueKey('candidate-$index'),
+              candidate: candidate,
+              progress: compactLabel(candidate),
+              selected: identical(candidate, selected),
+              canChoose: canChoose,
+              onSelect: onSelect,
+            )
+          else
+            _CandidateCard(
+              candidate: candidate,
+              index: index,
+              canChoose: canChoose,
+              onSelect: onSelect,
             ),
-            if (providerTime != null)
+        if (compactLabel == null)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: StopBellSpacing.xs,
+            children: [
               Text(
-                '목록 공통 제공 시각 · ${boardingTime(providerTime)}',
+                '목록 서버 관측 시각 · ${boardingTime(result.observedAt)}',
                 style: theme.textTheme.bodySmall,
               ),
-            Text(
-              '화면 수신 시각 · ${boardingTime(receivedAt)}',
-              style: theme.textTheme.bodySmall,
-            ),
-          ],
-        ),
+              if (providerTime != null)
+                Text(
+                  '목록 공통 제공 시각 · ${boardingTime(providerTime)}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              Text(
+                '화면 수신 시각 · ${boardingTime(receivedAt)}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
       ],
     );
   }
+}
+
+class _CompactCandidateCard extends StatelessWidget {
+  const _CompactCandidateCard({
+    super.key,
+    required this.candidate,
+    required this.progress,
+    required this.selected,
+    required this.canChoose,
+    this.onSelect,
+  });
+
+  final BoardingCandidate candidate;
+  final BoardingCandidateProgressLabel progress;
+  final bool selected, canChoose;
+  final ValueChanged<BoardingCandidate>? onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final semantic = StopBellColors.of(context);
+    final canSelect = canChoose && canConfirmBoardingCandidate(candidate);
+    final holdReason = canSelect ? null : _holdReason(candidate, canChoose);
+    final onTap = canSelect && onSelect != null
+        ? () => onSelect!(candidate)
+        : null;
+    final time = MaterialLocalizations.of(context).formatTimeOfDay(
+      TimeOfDay.fromDateTime(candidate.observedAt.toLocal()),
+      alwaysUse24HourFormat: true,
+    );
+    final progressColor = switch (progress.endpoint) {
+      BoardingGapEndpoint.boarding => semantic.boardingStop,
+      BoardingGapEndpoint.target => semantic.targetStop,
+      null => colors.onSurfaceVariant,
+    };
+    return MergeSemantics(
+      child: Semantics(
+        enabled: onTap != null,
+        checked: selected,
+        inMutuallyExclusiveGroup: true,
+        child: Card(
+          margin: EdgeInsets.zero,
+          color: selected
+              ? colors.primaryContainer
+              : canSelect
+              ? colors.surface
+              : colors.surfaceContainer,
+          clipBehavior: Clip.antiAlias,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(StopBellRadius.card),
+            side: BorderSide(
+              color: selected ? semantic.targetStop : colors.outlineVariant,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: StopBellSpacing.md,
+                vertical: StopBellSpacing.sm,
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    !canSelect
+                        ? Icons.block_outlined
+                        : selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    size: 20,
+                    color: !canSelect
+                        ? semantic.warning
+                        : selected
+                        ? semantic.targetStop
+                        : colors.outline,
+                  ),
+                  const SizedBox(width: StopBellSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      spacing: StopBellSpacing.xs,
+                      children: [
+                        Text(
+                          candidate.vehicleNumber ?? '차량번호 확인 불가',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        if (holdReason != null)
+                          Text(
+                            holdReason,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: semantic.warning,
+                            ),
+                          ),
+                        if (holdReason == null || progress.endpoint != null)
+                          Text(
+                            progress.text,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: progressColor,
+                            ),
+                          ),
+                        Text('$time 관측', style: theme.textTheme.labelMedium),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _holdReason(BoardingCandidate candidate, bool canChoose) {
+  if (!canChoose) return '선택 보류 · 목록 상태 미확인';
+  final reasons = {
+    candidate.reasonCode,
+    ...candidate.limitations,
+    candidate.trackingReasonCode,
+  };
+  for (final (code, message) in const [
+    ('IDENTITY_CONFLICT', '차량 식별 정보 불일치'),
+    ('DETAIL_ID_MISMATCH', '차량 식별 정보 불일치'),
+    ('DETAIL_NUMBER_MISMATCH', '차량번호 불일치'),
+    ('STALE_OBSERVATION', '오래된 관측'),
+    ('FUTURE_OBSERVATION', '관측 시각 오류'),
+  ]) {
+    if (reasons.contains(code)) return '선택 보류 · $message';
+  }
+  if (candidate.vehicleNumber == null) return '선택 보류 · 차량번호 미확인';
+  final reason =
+      candidate.reasonCode ??
+      (candidate.trackingSupport != TrackingSupport.conditional
+          ? candidate.trackingReasonCode
+          : null);
+  if (reason != null && reason != 'REVALIDATION_REQUIRED') {
+    return '선택 보류 · ${_reasonMessage(reason)}';
+  }
+  return candidate.trackingSupport != TrackingSupport.conditional
+      ? '선택 보류 · 하차 추적 지원 미확인'
+      : '선택 보류 · 차량 확인 필요';
 }
 
 class _CandidateCard extends StatelessWidget {

@@ -27,6 +27,97 @@ void main() {
   }
 
   testWidgets(
+    'compact cards expose the radio state, hold reason and server clock',
+    (tester) async {
+      final semantics = tester.ensureSemantics();
+      final taps = <BoardingCandidate>[];
+      final result = BoardingCandidates.fromJson(
+        candidatesJson(
+          status: 'PARTIAL',
+          candidates: [
+            {
+              ...candidateJson(),
+              'observedAt': '2026-10-20T01:02:03Z',
+              'providerDataTime': '2026-10-20T00:55:00Z',
+            },
+            {
+              ...candidateJson(number: '서울70사5678'),
+              'limitations': ['STALE_OBSERVATION'],
+            },
+          ],
+        ),
+      );
+
+      Future<void> show(
+        BoardingCandidates candidates, {
+        BoardingCandidate? selected,
+      }) => tester.pumpWidget(
+        MaterialApp(
+          theme: StopBellTheme.light,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: BoardingCandidatesView.compact(
+                result: candidates,
+                receivedAt: DateTime.utc(2026, 10, 20, 1, 4),
+                selected: selected,
+                progressLabel: (_) => (text: '진행 위치 미확인', endpoint: null),
+                onSelect: taps.add,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await show(result);
+      final first = find.byKey(const ValueKey('candidate-0'));
+      final held = find.byKey(const ValueKey('candidate-1'));
+      final time = MaterialLocalizations.of(tester.element(first))
+          .formatTimeOfDay(
+            TimeOfDay.fromDateTime(
+              result.candidates.first.observedAt.toLocal(),
+            ),
+            alwaysUse24HourFormat: true,
+          );
+      expect(find.text('$time 관측'), findsNWidgets(2));
+      expect(find.textContaining('서버 관측 기준'), findsOneWidget);
+      expect(find.textContaining('제공기관 원본 시각'), findsNothing);
+      expect(find.textContaining('일부 차량 정보'), findsOneWidget);
+      expect(find.text('선택 보류 · 오래된 관측'), findsOneWidget);
+      expect(
+        tester.getSemantics(first),
+        isSemantics(
+          isInMutuallyExclusiveGroup: true,
+          isChecked: false,
+          isEnabled: true,
+          hasTapAction: true,
+        ),
+      );
+      expect(
+        tester.getSemantics(held),
+        isSemantics(isEnabled: false, hasTapAction: false),
+      );
+      await tester.tap(held);
+      expect(taps, isEmpty);
+      await tester.tap(first);
+      expect(taps, [result.candidates.first]);
+      await show(result, selected: taps.single);
+      expect(tester.getSemantics(first), isSemantics(isChecked: true));
+
+      await show(
+        BoardingCandidates.fromJson(candidatesJson(status: 'UNKNOWN')),
+      );
+      expect(find.textContaining('목록의 상태를 확인할 수 없어요'), findsOneWidget);
+      expect(
+        tester.getSemantics(first),
+        isSemantics(isEnabled: false, hasTapAction: false),
+      );
+      await tester.tap(first);
+      expect(taps, hasLength(1));
+      semantics.dispose();
+    },
+  );
+
+  testWidgets(
     'deadline partial explains both held reasons and allows only valid selection',
     (tester) async {
       final selected = <BoardingCandidate>[];

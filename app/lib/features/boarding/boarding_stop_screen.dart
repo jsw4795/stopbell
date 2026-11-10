@@ -7,7 +7,9 @@ import '../transit/bus_route.dart';
 import '../transit/bus_route_stop_occurrence.dart';
 import '../transit/bus_route_timeline.dart';
 import '../transit/bus_stop_selection_layout.dart';
+import '../transit/stop_display_name.dart';
 import 'boarding_candidate_client.dart';
+import 'boarding_candidate_progress_label.dart';
 import 'boarding_candidates.dart';
 import 'boarding_candidates_view.dart';
 import 'boarding_creation_intent.dart';
@@ -25,12 +27,14 @@ class BoardingStopScreen extends StatefulWidget {
     required this.findCandidates,
     required this.onBack,
     this.onSelectCandidate,
+    this.reconfirm = false,
   });
   final BusRoute route;
   final AuthSession authSession;
   final Future<List<BusRouteStopOccurrence>> Function(int) findStops;
   final FindBoardingCandidates findCandidates;
   final VoidCallback onBack;
+  final bool reconfirm;
   final void Function(
     BoardingCandidate,
     BoardingSelectionContext, {
@@ -53,6 +57,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   BusRouteStopOccurrence? _boarding;
   _Picker _picker = _Picker.boarding;
   BoardingCandidates? _result;
+  BoardingCandidate? _selectedCandidate;
   DateTime? _receivedAt;
   bool _loadingCandidates = false;
   String? _error;
@@ -80,6 +85,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   void _invalidateCandidates() {
     _candidateEpoch++;
     _result = null;
+    _selectedCandidate = null;
     _receivedAt = null;
     _loadingCandidates = false;
     _error = null;
@@ -261,7 +267,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       },
       child: BusStopSelectionLayout(
         route: widget.route,
-        title: '하차 알림',
+        title: _compactResults ? '차량 후보' : '하차 알림',
         onBack: _back,
         backLabel: _backLabel,
         body: _state == _StopsState.success ? _routeAndCandidates() : _status(),
@@ -296,6 +302,32 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     ),
   );
 
+  bool get _compactResults => _result != null && !widget.reconfirm;
+
+  bool _canUseCandidate(BoardingCandidate candidate) =>
+      _current &&
+      _result?.candidateSetStatus != CandidateSetStatus.unknown &&
+      (_result?.candidates.contains(candidate) ?? false) &&
+      canConfirmBoardingCandidate(candidate);
+
+  void _openConfirmation(BoardingCandidate candidate) {
+    final target = _target;
+    final boarding = _boarding;
+    if (target == null || boarding == null || !_canUseCandidate(candidate)) {
+      return;
+    }
+    widget.onSelectCandidate?.call(
+      candidate,
+      BoardingSelectionContext(
+        routeId: widget.route.id,
+        targetId: target.id,
+        boardingId: boarding.id,
+      ),
+      boarding: _stopLabel(boarding),
+      target: _stopLabel(target),
+    );
+  }
+
   Widget _routeAndCandidates() => IndexedStack(
     index: _result == null ? 0 : 1,
     sizing: StackFit.expand,
@@ -311,44 +343,86 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
             ? null
             : _select,
       ),
-      if (_result == null)
-        const SizedBox.shrink()
-      else
+      if (_result case final result?)
         SingleChildScrollView(
           key: const ValueKey('boarding-candidate-results'),
           primary: false,
           padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
-          child: BoardingCandidatesView(
-            result: _result!,
-            receivedAt: _receivedAt!,
-            onSelect: widget.onSelectCandidate == null
-                ? null
-                : (candidate) {
-                    final target = _target;
-                    final boarding = _boarding;
-                    if (!_current ||
-                        target == null ||
-                        boarding == null ||
-                        !(_result?.candidates.contains(candidate) ?? false)) {
-                      return;
-                    }
-                    widget.onSelectCandidate!(
-                      candidate,
-                      BoardingSelectionContext(
-                        routeId: widget.route.id,
-                        targetId: target.id,
-                        boardingId: boarding.id,
-                      ),
-                      boarding: _stopLabel(boarding),
-                      target: _stopLabel(target),
-                    );
-                  },
+          child: _compactResults
+              ? _compactCandidateList(result, _boarding!, _target!)
+              : BoardingCandidatesView(
+                  result: result,
+                  receivedAt: _receivedAt!,
+                  onSelect: widget.onSelectCandidate == null
+                      ? null
+                      : _openConfirmation,
+                ),
+        )
+      else
+        const SizedBox.shrink(),
+    ],
+  );
+
+  Widget _compactCandidateList(
+    BoardingCandidates result,
+    BusRouteStopOccurrence boarding,
+    BusRouteStopOccurrence target,
+  ) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _stopSummary(boarding, target: false, compact: true),
+      _stopSummary(target, target: true, compact: true),
+      Wrap(
+        spacing: StopBellSpacing.xs,
+        children: [
+          TextButton(
+            key: const ValueKey('reselect-stops'),
+            onPressed: _reselectStops,
+            child: const Text('정류장 다시 선택'),
           ),
+          TextButton(
+            key: const ValueKey('find-candidates'),
+            onPressed: _findCandidates,
+            child: const Text('차량 후보 다시 조회'),
+          ),
+        ],
+      ),
+      const Divider(height: StopBellSpacing.lg),
+      BoardingCandidatesView.compact(
+        result: result,
+        receivedAt: _receivedAt!,
+        progressLabel: (candidate) => boardingCandidateProgressLabel(
+          candidate,
+          _stops,
+          boardingId: boarding.id,
+          targetId: target.id,
         ),
+        selected: _selectedCandidate,
+        onSelect: widget.onSelectCandidate == null
+            ? null
+            : (candidate) {
+                if (_canUseCandidate(candidate)) {
+                  setState(() => _selectedCandidate = candidate);
+                }
+              },
+      ),
     ],
   );
 
   Widget _summary() {
+    if (_compactResults) {
+      final selected = _selectedCandidate;
+      return FilledButton(
+        key: const ValueKey('continue-boarding-candidate'),
+        onPressed:
+            selected != null &&
+                widget.onSelectCandidate != null &&
+                _canUseCandidate(selected)
+            ? () => _openConfirmation(selected)
+            : null,
+        child: const Text('이 차량으로 하차 알림 설정', textAlign: TextAlign.center),
+      );
+    }
     final boarding = _boarding;
     final target = _target;
     if (_picker == _Picker.boarding || boarding == null) {
@@ -430,16 +504,31 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     );
   }
 
-  Widget _stopSummary(BusRouteStopOccurrence stop, {required bool target}) {
-    final role = target ? '목표 정류장' : '승차 정류장';
-    final details = selectedStopContext(stop, _stops);
+  Widget _stopSummary(
+    BusRouteStopOccurrence stop, {
+    required bool target,
+    bool compact = false,
+  }) {
+    final role = target
+        ? (compact ? '목표' : '목표 정류장')
+        : (compact ? '승차' : '승차 정류장');
+    final name = stopDisplayName(stop.name).name;
+    final repeated = _stops.any(
+      (other) =>
+          other.id != stop.id && stopDisplayName(other.name).name == name,
+    );
+    final details = !compact || repeated
+        ? selectedStopContext(stop, _stops)
+        : null;
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final stopColors = StopBellColors.of(context);
     final accent = target ? stopColors.targetStop : stopColors.boardingStop;
     return Padding(
       key: ValueKey(target ? 'summary-target' : 'summary-boarding'),
-      padding: const EdgeInsets.all(StopBellSpacing.sm),
+      padding: compact
+          ? const EdgeInsets.symmetric(vertical: StopBellSpacing.xs)
+          : const EdgeInsets.all(StopBellSpacing.sm),
       child: Row(
         children: [
           Icon(

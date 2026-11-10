@@ -146,10 +146,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('서울70사1234'), findsOneWidget);
       expect(find.text('차량 후보 선택'), findsOneWidget);
-      expect(find.text('선택 가능'), findsOneWidget);
+      final next = find.byKey(const ValueKey('continue-boarding-candidate'));
+      expect(tester.widget<FilledButton>(next).onPressed, isNull);
       expect(find.textContaining('원하는 차량을 직접 선택'), findsOneWidget);
-      expect(find.textContaining('승차 정류장 · 반복 정류장'), findsOneWidget);
-      expect(find.textContaining('목표 정류장 · 반복 정류장'), findsOneWidget);
+      expect(find.textContaining('승차 · 반복 정류장'), findsOneWidget);
+      expect(find.textContaining('목표 · 반복 정류장'), findsOneWidget);
       expect(
         requests.where((r) => r.url.path == '/auth/refresh'),
         hasLength(1),

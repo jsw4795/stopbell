@@ -131,7 +131,11 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> select(WidgetTester tester) => tap(tester, '이 차량 선택');
+  Future<void> select(WidgetTester tester) async {
+    await tap(tester, '서울70사1234');
+    await tap(tester, '이 차량으로 하차 알림 설정');
+  }
+
   Future<void> confirm(WidgetTester tester, {bool reconfirm = false}) async {
     await tap(tester, reconfirm ? '동일 차량 재확인 요청' : '하차 알림 등록');
   }
@@ -143,7 +147,13 @@ void main() {
       await candidates(tester);
       expect(api.creations, isEmpty);
       expect(find.byType(BoardingConfirmationView), findsNothing);
-      await select(tester);
+      final next = find.byKey(const ValueKey('continue-boarding-candidate'));
+      expect(tester.widget<FilledButton>(next).onPressed, isNull);
+      await tap(tester, '서울70사1234');
+      expect(find.byType(BoardingConfirmationView), findsNothing);
+      expect(api.creations, isEmpty);
+      expect(tester.widget<FilledButton>(next).onPressed, isNotNull);
+      await tap(tester, '이 차량으로 하차 알림 설정');
       expect(api.creations, isEmpty);
       expect(find.textContaining('등록하면 바로 추적을 시작해요'), findsOneWidget);
       expect(find.byType(TextField), findsNothing);
@@ -163,11 +173,12 @@ void main() {
       ];
       await pump(tester);
       await candidates(tester);
-      final buttons = tester.widgetList<OutlinedButton>(
-        find.widgetWithText(OutlinedButton, '선택 불가'),
-      );
-      expect(buttons, hasLength(2));
-      expect(buttons.every((b) => b.onPressed == null), isTrue);
+      expect(find.text('선택 보류 · 차량번호 미확인'), findsOneWidget);
+      expect(find.byIcon(Icons.block_outlined), findsNWidgets(2));
+      await tap(tester, '서울70사1234');
+      await tap(tester, '차량번호 확인 불가');
+      final next = find.byKey(const ValueKey('continue-boarding-candidate'));
+      expect(tester.widget<FilledButton>(next).onPressed, isNull);
       expect(api.creations, isEmpty);
     },
   );
@@ -432,7 +443,7 @@ void main() {
       expect(find.textContaining('기존 선택 정보를 복원할 수 없어요'), findsOneWidget);
       expect(contexts, isEmpty);
       await candidates(tester);
-      await select(tester);
+      await tap(tester, '이 차량 선택');
       expect(find.byType(TextField), findsNothing);
       await confirm(tester, reconfirm: true);
       expect(api.reconfirmations, [(123, 5, 'fresh-reference', '서울70사1234')]);
@@ -463,7 +474,7 @@ void main() {
         (754, 22, 11),
         (754, 22, null),
       ]);
-      await select(tester);
+      await tap(tester, '이 차량 선택');
       expect(find.byType(TextField), findsNothing);
       await confirm(tester, reconfirm: true);
       expect(api.reconfirmations, [
