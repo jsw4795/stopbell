@@ -83,7 +83,7 @@ JWT Access Token이 필요한 Application API다. `query`는 trim한 뒤 노선�
 
 `regionCategory`는 Provider와 지원 지역 메타데이터로 검증한 광역 지역 표시명이다. 현재 `SEOUL_BUS`는 `서울`, 지원 경기 시·군의 `TAGO`는 `경기`를 반환한다. Client는 이 응답에 포함된 지역만 탭으로 표시하고 같은 결과 집합을 필터링한다.
 
-`startStopName`과 `endStopName`은 노선에 연결된 TAGO ROUTE 원본의 공식 `startnodenm`, `endnodenm` 표시 쌍이다. 내부 연결과 원본 노선 ID·번호가 일치하고 이름이 모두 유효하며 서로 다를 때 두 값을 반환한다. 서울 T Data CSV, 원본 누락·불일치, 동일한 기종점 표기의 경우 둘 다 `null`이다. 첫·마지막 occurrence나 정류장 응답의 방향별 `destinationName`으로 대체하지 않는다. 검색은 최대 50건을 먼저 선택하고 경기 노선 원본을 한 번에 읽는다.
+`startStopName`과 `endStopName`은 서울 TOPIS 버스 검색의 `stnFirst`·`stnLast` 또는 경기 TAGO ROUTE 원본의 `startnodenm`·`endnodenm` 표시 쌍이다. 내부 연결과 원본 노선 ID·번호가 일치하고 이름이 모두 유효하며 서로 다를 때 두 값을 반환한다. 원본 누락·불일치나 동일한 기종점 표기의 경우 둘 다 `null`이다. 첫·마지막 occurrence나 정류장 응답의 방향별 `destinationName`으로 대체하지 않는다. 최대 50건을 먼저 선택하고 결과에 포함된 Provider별 표시 데이터를 한 번씩 일괄 조회한다. [서울 표시 데이터 저장 계약](database.md#서울-topis-검색-운행-구간)
 
 ### 버스 노선의 정류장 조회
 

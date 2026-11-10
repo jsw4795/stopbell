@@ -23,4 +23,19 @@ public interface BusRouteRepository extends JpaRepository<BusRoute, Long> {
             LIMIT 50
             """, nativeQuery = true)
     List<BusRoute> searchByRouteNumberPrefix(@Param("query") String query);
+
+    @Query(value = """
+            SELECT e.route_id AS routeId, e.start_stop_name AS startStopName, e.end_stop_name AS endStopName
+            FROM seoul_route_endpoints e JOIN bus_routes br ON br.id = e.route_id
+            WHERE br.id IN (:routeIds) AND br.provider = 'SEOUL_BUS'
+              AND BINARY br.external_route_id = BINARY e.external_route_id
+              AND BINARY br.route_number = BINARY e.route_number
+            """, nativeQuery = true)
+    List<SeoulEndpoints> findSeoulEndpoints(@Param("routeIds") List<Long> routeIds);
+
+    interface SeoulEndpoints {
+        Long getRouteId();
+        String getStartStopName();
+        String getEndStopName();
+    }
 }

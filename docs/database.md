@@ -498,6 +498,12 @@ GBIS ROUTE와 OCCURRENCE 원본은 전체 수집 결과를 출처별 키와 공�
 
 오프라인 Bundle 승인 적용에서는 TAGO와 GBIS의 각 Manifest 수집 시작 시각을 해당 Raw의 `collected_at`으로 사용한다. 두 시작 시각은 실행 시각이나 개별 응답 시각이 아니며, 승인 지문에도 포함되어 재검증된다. 미수집 Raw를 삭제하지 않는 기존 정책은 동일하다.
 
+### 서울 TOPIS 검색 운행 구간
+
+V39 `seoul_route_endpoints`는 [서울 TOPIS 버스정보 조회](https://topis.seoul.go.kr/map/openBusMap.do)의 공식 표시명 `stnFirst`·`stnLast`를 보관한다. 내부 Route ID를 PK/FK로 사용하며 Route 삭제 시 보조 행도 삭제한다. 공식 `routId`와 노선번호를 저장하고 조회 시 현재 `SEOUL_BUS` Route의 두 값과 재대조한다. 출처는 이 테이블에 고정하며 UTC 수집 시각, Bundle SHA-256, 원본 페이지 번호를 보존한다. Bundle 해시는 페이지 순서대로 이어 붙인 각 원본의 SHA-256 바이너리 값의 SHA-256이다.
+
+서울 T Data CSV는 계속 Route·Stop·occurrence의 원본으로 사용한다. 별도 TOPIS 갱신은 검증된 전체 Bundle로 보조 행만 갱신하고, 최신 Bundle에서 표시 조건을 충족하지 못하는 기존 보조 행은 제거한다. 같은 Bundle을 재적용하면 변경이 없으며, 더 오래된 Bundle과 수집 시각이 같은 다른 Bundle은 적용을 차단한다. [로컬 적용 및 복구](local-development.md#서울-topis-기종점-갱신)
+
 ### Transit metadata 수집 이력 (Phase 3-A-3A-1)
 
 V34의 `transit_metadata_collection_runs`는 독립 실행 ID, `provider`(SEOUL_BUS/TAGO), 상태, UTC 의미의 시작·종료·생성·갱신 시각과 실패 단계·코드·고정 메시지를 저장한다. GBIS는 별도 Provider가 아니라 TAGO 실행의 일부다. 상태와 Provider, 종료 시각 및 실패 정보의 일관성에 CHECK를 두고 Provider/시작 시각과 상태를 색인한다. 원본 파일은 아래 별도 테이블에서 실행에 연결한다.

@@ -28,6 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -59,6 +60,9 @@ class BusRouteSearchIntegrationTest {
 
     @Autowired
     private EntityManager entityManager;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @Autowired
     private JwtTokenService jwtTokenService;
@@ -208,6 +212,35 @@ class BusRouteSearchIntegrationTest {
     }
 
     @Test
+    @DisplayName("서울 공식 표시 구간은 연결된 노선에만 제공하고 같은 이름의 순환 구간은 보류한다")
+    void return_seoul_endpoints_for_exact_route_identity() throws Exception {
+        var route = route(TransitProvider.SEOUL_BUS, "100100022", "143", null);
+        var other = route(TransitProvider.SEOUL_BUS, "100100023", "143", null);
+        var stale = route(TransitProvider.SEOUL_BUS, "100100024", "143", null);
+        var loop = route(TransitProvider.SEOUL_BUS, "100100001", "01A", null);
+        seoulEndpoints(route, "100100022", "143", "정릉", "개포동");
+        seoulEndpoints(other, "100100022", "143", "정릉", "개포동");
+        seoulEndpoints(stale, "100100024", "144", "정릉", "개포동");
+        seoulEndpoints(loop, "100100001", "01A", "예장주차장", "예장주차장");
+
+        mockMvc.perform(get("/api/v1/bus-routes").param("query", "143")
+                        .header("Authorization", authorization()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(route.getId()))
+                .andExpect(jsonPath("$[0].provider").value("SEOUL_BUS"))
+                .andExpect(jsonPath("$[0].regionCategory").value("서울"))
+                .andExpect(jsonPath("$[0].startStopName").value("정릉"))
+                .andExpect(jsonPath("$[0].endStopName").value("개포동"))
+                .andExpect(jsonPath("$[1].id").value(other.getId()))
+                .andExpect(jsonPath("$[1].startStopName").value(Matchers.nullValue()))
+                .andExpect(jsonPath("$[2].startStopName").value(Matchers.nullValue()));
+        assertThat(busRouteSearchService.search("01A")).singleElement().satisfies(result -> {
+            assertThat(result.startStopName()).isNull();
+            assertThat(result.endStopName()).isNull();
+        });
+    }
+
+    @Test
     @DisplayName("검색 결과는 노선번호와 같은 번호의 내부 ID 순으로 최대 50건만 반환한다")
     void limit_and_order_search_results() {
         for (int index = 50; index >= 0; index--) {
@@ -238,7 +271,11 @@ class BusRouteSearchIntegrationTest {
             route(TransitProvider.SEOUL_BUS, "route-m-" + index, "M88" + String.format("%02d", index), null);
         }
 
-        assertThat(busRouteSearchService.search("88")).extracting(BusRouteSearchResponse::routeNumber)
+        var statistics = entityManager.unwrap(Session.class).getSessionFactory().getStatistics();
+        long queryCount = statistics.getQueryExecutionCount();
+        var results = busRouteSearchService.search("88");
+        assertThat(statistics.getQueryExecutionCount() - queryCount).isEqualTo(2);
+        assertThat(results).extracting(BusRouteSearchResponse::routeNumber)
                 .containsExactlyElementsOf(java.util.stream.IntStream.range(0, 50)
                         .mapToObj(index -> "M88" + String.format("%02d", index))
                         .toList());
@@ -314,6 +351,12 @@ class BusRouteSearchIntegrationTest {
         Instant now = Instant.now();
         sourceMetadataRepository.upsert(source, "ROUTE", sourceKey, routeId, null, null,
                 payload, null, now, now);
+    }
+
+    private void seoulEndpoints(BusRoute route, String externalId, String number, String start, String end) {
+        jdbc.update("""
+                INSERT INTO seoul_route_endpoints VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6), REPEAT('a', 64), 1)
+                """, route.getId(), externalId, number, start, end);
     }
 
     private String authorization() {

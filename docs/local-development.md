@@ -845,6 +845,18 @@ GBIS 기반정보의 `routeDownloadUrl`과 `routeStationDownloadUrl`은 실제 �
 
 완료 GBIS Bundle 재생과 제한적 재시도를 추가한 뒤 TAGO만 새로 수집했다. 경기 31개 도시 확인 후 TAGO 정류장 단계에서 `INVALID_RESPONSE detail=TAGO_STRUCTURE`, 요청 53회, 560,827바이트로 중단됐으며 응답 원문은 보관하지 않았다. 새 미완료 TAGO Bundle은 `/Users/jsw4795/GPT_Codex_Project/stopbell-collections/2026-11-09-live/db5433d9-9349-467e-8902-1c8aadb53f86`이다. GBIS 재호출과 수집 명령 재실행, DB 접근은 없었다. TAGO 완료 Bundle과 통합 Snapshot은 확보하지 못했다.
 
+### 서울 TOPIS 기종점 갱신
+
+[서울 TOPIS 버스정보 조회](https://topis.seoul.go.kr/map/openBusMap.do)가 공개 검색에 사용하는 `POST /map/busMap/selectBusList.do` 응답을 별도 디렉터리에 보관한다. 빈 `routName`, `pageIndex=1`, `recordPerPage=200`으로 시작하고 응답의 전체 페이지 수를 확인해 같은 검색 조건으로 남은 페이지를 순서대로 읽는다. 페이지 원본은 `page-1.json`부터 연속으로 저장한다. `collected-at.txt`에는 수집 시작 시각을 timezone 포함 ISO-8601 형식으로 기록한다. 인증키는 필요하지 않으며 공식 화면의 요청 경로나 응답이 바뀌면 전체 범위와 스키마를 다시 확인한다. 이 자료에는 발행 버전이 없어 수집 시각과 해시로 식별한다.
+
+원본 디렉터리의 파일별 SHA-256을 기록한 뒤 기존 서울 CSV와 다른 경로에 보관한다. 로컬 DB를 식별하고 [개발 DB 백업](#docker-mysql-개발-db-백업-및-복원)을 검증한 뒤 Flyway로 V39를 적용한다. 저장소 루트에서 다음 명령으로 검토용 SQL을 만든다.
+
+```bash
+python3 backend/scripts/prepare_seoul_route_endpoints.py /absolute/topis-bundle /absolute/new-sql-directory
+```
+
+다른 metadata writer를 중지한 뒤 로컬 개발 MySQL 세션에서 `preview.sql`을 실행한다. 전체 건수, ID 미제공, 노선번호 불일치, 이름 누락·동일 표기를 검토한다. 갱신이라면 `seoul_route_endpoints`와 임시 `topis_review`를 내부 ID로 비교해 제거될 보조 행과 변경할 구간도 검토한다. 검토를 통과한 경우 같은 세션에서 `apply.sql`을 실행한다. `bundle_allowed=1`, 예상 영향 행 수와 `eligible_rows_verified`를 확인해 `COMMIT`한다. 불일치나 오류가 있으면 `ROLLBACK`한다. 커밋 후 복구가 필요하면 백업을 격리 DB에 복원해 이전 보조 행만 복구한다. 최초 적용을 취소할 때는 승인된 별도 트랜잭션에서 해당 Bundle의 보조 행만 제거하고 V39 스키마는 유지한다.
+
 ### 기존 노선 유형 보강 준비
 
 `backend/scripts/prepare_route_type_backfill.py`는 기존 서울 노선마스터 CSV에서 두 SQL 파일만 생성하며 DB에 접속하지 않는다. GBIS 후보는 SQL 실행 시 `transit_source_metadata`의 버전 `20261109` ROUTE 중 기존에 검증되어 `route_id`가 연결된 행만 사용한다. 서울은 provider·원본 ID·노선명, 경기는 provider·연결된 내부 ID·`GGB` 원본 ID를 확인한다. 두 출처 모두 현재 유형이 NULL이고 알려진 코드인 행만 후보로 삼는다. 중복 Route 연결은 임시 후보 테이블의 기본키 제약으로 실패한다.

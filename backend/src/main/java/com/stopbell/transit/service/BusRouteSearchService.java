@@ -47,9 +47,20 @@ public class BusRouteSearchService {
                         TransitSourceSystem.TAGO, TransitSourceDataKind.ROUTE, tagoKeys).stream()
                         .collect(Collectors.toMap(TransitSourceMetadata::getSourceKey, Function.identity()));
 
+        List<Long> seoulIds = routes.stream()
+                .filter(route -> route.getProvider() == TransitProvider.SEOUL_BUS)
+                .map(BusRoute::getId)
+                .toList();
+        Map<Long, Endpoints> seoulEndpoints = seoulIds.isEmpty() ? Map.of()
+                : busRouteRepository.findSeoulEndpoints(seoulIds).stream()
+                        .collect(Collectors.toMap(BusRouteRepository.SeoulEndpoints::getRouteId,
+                                row -> endpointPair(row.getStartStopName(), row.getEndStopName())));
+
         return routes.stream().map(route -> {
-            Endpoints endpoints = route.getProvider() == TransitProvider.TAGO
-                    ? endpoints(route, tagoRows.get(route.getExternalRouteId())) : Endpoints.UNKNOWN;
+            Endpoints endpoints = switch (route.getProvider()) {
+                case TAGO -> endpoints(route, tagoRows.get(route.getExternalRouteId()));
+                case SEOUL_BUS -> seoulEndpoints.getOrDefault(route.getId(), Endpoints.UNKNOWN);
+            };
             return new BusRouteSearchResponse(route.getId(), route.getRouteNumber(),
                     regionNameResolver.resolve(route), route.getProvider(), route.getRouteType(),
                     regionNameResolver.category(route), endpoints.start(), endpoints.end());
@@ -67,9 +78,11 @@ public class BusRouteSearchService {
             return Endpoints.UNKNOWN;
         }
 
-        String start = stopName(raw.path("startnodenm"));
-        String end = stopName(raw.path("endnodenm"));
-        return start.isEmpty() || end.isEmpty() || start.equals(end)
+        return endpointPair(stopName(raw.path("startnodenm")), stopName(raw.path("endnodenm")));
+    }
+
+    private static Endpoints endpointPair(String start, String end) {
+        return start.isBlank() || end.isBlank() || start.equals(end)
                 ? Endpoints.UNKNOWN : new Endpoints(start, end);
     }
 
