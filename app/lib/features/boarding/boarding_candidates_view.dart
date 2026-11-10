@@ -74,7 +74,7 @@ class BoardingCandidatesView extends StatelessWidget {
         ),
         if (compactLabel != null && result.candidates.isNotEmpty)
           Text(
-            '시각은 서버 관측 기준이에요. 노선상 간격에는 미정차·경유 지점이 포함될 수 있어요.',
+            '시각은 서버 조회 기준이에요. 최근 관측은 진행 참고 지점이며 간격에는 미정차·경유가 포함될 수 있어요.',
             style: theme.textTheme.bodySmall,
           ),
         for (final (index, candidate) in result.candidates.indexed)
@@ -212,14 +212,36 @@ class _CompactCandidateCard extends StatelessWidget {
                               color: semantic.warning,
                             ),
                           ),
-                        if (holdReason == null || progress.endpoint != null)
-                          Text(
-                            progress.text,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: progressColor,
+                        if (progress.stopName case final stopName?
+                            when canChoose)
+                          Tooltip(
+                            message: stopName,
+                            excludeFromSemantics: true,
+                            child: Text(
+                              '최근 관측 · $stopName',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall,
                             ),
                           ),
-                        Text('$time 관측', style: theme.textTheme.labelMedium),
+                        Wrap(
+                          spacing: StopBellSpacing.sm,
+                          runSpacing: StopBellSpacing.xs,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            if (canChoose)
+                              Text(
+                                progress.text,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: progressColor,
+                                ),
+                              ),
+                            Text(
+                              '$time 조회',
+                              style: theme.textTheme.labelMedium,
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),

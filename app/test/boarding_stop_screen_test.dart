@@ -123,9 +123,9 @@ void main() {
         tester.platformDispatcher.platformBrightnessTestValue = brightness;
         addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
         final candidateData = [
-          for (final (number, id, order, gap) in [
-            ('경기74아3363', 10, 5, 1),
-            ('경기74아3491', 12, 24, -1),
+          for (final (number, id, order, gap, stopName) in [
+            ('경기74아3363', 10, 5, 1, '출발 정류장'),
+            ('경기74아3491', 12, 24, -1, '중간 정류장'),
           ])
             {
               ...candidateJson(number: number),
@@ -133,7 +133,7 @@ void main() {
               'progress': {
                 'occurrenceId': id,
                 'order': order,
-                'stopName': '표시용 정류장',
+                'stopName': stopName,
                 'kind': 'ROUTE_PROGRESS',
               },
               'boardingOccurrenceGap': gap,
@@ -152,6 +152,7 @@ void main() {
                 (11, 19, '승차 정류장 이름'),
                 (12, 24, '중간 정류장'),
                 (22, 90, '목표 정류장 이름'),
+                (23, 100, '중간 정류장'),
               ])
                 BusRouteStopOccurrence(
                   id: id,
@@ -179,6 +180,8 @@ void main() {
         expect(first.hitTestable(), findsOneWidget);
         expect(second.hitTestable(), findsOneWidget);
         expect(tester.getSize(first).height, lessThan(105));
+        expect(find.text('최근 관측 · 출발 정류장'), findsOneWidget);
+        expect(find.text('최근 관측 · 중간 정류장'), findsOneWidget);
         expect(find.text('이 차량 선택'), findsNothing);
         expect(find.text('후보 1'), findsNothing);
         expect(find.text('조건부 지원'), findsNothing);
@@ -756,6 +759,7 @@ void main() {
       final forwarded = <BoardingCandidate>[];
       var empty = true;
       const number = '경기차량번호가매우길어도생략하지않음1234567890';
+      const observedName = '화면의 한 줄에 들어가지 않는 매우 긴 환승 정류장 이름과 관측 참고 지점';
       await tester.pumpWidget(
         MaterialApp(
           darkTheme: StopBellTheme.dark,
@@ -780,7 +784,18 @@ void main() {
                     empty
                         ? candidatesJson(status: 'EMPTY')
                         : candidatesJson(
-                            candidates: [candidateJson(number: number)],
+                            candidates: [
+                              {
+                                ...candidateJson(number: number),
+                                'progress': {
+                                  'occurrenceId': 11,
+                                  'order': 1,
+                                  'stopName': observedName,
+                                  'kind': 'ROUTE_PROGRESS',
+                                },
+                                'boardingOccurrenceGap': 0,
+                              },
+                            ],
                           ),
                   ),
               onBack: () {},
@@ -822,6 +837,10 @@ void main() {
       await tester.pumpAndSettle();
       await tap(tester, 'candidate-0');
       expect(find.text(number).hitTestable(), findsOneWidget);
+      final location = find.text('최근 관측 · $observedName');
+      expect(location, findsOneWidget);
+      expect(tester.widget<Text>(location).maxLines, 1);
+      expect(find.byTooltip(observedName), findsOneWidget);
       final next = find.byKey(const ValueKey('continue-boarding-candidate'));
       expect(next.hitTestable(), findsOneWidget);
       expect(forwarded, isEmpty);

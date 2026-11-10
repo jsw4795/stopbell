@@ -75,7 +75,7 @@ UI-0 → UI-1 → UI-2 → UI-3 → UI-4 → UI-5 → UI-6 → UI-7 → UI-8 순
 
 ### UI-3 — 차량 후보 조회 및 탑승 확정
 
-간결한 신규 후보 카드에 전체 차량번호, 검증 가능한 승차·목표 간격 또는 진행 상태, 서버 관측 시각과 선택·보류 상태를 표시한다. 사용자가 카드 하나를 직접 고르고 하단 단일 버튼으로 확정 화면에 이동한다. 재조회·선택 문맥 이탈 시 후보 선택을 초기화하며 동일 차량 재확인에는 기존 선택 흐름을 사용한다. [후보 표시 요구사항](requirements.md#phase-9-탑승-차량-추천과-확인)을 따른다. 확정 화면은 선택 차량 → 승차·목표 정류장 → 알림 시점 순서로 구성한다. 2 occurrence 전이 기본이며 1 occurrence 전으로 바꿀 수 있다. 명시적 선택, `candidateRef`·`selectionKey`, 최신 재검증, Provider 오류와 후보 없음 구분, 등록 성공 시 즉시 TRACKING을 유지한다. 기존 Backend 후보 응답을 사용하며 좌석 표시는 UI-7에서 다룬다. Flutter 구현과 관련 자동 검증을 완료했으며 실제 iPhone 확인은 남아 있다. [API](api.md#탑승-세션-api-task-903)와 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다.
+간결한 신규 후보 카드에 전체 차량번호, 검증된 최근 관측 지점, 검증 가능한 승차·목표 간격과 서버 조회 시각을 표시한다. 지점만 검증되면 이름을 유지하고 남은 지점 수는 숨긴다. 사용자가 카드 하나를 직접 고르고 하단 단일 버튼으로 확정 화면에 이동한다. 재조회·선택 문맥 이탈 시 후보 선택을 초기화하며 동일 차량 재확인에는 기존 선택 흐름을 사용한다. [후보 표시 요구사항](requirements.md#phase-9-탑승-차량-추천과-확인)을 따른다. 확정 화면은 선택 차량 → 승차·목표 정류장 → 알림 시점 순서로 구성한다. 2 occurrence 전이 기본이며 1 occurrence 전으로 바꿀 수 있다. 명시적 선택, `candidateRef`·`selectionKey`, 최신 재검증, Provider 오류와 후보 없음 구분, 등록 성공 시 즉시 TRACKING을 유지한다. 기존 Backend 후보 응답을 사용하며 좌석 표시는 UI-7에서 다룬다. 사용자가 이전 카드 크기와 선택 UX를 iPhone에서 확인했다. 최근 관측 지점과 간격 보완의 실기기 재확인은 남아 있다. [API](api.md#탑승-세션-api-task-903)와 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md)을 따른다.
 
 ### UI-4 — 하차 추적 화면
 

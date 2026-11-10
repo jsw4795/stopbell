@@ -60,7 +60,14 @@ void main() {
                 result: candidates,
                 receivedAt: DateTime.utc(2026, 10, 20, 1, 4),
                 selected: selected,
-                progressLabel: (_) => (text: '진행 위치 미확인', endpoint: null),
+                progressLabel: (candidate) =>
+                    candidate == result.candidates.first
+                    ? (
+                        stopName: '검증된 참고 지점',
+                        text: '남은 지점 확인 필요',
+                        endpoint: null,
+                      )
+                    : (stopName: null, text: '진행 위치 미확인', endpoint: null),
                 onSelect: taps.add,
               ),
             ),
@@ -78,11 +85,14 @@ void main() {
             ),
             alwaysUse24HourFormat: true,
           );
-      expect(find.text('$time 관측'), findsNWidgets(2));
-      expect(find.textContaining('서버 관측 기준'), findsOneWidget);
+      expect(find.text('$time 조회'), findsNWidgets(2));
+      expect(find.textContaining('서버 조회 기준'), findsOneWidget);
       expect(find.textContaining('제공기관 원본 시각'), findsNothing);
       expect(find.textContaining('일부 차량 정보'), findsOneWidget);
       expect(find.text('선택 보류 · 오래된 관측'), findsOneWidget);
+      expect(find.text('최근 관측 · 검증된 참고 지점'), findsOneWidget);
+      expect(find.text('남은 지점 확인 필요'), findsOneWidget);
+      expect(find.text('진행 위치 미확인'), findsOneWidget);
       expect(
         tester.getSemantics(first),
         isSemantics(
