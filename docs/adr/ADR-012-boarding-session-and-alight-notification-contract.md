@@ -6,7 +6,7 @@
 
 ## 2026-11-11 후행 결정
 
-아래의 기존 freshness·시각 단조성·역행·관측 공백·stopFlag 차단과 신규 세션 목적지 Push 제외 결정은 후행 정책으로 대체한다. 정확한 차량·노선·occurrence를 확인해 간격으로 판단하고 준비와 목적지 Event를 각각 최대 한 번 생성한다. 과거 응답과 다른 운행 회차를 이 정보만으로 구분하지 못할 수 있다. 현재 계약은 [Domain](../domain-model.md#snapshot-and-progress)과 [요구사항](../requirements.md#phase-9-탑승-세션과-하차-준비-알림)을 따른다.
+아래 ADR의 과거 결정과 TASK 이력은 보존하며, 충돌하는 부분은 이 2026-11-11 후행 결정이 우선한다. 기존 freshness·시각 단조성·역행·관측 공백·stopFlag 차단과 신규 세션 목적지 Push 제외 결정은 후행 정책으로 대체한다. 최초 미검증 checkpoint 이후에도 정확한 목적지 occurrence를 확인하면 이전 방문이나 최초 검증 기준점 없이 완료한다. 다른 운행 회차를 구분하지 못할 가능성은 사용자가 수용했다. 정확한 차량·노선·occurrence를 확인해 간격으로 판단하고 준비와 목적지 Event를 각각 최대 한 번 생성한다. 과거 응답의 실제 최신성은 보장하지 않는다. 현재 계약은 [Domain](../domain-model.md#snapshot-and-progress)과 [요구사항](../requirements.md#phase-9-탑승-세션과-하차-준비-알림)을 따른다.
 
 ## 배경
 

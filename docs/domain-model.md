@@ -499,12 +499,13 @@ COMPLETED는 실제 정차·사용자 하차나 Push 성공을 뜻하지 않는�
 | stateReason | 자동 복구 / 종료 의미 |
 | --- | --- |
 | BASELINE_UNVERIFIED | TRACKING의 위치 근거 부족. 정확한 occurrence를 확인한 뒤 판단 |
-| TARGET_NOT_AHEAD | 검증 기준점 확보 전에 목적지 현재/이후 관측. 과거 목적지 알림 합성 없이 재선택 필요 |
 | TEMPORARY_PROVIDER_FAILURE / STALE_PROGRESS | 유효 관측을 자동 재조회. 시간 공백만으로 재개를 차단하지 않음 |
-| VEHICLE_MISSING / IDENTITY_CONFLICT / PROGRESS_REGRESSION / TRAVERSAL_AMBIGUOUS / CONTINUITY_GAP_EXCEEDED | 재확인 필요. 단순 재등장·번호 일치로 사유를 자동 제거하지 않음 |
+| VEHICLE_MISSING / IDENTITY_CONFLICT / TRAVERSAL_AMBIGUOUS | 재확인 필요. 단순 재등장·번호 일치로 사유를 자동 제거하지 않음 |
 | METADATA_CHANGED | 구조 변경 보류. 기존 불변 snapshot과 다시 일치하지 않으면 취소 후 목적지를 새로 선택하며 자동 치환 없음 |
 | ARRIVAL_OBSERVED / PASSED_OBSERVED | COMPLETED 종료 사유 |
 | USER_CANCELLED / SESSION_LIFETIME_EXPIRED | CANCELLED / EXPIRED 종료 사유 |
+
+`TARGET_NOT_AHEAD`, `PROGRESS_REGRESSION`, `CONTINUITY_GAP_EXCEEDED`는 기존 enum과 저장된 과거 사유의 호환을 위해 남아 있다. 현행 추적은 목적지 현재/이후, index 역행 또는 관측 공백을 이유로 이 사유를 새로 발생시키지 않는다. 과거 SUSPENDED 사유의 기존 재확인 처리는 유지한다. 차량번호 기반 신규 생성 요청의 목표 이전 검증은 별도 [API 계약](api.md#탑승-세션-api-task-903)이다.
 
 TRACKING의 stateReason은 정상 진행이면 NULL, 미검증이면 BASELINE_UNVERIFIED, 일시 장애·지연이면 TEMPORARY_PROVIDER_FAILURE/STALE_PROGRESS다. SUSPENDED는 보류 사유, terminal은 해당 종료 사유를 갖는다. runtime RECOVERY_PENDING은 DB stateReason이 아니며 재시작만으로 모든 row를 갱신하지 않는다.
 
@@ -514,7 +515,7 @@ TASK-908은 `UNVERIFIED_REFERENCE`를 진행 검증 근거와 구분한다. 차�
 
 동일 차량과 노선의 위치를 traversal의 occurrence에 대응한다. 서울은 `stId`와 `stOrd`를 함께 사용하고 `stopFlag`가 0·1·null이어도 정확히 대응하면 수용한다. TAGO는 `nodeord`가 유일한 occurrence에 대응하고 `nodeid`가 있으면 일치해야 한다. ID가 없으면 합성하지 않는다. 같은 Stop ID의 재방문은 order로 구분하며 구간순번 `sectOrd`를 정류장 순번으로 대체하지 않는다. 명시적 운행 종료와 차량 식별 충돌은 기존대로 처리한다.
 
-`remainingOccurrenceGap = targetIndex - progressIndex`다. raw order 차이, 실제 정차 수, 거리·ETA가 아니다. Provider 시각의 경과·역행·반복, 이전 index 대비 역행, 관측 공백만으로 정확한 위치를 차단하지 않는다. 같은 응답은 다시 평가될 수 있으나 durable Event identity가 중복 생성을 막는다. 원본 시각이나 차량 ID만으로 실제 최신성과 동일 운행 회차를 증명할 수 없다.
+`remainingOccurrenceGap = targetIndex - progressIndex`다. 양수는 목적지 이전, 0은 도달, 음수는 통과다. 미정차·경유도 traversal의 정상 구성 요소이며 간격은 배열 index 차이지 raw order 차이, 실제 정차 수, 거리·ETA가 아니다. 하차 추적 진행을 Provider 데이터의 60초 이상 경과, Provider 시각의 역행·반복, 동일 Provider 시각의 다른 정확한 occurrence, 이전 index 대비 역행, 관측 공백 또는 stopFlag 0·1·null로 차단하는 설계는 폐기했다. 같은 응답은 다시 평가될 수 있으나 durable Event identity가 중복 생성을 막는다. 후보 reference 유효기간과 Notification TTL·세션 수명은 별도 시간 계약으로 유지한다. 원본 시각이나 차량 ID만으로 실제 최신성과 동일 운행 회차를 증명할 수 없다.
 
 현재 metadata fingerprint가 구조적으로 바뀌거나 대응이 모순되면 보류한다. 표시 이름만의 변경은 구조 변경이 아니다. snapshot을 자동 교체하지 않으며 공유 Route Lock 없이 commit 순간의 전역 최신성을 보장한다고 하지 않는다.
 
@@ -522,9 +523,9 @@ TASK-908은 `UNVERIFIED_REFERENCE`를 진행 검증 근거와 구분한다. 차�
 
 새 세션의 불변 `notificationOffsetStops`는 2(기본) 또는 1이다. 실제 목적지는 traversal.targetIndex와 targetName으로 보존하고 알림 목표는 `targetIndex - notificationOffsetStops`의 실제 배열 occurrence로 계산한다. raw order/ID를 산술 차감하지 않는다. 같은 차량의 신뢰할 진행에서 `0 < remainingOccurrenceGap <= notificationOffsetStops`이면 PREPARE_ALIGHT를 판단한다. 2→1 대체·최초 검증 시 이미 간격 1인 차량도 허용하되 목적지 현재/이후는 금지한다. 신규 등록 자체가 이미 알림 구간이면 검증한 현재 checkpoint로 즉시 준비 Event를 원자 저장한다. 중간 도달·정차를 합성하지 않으며, commit 확인 뒤에만 같은 baseline을 runtime에 공개한다. 알림 목표가 배열 시작보다 앞이면 occurrence를 합성하지 않으며, 실제로 확인한 목적지 이전 진행에 한해 대체 조건을 적용한다. 기존 세션은 NULL offset과 보존된 prepareNotificationEnabled로 구분하며 ON일 때 간격 2/1 준비 정책을 유지한다.
 
-간격 3→1은 현재 1로 판단한다. 목적지 현재 또는 이후에서는 준비 알림을 소급 생성하지 않고 세션을 완료한다. 미검증 최초 기준점에서도 정확한 목적지 현재/이후 occurrence가 관측되면 해당 간격으로 완료한다. 위치와 회차의 실제 정확성은 Provider 응답에 의존한다.
+간격 3→1은 현재 1로 판단한다. 목적지 현재 또는 이후에서는 준비 알림을 소급 생성하지 않고 세션을 완료한다. 최초 checkpoint가 `UNVERIFIED_REFERENCE`여도 이후 정확한 목적지 현재/이후 occurrence를 확인하면 이전 목적지 방문 기록이나 최초 검증 기준점 없이 즉시 완료하고 목적지 Event를 판단한다. 같은 차량의 다른 운행 회차를 구분하지 못할 가능성은 사용자가 수용한 현행 한계이며, 실제 문제가 발생하고 사용자가 별도로 지시할 때 검토한다.
 
-`BoardingTrackingDecision`은 PREPARE_ALIGHT, NO_CANDIDATE, HELD, ARRIVAL_OBSERVED, PASSED_OBSERVED, EXPIRED_CANDIDATE를 구분한다. 원래 수신시각 기반 TTL과 세션 수명을 적용한다. 세션 Notification identity는 `(boardingSessionId, boardingEventType)`이며 준비와 목적지 각각 최대 한 번 저장한다. Event 저장과 recipient Delivery 생성은 같은 transaction이다. 전송 성공은 실제 단말 표시의 exactly-once를 보장하지 않는다.
+`BoardingTrackingDecision`은 PREPARE_ALIGHT, NO_CANDIDATE, HELD, ARRIVAL_OBSERVED, PASSED_OBSERVED, EXPIRED_CANDIDATE를 구분한다. 두 종류의 Event 모두 원래 수신시각 기반 TTL과 세션 수명을 적용하며 최초 INSERT 전에 기한이 지나면 Event·Delivery를 생성하지 않는다. 세션 Notification identity는 `(boardingSessionId, boardingEventType)`이며 준비와 목적지 각각 최대 한 번 저장한다. Event 저장과 recipient Delivery 생성은 같은 transaction이다. 전송 성공은 실제 단말 표시의 exactly-once를 보장하지 않는다.
 
 ## Recovery
 

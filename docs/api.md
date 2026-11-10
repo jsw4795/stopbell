@@ -545,7 +545,7 @@ cancel body는 `expectedRevision`이다. current revision이 일치하는 미종
 | BOARDING_SESSION_CONFLICT | 409 | 다른 미종료 세션 존재 |
 | BOARDING_REQUEST_CONFLICT | 409 | 동일 생성 요청 UUID의 다른 내용 |
 | BOARDING_REVISION_CONFLICT | 409 | 오래된 mutation revision |
-| BOARDING_TARGET_NOT_AHEAD | 409 | 이전 Backend 호환 코드. 현행 생성은 즉시 TRACKING 후 evaluationStatus/reasonCode로 알림 근거 부족을 표시 |
+| BOARDING_TARGET_NOT_AHEAD | 409 | 차량번호 기반 신규 생성에서 현재 진행이 목표 현재/이후인 경우. 기존 candidateRef 형식과 세션 추적은 별도 계약 적용 |
 | BOARDING_TRACKING_UNSUPPORTED | 409 | 요청한 차량 진행 의미·경로/운행 근거 미지원 (하차 허용 여부와 무관) |
 | BOARDING_RECONFIRM_REQUIRED | 409 | 재확인 가능한 같은 차량·목적/상태 조건 불충족 |
 | TRANSIT_TEMPORARILY_UNAVAILABLE | 503 | Provider/transport/protocol/전체 목록 불완전. 정상 empty와 구분 |
