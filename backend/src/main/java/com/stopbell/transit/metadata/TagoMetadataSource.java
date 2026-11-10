@@ -23,6 +23,12 @@ public final class TagoMetadataSource implements BusMetadataSource {
     private static final Logger log = LoggerFactory.getLogger(TagoMetadataSource.class);
     private static final int PROGRESS_LOG_INTERVAL = 100;
 
+    @FunctionalInterface
+    interface TraversalProgress {
+        void update(int citiesCompleted, int routesProcessed, boolean report);
+    }
+
+    private final boolean logTraversal;
     private final TagoMetadataClient client; private final GbisMetadataClient gbisClient;
     private final long requestIntervalMillis; private final List<String> gyeonggiCodes;
     public TagoMetadataSource(TagoMetadataClient client, GbisMetadataClient gbisClient, long requestIntervalMillis) {
@@ -31,11 +37,13 @@ public final class TagoMetadataSource implements BusMetadataSource {
     TagoMetadataSource(TagoMetadataClient client, long requestIntervalMillis) { this(client, null, requestIntervalMillis, GYEONGGI_CODES); }
     TagoMetadataSource(TagoMetadataClient client, long requestIntervalMillis, Set<String> gyeonggiCodes) { this(client, null, requestIntervalMillis, gyeonggiCodes); }
     TagoMetadataSource(TagoMetadataClient client, GbisMetadataClient gbisClient, long requestIntervalMillis, Set<String> gyeonggiCodes) {
+        this.logTraversal = true;
         this.client=client; this.gbisClient=gbisClient; this.requestIntervalMillis=requestIntervalMillis;
         this.gyeonggiCodes=List.copyOf(Set.copyOf(gyeonggiCodes));
     }
     // Replay receives the recorded city traversal order, not Set's process-dependent iteration order.
     TagoMetadataSource(TagoMetadataClient client, List<String> orderedCities) {
+        this.logTraversal = false;
         this.client = client; this.gbisClient = null; this.requestIntervalMillis = 0;
         this.gyeonggiCodes = List.copyOf(orderedCities);
         if (gyeonggiCodes.isEmpty() || new HashSet<>(gyeonggiCodes).size() != gyeonggiCodes.size())
@@ -55,7 +63,13 @@ public final class TagoMetadataSource implements BusMetadataSource {
     public TagoSnapshot fetchSnapshotWithRawRows(long runId, TransitMetadataArchiveService archive) {
         return collect(true, runId, java.util.Objects.requireNonNull(archive));
     }
+    TagoSnapshot fetchSnapshotWithRawRows(TraversalProgress progress) {
+        return collect(true, null, null, progress);
+    }
     private TagoSnapshot collect(boolean preserveRaw, Long runId, TransitMetadataArchiveService archive) {
+        return collect(preserveRaw, runId, archive, null);
+    }
+    private TagoSnapshot collect(boolean preserveRaw, Long runId, TransitMetadataArchiveService archive, TraversalProgress progress) {
         // A failed bulk fetch is never treated as an empty, complete enrichment source.
         GbisCollectedSnapshot gbisCollected = gbisClient != null && preserveRaw
                 ? java.util.Objects.requireNonNull(archive == null ? gbisClient.fetchWithRaw()
@@ -65,16 +79,18 @@ public final class TagoMetadataSource implements BusMetadataSource {
         pace(); Set<String> discovered = new HashSet<>(); for (TagoMetadataClient.City city : archive == null ? client.cityCodes()
                 : client.cityCodes(bytes -> archive.store(runId, TransitSourceSystem.TAGO, "tago_city_codes", bytes))) { if (city.citycode()==null) throw new IllegalStateException("TAGO city code missing"); discovered.add(city.citycode()); }
         if (!discovered.containsAll(gyeonggiCodes)) throw new IllegalStateException("TAGO city discovery did not verify every Gyeonggi city code");
-        log.info("TAGO city discovery complete: gyeonggiCities={}", gyeonggiCodes.size());
+        if (logTraversal) log.info("TAGO city discovery complete: gyeonggiCities={}", gyeonggiCodes.size());
         List<BusRouteMetadataSnapshot> snapshots=new ArrayList<>(); Set<String> routeIds=new HashSet<>();
         List<RawSourceRow> rawRows = new ArrayList<>();
         int routesProcessed = 0;
+        int citiesCompleted = 0;
         for (String city : gyeonggiCodes) {
             List<TagoMetadataClient.RawItem<TagoMetadataClient.Route>> routes = pages(page -> preserveRaw
                     ? archive == null ? client.routesWithRaw(city, page) : client.routesWithRaw(city, page,
                             bytes -> archive.store(runId, TransitSourceSystem.TAGO, archiveKey("route", city, "", page), bytes))
                     : wrap(client.routes(city, page)));
-            log.info("TAGO route discovery complete: cityCode={}, routes={}", city, routes.size());
+            if (logTraversal) log.info("TAGO route discovery complete: cityCode={}, routes={}", city, routes.size());
+            int remainingRoutes = routes.size();
             for (TagoMetadataClient.RawItem<TagoMetadataClient.Route> routeItem : routes) {
                 TagoMetadataClient.Route route = routeItem.normalized();
                 required(route.routeid()); required(route.routeno());
@@ -94,13 +110,20 @@ public final class TagoMetadataSource implements BusMetadataSource {
                 if(stops.isEmpty()) throw new IllegalStateException("TAGO route has no stops");
                 snapshots.add(new BusRouteMetadataSnapshot(provider(),route.routeid(),route.routeno(),city,stops));
                 routesProcessed++;
-                if (routesProcessed % PROGRESS_LOG_INTERVAL == 0) {
+                remainingRoutes--;
+                boolean milestone = routesProcessed % PROGRESS_LOG_INTERVAL == 0;
+                if (progress != null) progress.update(citiesCompleted, routesProcessed, milestone && remainingRoutes > 0);
+                if (logTraversal && milestone) {
                     log.info("TAGO route stop collection progress: routesProcessed={}", routesProcessed);
                 }
             }
+            citiesCompleted++;
+            if (progress != null) progress.update(citiesCompleted, routesProcessed, true);
         }
-        int stopOccurrences = snapshots.stream().mapToInt(snapshot -> snapshot.occurrences().size()).sum();
-        log.info("TAGO metadata collection complete: routes={}, stopOccurrences={}", snapshots.size(), stopOccurrences);
+        if (logTraversal) {
+            int stopOccurrences = snapshots.stream().mapToInt(snapshot -> snapshot.occurrences().size()).sum();
+            log.info("TAGO metadata collection complete: routes={}, stopOccurrences={}", snapshots.size(), stopOccurrences);
+        }
         if (gbis != null) {
             GbisDestinationEnricher.Result enriched = GbisDestinationEnricher.enrich(snapshots, gbis);
             log.info("GBIS destination enrichment complete: tagoRoutes={}, gbisRoutes={}, enrichedRoutes={}, skippedRoutes={}, destinationOccurrences={}, skipReasons={}",

@@ -158,7 +158,10 @@ class TransitMetadataCollectionTest {
         var delays = new java.util.ArrayList<Duration>();
         var budget = new CollectionBudget(limits(100, 10000, 100000, 10000));
         var c = new TransitMetadataCollector(temp.toRealPath(), KEY, TAGO, GBIS, budget, mock, null, delays::add);
-        var result = c.collect();
+        var progress = new ByteArrayOutputStream();
+        var result = c.collect(new PrintStream(progress));
+        assertThat(progress.toString()).contains("requests=41 responses=40", "citiesCompleted=31/31 routesProcessed=2")
+                .doesNotContain(KEY, SESSION_ERROR);
         assertThat(delays).containsExactly(Duration.ofSeconds(5));
         assertThat(result.requests()).isEqualTo(41);
         assertThat(TagoLocalBundle.replay(result.tagoPath(), KEY).normalized().routes()).hasSize(2);
@@ -241,7 +244,9 @@ class TransitMetadataCollectionTest {
             var args = new String[]{"--directory=" + root.toRealPath(), "--live", "--confirm=COLLECT", "--max-requests=50", "--interval-ms=1"};
             assertThat(TransitMetadataCollectionCli.run(args, Map.of("PUBLIC_DATA_SERVICE_KEY", KEY), new PrintStream(out), new PrintStream(err), mock)).isEqualTo(1);
             String output = out.toString() + err;
-            assertThat(output).contains("operation=getRouteAcctoThrghSttnList", "cityCode=" + TagoMetadataSource.fullCityScope().getFirst(),
+            assertThat(output).contains("status=FAILED", "citiesCompleted=0/31 routesProcessed=0", "gbisPublished=true",
+                            "tagoPublished=false", "tagoBundle=" + root.toRealPath().resolve("incomplete"),
+                            "operation=getRouteAcctoThrghSttnList", "cityCode=" + TagoMetadataSource.fullCityScope().getFirst(),
                     "routeId=GGB200", "pageNo=1", "httpStatus=2xx", "detail=" + scenario.getValue(), "diagnosticStatus=saved")
                     .doesNotContain(KEY, scenario.getKey());
             try (var files = Files.walk(root)) {
@@ -343,9 +348,35 @@ class TransitMetadataCollectionTest {
         int status = TransitMetadataCollectionCli.run(args, Map.of("PUBLIC_DATA_SERVICE_KEY", KEY), new PrintStream(out), new PrintStream(err), mock);
         assertThat(status).isZero();
         assertThat(mock.sent).hasValue(40);
-        assertThat(out.toString()).contains("complete=true", "requests=40", "enrichedRoutes=1").doesNotContain(KEY);
+        String output = out.toString();
+        assertThat(output).contains("complete=true", "requests=40", "enrichedRoutes=1",
+                "status=SUCCESS gbisMode=NEW responses=40 citiesCompleted=31/31 routesProcessed=2").doesNotContain(KEY);
+        assertThat(output).containsSubsequence("[GBIS] stage=BASE_INFO", "[GBIS] stage=ROUTE ",
+                "[GBIS] stage=ROUTE_STATION", "[GBIS] stage=REPLAY event=VERIFIED",
+                "[GBIS] stage=PUBLISH event=PUBLISHED", "[TAGO] stage=CREATE",
+                "[TAGO] stage=REPLAY event=VERIFIED", "[TAGO] stage=PUBLISH event=PUBLISHED",
+                "[COMBINED] stage=REPLAY event=VERIFIED");
+        var cities = output.lines().filter(line -> line.contains("event=CITY_COMPLETE")).toList();
+        assertThat(cities).hasSize(31);
+        for (int i = 0; i < cities.size(); i++) {
+            assertThat(cities.get(i)).contains("citiesCompleted=" + (i + 1) + "/31 routesProcessed=2");
+        }
         assertThat(err.toString()).isEmpty();
     }
+    @Test void request_limit_reports_saved_responses_and_unfinished_traversal() throws Exception {
+        var out = new ByteArrayOutputStream();
+        var err = new ByteArrayOutputStream();
+        var mock = new Mock();
+        var args = new String[]{"--directory=" + temp.toRealPath(), "--live", "--confirm=COLLECT",
+                "--max-requests=8", "--interval-ms=1"};
+        assertThat(TransitMetadataCollectionCli.run(args, Map.of("PUBLIC_DATA_SERVICE_KEY", KEY),
+                new PrintStream(out), new PrintStream(err), mock)).isEqualTo(1);
+        assertThat(mock.sent).hasValue(8);
+        assertThat(err.toString()).contains("failure=REQUEST_LIMIT", "requests=8", "responses=8", "status=FAILED",
+                "citiesCompleted=0/31 routesProcessed=1", "gbisPublished=true", "tagoPublished=false",
+                "tagoBundle=" + temp.toRealPath().resolve("incomplete"), "elapsedMs=").doesNotContain(KEY);
+    }
+
     @Test void invalid_official_download_and_storage_leave_incomplete_bundle() throws Exception {
         var mock = new Mock(); mock.base = BASE.replace("openapi.gbis.go.kr", "evil.test");
         var c = collector(new CollectionBudget(limits(50, 10000, 100000, 10000)), mock);
@@ -393,7 +424,9 @@ class TransitMetadataCollectionTest {
                 "--interval-ms=1", "--gbis-bundle=" + gbis};
         assertThat(TransitMetadataCollectionCli.run(args, Map.of("PUBLIC_DATA_SERVICE_KEY", KEY),
                 new PrintStream(output), new PrintStream(errors), mock)).isZero();
-        assertThat(output.toString()).contains("gbisBundle=" + gbis + " gbisComplete=true");
+        assertThat(output.toString()).contains("gbisBundle=" + gbis + " gbisComplete=true",
+                "event=REUSE bundle=" + gbis, "[GBIS] stage=REPLAY event=VERIFIED",
+                "status=SUCCESS gbisMode=REUSED responses=37").doesNotContain("[GBIS] stage=BASE_INFO");
         assertThat(errors.toString()).isEmpty();
         assertThat(mock.sent).hasValue(37);
         assertThat(onlyChild(gbis.getParent())).isEqualTo(gbis);

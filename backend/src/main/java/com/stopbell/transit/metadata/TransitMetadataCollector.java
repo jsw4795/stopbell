@@ -30,7 +30,9 @@ final class TransitMetadataCollector {
     private final java.util.function.Consumer<Duration> retryWait;
     private String provider = "GBIS", stage = "CREATE";
     private Path tagoPath, gbisPath;
-    private int responses;
+    private int responses, citiesCompleted, routesProcessed;
+    private static final int TAGO_CITIES = TagoMetadataSource.fullCityScope().size();
+    private java.io.PrintStream progress;
     private boolean tagoManifest, gbisManifest, tagoComplete, gbisComplete, tagoPublished, gbisPublished;
     private GbisBaseInfoValidationException.Code validationCode;
     private GbisBaseInfoValidationException.Field validationField;
@@ -61,62 +63,97 @@ final class TransitMetadataCollector {
         this.key = key; this.tagoUrl = tagoUrl; this.gbisUrl = gbisUrl;
         this.budget = budget; this.transport = transport; this.existingGbis = existingGbis; this.retryWait = retryWait;
     }
+    Report collect(java.io.PrintStream out) {
+        progress = out;
+        return collect();
+    }
+
+    private void report(String event) {
+        if (progress == null) return;
+        progress.println("[" + provider + "] stage=" + stage + " event=" + event
+                + ("TAGO".equals(provider) ? traversalSummary() : "")
+                + " requests=" + budget.requests() + " responses=" + responses
+                + " bytes=" + budget.bytes() + " elapsedMs=" + budget.elapsedMillis());
+    }
+
+    int responsesStored() { return responses; }
+
+    String traversalSummary() {
+        return " citiesCompleted=" + citiesCompleted + "/" + TAGO_CITIES + " routesProcessed=" + routesProcessed;
+    }
+
+    private void enter(String nextStage) {
+        stage = nextStage;
+        report("START");
+    }
+
     Report collect() {
         try {
             budget.check();
             GbisCollectedSnapshot gbis;
             if (existingGbis != null) {
                 gbisPath = existingGbis;
-                stage = "REPLAY";
-                try { gbis = GbisLocalBundle.replay(gbisPath, key); gbisManifest = true; gbisComplete = true; }
+                enter("REPLAY");
+                report("REUSE bundle=" + gbisPath);
+                try { gbis = GbisLocalBundle.replay(gbisPath, key); gbisManifest = true; gbisComplete = true; report("VERIFIED"); }
                 catch (IOException | RuntimeException e) { throw new CollectionBudget.Failure(CollectionBudget.Code.INTEGRITY_FAILURE); }
             } else {
+                report("START");
                 Instant startedAt = clock.instant();
                 var gbisWriter = GbisLocalBundle.create(output.incomplete(startedAt), key, startedAt);
                 gbisPath = gbisWriter.directory();
-                stage = "BASE_INFO";
+                enter("BASE_INFO");
                 URI base = UriComponentsBuilder.fromUriString(gbisUrl).queryParam("format", "json")
                         .queryParam("serviceKey", key).build(true).toUri();
                 byte[] info = get(base);
                 var item = GbisMetadataClient.parseBaseInfo(info, key);
                 gbisWriter.add(GbisLocalBundle.Source.BASE_INFO, info); responses++;
-                stage = "ROUTE";
+                enter("ROUTE");
                 gbisWriter.add(GbisLocalBundle.Source.ROUTE, get(URI.create(item.routeDownloadUrl()))); responses++;
-                stage = "ROUTE_STATION";
+                enter("ROUTE_STATION");
                 gbisWriter.add(GbisLocalBundle.Source.ROUTE_STATION, get(URI.create(item.routeStationDownloadUrl()))); responses++;
-                stage = "COMPLETE";
+                enter("COMPLETE");
                 budget.check();
                 gbis = gbisWriter.complete(budget::check); gbisManifest = true;
                 budget.check();
-                stage = "REPLAY";
+                enter("REPLAY");
                 try {
                     if (!gbis.equals(GbisLocalBundle.replay(gbisPath, key))) throw new IllegalStateException();
                 } catch (IOException | RuntimeException e) { throw new CollectionBudget.Failure(CollectionBudget.Code.INTEGRITY_FAILURE); }
                 gbisComplete = true;
+                report("VERIFIED");
                 gbisPath = publish(gbisPath, startedAt);
                 gbisPublished = true;
+                report("PUBLISHED");
             }
-            provider = "TAGO"; stage = "CREATE";
+            provider = "TAGO"; enter("CREATE");
             Instant startedAt = clock.instant();
             var writer = TagoLocalBundle.create(output.incomplete(startedAt), key, startedAt);
             tagoPath = writer.directory();
             var properties = new TransitClientProperties.Tago(tagoUrl, tagoUrl, key);
             var client = new CapturingTagoClient(properties, writer);
             var source = new TagoMetadataSource(client, writer.cityOrder());
-            var captured = source.fetchSnapshotWithRawRows();
-            stage = "COMPLETE";
+            var captured = source.fetchSnapshotWithRawRows((cities, routes, emit) -> {
+                boolean cityCompleted = cities > citiesCompleted;
+                citiesCompleted = cities;
+                routesProcessed = routes;
+                if (emit) report(cityCompleted ? "CITY_COMPLETE" : "ROUTE_MILESTONE");
+            });
+            enter("COMPLETE");
             budget.check();
             var saved = writer.complete(budget::check); tagoManifest = true;
             budget.check();
-            stage = "REPLAY";
+            enter("REPLAY");
             try {
                 var replay = TagoLocalBundle.replay(tagoPath, key);
                 if (!captured.equals(saved) || !captured.equals(replay)) throw new IllegalStateException();
             } catch (IOException | RuntimeException e) { throw new CollectionBudget.Failure(CollectionBudget.Code.INTEGRITY_FAILURE); }
             tagoComplete = true;
+            report("VERIFIED");
             tagoPath = publish(tagoPath, startedAt);
             tagoPublished = true;
-            provider = "COMBINED"; stage = "REPLAY";
+            report("PUBLISHED");
+            provider = "COMBINED"; enter("REPLAY");
             budget.check();
             TagoMetadataSource.TagoSnapshot combined;
             try { combined = TagoGbisOfflineSnapshotAssembler.withGbis(tagoPath, gbisPath, key); }
@@ -125,6 +162,7 @@ final class TransitMetadataCollector {
             if (!combined.normalized().routes().equals(enriched.routes()) || !combined.rawRows().equals(captured.rawRows())
                     || !gbis.equals(combined.gbis())) throw new CollectionBudget.Failure(CollectionBudget.Code.INTEGRITY_FAILURE);
             budget.check();
+            report("VERIFIED");
             var stops = new HashSet<String>();
             int occurrences = 0;
             for (var route : combined.normalized().routes()) for (var stop : route.occurrences()) {
@@ -148,7 +186,7 @@ final class TransitMetadataCollector {
         }
     }
     private Path publish(Path staged, Instant startedAt) throws IOException {
-        stage = "PUBLISH";
+        enter("PUBLISH");
         budget.check();
         try {
             return output.publish(staged, provider, startedAt);
@@ -179,7 +217,9 @@ final class TransitMetadataCollector {
                 + " bytes=" + budget.bytes() + " responses=" + responses + " tagoBundle=" + tagoPath
                 + " tagoComplete=" + tagoComplete + " tagoManifest=" + tagoManifest + " tagoPublished=" + tagoPublished
                 + " gbisBundle=" + gbisPath + " gbisComplete=" + gbisComplete + " gbisManifest=" + gbisManifest
-                + " gbisPublished=" + gbisPublished + " gbisReused=" + (existingGbis != null && gbisComplete);
+                + " gbisPublished=" + gbisPublished + " gbisReused=" + (existingGbis != null && gbisComplete)
+                + traversalSummary() + " elapsedMs=" + budget.elapsedMillis()
+                + ("TAGO".equals(provider) && requestOperation != null ? "" : " diagnosticFile=none diagnosticStatus=none");
     }
     private String requestSummary() {
         return " operation=" + requestOperation + " cityCode=" + safeId(requestCity)
@@ -217,7 +257,8 @@ final class TransitMetadataCollector {
             super(null, properties); this.writer = writer;
         }
         private byte[] fetch(String op, String city, String route, Integer page) {
-            stage = op; requestOperation = op; requestCity = city; requestRoute = route; requestPage = page;
+            if (!op.equals(stage)) enter(op);
+            requestOperation = op; requestCity = city; requestRoute = route; requestPage = page;
             receivedResponse = false; diagnosticFile = null; diagnosticStatus = "no_response";
             byte[] result = transport.get(uri(op, city, route, page), budget);
             receivedResponse = true; diagnosticStatus = "not_saved";

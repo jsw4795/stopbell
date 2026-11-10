@@ -56,16 +56,18 @@ public final class TransitMetadataCollectionCli {
             try (var connection = transport == CollectionHttp.NETWORK ? new CollectionHttp.Connection(limits) : null) {
                 var collector = new TransitMetadataCollector(directory, key, tago, gbis, budget, connection == null ? transport : connection, existingGbis);
                 try {
-                    var result = collector.collect();
+                    var result = collector.collect(out);
                     out.println("complete=true tagoBundle=" + result.tagoPath() + " tagoComplete=true gbisBundle=" + result.gbisPath()
                             + " gbisComplete=true tagoRoutes=" + result.tagoRoutes() + " tagoStops=" + result.tagoStops()
                             + " occurrences=" + result.occurrences() + " gbisRoutes=" + result.gbisRoutes()
                             + " gbisVersion=" + result.version().replaceAll("[\\p{Cntrl}]", "?") + " enrichedRoutes=" + result.enriched()
                             + " skippedRoutes=" + result.skipped() + " requests=" + result.requests()
-                            + " bytes=" + result.bytes() + " elapsedMs=" + result.elapsedMillis());
+                            + " bytes=" + result.bytes() + " elapsedMs=" + result.elapsedMillis()
+                            + " status=SUCCESS gbisMode=" + (existingGbis == null ? "NEW" : "REUSED")
+                            + " responses=" + collector.responsesStored() + collector.traversalSummary());
                     return 0;
                 } catch (CollectionBudget.Failure e) {
-                    err.println("complete=false " + collector.failureSummary(e.code));
+                    err.println("complete=false " + collector.failureSummary(e.code) + " status=FAILED");
                     return 1;
                 }
             }

@@ -797,6 +797,14 @@ TAGO에서 성공 HTTP 본문을 받은 뒤 JSON 파싱 또는 응답 구조 검
 
 이 명령은 웹 서버, Scheduler, FCM, Flyway, Hibernate, DB 연결 및 Bootstrap을 시작하지 않는다. 정상 수집 후 기존 Bundle 및 통합 Snapshot 재생을 검증하지만 DB Preview나 적용은 하지 않는다. 이 단계에서는 Mock Provider와 로컬 HTTP fixture만 사용했으며 실제 Provider·개발/운영 DB는 사용하지 않았다. 실제 GBIS URL·최신성, API quota와 수집 결과 및 DB Preview는 Live 수집 전에 별도로 검토한다.
 
+Live 진행 로그는 Provider와 단계 전환, TAGO 도시 완료 및 노선 100개 단위, Replay와 게시 결과를 평문으로 표시한다. 같은 시점의 도시 완료와 노선 단위 로그는 도시 완료 한 줄로 표시한다.
+
+```text
+[TAGO] stage=getRouteAcctoThrghSttnList event=CITY_COMPLETE citiesCompleted=3/31 routesProcessed=105 requests=120 responses=119 bytes=4200000 elapsedMs=150000
+```
+
+`citiesCompleted`는 순회가 끝난 도시 수이며, `routesProcessed`는 정류장까지 처리한 노선 수다. `requests`는 재시도를 포함한 HTTP 시도, `responses`는 검증 후 Bundle에 저장한 응답 수, `bytes`는 수신량, `elapsedMs`는 전체 경과 시간이다. GBIS 재사용은 `REUSE`와 `VERIFIED`로 표시하며 재생은 HTTP 시도나 저장 응답에 포함하지 않는다. 기존 `complete=true/false` 요약에는 `status=SUCCESS/FAILED`가 추가된다. 실패 시 보존 경로, 진단 상태 및 마지막 완료 카운트를 확인한다.
+
 ### GBIS 공식 기반정보와 Live 수집 시도 (Phase 3-B-2B-2B-2B)
 
 GBIS 기반정보의 `routeDownloadUrl`과 `routeStationDownloadUrl`은 실제 다운로드에 사용하므로 공식 호스트·URI·민감 query 검사를 통과해야 한다. 사용하지 않는 네 필드는 URL 형식을 강제하지 않으며 인증정보 안전성 검사를 통과한 원본을 변형 없이 보존한다. 다른 필드는 기존 안전 정책을 따른다.
