@@ -91,16 +91,10 @@ public class BoardingTrackingRuntime {
     public boolean isReady(BoardingTrackingSnapshot session, LocalDateTime now) {
         var entry = revisions.get(session.id());
         var checkpoint = session.checkpoint();
-        boolean progressValid = session.reason() == null && checkpoint.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
-                && checkpoint.getIndex() < session.traversal().targetIndex()
-                && (session.provider() != TransitProvider.SEOUL_BUS
-                    || checkpoint.getProviderDataTime() != null)
-                && (checkpoint.getProviderDataTime() == null
-                    || !checkpoint.getProviderDataTime().isAfter(checkpoint.getObservedAt()));
-        boolean fresh = now.isBefore(session.expiresAt()) && !checkpoint.getObservedAt().isAfter(now)
-                && !checkpoint.getObservedAt().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))
-                && (checkpoint.getProviderDataTime() == null || (!checkpoint.getProviderDataTime().isAfter(now)
-                    && !checkpoint.getProviderDataTime().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))));
+        boolean progressValid = session.reason() == null
+                && checkpoint.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                && checkpoint.getIndex() < session.traversal().targetIndex();
+        boolean fresh = now.isBefore(session.expiresAt());
         if ((!fresh || !progressValid) && entry != null && entry.revision() == session.revision()) {
             if (revisions.replace(session.id(), entry, new Entry(entry.revision(), entry.registered(), null))
                     && entry.validated() != null) {

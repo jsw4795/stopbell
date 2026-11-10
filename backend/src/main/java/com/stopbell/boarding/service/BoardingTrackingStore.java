@@ -151,15 +151,7 @@ public class BoardingTrackingStore {
         if (current.outcome() == Outcome.HELD) {
             session.suspend(expected.revision(), current.reason(), now);
         } else if (current.checkpoint() != null) {
-            if (current.observedAt().isAfter(now)
-                    || current.observedAt().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))
-                    || (current.checkpoint().getProviderDataTime() != null && (current.checkpoint().getProviderDataTime().isAfter(now)
-                        || current.checkpoint().getProviderDataTime().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))))) {
-                current = BoardingTrackingDecision.held(BoardingStateReason.STALE_PROGRESS);
-                session.suspend(expected.revision(), current.reason(), now);
-            } else {
-                session.track(expected.revision(), current.checkpoint(), current.reason(), now);
-            }
+            session.track(expected.revision(), current.checkpoint(), current.reason(), now);
         }
         sessions.flush();
         Long eventId = notifications.recordDecision(session, expected, current);

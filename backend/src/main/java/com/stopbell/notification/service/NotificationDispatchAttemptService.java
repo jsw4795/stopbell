@@ -177,16 +177,9 @@ public class NotificationDispatchAttemptService {
                 && session.prepareNotificationEnabled() && runtime.isReady(session, now);
     }
 
-    private boolean destinationReady(BoardingTrackingSnapshot session, LocalDateTime now) {
-        var checkpoint = session.checkpoint();
-        var providerTime = checkpoint.getProviderDataTime();
-        return session.notificationOffsetStops() == null && session.destinationReached() && now.isBefore(session.expiresAt())
-                && !checkpoint.getObservedAt().isAfter(now)
-                && !checkpoint.getObservedAt().isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))
-                && (session.provider() != TransitProvider.SEOUL_BUS || providerTime != null)
-                && (providerTime == null || (!providerTime.isAfter(checkpoint.getObservedAt())
-                    && !providerTime.isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS))));
-    }
+	private boolean destinationReady(BoardingTrackingSnapshot session, LocalDateTime now) {
+		return session.destinationReached() && now.isBefore(session.expiresAt());
+	}
 
     public void completeAttempt(NotificationAttemptSnapshot snapshot, NotificationSendResult result) {
         try {

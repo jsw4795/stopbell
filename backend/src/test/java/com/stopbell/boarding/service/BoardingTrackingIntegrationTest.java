@@ -285,7 +285,7 @@ class BoardingTrackingIntegrationTest {
     @ParameterizedTest
     @CsvSource({"2,1,0,true", "2,2,0,true", "1,1,0,false", "1,2,0,true",
             "2,1,1,true", "1,2,1,true", "2,3,0,false", "2,4,0,false", "1,3,1,false", "1,4,1,false"})
-    @DisplayName("새 정책은 이동·정차·관측 누락·재시작에도 준비 Event 한 번과 목적지 완료만 저장한다")
+    @DisplayName("이동·정차·관측 누락·재시작에도 준비와 목적지 Event를 각각 한 번 저장한다")
     void pre_departure_policy_polling(int offset, int index, int stopFlag, boolean prepare) {
         jdbc.update("update boarding_sessions set notification_offset_stops=? where id=?", offset, session.getId());
         device(session.getUser());
@@ -296,7 +296,7 @@ class BoardingTrackingIntegrationTest {
         var current = api.find(session.getUser().getId(), session.getId());
         assertThat(current.notificationOffsetStops()).isEqualTo(offset);
         assertThat(current.preparationNotificationStatus()).isEqualTo(prepare ? "PENDING" : "NOT_CREATED");
-        assertThat(events.count()).isEqualTo(prepare ? 1 : 0);
+        assertThat(events.count()).isEqualTo(index >= 3 ? 1 : prepare ? 1 : 0);
         assertThat(deliveries.count()).isEqualTo(events.count());
         assertThat(current.status()).isEqualTo(index >= 3 ? BoardingSessionStatus.COMPLETED : BoardingSessionStatus.TRACKING);
         if (index < 3) {
@@ -309,10 +309,11 @@ class BoardingTrackingIntegrationTest {
             polling.poll(cycle());
         }
         assertThat(api.find(session.getUser().getId(), session.getId()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
-        assertThat(events.findAll()).allSatisfy(event ->
-                assertThat(event.getBoardingEventType()).isEqualTo(BoardingNotificationEventType.PREPARE_ALIGHT));
-        assertThat(events.count()).isLessThanOrEqualTo(1);
-        assertThat(deliveries.findAll()).noneMatch(delivery -> delivery.getStatus() == NotificationDeliveryStatus.PENDING);
+        assertThat(events.findAll()).filteredOn(event -> event.getBoardingEventType()
+                == BoardingNotificationEventType.DESTINATION_REACHED).hasSize(1);
+        assertThat(events.count()).isEqualTo(index < 3 || prepare ? 2 : 1);
+        assertThat(deliveries.findAll()).filteredOn(delivery -> delivery.getStatus()
+                == NotificationDeliveryStatus.PENDING).hasSize(1);
     }
 
     @ParameterizedTest

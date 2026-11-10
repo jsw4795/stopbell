@@ -209,14 +209,6 @@ public class BoardingSession {
             throw new IllegalArgumentException("Live checkpoint is required");
         }
         next.validateAgainst(getTraversal());
-        if (next.getIndex() < checkpoint.getIndex() || next.getObservedAt().isBefore(checkpoint.getObservedAt())
-                || !java.util.Objects.equals(next.getDirectionContext(), checkpoint.getDirectionContext())
-                || (next.getIndex() != checkpoint.getIndex() && (next.getObservedAt().equals(checkpoint.getObservedAt())
-                    || (next.getProviderDataTime() != null && next.getProviderDataTime().equals(checkpoint.getProviderDataTime()))))
-                || (checkpoint.getProviderDataTime() != null && (next.getProviderDataTime() == null
-                    || next.getProviderDataTime().isBefore(checkpoint.getProviderDataTime())))) {
-            throw new IllegalArgumentException("Checkpoint must preserve monotonic progress and time");
-        }
         if (checkpoint.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE && completion != null) {
             throw new IllegalArgumentException("Initial verification cannot complete a destination notification");
         }

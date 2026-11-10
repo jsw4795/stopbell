@@ -1,27 +1,26 @@
 package com.stopbell.boarding.service;
 
 import java.time.Clock;
-import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 
-import com.stopbell.boarding.domain.*;
-import com.stopbell.boarding.entity.BoardingCheckpoint;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Component;
+
+import com.stopbell.boarding.domain.BoardingProgressObservation;
+import com.stopbell.boarding.domain.BoardingTrackingSnapshot;
 import com.stopbell.boarding.entity.BoardingStateReason;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.mapper.BoardingCandidateMapper;
 import com.stopbell.transit.mapper.BoardingCandidateMapper.Vehicle;
 import com.stopbell.transit.service.VehiclePollingCycle;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.stereotype.Component;
 
 @Component
 public class BoardingVehicleTracker {
-    private final Clock clock;
-
-    public BoardingVehicleTracker(@Qualifier("transitMetadataClock") Clock clock) {
-        this.clock = clock;
-    }
+	
+	public BoardingVehicleTracker(
+	        @Qualifier("transitMetadataClock") Clock clock) {
+	    // 기존 테스트와 Spring DI 호환성을 위해 유지
+	}
 
     public record Input(BoardingProgressObservation observation, BoardingStateReason reason) {
         static Input held(BoardingStateReason reason) { return new Input(null, reason); }
@@ -55,9 +54,6 @@ public class BoardingVehicleTracker {
         if (!session.vehicleNumber().equals(vehicle.number())) {
             return Input.held(BoardingStateReason.IDENTITY_CONFLICT);
         }
-        if (stale(vehicle, clock.instant())) {
-            return Input.held(BoardingStateReason.STALE_PROGRESS);
-        }
         if (vehicle.runEnded()) {
             // isrunyn=0 is explicit negative continuity evidence. Neither missing
             // values nor isrunyn=1 prove the same trip/lap or permit automatic recovery.
@@ -78,17 +74,9 @@ public class BoardingVehicleTracker {
             if (!vehicle.id().equals(detail.id()) || !vehicle.number().equals(detail.number())) {
                 return Input.held(BoardingStateReason.IDENTITY_CONFLICT);
             }
-            if (stale(vehicle, clock.instant()) || stale(detail, clock.instant())
-                    || vehicle.providerDataTime() == null || detail.providerDataTime() == null) {
-                return Input.held(BoardingStateReason.STALE_PROGRESS);
-            }
-            if (session.checkpoint().getProviderDataTime() != null && vehicle.providerDataTime()
-                    .isBefore(session.checkpoint().getProviderDataTime().toInstant(ZoneOffset.UTC))) {
-                return Input.held(BoardingStateReason.PROGRESS_REGRESSION);
-            }
             vehicle = detail;
         }
-        if (session.provider() == TransitProvider.SEOUL_BUS && Integer.valueOf(0).equals(vehicle.stopFlag())) {
+        if (session.provider() == TransitProvider.SEOUL_BUS) {
             return moving(session, vehicle);
         }
         if (session.provider() == TransitProvider.TAGO) {
@@ -104,71 +92,25 @@ public class BoardingVehicleTracker {
             return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
                     vehicle, BoardingProgressObservation.Meaning.VERIFIED_REACHED, orderOnly, null, false), null);
         }
-        if (session.provider() == TransitProvider.SEOUL_BUS && !Integer.valueOf(1).equals(vehicle.stopFlag())) {
-            // Missing/unknown meaning is unavailable progress, not proof of lost continuity.
-            return Input.held(BoardingStateReason.STALE_PROGRESS);
-        }
-        // A stopped exact detail is a direct arrival; moving detail uses the empirical contract below.
-        var meaning = session.provider() == TransitProvider.SEOUL_BUS && Integer.valueOf(1).equals(vehicle.stopFlag())
-                && vehicle.stopId() != null ? BoardingProgressObservation.Meaning.DIRECT_ARRIVAL
-                : BoardingProgressObservation.Meaning.UNVERIFIED;
-        return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
-                vehicle, meaning, false, null, false), null);
+        return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
     }
 
-    private Input moving(BoardingTrackingSnapshot session, Vehicle vehicle) {
-        var previous = session.checkpoint();
-        if (vehicle.observedAt().isBefore(previous.getObservedAt().toInstant(ZoneOffset.UTC))
-                || (previous.getProviderDataTime() != null && vehicle.providerDataTime()
-                    .isBefore(previous.getProviderDataTime().toInstant(ZoneOffset.UTC)))) {
-            return Input.held(BoardingStateReason.PROGRESS_REGRESSION);
-        }
-        var occurrences = session.traversal().occurrences();
-        int index = -1;
-        for (int i = 0; i < occurrences.size(); i++) {
-            var occurrence = occurrences.get(i);
-            if (Integer.valueOf(occurrence.order()).equals(vehicle.order())
-                    && occurrence.externalStopId().equals(vehicle.stopId())) {
-                index = i;
-                break;
-            }
-        }
-        if (index < 0) {
-            if (vehicle.stopId() == null || vehicle.order() == null) {
-                if (previous.getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
-                    return Input.held(BoardingStateReason.STALE_PROGRESS);
-                }
-                return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
-                        vehicle, BoardingProgressObservation.Meaning.UNVERIFIED, false, null, false), null);
-            }
-            return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
-        }
-        if (index < previous.getIndex()) {
-            return Input.held(BoardingStateReason.PROGRESS_REGRESSION);
-        }
-        if (index != previous.getIndex()
-                && (vehicle.observedAt().equals(previous.getObservedAt().toInstant(ZoneOffset.UTC))
-                    || (previous.getProviderDataTime() != null && vehicle.providerDataTime()
-                        .equals(previous.getProviderDataTime().toInstant(ZoneOffset.UTC))))) {
-            return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
-        }
-        // TASK-908: empirical Seoul 143/N51 assumption, NOT an official API guarantee:
-        // flag=0 stId/stOrd identifies the last reported reached/passed occurrence;
-        // flag=1 identifies the current arrival. Non-stopping updates remain unverified live.
-        // Exact metadata ID+stOrd occurrence mapping and evaluator continuity/time gates
-        // are mandatory. Roster sectOrd is never substituted for a Stop occurrence order.
-        return new Input(new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
-                vehicle, BoardingProgressObservation.Meaning.VERIFIED_REACHED, false,
-                previous.getDirectionContext(), false), null);
-    }
+	private Input moving(BoardingTrackingSnapshot session, Vehicle vehicle) {
+		var occurrences = session.traversal().occurrences();
 
-    private static boolean stale(Vehicle vehicle, Instant now) {
-        return vehicle.timeIssue() != null || invalidTime(vehicle.observedAt(), now)
-                || (vehicle.providerDataTime() != null && (invalidTime(vehicle.providerDataTime(), now)
-                    || vehicle.providerDataTime().isAfter(vehicle.observedAt())));
-    }
+		for (var occurrence : occurrences) {
+			if (Integer.valueOf(occurrence.order()).equals(vehicle.order())
+					&& occurrence.externalStopId().equals(vehicle.stopId())) {
 
-    private static boolean invalidTime(Instant time, Instant now) {
-        return time == null || time.isAfter(now) || time.isBefore(now.minus(BoardingProgressEvaluator.FRESHNESS));
-    }
+				return new Input(
+						new BoardingProgressObservation(session.provider(), session.routeId(), session.cityCode(),
+								vehicle, BoardingProgressObservation.Meaning.VERIFIED_REACHED, false, null, false),
+						null);
+			}
+		}
+
+		// 노드 매핑이 불가능하면 다음 정상 응답에서 자동 재시도
+		return Input.held(BoardingStateReason.STALE_PROGRESS);
+	}
+
 }

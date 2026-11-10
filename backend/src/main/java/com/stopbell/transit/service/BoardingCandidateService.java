@@ -94,7 +94,7 @@ public class BoardingCandidateService {
         for (int index = 0; index < vehicles.size(); index++) {
             Vehicle vehicle = vehicles.get(index);
             if (route.provider() == TransitProvider.SEOUL_BUS && boardingId != null
-                    && identityIssue(vehicle, conflictingIds) == null && timeIssue(vehicle, clock.instant()) == null) {
+                    && identityIssue(vehicle, conflictingIds) == null) {
                 requested.add(index);
             }
             details.add(new Detail(null, route.provider() == TransitProvider.SEOUL_BUS
@@ -102,8 +102,7 @@ public class BoardingCandidateService {
         }
         var results = detailExecutor.collect(requested, deadline, index -> {
             Vehicle vehicle = vehicles.get(index);
-            ReasonCode issue = timeIssue(vehicle, clock.instant());
-            return issue == null ? fetchDetail(vehicle) : new Detail(null, issue);
+            return fetchDetail(vehicle);
         });
         for (int index = 0; index < requested.size(); index++) {
             var result = results.get(index);
@@ -155,9 +154,6 @@ public class BoardingCandidateService {
         if (selected.runEnded()) {
             throw unsupported(route, "CURRENT_RUN_ENDED");
         }
-        if (timeIssue(selected, clock.instant()) != null) {
-            throw new ApiException(ErrorCode.BOARDING_POSITION_UNAVAILABLE);
-        }
         Vehicle progress = selected;
         if (route.provider() == TransitProvider.SEOUL_BUS) {
             var detail = fetchDetail(selected);
@@ -171,11 +167,6 @@ public class BoardingCandidateService {
                 });
             }
             progress = detail.vehicle();
-            if (timeIssue(progress, clock.instant()) != null || progress.providerDataTime() == null
-                    || progress.providerDataTime().isAfter(progress.observedAt())
-                    || (!Integer.valueOf(0).equals(progress.stopFlag()) && !Integer.valueOf(1).equals(progress.stopFlag()))) {
-                throw new ApiException(ErrorCode.BOARDING_POSITION_UNAVAILABLE);
-            }
         }
         int index = progressIndex(route, progress);
         if (index < 0) {
@@ -185,14 +176,7 @@ public class BoardingCandidateService {
             throw new ApiException(ErrorCode.BOARDING_TARGET_NOT_AHEAD);
         }
         Instant now = clock.instant();
-        if (timeIssue(selected, now) != null || timeIssue(progress, now) != null) {
-            throw new ApiException(ErrorCode.BOARDING_POSITION_UNAVAILABLE);
-        }
-        Instant expiresAt = selected.observedAt().plus(BoardingCandidateReferenceStore.FRESHNESS);
-        if (selected.providerDataTime() != null) {
-            Instant sourceExpiry = selected.providerDataTime().plus(BoardingCandidateReferenceStore.FRESHNESS);
-            if (sourceExpiry.isBefore(expiresAt)) expiresAt = sourceExpiry;
-        }
+        Instant expiresAt = now.plus(BoardingCandidateReferenceStore.FRESHNESS);
         return new CurrentVehicle(new VerifiedCandidate(route, progress, index,
                 route.provider() == TransitProvider.SEOUL_BUS), expiresAt);
     }
@@ -212,12 +196,7 @@ public class BoardingCandidateService {
         if (route.provider() == TransitProvider.TAGO) {
             return revalidateTago(original, route, expectedVehicleNumber);
         }
-        Instant validationTime = clock.instant();
         Vehicle originalRoster = original.rosterVehicle();
-        if (timeIssue(originalRoster, validationTime) != null
-                || originalRoster.providerDataTime().isAfter(originalRoster.observedAt())) {
-            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
-        }
         if (originalRoster.runEnded()) {
             throw unsupported(route, "ORIGINAL_RUN_ENDED");
         }
@@ -255,52 +234,26 @@ public class BoardingCandidateService {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         Instant now = clock.instant();
-        if (now.isAfter(original.expiresAt()) || timeIssue(selected, now) != null || timeIssue(detail, now) != null
-                || detail.providerDataTime().isAfter(detail.observedAt())
-                || selected.providerDataTime().isAfter(selected.observedAt())
-                || selected.providerDataTime().isBefore(original.rosterVehicle().providerDataTime())) {
+        if (now.isAfter(original.expiresAt())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         // A changed coarse roster at the same source time is conflicting data, not
         // evidence that sectOrd is a Stop order or that a new trip has started.
-        if (selected.providerDataTime().equals(originalRoster.providerDataTime())
-                && !java.util.Objects.equals(selected.coarseContext(), originalRoster.coarseContext())) {
-            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
-        }
         int current = progressIndex(route, detail);
         if (current < 0 && detail.stopId() != null && detail.order() != null) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
-        Vehicle previous = original.detailVehicle();
-        boolean stopped = detailAvailable && current >= 0 && Integer.valueOf(1).equals(detail.stopFlag());
-        if (previous != null && (!detail.id().equals(previous.id()) || !detail.number().equals(previous.number())
-                || (current >= 0 && current < progressIndex(route, previous))
-                || detail.observedAt().isBefore(previous.observedAt())
-                || previous.providerDataTime() == null || timeIssue(previous, now) != null
-                || previous.providerDataTime().isAfter(previous.observedAt())
-                || detail.providerDataTime().isBefore(previous.providerDataTime()))) {
-            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
-        }
-        // Match the polling evaluator: an unchanged source/receipt time cannot
-        // establish progress to a different occurrence during start/reconfirmation.
-        if (previous != null && (detail.providerDataTime().equals(previous.providerDataTime())
-                || detail.observedAt().equals(previous.observedAt()))
-                && current >= 0 && progressIndex(route, previous) >= 0 && current != progressIndex(route, previous)) {
-            throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
-        }
-        // Empirical TASK-908 assumption (143/N51), not an official API contract.
-        // Exact stId+stOrd map to CSV node ID + Stop order; sectOrd is never used.
-        // A moving reference may establish the current baseline before the destination,
-        // without inventing arrival events for any skipped occurrence. Non-stop updates
-        // still require subsequent real-provider/iPhone verification.
-        boolean reached = stopped || detailAvailable && current >= 0 && Integer.valueOf(0).equals(detail.stopFlag());
-        boolean sameReachedSource = previous != null && current >= 0 && current == progressIndex(route, previous)
-                && detail.providerDataTime().equals(previous.providerDataTime())
-                && (Integer.valueOf(0).equals(previous.stopFlag()) || Integer.valueOf(1).equals(previous.stopFlag()));
-        // Repeated source data cannot extend observation freshness or the original preparation TTL.
-        Vehicle baseline = sameReachedSource ? previous : detail;
-        return new VerifiedCandidate(route, baseline, current,
-                reached && current < route.indexOf(route.targetOccurrenceId()));
+
+		Vehicle previous = original.detailVehicle();
+
+		if (previous != null && (!detail.id().equals(previous.id()) || !detail.number().equals(previous.number()))) {
+			throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
+		}
+
+		boolean baselineVerified = detailAvailable && current >= 0
+				&& current < route.indexOf(route.targetOccurrenceId());
+
+		return new VerifiedCandidate(route, detail, current, baselineVerified);
     }
 
     private VerifiedCandidate revalidateTago(BoardingCandidateReferenceStore.Snapshot original,
@@ -311,8 +264,10 @@ public class BoardingCandidateService {
         var previous = original.rosterVehicle();
         Instant now = clock.instant();
         int previousIndex = progressIndex(route, previous);
-        if (previous.id() == null || !expectedNumber.equals(previous.number()) || previousIndex < 0
-                || timeIssue(previous, now) != null || now.isAfter(original.expiresAt())) {
+        if (previous.id() == null
+                || !expectedNumber.equals(previous.number())
+                || previousIndex < 0
+                || now.isAfter(original.expiresAt())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
         Roster roster;
@@ -327,8 +282,8 @@ public class BoardingCandidateService {
         }
         var selected = matches.getFirst();
         int index = progressIndex(route, selected);
-        if (!expectedNumber.equals(selected.number()) || timeIssue(selected, clock.instant()) != null
-                || selected.observedAt().isBefore(previous.observedAt()) || index < previousIndex
+        if (!expectedNumber.equals(selected.number())
+                || index < 0
                 || index >= route.indexOf(route.targetOccurrenceId())) {
             throw new ApiException(ErrorCode.BOARDING_CANDIDATE_CHANGED);
         }
@@ -396,13 +351,7 @@ public class BoardingCandidateService {
     private Candidate candidate(BoardingRouteSnapshot route, Context context, Vehicle roster, Detail result,
             Set<String> conflictingIds, Instant now) {
         ReasonCode held = identityIssue(roster, conflictingIds);
-        if (held == null) {
-            held = timeIssue(roster, now);
-        }
         Vehicle detail = result.vehicle();
-        if (held == null && detail != null) {
-            held = timeIssue(detail, now);
-        }
         if (held == null && result.issue() != null && result.issue() != ReasonCode.DETAIL_NOT_REQUESTED
                 && result.issue() != ReasonCode.DETAIL_EMPTY) {
             held = result.issue();

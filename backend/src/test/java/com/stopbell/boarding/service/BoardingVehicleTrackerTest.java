@@ -144,13 +144,14 @@ class BoardingVehicleTrackerTest {
         assertThat(tracker.observe(session, cycle()).reason()).isEqualTo(BoardingStateReason.IDENTITY_CONFLICT);
     }
 
-    @Test
-    @DisplayName("실제 서울 이동 중 detail 의미가 검증되지 않은 범위는 테스트 fixture의 검증된 진행과 구분한다")
-    void unknown_flag_remains_unverified() {
-        when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s1", 20, 2, "20261020120019"));
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @DisplayName("서울 stopFlag가 알려지지 않아도 유효한 occurrence를 사용한다")
+    void unknown_flag_uses_occurrence(String flag) {
+        when(detail.fetchVehicleDetail(any())).thenReturn(detail("vehicle-id", NUMBER, "s1", 20, flag == null ? null : 2, "20261020120019"));
         var input = tracker.observe(session, cycle());
-        assertThat(input.reason()).isEqualTo(BoardingStateReason.STALE_PROGRESS);
-        assertThat(input.observation()).isNull();
+        assertThat(input.reason()).isNull();
+        assertThat(input.observation().meaning()).isEqualTo(Meaning.VERIFIED_REACHED);
     }
 
     @Test
@@ -289,7 +290,7 @@ class BoardingVehicleTrackerTest {
         return new SeoulBusVehicleLocationResponse(new SeoulBusVehicleLocationResponse.Header("0", null),
                 new SeoulBusVehicleLocationResponse.Body(List.of(items)));
     }
-    private static SeoulBusVehicleDetailResponse detail(String id, String number, String stop, int order, int flag, String time) {
+    private static SeoulBusVehicleDetailResponse detail(String id, String number, String stop, int order, Integer flag, String time) {
         return new SeoulBusVehicleDetailResponse(new SeoulBusVehicleDetailResponse.Header("0", null),
                 new SeoulBusVehicleDetailResponse.Body(List.of(new SeoulBusVehicleDetailItem(id, number, stop, order, flag, time, null, null))));
     }

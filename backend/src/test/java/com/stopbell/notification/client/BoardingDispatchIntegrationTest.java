@@ -377,16 +377,16 @@ class BoardingDispatchIntegrationTest {
     }
 
     @Test
-    @DisplayName("새 정책 세션에 잘못 연결된 목적지 Event는 SQL LIMIT 전과 attempt에서 모두 배제한다")
-    void new_policy_rejects_destination_delivery() {
+    @DisplayName("알림 시점 설정 세션의 목적지 Event도 전송 대상으로 선택한다")
+    void offset_session_allows_destination_delivery() {
         var fixture = fixture(false);
         time.set(NOW.plusSeconds(10));
         Long eventId = completeDestination(fixture);
         Long destinationDelivery = deliveries.findAllByNotificationEventIdOrderByIdAsc(eventId).getFirst().getId();
         jdbc.update("update boarding_sessions set notification_offset_stops=2 where id=?", fixture.sessionId());
-        assertThat(deliveries.findBoardingDuePendingIds(List.of(-1L), utc(), PageRequest.of(0, 10))).isEmpty();
-        assertThat(attempts.beginAttempt(destinationDelivery)).isEmpty();
-        assertThat(deliveries.findById(destinationDelivery).orElseThrow().getAttemptCount()).isZero();
+        assertThat(deliveries.findBoardingDuePendingIds(List.of(-1L), utc(), PageRequest.of(0, 10)))
+                .contains(destinationDelivery);
+        assertThat(attempts.beginAttempt(destinationDelivery)).isPresent();
     }
 
     @Test

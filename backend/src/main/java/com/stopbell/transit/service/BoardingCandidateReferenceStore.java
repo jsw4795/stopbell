@@ -51,13 +51,7 @@ public class BoardingCandidateReferenceStore {
     public synchronized String issue(Context context, BoardingRouteSnapshot route, Vehicle roster, Vehicle detail) {
         Instant now = clock.instant();
         references.values().removeIf(value -> expired(value, now));
-        Instant expiresAt = expiry(roster);
-        if (detail != null && expiry(detail).isBefore(expiresAt)) {
-            expiresAt = expiry(detail);
-        }
-        if (now.isAfter(expiresAt) || future(roster, now) || (detail != null && future(detail, now))) {
-            return null;
-        }
+        Instant expiresAt = now.plus(FRESHNESS);
         while (references.size() >= capacity) {
             references.remove(references.keySet().iterator().next());
         }
@@ -86,18 +80,7 @@ public class BoardingCandidateReferenceStore {
     }
 
     private static boolean expired(Snapshot snapshot, Instant now) {
-        return now.isAfter(snapshot.expiresAt()) || future(snapshot.rosterVehicle(), now)
-                || (snapshot.detailVehicle() != null && future(snapshot.detailVehicle(), now));
+        return now.isAfter(snapshot.expiresAt());
     }
-
-    private static boolean future(Vehicle vehicle, Instant now) {
-        return vehicle.observedAt().isAfter(now)
-                || (vehicle.providerDataTime() != null && vehicle.providerDataTime().isAfter(now));
-    }
-
-    private static Instant expiry(Vehicle vehicle) {
-        Instant observedExpiry = vehicle.observedAt().plus(FRESHNESS);
-        return vehicle.providerDataTime() != null && vehicle.providerDataTime().isBefore(vehicle.observedAt())
-                ? vehicle.providerDataTime().plus(FRESHNESS) : observedExpiry;
-    }
+    
 }

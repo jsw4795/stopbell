@@ -95,9 +95,6 @@ public class BoardingNotificationService {
             BoardingTrackingDecision decision, boolean initial) {
         boolean destination = decision.outcome() == BoardingTrackingDecision.Outcome.ARRIVAL_OBSERVED
                 || decision.outcome() == BoardingTrackingDecision.Outcome.PASSED_OBSERVED;
-        if (destination && session.getNotificationOffsetStops() != null) {
-            return null; // New policy completes the Session without a destination Push.
-        }
         if (!destination && (decision.outcome() != BoardingTrackingDecision.Outcome.PREPARE_ALIGHT
                 || !session.isPrepareNotificationEnabled())) {
             return null;

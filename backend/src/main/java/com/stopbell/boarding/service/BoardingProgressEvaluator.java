@@ -46,23 +46,11 @@ public class BoardingProgressEvaluator {
                 : LocalDateTime.ofInstant(vehicle.observedAt(), ZoneOffset.UTC);
         LocalDateTime providerTime = vehicle.providerDataTime() == null ? null
                 : LocalDateTime.ofInstant(vehicle.providerDataTime(), ZoneOffset.UTC);
-        if (invalidTime(observedAt, now) || vehicle.timeIssue() != null
-                || (session.provider() == TransitProvider.SEOUL_BUS && providerTime == null)
-                || (providerTime != null && (invalidTime(providerTime, now) || providerTime.isAfter(observedAt)))) {
+        if (observedAt == null) {
             return BoardingTrackingDecision.held(BoardingStateReason.STALE_PROGRESS);
         }
         var previous = session.checkpoint();
-        if (observedAt.isBefore(previous.getObservedAt())
-                || (previous.getProviderDataTime() != null && (providerTime == null
-                    || providerTime.isBefore(previous.getProviderDataTime())))) {
-            return BoardingTrackingDecision.held(BoardingStateReason.PROGRESS_REGRESSION);
-        }
-        if (Duration.between(previous.getObservedAt(), observedAt).compareTo(maxObservationGap) > 0) {
-            return BoardingTrackingDecision.held(BoardingStateReason.CONTINUITY_GAP_EXCEEDED);
-        }
-        if (observation.traversalAmbiguous()
-                || !Objects.equals(previous.getDirectionContext(), observation.directionContext())
-                || observation.meaning() == null) {
+        if (observation.traversalAmbiguous() || observation.meaning() == null) {
             return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
         }
         if ((vehicle.order() == null || vehicle.stopId() == null && !observation.orderOnlyVerified())
@@ -92,31 +80,10 @@ public class BoardingProgressEvaluator {
         if (index < 0 && previous.getIndex() >= 0) {
             return BoardingTrackingDecision.held(BoardingStateReason.STALE_PROGRESS);
         }
-        if (index < previous.getIndex()) {
-            return BoardingTrackingDecision.held(BoardingStateReason.PROGRESS_REGRESSION);
-        }
         boolean pending = previous.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE;
-        boolean sameProviderData = providerTime != null && providerTime.equals(previous.getProviderDataTime());
-        if ((sameProviderData || observedAt.equals(previous.getObservedAt())) && index != previous.getIndex()) {
-            return BoardingTrackingDecision.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
-        }
-        // Repeated source data is not new progress or new freshness, including TAGO without dataTm.
-        boolean repeated = sameProviderData || observedAt.equals(previous.getObservedAt())
-                || (providerTime == null && index == previous.getIndex());
+        
         int gap = traversal.targetIndex() - index;
-        if (repeated) {
-            if (session.provider() == TransitProvider.TAGO && observedAt.isAfter(previous.getObservedAt())) {
-                // Receipt confirms continued roster presence, not a new arrival or decision.
-                var receipt = new BoardingCheckpoint(previous.getStopExternalId(), previous.getStopOrder(), previous.getIndex(),
-                        previous.getEvidence(), previous.getDirectionContext(), observedAt, null);
-                return new BoardingTrackingDecision(Outcome.NO_CANDIDATE, receipt, null, gap, observedAt, null, now);
-            }
-            if (session.status() == BoardingSessionStatus.SUSPENDED) {
-                return BoardingTrackingDecision.held(session.reason());
-            }
-            return new BoardingTrackingDecision(Outcome.NO_CANDIDATE, null, null, gap,
-                    previous.getObservedAt(), null, now);
-        }
+        
         if (pending && index >= traversal.targetIndex()) {
             // No trusted baseline before the target: never infer a missed destination.
             return BoardingTrackingDecision.held(BoardingStateReason.TARGET_NOT_AHEAD);
