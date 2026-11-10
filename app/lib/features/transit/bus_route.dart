@@ -3,11 +3,15 @@ class BusRoute {
     required this.id,
     required this.routeNumber,
     required this.regionName,
+    this.provider,
+    this.routeType,
   });
 
   final int id;
   final String routeNumber;
   final String regionName;
+  final String? provider;
+  final String? routeType;
 
   factory BusRoute.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) throw const FormatException();
@@ -22,6 +26,16 @@ class BusRoute {
         regionName.trim().isEmpty) {
       throw const FormatException();
     }
-    return BusRoute(id: id, routeNumber: routeNumber, regionName: regionName);
+    return BusRoute(
+      id: id,
+      routeNumber: routeNumber,
+      regionName: regionName,
+      provider: value['provider'] is String
+          ? value['provider'] as String
+          : null,
+      routeType: value['routeType'] is String
+          ? value['routeType'] as String
+          : null,
+    );
   }
 }

@@ -65,8 +65,20 @@ void main() {
         MockClient(
           (_) async => http.Response(
             jsonEncode([
-              {'id': 754, 'routeNumber': '7000', 'regionName': '수원시'},
-              {'id': 1390, 'routeNumber': '7000', 'regionName': '김포시'},
+              {
+                'id': 754,
+                'routeNumber': '7000',
+                'regionName': '수원시',
+                'provider': 'TAGO',
+                'routeType': 'CITY_LOCAL',
+              },
+              {
+                'id': 1390,
+                'routeNumber': '7000',
+                'regionName': '김포시',
+                'provider': 'TAGO',
+                'routeType': null,
+              },
             ]),
             200,
             headers: {'content-type': 'application/json; charset=utf-8'},
@@ -77,6 +89,8 @@ void main() {
       expect(routes.map((route) => route.id), [754, 1390]);
       expect(routes.map((route) => route.routeNumber), ['7000', '7000']);
       expect(routes.map((route) => route.regionName), ['수원시', '김포시']);
+      expect(routes.map((route) => route.provider), ['TAGO', 'TAGO']);
+      expect(routes.map((route) => route.routeType), ['CITY_LOCAL', null]);
     },
   );
 

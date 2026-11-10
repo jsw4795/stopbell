@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_spacing.dart';
 import 'bus_route.dart';
+import 'bus_route_presentation.dart';
 
 enum _SearchState { idle, loading, success, empty, error }
 
@@ -65,6 +66,7 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
             controller: _queryController,
             enabled: !loading,
             decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.directions_bus_outlined),
               labelText: '노선번호',
               hintText: '노선번호를 입력하세요',
             ),
@@ -119,11 +121,62 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
           itemCount: _routes.length,
           itemBuilder: (context, index) {
             final route = _routes[index];
-            return ListTile(
+            final theme = Theme.of(context);
+            final presentation = BusRoutePresentation.forRoute(
+              route,
+              theme.brightness,
+            );
+            return Card(
               key: ValueKey(route.id),
-              title: Text(route.routeNumber),
-              subtitle: Text(route.regionName),
-              onTap: () => widget.onSelect(route),
+              margin: const EdgeInsets.only(bottom: StopBellSpacing.md),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: () => widget.onSelect(route),
+                child: Padding(
+                  padding: const EdgeInsets.all(StopBellSpacing.lg),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: presentation.color,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                      const SizedBox(width: StopBellSpacing.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              route.routeNumber,
+                              style: theme.textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: StopBellSpacing.xs),
+                            if (presentation.label != null)
+                              Text(
+                                presentation.label!,
+                                style: theme.textTheme.labelSmall!.copyWith(
+                                  color: presentation.color,
+                                ),
+                              ),
+                            Text(
+                              route.regionName,
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: StopBellSpacing.sm),
+                      Icon(
+                        Icons.chevron_right,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             );
           },
         );

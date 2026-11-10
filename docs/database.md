@@ -473,7 +473,7 @@ V33은 기존 `bus_routes`에 nullable `route_type VARCHAR(24)`를 추가하고 
 | GBIS 52 | 좌석형공항 | AIRPORT_SEAT | 회색 |
 | GBIS 53 | 일반형공항 | AIRPORT_LOCAL | 회색 |
 
-색상은 Flutter에 적용하지 않은 표시 정책이며, 경기는 별도 확인 전 회색을 사용한다. `LOCAL`은 기존 호환 타입이고 현재 원본 매핑에서는 생성하지 않는다. GBIS는 노선명과 전체 정류장 순번·ID가 일치한 TAGO 노선에만 유형을 부여한다. GBIS 필드가 수집되지 않은 TAGO 단독 동기화는 기존 유형을 보존하며 수집된 미지원 값은 NULL로 갱신한다. 유형은 비교 및 승인 지문에 포함되므로 변경 전 승인 지문은 새 지문과 일치하지 않는다.
+Flutter 검색 화면은 이 표시 정책을 적용하며, 경기는 별도 확인 전 회색을 사용한다. `LOCAL`은 기존 호환 타입이고 현재 원본 매핑에서는 생성하지 않는다. GBIS는 노선명과 전체 정류장 순번·ID가 일치한 TAGO 노선에만 유형을 부여한다. GBIS 필드가 수집되지 않은 TAGO 단독 동기화는 기존 유형을 보존하며 수집된 미지원 값은 NULL로 갱신한다. 유형은 비교 및 승인 지문에 포함되므로 변경 전 승인 지문은 새 지문과 일치하지 않는다.
 
 원본 행은 `source_system`(SEOUL_TDATA/TAGO/GBIS), `data_kind`(ROUTE/STOP/OCCURRENCE), `source_key` 복합 UNIQUE로 식별한다. JSON 객체, nullable 원본 버전, 수집 시각과 갱신 시각을 저장한다. 기존 Route/Stop/Occurrence 중 같은 종류의 nullable FK 하나로 연결하며 FK 삭제 시 연결만 NULL이 되고 원본은 보존된다. 경유 source key는 제공기관의 노선과 순번을 모호하지 않게 인코딩해야 하며 내부 occurrence ID로 취급하지 않는다. 서울 서비스 범위 밖의 원본은 연결 없이 저장할 수 있다.
 
