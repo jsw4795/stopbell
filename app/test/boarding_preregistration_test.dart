@@ -14,6 +14,35 @@ import 'boarding_session_test_fakes.dart';
 import 'boarding_test_fakes.dart';
 
 void main() {
+  testWidgets(
+    'confirmation starts with the previously selected notification offset',
+    (tester) async {
+      final candidate = BoardingCandidate.fromJson(candidateJson());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BoardingConfirmationView(
+              candidate: candidate,
+              routeNumber: '7000',
+              targetName: '목표',
+              initialNotificationOffsetStops: 1,
+              onConfirm: (_) async {},
+              onBack: () {},
+            ),
+          ),
+        ),
+      );
+      expect(
+        tester
+            .widget<RadioGroup<int>>(
+              find.byKey(const ValueKey('notification-offset-stops')),
+            )
+            .groupValue,
+        1,
+      );
+    },
+  );
+
   testWidgets('moving vehicle registration has no manual number input', (
     tester,
   ) async {

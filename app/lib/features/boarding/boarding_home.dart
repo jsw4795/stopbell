@@ -105,7 +105,6 @@ class _BoardingHomeState extends State<BoardingHome> {
     String? boarding,
   }) {
     if (!_current || _controller!.busy || _controller!.needsRecovery) return;
-    _notificationOffsetStops = 2;
     setState(
       () => _draft = (
         candidate: candidate,
@@ -226,6 +225,7 @@ class _BoardingHomeState extends State<BoardingHome> {
                 boardingName: draft.boarding,
                 targetName: draft.target,
                 onConfirm: _confirm,
+                initialNotificationOffsetStops: _notificationOffsetStops,
                 onNotificationOffsetChanged: (value) =>
                     _notificationOffsetStops = value,
                 onBack: () => setState(() => _draft = null),

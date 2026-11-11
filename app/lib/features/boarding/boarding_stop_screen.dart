@@ -423,44 +423,52 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
                 }
               },
       ),
-      const SizedBox(height: StopBellSpacing.md),
-      Row(
-        children: [
-          const Text('알림 시점'),
-          const SizedBox(width: 12),
-          Expanded(
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 2, label: Text('2개 전')),
-                ButtonSegment(value: 1, label: Text('1개 전')),
-              ],
-              selected: {widget.notificationOffsetStops},
-              onSelectionChanged: widget.creationBusy
-                  ? null
-                  : (values) =>
-                        widget.onNotificationOffsetChanged?.call(values.single),
-            ),
-          ),
-        ],
-      ),
     ],
   );
 
   Widget _summary() {
     if (_compactResults) {
       final selected = _selectedCandidate;
-      return FilledButton(
-        key: const ValueKey('continue-boarding-candidate'),
-        onPressed:
-            selected != null &&
-                widget.onSelectCandidate != null &&
-                _canUseCandidate(selected)
-            ? () => _openConfirmation(selected)
-            : null,
-        child: Text(
-          widget.creationBusy ? '등록 중…' : '이 차량으로 하차 알림 설정',
-          textAlign: TextAlign.center,
-        ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (selected != null) ...[
+            Row(
+              children: [
+                const Text('알림 시점'),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(value: 2, label: Text('2개 전')),
+                      ButtonSegment(value: 1, label: Text('1개 전')),
+                    ],
+                    selected: {widget.notificationOffsetStops},
+                    onSelectionChanged: widget.creationBusy
+                        ? null
+                        : (values) => widget.onNotificationOffsetChanged?.call(
+                            values.single,
+                          ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: StopBellSpacing.sm),
+          ],
+          FilledButton(
+            key: const ValueKey('continue-boarding-candidate'),
+            onPressed:
+                selected != null &&
+                    widget.onSelectCandidate != null &&
+                    _canUseCandidate(selected)
+                ? () => _openConfirmation(selected)
+                : null,
+            child: Text(
+              widget.creationBusy ? '등록 중…' : '이 차량으로 하차 알림 설정',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ],
       );
     }
     final boarding = _boarding;

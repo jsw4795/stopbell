@@ -20,6 +20,7 @@ class BoardingConfirmationView extends StatefulWidget {
     this.busy = false,
     this.reconfirm = false,
     this.onNotificationOffsetChanged,
+    this.initialNotificationOffsetStops = 2,
   });
 
   final BoardingCandidate candidate;
@@ -30,6 +31,7 @@ class BoardingConfirmationView extends StatefulWidget {
   final VoidCallback onBack;
   final ValueChanged<int>? onNotificationOffsetChanged;
   final bool busy, reconfirm;
+  final int initialNotificationOffsetStops;
 
   @override
   State<BoardingConfirmationView> createState() =>
@@ -38,7 +40,13 @@ class BoardingConfirmationView extends StatefulWidget {
 
 class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
   bool _sending = false;
-  int _notificationOffsetStops = 2;
+  late int _notificationOffsetStops;
+
+  @override
+  void initState() {
+    super.initState();
+    _notificationOffsetStops = widget.initialNotificationOffsetStops;
+  }
 
   bool get _busy => widget.busy || _sending;
 

@@ -576,8 +576,9 @@ void main() {
     });
     await pump(tester);
     await candidates(tester);
-    await tap(tester, '1개 전');
+    expect(find.text('알림 시점'), findsNothing);
     await select(tester);
+    await tap(tester, '1개 전');
     await confirm(tester);
     expect(api.creations.single['notificationOffsetStops'], 1);
     expect(find.byType(BoardingSessionView), findsOneWidget);

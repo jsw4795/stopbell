@@ -114,6 +114,35 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets(
+    'selected notification controls fit above safe area on a small screen',
+    (tester) async {
+      await setup(tester);
+      tester.view.physicalSize = const Size(320, 568);
+      tester.view.padding = const FakeViewPadding(bottom: 34);
+      addTearDown(tester.view.resetPadding);
+      await tester.pumpWidget(
+        screen(
+          onSelectCandidate: (
+            candidate,
+            selection, {
+            required boarding,
+            required target,
+          }) {},
+        ),
+      );
+      await tester.pumpAndSettle();
+      await query(tester);
+      await tap(tester, 'candidate-0');
+      expect(find.text('알림 시점'), findsOneWidget);
+      final button = tester.getRect(
+        find.byKey(const ValueKey('continue-boarding-candidate')),
+      );
+      expect(button.bottom, lessThanOrEqualTo(534));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   for (final brightness in Brightness.values) {
     testWidgets(
       'compact result compares and changes one selection in $brightness',
@@ -196,7 +225,29 @@ void main() {
           semantic.targetStop,
         );
         expect(tester.widget<FilledButton>(next).onPressed, isNull);
+        expect(find.text('알림 시점'), findsNothing);
         await tap(tester, 'candidate-0');
+        expect(find.text('알림 시점'), findsOneWidget);
+        expect(
+          tester
+              .widget<SegmentedButton<int>>(find.byType(SegmentedButton<int>))
+              .selected,
+          {2},
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('stop-selection-summary')),
+            matching: find.text('알림 시점'),
+          ),
+          findsOneWidget,
+        );
+        final selectorY = tester.getTopLeft(find.text('알림 시점')).dy;
+        await tester.drag(
+          find.byKey(const ValueKey('candidate-0')),
+          const Offset(0, -100),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.getTopLeft(find.text('알림 시점')).dy, selectorY);
         expect(find.byIcon(Icons.radio_button_checked), findsOneWidget);
         await tap(tester, 'candidate-1');
         expect(
@@ -215,6 +266,7 @@ void main() {
         await tap(tester, 'find-candidates');
         await tester.pumpAndSettle();
         expect(tester.widget<FilledButton>(next).onPressed, isNull);
+        expect(find.text('알림 시점'), findsNothing);
         expect(find.byIcon(Icons.radio_button_checked), findsNothing);
         await tap(tester, 'candidate-0');
         await tester.tap(find.byTooltip('정류장 선택으로'));
