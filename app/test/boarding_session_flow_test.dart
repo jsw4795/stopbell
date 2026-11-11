@@ -181,7 +181,17 @@ void main() {
       await tap(tester, '알림 없이 계속');
       expect(find.byType(BoardingSessionView), findsOneWidget);
       expect(find.textContaining('하차 알림 (추적 중)'), findsOneWidget);
-      expect(find.textContaining('차량 위치 확인 중'), findsOneWidget);
+      final locationCard = find
+          .ancestor(
+            of: find.text('최근 확인된 버스 위치'),
+            matching: find.byType(Container),
+          )
+          .first;
+      expect(
+        find.descendant(of: locationCard, matching: find.text('차량 위치 확인 중')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('개 지점 남음'), findsNothing);
       expect(find.textContaining('VERIFYING'), findsNothing);
       expect(find.text('추적 취소'), findsOneWidget);
       expect(
