@@ -11,7 +11,7 @@ import com.stopbell.boarding.entity.BoardingStateReason;
 
 public record BoardingSessionResponse(
         Long id, BoardingSessionStatus status, long revision, String routeNumber, String vehicleNumber,
-        String targetName, int targetOrder, Integer remainingOccurrenceGap, Instant checkpointObservedAt,
+        String targetName, int targetOrder, Integer remainingOccurrenceGap, String currentStopName, Instant checkpointObservedAt,
         Instant providerDataTime, EvaluationStatus evaluationStatus, BoardingStateReason reasonCode,
         Instant expiresAt, Instant endedAt, boolean prepareNotificationEnabled, Integer notificationOffsetStops,
         String preparationNotificationStatus
@@ -32,7 +32,7 @@ public record BoardingSessionResponse(
         return new BoardingSessionResponse(session.getId(), session.getStatus(), session.getRevision(),
                 session.getRouteNumber(), session.getVehicleNumber(), session.getTargetName(),
                 traversal.occurrences().get(traversal.targetIndex()).order(),
-                evaluation == EvaluationStatus.READY ? verifiedGap : null,
+                evaluation == EvaluationStatus.READY ? verifiedGap : null, null,
                 session.getCheckpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
                     ? null : instant(session.getCheckpoint().getObservedAt()), instant(session.getCheckpoint().getProviderDataTime()),
                 evaluation, session.getStateReason(), instant(session.getExpiresAt()), instant(session.getEndedAt()),
@@ -41,8 +41,15 @@ public record BoardingSessionResponse(
 
     public BoardingSessionResponse withPreparationStatus(String status) {
         return new BoardingSessionResponse(id, this.status, revision, routeNumber, vehicleNumber, targetName,
-                targetOrder, remainingOccurrenceGap, checkpointObservedAt, providerDataTime, evaluationStatus,
+                targetOrder, remainingOccurrenceGap, currentStopName, checkpointObservedAt, providerDataTime, evaluationStatus,
                 reasonCode, expiresAt, endedAt, prepareNotificationEnabled, notificationOffsetStops, status);
+    }
+
+    public BoardingSessionResponse withCurrentStopName(String name) {
+        return new BoardingSessionResponse(id, status, revision, routeNumber, vehicleNumber, targetName,
+                targetOrder, remainingOccurrenceGap, evaluationStatus == EvaluationStatus.READY ? name : null,
+                checkpointObservedAt, providerDataTime, evaluationStatus, reasonCode, expiresAt, endedAt,
+                prepareNotificationEnabled, notificationOffsetStops, preparationNotificationStatus);
     }
 
     private static Instant instant(LocalDateTime time) {

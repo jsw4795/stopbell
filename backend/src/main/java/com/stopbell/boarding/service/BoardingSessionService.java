@@ -18,6 +18,7 @@ import com.stopbell.boarding.repository.BoardingSessionRepository;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.service.BoardingCandidateMetadataService;
+import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
 import com.stopbell.user.repository.UserRepository;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -44,12 +45,13 @@ public class BoardingSessionService {
     private final TransactionTemplate transaction;
     private final BoardingTrackingRuntime runtime;
     private final BoardingNotificationService notifications;
+    private final BusRouteStopOccurrenceRepository occurrences;
 
     public BoardingSessionService(BoardingSessionRepository sessions, UserRepository users,
             BoardingSessionStartValidator validator, BoardingCandidateMetadataService metadata,
             BoardingSessionProperties properties, PlatformTransactionManager manager,
             @Qualifier("transitMetadataClock") Clock clock, BoardingTrackingRuntime runtime,
-            BoardingNotificationService notifications) {
+            BoardingNotificationService notifications, BusRouteStopOccurrenceRepository occurrences) {
         this.sessions = sessions;
         this.users = users;
         this.validator = validator;
@@ -58,6 +60,7 @@ public class BoardingSessionService {
         this.clock = clock;
         this.runtime = runtime;
         this.notifications = notifications;
+        this.occurrences = occurrences;
         transaction = new TransactionTemplate(manager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
@@ -338,7 +341,14 @@ public class BoardingSessionService {
 
     private BoardingSessionResponse response(BoardingSession session) {
         closeAfterCommit(session);
-        return runtime.response(session, now()).withPreparationStatus(notifications.preparationStatus(session.getId()));
+        var response = runtime.response(session, now()).withPreparationStatus(notifications.preparationStatus(session.getId()));
+        if (response.evaluationStatus() != BoardingSessionResponse.EvaluationStatus.READY) {
+            return response;
+        }
+        var traversal = session.getTraversal();
+        var occurrence = traversal.occurrences().get(session.getCheckpoint().getIndex());
+        return response.withCurrentStopName(occurrences.findSnapshotStopName(occurrence.occurrenceId(), occurrence.order(), traversal.provider(),
+                occurrence.externalStopId(), traversal.externalRouteId()).orElse(null));
     }
 
     private BoardingSession owned(Long userId, Long id) {

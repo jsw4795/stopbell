@@ -552,7 +552,7 @@ void main() {
           expect(find.text('추적 취소'), findsNothing);
           expect(find.text('동일 차량 다시 확인'), findsNothing);
           expect(
-            find.textContaining('검증된 노선 방문 지점 간격'),
+            find.textContaining('개 지점 남음'),
             status == 'TRACKING' && evaluation == 'READY'
                 ? findsOneWidget
                 : findsNothing,

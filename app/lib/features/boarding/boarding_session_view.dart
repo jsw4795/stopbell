@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
-import 'boarding_candidates_view.dart';
 import 'boarding_session.dart';
 import 'boarding_session_controller.dart';
 
@@ -74,13 +73,11 @@ class BoardingSessionView extends StatelessWidget {
             session: s,
             stateUncertain: c.stateUncertain,
             boardingName: boardingName,
-          ),
-          OutlinedButton(
-            onPressed: c.busy ? null : c.refresh,
-            child: const Text('상태 새로고침'),
+            onRefresh: c.busy ? null : c.refresh,
+            showRefresh: true,
           ),
           if (s.isOpen)
-            OutlinedButton(
+            TextButton(
               onPressed: c.busy || c.stateUncertain
                   ? null
                   : () => _cancel(context),
@@ -116,7 +113,11 @@ class BoardingSessionDetails extends StatelessWidget {
     required this.session,
     this.stateUncertain = false,
     this.boardingName,
+    this.onRefresh,
+    this.showRefresh = false,
   });
+  final VoidCallback? onRefresh;
+  final bool showRefresh;
   final BoardingSession session;
   final bool stateUncertain;
   final String? boardingName;
@@ -166,15 +167,6 @@ class BoardingSessionDetails extends StatelessWidget {
               _ => null,
             },
           };
-    final alertStatus = switch (s.preparationNotificationStatus) {
-      'NOT_CREATED' => '아직 생성되지 않음',
-      'PENDING' => '발송 대기 중',
-      'ACCEPTED' => '전송 서비스 접수 완료 · 기기 표시 미확인',
-      'NO_RECIPIENT' => '수신 가능한 기기 없음',
-      'FAILED' => '발송 실패',
-      'EXPIRED' => '발송 기한 만료',
-      _ => '발송 여부 확인 중',
-    };
     final alertTiming = s.notificationOffsetStops != null
         ? '${s.notificationOffsetStops}개 지점 전'
         : s.prepareNotificationEnabled
@@ -183,11 +175,23 @@ class BoardingSessionDetails extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          '하차 알림 ($label)',
-          style: theme.textTheme.headlineSmall!.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '하차 알림 ($label)',
+                style: theme.textTheme.headlineSmall!.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            if (showRefresh)
+              IconButton(
+                onPressed: onRefresh,
+                tooltip: '상태 새로고침',
+                icon: const Icon(Icons.refresh),
+              ),
+          ],
         ),
         const SizedBox(height: 16),
         Container(
@@ -228,7 +232,45 @@ class BoardingSessionDetails extends StatelessWidget {
             padding: const EdgeInsets.only(top: 12),
             child: Text(notice, style: theme.textTheme.bodySmall),
           ),
-        const SizedBox(height: 32),
+        const SizedBox(height: 20),
+        if (!s.isTerminal)
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('최근 확인된 버스 위치', style: theme.textTheme.labelLarge),
+                const SizedBox(height: 6),
+                Text(
+                  progress && s.currentStopName != null
+                      ? '${s.currentStopName} 부근 지나는 중'
+                      : '차량 위치 확인 중',
+                  style: theme.textTheme.titleMedium,
+                ),
+                if (progress && s.currentStopName != null)
+                  Text('최근 관측 기준', style: theme.textTheme.bodySmall),
+                if (progress) ...[
+                  const Divider(height: 32),
+                  Text('${s.targetName}까지', style: theme.textTheme.bodyMedium),
+                  Text(
+                    '${s.remainingOccurrenceGap}개 지점 남음',
+                    style: theme.textTheme.headlineSmall!.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    '노선 순서 기준 · 미정차 지점 포함',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        const SizedBox(height: 28),
         _TimelineRow(
           icon: Icons.check_circle,
           color: semantic.boardingStop,
@@ -261,8 +303,6 @@ class BoardingSessionDetails extends StatelessWidget {
                   color: scheme.onSurfaceVariant,
                 ),
               ),
-              if (s.preparationNotificationStatus != 'NOT_CREATED')
-                Text(alertStatus, style: theme.textTheme.bodySmall),
             ],
           ),
         ),
@@ -280,45 +320,6 @@ class BoardingSessionDetails extends StatelessWidget {
               ),
             ],
           ),
-        ),
-        if (progress)
-          Padding(
-            padding: const EdgeInsets.only(left: 40, top: 12),
-            child: Text(
-              '검증된 노선 방문 지점 간격: ${s.remainingOccurrenceGap}',
-              style: theme.textTheme.bodySmall,
-            ),
-          ),
-        const SizedBox(height: 24),
-        ExpansionTile(
-          tilePadding: EdgeInsets.zero,
-          title: const Text('상세 정보'),
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('준비 알림: $alertStatus'),
-                  if (s.reasonCode != null)
-                    Text('사유: ${_reason(s.reasonCode!)}'),
-                  Text(
-                    s.checkpointObservedAt == null
-                        ? '검증된 관측 시각 없음'
-                        : '마지막 검증 관측 시각: ${boardingTime(s.checkpointObservedAt!)}',
-                  ),
-                  const Text('과거 검증 근거 시각이며 현재 버스 위치 시각이 아니에요.'),
-                  Text(
-                    'Provider 제공 시각: ${s.providerDataTime == null ? '알 수 없음' : boardingTime(s.providerDataTime!)}',
-                  ),
-                  Text('세션 종료 예정 시각: ${boardingTime(s.expiresAt)}'),
-                  if (s.endedAt != null)
-                    Text('세션 종료 시각: ${boardingTime(s.endedAt!)}'),
-                  if (progress) const Text('지점 간격은 실제 남은 정차 수·거리·도착 시간이 아니에요.'),
-                ],
-              ),
-            ),
-          ],
         ),
       ],
     );
@@ -385,21 +386,3 @@ class _TimelineRow extends StatelessWidget {
     ),
   );
 }
-
-String _reason(BoardingReason reason) => switch (reason) {
-  BoardingReason.baselineUnverified => '차량 위치 확인 중',
-  BoardingReason.targetNotAhead => '검증 전 목적지 도달 또는 통과 · 알림 판단 불가',
-  BoardingReason.temporaryProviderFailure => '차량 정보 제공 일시 장애',
-  BoardingReason.staleProgress => '진행 정보 지연',
-  BoardingReason.vehicleMissing => '기존 차량 정보 소실',
-  BoardingReason.identityConflict => '차량 식별 정보 충돌',
-  BoardingReason.progressRegression => '차량 진행 역행',
-  BoardingReason.traversalAmbiguous => '운행 경로·회차 불확실',
-  BoardingReason.continuityGapExceeded => '진행 확인 공백 초과',
-  BoardingReason.metadataChanged => '노선·정류장 정보 변경',
-  BoardingReason.arrivalObserved => '목적지 도달 근거 관측',
-  BoardingReason.passedObserved => '목적지 이후 진행 근거 관측',
-  BoardingReason.userCancelled => '사용자 취소',
-  BoardingReason.sessionLifetimeExpired => '세션 수명 만료',
-  BoardingReason.unknown => '알 수 없는 사유',
-};

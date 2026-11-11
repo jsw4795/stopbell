@@ -169,6 +169,7 @@ class BoardingSessionApiIntegrationTest {
             time.set(NOW.plusSeconds(60));
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
             assertThat(service.find(owner.getId(), created.response().id()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
+            assertThat(service.find(owner.getId(), created.response().id()).currentStopName()).isNull();
             assertThat(events.count()).isEqualTo(2);
         } finally {
             org.springframework.test.util.ReflectionTestUtils.setField(candidates, "tagoExperimentEnabled", false);
@@ -226,6 +227,9 @@ class BoardingSessionApiIntegrationTest {
         assertThat(created.response().targetName()).isEqualTo("s1");
         assertThat(created.response().targetOrder()).isEqualTo(40);
         assertThat(created.response().remainingOccurrenceGap()).isEqualTo(3);
+        assertThat(created.response().currentStopName()).isEqualTo("s1");
+        assertThat(occurrences.findSnapshotStopName(first.getId(), 10, TransitProvider.SEOUL_BUS,
+                "incorrect-stop", route.getExternalRouteId())).isEmpty();
         assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
         assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
         time.set(NOW.plusSeconds(20));
@@ -234,10 +238,12 @@ class BoardingSessionApiIntegrationTest {
         when(detail.fetchVehicleDetail("vehicle-id")).thenAnswer(invocation -> liveProgress("s3", 30, 0));
         polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
         assertThat(service.find(owner.getId(), created.response().id()).remainingOccurrenceGap()).isEqualTo(1);
+        assertThat(service.find(owner.getId(), created.response().id()).currentStopName()).isEqualTo("목적지");
         time.set(NOW.plusSeconds(40));
         when(detail.fetchVehicleDetail("vehicle-id")).thenAnswer(invocation -> liveProgress("s1", 40, 0));
         polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
         assertThat(service.find(owner.getId(), created.response().id()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
+        assertThat(service.find(owner.getId(), created.response().id()).currentStopName()).isNull();
         assertThat(jdbc.queryForList("select boarding_event_type from notification_events order by id", String.class))
                 .containsExactly("PREPARE_ALIGHT", "DESTINATION_REACHED");
     }
@@ -721,6 +727,7 @@ class BoardingSessionApiIntegrationTest {
         var created = service.create(owner.getId(), new CreateBoardingSessionRequest(REQUEST_ID, reference, null));
         assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
         assertThat(created.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING);
+        assertThat(created.response().currentStopName()).isNull();
         service.cancel(owner.getId(), created.response().id(), created.response().revision());
         sessions.deleteAll();
         jdbc.update("update bus_route_stop_occurrences set stop_order=11 where id=?", first.getId());
@@ -800,7 +807,7 @@ class BoardingSessionApiIntegrationTest {
                 }
                 public void rollback(TransactionStatus status) { manager.rollback(status); }
             };
-            var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, failing, clock, new com.stopbell.boarding.service.BoardingTrackingRuntime(), notifications);
+            var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, failing, clock, new com.stopbell.boarding.service.BoardingTrackingRuntime(), notifications, occurrences);
             var result = tested.create(owner.getId(), request(REQUEST_ID, "ref"));
             assertThat(sessions.count()).isEqualTo(1);
             assertThat(result.created()).isEqualTo(!committed);
@@ -995,7 +1002,7 @@ class BoardingSessionApiIntegrationTest {
             }
             public void rollback(TransactionStatus status) { manager.rollback(status); }
         };
-        var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, uncertain, clock, runtime, notifications);
+        var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, uncertain, clock, runtime, notifications, occurrences);
         var request = new ReconfirmBoardingSessionRequest(1, "ref", NUMBER);
         if (persisted) {
             assertThat(tested.reconfirm(owner.getId(), id, request).evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.READY);
@@ -1289,7 +1296,7 @@ class BoardingSessionApiIntegrationTest {
             }
             public void rollback(TransactionStatus status) { manager.rollback(status); }
         };
-        var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, uncertain, clock, runtime, notifications);
+        var tested = new BoardingSessionService(sessions, users, validator, metadata, properties, uncertain, clock, runtime, notifications, occurrences);
         var request = new ReconfirmBoardingSessionRequest(1, "ref", null);
         if (persisted) {
             assertThat(tested.reconfirm(owner.getId(), id, request).preparationNotificationStatus()).isEqualTo("PENDING");

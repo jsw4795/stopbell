@@ -32,7 +32,8 @@ TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 �
 | UI-0 / UI-1 | 공통 디자인 시스템 / 세로 타임라인 | 주요 부분 구현; 보완 범위 확인 |
 | UI-2 | 공식 유형 및 검색 화면 | 공식 유형색, 동적 지역 탭, 서울 TOPIS·경기 TAGO 기종점 표시 구현. iPhone 확인 잔여 |
 | UI-3 | 차량 후보 조회·탑승 확정 | Flutter 구현 및 관련 자동 검증 완료. iPhone 확인 잔여 |
-| UI-4~UI-8 | 하차 추적부터 실시간 다중 차량·좌석 표시와 통합 검증 | 예정. 아래 로드맵 참조 |
+| UI-4 | 하차 추적 화면 | 구현 및 자동 검증 완료, 실제 iPhone 확인 미완료 |
+| UI-5~UI-8 | 홈부터 실시간 다중 차량·좌석 표시와 통합 검증 | 예정. 아래 로드맵 참조 |
 
 원본 필드 보존 → DB 저장 → 수집 이력 → 파일 아카이브 → 수집 경로 연결 → 변경분 분석 → 안전한 최신화 → 공식 유형 저장·API 제공의 순서다. `bus_routes.route_type`의 존재는 공식 유형 매핑 완료를 뜻하지 않는다. 상세 저장·동기화 계약은 [Database](database.md)와 [ADR-009](adr/ADR-009-bus-transit-metadata-persistence-and-diff-sync-strategy.md)를 따른다.
 
@@ -40,7 +41,7 @@ TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 �
 
 ## 향후 수집 데이터 관리 개선 계획
 
-서울·경기 개발 DB 최신화와 로컬 수집 폴더 구조 정리를 완료했다. 수집 CLI 진행 표시와 결과 요약을 완료했다. Flutter UI-3을 완료했으며 다음은 UI-4 하차 추적 화면이다. Bundle 생성·재생과 실패 처리 계약은 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다.
+서울·경기 개발 DB 최신화와 로컬 수집 폴더 구조 정리를 완료했다. 수집 CLI 진행 표시와 결과 요약을 완료했다. Flutter UI-4 자동 검증을 완료했으며 실제 iPhone 확인이 남아 있다. 다음은 UI-5 홈 및 알람 관리다. Bundle 생성·재생과 실패 처리 계약은 [Local Development](local-development.md#tagogbis-독립-수집-명령-phase-3-b-2b-2b-2a)를 따른다.
 
 ### 저장 구조와 기존 Bundle 이전
 
@@ -79,7 +80,7 @@ UI-0 → UI-1 → UI-2 → UI-3 → UI-4 → UI-5 → UI-6 → UI-7 → UI-8 순
 
 ### UI-4 — 하차 추적 화면
 
-선택 차량번호·노선, 승차·목표, 추적과 알림 상태, 마지막 관측, 근거 있는 진행, 종료·취소와 오류·보류·복구를 명확히 보여준다. TRACKING 자체를 검증된 위치로 표현하지 않고 근거 없는 남은 occurrence·실제 정차 수·ETA·실제 탑승을 추측하지 않는다. checkpoint 복구와 Notification 중복 방지는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
+검증된 최근 관측 지점과 목적지까지 남은 occurrence 간격을 함께 표시하고, 위치를 확인할 수 없으면 추측하지 않는다. 새로고침은 상태 영역 아이콘, 취소는 확인 대화상자를 유지한 텍스트 버튼으로 제공한다. 구현 및 자동 검증은 완료했으며 실제 iPhone 확인은 남아 있다. 선택 차량번호·노선, 승차·목표, 추적과 알림 상태, 마지막 관측, 근거 있는 진행, 종료·취소와 오류·보류·복구를 명확히 보여준다. TRACKING 자체를 검증된 위치로 표현하지 않고 근거 없는 남은 occurrence·실제 정차 수·ETA·실제 탑승을 추측하지 않는다. checkpoint 복구와 Notification 중복 방지는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
 
 ### UI-5 — 홈 및 알람 관리
 

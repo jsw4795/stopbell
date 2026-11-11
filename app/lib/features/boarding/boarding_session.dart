@@ -95,6 +95,9 @@ class BoardingSession {
     final gap = value['remainingOccurrenceGap'];
     if (gap != null && gap is! int) throw const FormatException();
     remainingOccurrenceGap = gap as int?;
+    currentStopName = value['currentStopName'] == null
+        ? null
+        : boardingText(value['currentStopName']);
     checkpointObservedAt = value['checkpointObservedAt'] == null
         ? null
         : boardingInstant(value['checkpointObservedAt']);
@@ -156,6 +159,7 @@ class BoardingSession {
   late final BoardingEvaluation evaluationStatus;
   late final BoardingReason? reasonCode;
   late final int? remainingOccurrenceGap;
+  late final String? currentStopName;
   late final DateTime expiresAt;
   late final DateTime? checkpointObservedAt, providerDataTime, endedAt;
 

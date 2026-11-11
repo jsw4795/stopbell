@@ -44,14 +44,30 @@ void main() {
         );
         expect(find.text('목적 정류장'), findsOneWidget);
         expect(find.text('1개 지점 전'), findsOneWidget);
-        await tester.ensureVisible(find.text('상세 정보'));
-        await tester.tap(find.text('상세 정보'));
-        await tester.pumpAndSettle();
-        expect(find.text('준비 알림: ${entry.value}'), findsOneWidget);
+        expect(find.text('상세 정보'), findsNothing);
         expect(find.textContaining('목적지 알림: ON'), findsNothing);
       },
     );
   }
+  testWidgets('verified name and remaining gap are independently shown', (
+    tester,
+  ) async {
+    final session = BoardingSession.fromJson({
+      ...sessionJson(),
+      'currentStopName': '평내호평역',
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(children: [BoardingSessionDetails(session: session)]),
+        ),
+      ),
+    );
+    expect(find.text('평내호평역 부근 지나는 중'), findsOneWidget);
+    expect(find.text('최근 관측 기준'), findsOneWidget);
+    expect(find.text('3개 지점 남음'), findsOneWidget);
+  });
+
   for (final theme in [StopBellTheme.light, StopBellTheme.dark]) {
     testWidgets(
       'detail fits a narrow screen with large text in ${theme.brightness}',
@@ -275,8 +291,8 @@ void main() {
       );
       expect(api.creations.single, isNot(contains('candidateRef')));
       expect(find.byType(BoardingSessionView), findsOneWidget);
-      expect(find.text('검증된 노선 방문 지점 간격: 3'), findsOneWidget);
-      expect(find.text('상세 정보'), findsOneWidget);
+      expect(find.text('3개 지점 남음'), findsOneWidget);
+      expect(find.text('상세 정보'), findsNothing);
       expect(find.textContaining('승차 정류장 정보 없음'), findsNothing);
     },
   );
@@ -541,7 +557,7 @@ void main() {
         await pump(tester);
         expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
         expect(find.textContaining('999'), findsNothing);
-        expect(find.text('상세 정보'), findsOneWidget);
+        expect(find.text('상세 정보'), findsNothing);
         if (evaluation == 'HELD') {
           expect(find.textContaining('차량 정보 확인이 보류'), findsOneWidget);
           expect(find.text('동일 차량 다시 확인'), findsNothing);
@@ -624,9 +640,7 @@ void main() {
       expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
       expect(
         tester
-            .widget<OutlinedButton>(
-              find.widgetWithText(OutlinedButton, '추적 취소'),
-            )
+            .widget<TextButton>(find.widgetWithText(TextButton, '추적 취소'))
             .onPressed,
         isNull,
       );
@@ -666,7 +680,8 @@ void main() {
         revision: 6,
         reason: 'CONTINUITY_GAP_EXCEEDED',
       );
-      await tap(tester, '상태 새로고침');
+      await tester.tap(find.byTooltip('상태 새로고침'));
+      await tester.pump();
       candidateValues = [
         {...freshCandidate(), 'candidateRef': 'fresh-reconfirmation-reference'},
       ];
@@ -692,7 +707,8 @@ void main() {
       await pump(tester);
       final old = Completer<BoardingSession>();
       api.onFind = () => old.future;
-      await tap(tester, '상태 새로고침');
+      await tester.tap(find.byTooltip('상태 새로고침'));
+      await tester.pump();
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
       old.complete(sessionFixture(revision: 5));
