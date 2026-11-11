@@ -150,10 +150,12 @@ public class BoardingSessionService {
                 throw new ApiException(request.currentVehicleRequest() ? ErrorCode.BOARDING_POSITION_UNAVAILABLE
                         : ErrorCode.BOARDING_CANDIDATE_CHANGED);
             }
-            BoardingSession session = sessions.saveAndFlush(new BoardingSession(user, request.clientRequestId(),
+            BoardingSession session = new BoardingSession(user, request.clientRequestId(),
                     request.fingerprint(), start.vehicleTrackingId(), start.vehicleNumber(), start.routeNumber(),
                     start.targetName(), start.traversal(), start.checkpoint(), now, now.plus(properties.getMaxLifetime()),
-                    request.effectiveNotificationOffsetStops()));
+                    request.effectiveNotificationOffsetStops());
+            session.setInitialBoardingOccurrenceId(original.boardingOccurrenceId());
+            session = sessions.saveAndFlush(session);
             notifications.recordInitialPreparation(session);
             sessions.flush();
             var response = response(session);
@@ -165,6 +167,7 @@ public class BoardingSessionService {
                     && index >= 0 && index < start.traversal().targetIndex()) {
                 response = response.withInitialObservation(new BoardingSessionResponse.InitialObservation(
                         latest.traversal().get(index).stopName(), start.traversal().targetIndex() - index));
+                response = response.withTimeline(timeline(session, index, "INITIAL"));
             }
             return new CreationResult(response, true,
                     session.getStateReason() == null ? BoardingTrackingSnapshot.from(session) : null);
@@ -354,13 +357,47 @@ public class BoardingSessionService {
     private BoardingSessionResponse response(BoardingSession session) {
         closeAfterCommit(session);
         var response = runtime.response(session, now()).withPreparationStatus(notifications.preparationStatus(session.getId()));
-        if (response.evaluationStatus() != BoardingSessionResponse.EvaluationStatus.READY) {
-            return response;
-        }
+        Integer position = response.evaluationStatus() == BoardingSessionResponse.EvaluationStatus.READY
+                ? session.getCheckpoint().getIndex() : null;
+        response = response.withTimeline(timeline(session, position, position == null ? null : "READY"));
+        if (position == null) return response;
         var traversal = session.getTraversal();
-        var occurrence = traversal.occurrences().get(session.getCheckpoint().getIndex());
+        var occurrence = traversal.occurrences().get(position);
         return response.withCurrentStopName(occurrences.findSnapshotStopName(occurrence.occurrenceId(), occurrence.order(), traversal.provider(),
                 occurrence.externalStopId(), traversal.externalRouteId()).orElse(null));
+    }
+
+    private BoardingSessionResponse.Timeline timeline(BoardingSession session, Integer position, String basis) {
+        if (session.getBoardingOccurrenceId() == null) return null;
+        var path = session.getTraversal();
+        int boarding = -1;
+        for (int i = 0; i < path.occurrences().size(); i++) {
+            if (path.occurrences().get(i).occurrenceId() == session.getBoardingOccurrenceId()) boarding = i;
+        }
+        if (boarding < 0 || boarding >= path.targetIndex()) return null;
+        var ids = path.occurrences().subList(boarding, path.targetIndex() + 1).stream()
+                .map(item -> item.occurrenceId()).toList();
+        var metadata = occurrences.findTimelineMetadata(ids).stream().collect(java.util.stream.Collectors.toMap(
+                item -> item.getId(), item -> item));
+        var stops = new java.util.ArrayList<BoardingSessionResponse.TimelineStop>();
+        String routeType = null;
+        for (int i = boarding; i <= path.targetIndex(); i++) {
+            var saved = path.occurrences().get(i);
+            var item = metadata.get(saved.occurrenceId());
+            String name = null;
+            if (item != null && item.getStopOrder() == saved.order()
+                    && item.getStop().getProvider() == path.provider()
+                    && item.getStop().getExternalStopId().equals(saved.externalStopId())
+                    && item.getRoute().getProvider() == path.provider()
+                    && item.getRoute().getExternalRouteId().equals(path.externalRouteId())
+                    && java.util.Objects.equals(item.getRoute().getCityCode(), path.cityCode())) {
+                name = item.getStop().getStopName();
+                if (item.getRoute().getRouteType() != null) routeType = item.getRoute().getRouteType().name();
+            }
+            stops.add(new BoardingSessionResponse.TimelineStop(saved.occurrenceId(), i, saved.order(), name));
+        }
+        return new BoardingSessionResponse.Timeline(path.provider().name(), routeType, boarding,
+                path.targetIndex(), position, basis, List.copyOf(stops));
     }
 
     private BoardingSession owned(Long userId, Long id) {

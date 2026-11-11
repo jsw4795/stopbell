@@ -92,6 +92,9 @@ class BoardingSession {
     };
     // The server may retain a historical gap in future versions. Only READY
     // permits displaying it; keep the nullable wire value without inventing one.
+    timeline = value['timeline'] == null
+        ? null
+        : BoardingTimeline.fromJson(value['timeline']);
     final gap = value['remainingOccurrenceGap'];
     if (gap != null && gap is! int) throw const FormatException();
     remainingOccurrenceGap = gap as int?;
@@ -160,6 +163,7 @@ class BoardingSession {
     }
   }
 
+  late final BoardingTimeline? timeline;
   late final bool prepareNotificationEnabled;
   late final int? notificationOffsetStops;
   late final String preparationNotificationStatus;
@@ -197,4 +201,60 @@ int boardingInteger(Object? value, {bool positive = false}) {
 String boardingText(Object? value) {
   if (value is! String || value.trim().isEmpty) throw const FormatException();
   return value;
+}
+
+class BoardingTimelineStop {
+  BoardingTimelineStop(this.id, this.index, this.order, this.name);
+  final int id, index, order;
+  final String? name;
+}
+
+class BoardingTimeline {
+  BoardingTimeline.fromJson(Object? value) {
+    if (value is! Map<String, dynamic>) throw const FormatException();
+    boardingIndex = boardingInteger(value['boardingIndex']);
+    targetIndex = boardingInteger(value['targetIndex']);
+    provider = boardingText(value['provider']);
+    routeType = value['routeType'] == null
+        ? null
+        : boardingText(value['routeType']);
+    positionIndex = value['positionIndex'] == null
+        ? null
+        : boardingInteger(value['positionIndex']);
+    positionBasis = value['positionBasis'] == null
+        ? null
+        : boardingText(value['positionBasis']);
+    final rows = value['stops'];
+    if (rows is! List ||
+        targetIndex <= boardingIndex ||
+        rows.length != targetIndex - boardingIndex + 1) {
+      throw const FormatException();
+    }
+    stops = [
+      for (var i = 0; i < rows.length; i++) _stop(rows[i], boardingIndex + i),
+    ];
+    if ((positionIndex == null) != (positionBasis == null) ||
+        (positionBasis != null &&
+            !const ['READY', 'INITIAL'].contains(positionBasis))) {
+      throw const FormatException();
+    }
+  }
+  static BoardingTimelineStop _stop(Object? row, int expected) {
+    if (row is! Map<String, dynamic> ||
+        boardingInteger(row['index']) != expected) {
+      throw const FormatException();
+    }
+    return BoardingTimelineStop(
+      boardingInteger(row['id'], positive: true),
+      expected,
+      boardingInteger(row['order'], positive: true),
+      row['name'] == null ? null : boardingText(row['name']),
+    );
+  }
+
+  late final int boardingIndex, targetIndex;
+  late final int? positionIndex;
+  late final String provider;
+  late final String? routeType, positionBasis;
+  late final List<BoardingTimelineStop> stops;
 }

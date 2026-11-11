@@ -14,8 +14,12 @@ public record BoardingSessionResponse(
         String targetName, int targetOrder, Integer remainingOccurrenceGap, String currentStopName, Instant checkpointObservedAt,
         Instant providerDataTime, EvaluationStatus evaluationStatus, BoardingStateReason reasonCode,
         Instant expiresAt, Instant endedAt, boolean prepareNotificationEnabled, Integer notificationOffsetStops,
-        String preparationNotificationStatus, InitialObservation initialObservation
+        String preparationNotificationStatus, InitialObservation initialObservation, Timeline timeline
 ) {
+    public record Timeline(String provider, String routeType, int boardingIndex, int targetIndex,
+            Integer positionIndex, String positionBasis, java.util.List<TimelineStop> stops) { }
+    public record TimelineStop(long id, int index, int order, String name) { }
+
     public record InitialObservation(String stopName, int remainingOccurrenceGap) { }
 
     public enum EvaluationStatus { VERIFICATION_PENDING, READY, RECOVERY_PENDING, HELD, ENDED }
@@ -38,27 +42,34 @@ public record BoardingSessionResponse(
                 session.getCheckpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
                     ? null : instant(session.getCheckpoint().getObservedAt()), instant(session.getCheckpoint().getProviderDataTime()),
                 evaluation, session.getStateReason(), instant(session.getExpiresAt()), instant(session.getEndedAt()),
-                session.isPrepareNotificationEnabled(), session.getNotificationOffsetStops(), "UNKNOWN", null);
+                session.isPrepareNotificationEnabled(), session.getNotificationOffsetStops(), "UNKNOWN", null, null);
     }
 
     public BoardingSessionResponse withPreparationStatus(String status) {
         return new BoardingSessionResponse(id, this.status, revision, routeNumber, vehicleNumber, targetName,
                 targetOrder, remainingOccurrenceGap, currentStopName, checkpointObservedAt, providerDataTime, evaluationStatus,
-                reasonCode, expiresAt, endedAt, prepareNotificationEnabled, notificationOffsetStops, status, initialObservation);
+                reasonCode, expiresAt, endedAt, prepareNotificationEnabled, notificationOffsetStops, status, initialObservation, timeline);
     }
 
     public BoardingSessionResponse withCurrentStopName(String name) {
         return new BoardingSessionResponse(id, status, revision, routeNumber, vehicleNumber, targetName,
                 targetOrder, remainingOccurrenceGap, evaluationStatus == EvaluationStatus.READY ? name : null,
                 checkpointObservedAt, providerDataTime, evaluationStatus, reasonCode, expiresAt, endedAt,
-                prepareNotificationEnabled, notificationOffsetStops, preparationNotificationStatus, initialObservation);
+                prepareNotificationEnabled, notificationOffsetStops, preparationNotificationStatus, initialObservation, timeline);
     }
 
     public BoardingSessionResponse withInitialObservation(InitialObservation observation) {
         return new BoardingSessionResponse(id, status, revision, routeNumber, vehicleNumber, targetName,
                 targetOrder, remainingOccurrenceGap, currentStopName, checkpointObservedAt, providerDataTime,
                 evaluationStatus, reasonCode, expiresAt, endedAt, prepareNotificationEnabled,
-                notificationOffsetStops, preparationNotificationStatus, observation);
+                notificationOffsetStops, preparationNotificationStatus, observation, timeline);
+    }
+
+    public BoardingSessionResponse withTimeline(Timeline value) {
+        return new BoardingSessionResponse(id, status, revision, routeNumber, vehicleNumber, targetName,
+                targetOrder, remainingOccurrenceGap, currentStopName, checkpointObservedAt, providerDataTime,
+                evaluationStatus, reasonCode, expiresAt, endedAt, prepareNotificationEnabled,
+                notificationOffsetStops, preparationNotificationStatus, initialObservation, value);
     }
 
     private static Instant instant(LocalDateTime time) {

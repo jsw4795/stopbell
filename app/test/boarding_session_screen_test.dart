@@ -178,7 +178,7 @@ void main() {
       },
     );
   }
-  testWidgets('timeline uses only the supplied boarding context', (
+  testWidgets('legacy session does not infer boarding from transient context', (
     tester,
   ) async {
     final session = BoardingSession.fromJson({
@@ -199,9 +199,9 @@ void main() {
         ),
       ),
     );
-    expect(find.text('선택한 승차 정류장'), findsOneWidget);
+    expect(find.text('선택한 승차 정류장'), findsNothing);
     expect(find.text('아주 긴 목표 정류장 이름과 환승센터 방면'), findsOneWidget);
-    expect(find.text('승차 정류장 정보 없음'), findsNothing);
+    expect(find.textContaining('전체 노선 구간을 표시할 수 없어요'), findsOneWidget);
     expect(find.textContaining('분 후'), findsNothing);
     await tester.pumpWidget(
       MaterialApp(
@@ -210,7 +210,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('승차 정류장 정보 없음'), findsOneWidget);
+    expect(find.textContaining('전체 노선 구간을 표시할 수 없어요'), findsOneWidget);
     expect(find.text('선택한 승차 정류장'), findsNothing);
   });
   testWidgets('uncertain response hides an otherwise valid gap', (

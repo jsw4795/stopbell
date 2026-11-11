@@ -154,8 +154,19 @@ class BoardingSessionApiIntegrationTest {
             assertThat(created.response().evaluationStatus()).isEqualTo(BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING);
             assertThat(created.response().initialObservation().stopName()).isEqualTo("t26");
             assertThat(created.response().initialObservation().remainingOccurrenceGap()).isEqualTo(3);
+            assertThat(sessions.findById(created.response().id()).orElseThrow().getBoardingOccurrenceId()).isEqualTo(boarding.getId());
+            assertThat(created.response().timeline().boardingIndex()).isEqualTo(2);
+            assertThat(created.response().timeline().targetIndex()).isEqualTo(3);
+            assertThat(created.response().timeline().positionIndex()).isZero();
+            assertThat(created.response().timeline().positionBasis()).isEqualTo("INITIAL");
+            assertThat(created.response().timeline().stops()).extracting(BoardingSessionResponse.TimelineStop::id)
+                    .containsExactly(boarding.getId(), target.getId());
+            assertThat(service.find(owner.getId(), created.response().id()).timeline().positionIndex()).isNull();
             assertThat(service.find(owner.getId(), created.response().id()).initialObservation()).isNull();
             assertThat(service.create(owner.getId(), request).response().initialObservation()).isNull();
+            jdbc.update("update bus_stops set external_stop_id='changed-stop' where id=(select stop_id from bus_route_stop_occurrences where id=?)", boarding.getId());
+            assertThat(service.find(owner.getId(), created.response().id()).timeline().stops().getFirst().name()).isNull();
+            jdbc.update("update bus_stops set external_stop_id='t28' where id=(select stop_id from bus_route_stop_occurrences where id=?)", boarding.getId());
             var initial = sessions.findById(created.response().id()).orElseThrow().getCheckpoint();
             assertThat(initial.getEvidence()).isEqualTo(BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE);
             assertThat(initial.getStopExternalId()).isNull();
@@ -171,6 +182,8 @@ class BoardingSessionApiIntegrationTest {
             assertThat(ready.initialObservation()).isNull();
             assertThat(ready.currentStopName()).isEqualTo("t27");
             assertThat(ready.remainingOccurrenceGap()).isEqualTo(2);
+            assertThat(ready.timeline().positionIndex()).isEqualTo(1);
+            assertThat(ready.timeline().positionBasis()).isEqualTo("READY");
             position.set(28);
             time.set(NOW.plusSeconds(40));
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));

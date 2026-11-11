@@ -507,7 +507,7 @@ class _StopRow extends StatelessWidget {
                         Column(
                           children: [
                             Expanded(
-                              child: _RailSegment(
+                              child: BusRouteRailSegment(
                                 color: first
                                     ? null
                                     : incomingSelected
@@ -516,7 +516,7 @@ class _StopRow extends StatelessWidget {
                               ),
                             ),
                             Expanded(
-                              child: _RailSegment(
+                              child: BusRouteRailSegment(
                                 color: last
                                     ? null
                                     : outgoingSelected
@@ -583,8 +583,8 @@ class _StopRow extends StatelessWidget {
   }
 }
 
-class _RailSegment extends StatelessWidget {
-  const _RailSegment({required this.color});
+class BusRouteRailSegment extends StatelessWidget {
+  const BusRouteRailSegment({super.key, required this.color});
 
   final Color? color;
 

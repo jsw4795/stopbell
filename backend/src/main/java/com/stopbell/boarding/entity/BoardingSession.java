@@ -71,6 +71,9 @@ public class BoardingSession {
     @Column(name = "traversal_snapshot", nullable = false, updatable = false)
     private String traversalSnapshot;
 
+    @Column(name = "boarding_occurrence_id", updatable = false)
+    private Long boardingOccurrenceId;
+
     @Column(name = "traversal_fingerprint", nullable = false, updatable = false, length = 64)
     private String traversalFingerprint;
 
@@ -167,6 +170,19 @@ public class BoardingSession {
         }
         this.notificationOffsetStops = notificationOffsetStops;
     }
+
+    public void setInitialBoardingOccurrenceId(long id) {
+        if (this.id != null || boardingOccurrenceId != null) throw new IllegalStateException("Boarding occurrence is immutable");
+        var traversal = getTraversal();
+        int index = -1;
+        for (int i = 0; i < traversal.occurrences().size(); i++) {
+            if (traversal.occurrences().get(i).occurrenceId() == id) index = i;
+        }
+        if (index < 0 || index >= traversal.targetIndex()) throw new IllegalArgumentException("Invalid boarding occurrence");
+        boardingOccurrenceId = id;
+    }
+
+    public Long getBoardingOccurrenceId() { return boardingOccurrenceId; }
 
     public Integer getNotificationOffsetStops() { return notificationOffsetStops; }
 

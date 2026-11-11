@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
+import '../transit/stop_display_name.dart';
+import '../transit/bus_route_timeline.dart' show BusRouteRailSegment;
+import '../transit/bus_route.dart';
+import '../transit/bus_route_presentation.dart';
 import 'boarding_session.dart';
 import 'boarding_session_controller.dart';
 
@@ -188,11 +192,6 @@ class BoardingSessionDetails extends StatelessWidget {
               _ => null,
             },
           };
-    final alertTiming = s.notificationOffsetStops != null
-        ? '${s.notificationOffsetStops}개 지점 전'
-        : s.prepareNotificationEnabled
-        ? '기존 알림 설정'
-        : '준비 알림 꺼짐';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -299,56 +298,14 @@ class BoardingSessionDetails extends StatelessWidget {
             ),
           ),
         const SizedBox(height: 28),
-        _TimelineRow(
-          icon: Icons.check_circle,
-          color: semantic.boardingStop,
-          lineColor: semantic.boardingStop,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _Badge(label: '승차', color: semantic.boardingStop),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  boardingName ?? '승차 정류장 정보 없음',
-                  style: theme.textTheme.titleMedium,
-                ),
-              ),
-            ],
-          ),
-        ),
-        _TimelineRow(
-          icon: Icons.notifications,
-          color: semantic.boardingStop,
-          lineColor: scheme.outline,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('하차 알림', style: theme.textTheme.titleMedium),
-              Text(
-                alertTiming,
-                style: theme.textTheme.titleMedium!.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-        _TimelineRow(
-          icon: Icons.circle,
-          color: scheme.outline,
-          last: true,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _Badge(label: '목표', color: scheme.onSurfaceVariant),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(s.targetName, style: theme.textTheme.titleMedium),
-              ),
-            ],
-          ),
-        ),
+        if (s.timeline == null) ...[
+          Text(s.targetName, style: theme.textTheme.titleMedium),
+          const Text('하차 알림'),
+          if (s.notificationOffsetStops != null)
+            Text('${s.notificationOffsetStops}개 지점 전'),
+          const Text('승차 정류장 정보가 없어 전체 노선 구간을 표시할 수 없어요.'),
+        ] else
+          _TrackingTimeline(session: s, stateUncertain: stateUncertain),
       ],
     );
   }
@@ -376,41 +333,167 @@ class _Badge extends StatelessWidget {
   );
 }
 
-class _TimelineRow extends StatelessWidget {
-  const _TimelineRow({
-    required this.icon,
-    required this.color,
-    required this.child,
-    this.lineColor,
-    this.last = false,
+class _TrackingTimeline extends StatefulWidget {
+  const _TrackingTimeline({
+    required this.session,
+    required this.stateUncertain,
   });
-  final IconData icon;
-  final Color color;
-  final Color? lineColor;
-  final Widget child;
-  final bool last;
+  final BoardingSession session;
+  final bool stateUncertain;
+
   @override
-  Widget build(BuildContext context) => IntrinsicHeight(
-    child: Row(
+  State<_TrackingTimeline> createState() => _TrackingTimelineState();
+}
+
+class _TrackingTimelineState extends State<_TrackingTimeline> {
+  final _markerKey = GlobalKey();
+  bool _initialFocusScheduled = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final session = widget.session;
+    final timeline = session.timeline!;
+    final scheme = Theme.of(context).colorScheme;
+    final accent = BusRoutePresentation.forRoute(
+      BusRoute(
+        id: 1,
+        routeNumber: session.routeNumber,
+        regionName: '-',
+        provider: timeline.provider,
+        routeType: timeline.routeType,
+      ),
+      Theme.of(context).brightness,
+    ).color;
+    final usable =
+        !widget.stateUncertain &&
+        session.status == BoardingSessionStatus.tracking &&
+        ((session.evaluationStatus == BoardingEvaluation.ready &&
+                timeline.positionBasis == 'READY') ||
+            (session.evaluationStatus ==
+                    BoardingEvaluation.verificationPending &&
+                timeline.positionBasis == 'INITIAL'));
+    final position = usable ? timeline.positionIndex : null;
+    final before = position != null && position < timeline.boardingIndex;
+    if (!_initialFocusScheduled) {
+      _initialFocusScheduled = true;
+      if (position != null &&
+          position >= timeline.boardingIndex &&
+          position <= timeline.targetIndex) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final markerContext = _markerKey.currentContext;
+          if (mounted && markerContext != null) {
+            Scrollable.ensureVisible(markerContext, alignment: 0.4);
+          }
+        });
+      }
+    }
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SizedBox(
-          width: 32,
-          child: Column(
-            children: [
-              Icon(icon, size: 24, color: color),
-              if (!last) Expanded(child: Container(width: 2, color: lineColor)),
-            ],
+        if (before)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              '버스가 승차 정류장에 도착하기 전\n승차까지 ${timeline.boardingIndex - position}개 지점',
+            ),
           ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Padding(
-            padding: EdgeInsets.only(bottom: last ? 0 : 36),
-            child: child,
+        for (final stop in timeline.stops)
+          _TrackingRow(
+            key: position == stop.index ? _markerKey : ValueKey(stop.id),
+            stop: stop,
+            first: stop.index == timeline.boardingIndex,
+            last: stop.index == timeline.targetIndex,
+            bus: position == stop.index,
+            initial: timeline.positionBasis == 'INITIAL',
+            passed: position != null && stop.index <= position,
+            alert:
+                session.notificationOffsetStops != null &&
+                stop.index ==
+                    timeline.targetIndex - session.notificationOffsetStops!,
+            accent: accent,
+            scheme: scheme,
           ),
-        ),
       ],
-    ),
-  );
+    );
+  }
+}
+
+class _TrackingRow extends StatelessWidget {
+  const _TrackingRow({
+    super.key,
+    required this.stop,
+    required this.first,
+    required this.last,
+    required this.bus,
+    required this.initial,
+    required this.passed,
+    required this.alert,
+    required this.accent,
+    required this.scheme,
+  });
+  final BoardingTimelineStop stop;
+  final bool first, last, bus, initial, passed, alert;
+  final Color accent;
+  final ColorScheme scheme;
+  @override
+  Widget build(BuildContext context) {
+    final display = stop.name == null ? null : stopDisplayName(stop.name!);
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: 40,
+            child: Column(
+              children: [
+                Icon(
+                  bus
+                      ? Icons.directions_bus
+                      : last
+                      ? Icons.flag_outlined
+                      : alert
+                      ? Icons.notifications_outlined
+                      : Icons.circle,
+                  key: bus ? const ValueKey('tracking-bus-marker') : null,
+                  semanticLabel: bus
+                      ? (initial ? '등록 당시 관측 차량 위치' : '최근 관측 차량 위치')
+                      : null,
+                  size: bus || first || last || alert ? 24 : 12,
+                  color: passed || first || last ? accent : scheme.outline,
+                ),
+                if (!last)
+                  Expanded(
+                    child: BusRouteRailSegment(
+                      color: passed && !bus ? accent : scheme.outlineVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    display?.name ?? '정류장 정보 없음',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  if (display?.isNonstop == true) const Text('미정차'),
+                  if (first) const Text('승차 정류장'),
+                  if (last) const Text('목표 정류장'),
+                  if (alert) const Text('하차 준비 알림 지점'),
+                  Text(
+                    '노선 순서 ${stop.order}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

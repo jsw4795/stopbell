@@ -25,6 +25,13 @@ public interface BusRouteStopOccurrenceRepository extends JpaRepository<BusRoute
 
     @Query("""
             select occurrence from BusRouteStopOccurrence occurrence
+            join fetch occurrence.stop join fetch occurrence.route
+            where occurrence.id in :ids
+            """)
+    List<BusRouteStopOccurrence> findTimelineMetadata(java.util.Collection<Long> ids);
+
+    @Query("""
+            select occurrence from BusRouteStopOccurrence occurrence
             join fetch occurrence.stop
             where occurrence.route = :route
             order by occurrence.stopOrder asc
