@@ -80,21 +80,6 @@ BoardingCandidateProgressLabel boardingCandidateProgressLabel(
   final endpoint = observed < boarding
       ? BoardingGapEndpoint.boarding
       : BoardingGapEndpoint.target;
-  final reference = endpoint == BoardingGapEndpoint.boarding
-      ? boarding
-      : target;
-  final start = observed < reference ? observed : reference;
-  final end = observed < reference ? reference : observed;
-
-  // The occurrence identifies the observation. Different known destinations
-  // within the compared segment can still mark a turn in the traversal.
-  String? direction;
-  for (var index = start; index <= end; index++) {
-    final destination = stops[index].destinationName;
-    if (destination == null) continue;
-    if (direction != null && direction != destination) return uncertain;
-    direction = destination;
-  }
 
   final text = switch (endpoint) {
     BoardingGapEndpoint.boarding => '승차까지 약 $gap개 지점',

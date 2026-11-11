@@ -168,7 +168,7 @@ void main() {
     );
   });
 
-  test('direction changes within the compared segment hide only the gap', () {
+  test('direction changes do not hide an exact occurrence gap', () {
     final traversal = [
       for (final stop in stops)
         _stop(
@@ -183,9 +183,8 @@ void main() {
         ),
     ];
     final acrossTurn = label(traversal: traversal);
-    expect(acrossTurn.stopName, '표시 이름으로 매칭하지 않음');
-    expect(acrossTurn.text, '남은 지점 확인 필요');
-    expect(acrossTurn.endpoint, isNull);
+    expect(acrossTurn.text, '목표까지 약 2개 지점');
+    expect(acrossTurn.endpoint, BoardingGapEndpoint.target);
     expect(
       label(
         traversal: traversal,
