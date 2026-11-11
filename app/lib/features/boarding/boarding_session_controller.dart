@@ -6,6 +6,15 @@ import 'boarding_creation_intent.dart';
 import 'boarding_session.dart';
 import 'boarding_session_client.dart';
 
+typedef InitialReference = ({
+  int id,
+  int index,
+  int boarding,
+  int target,
+  String? name,
+  int gap,
+});
+
 enum BoardingCreationState { notStarted, submitting, outcomeUnknown, resolved }
 
 /// Screen-local coordination of durable creation and authoritative session state.
@@ -34,6 +43,22 @@ class BoardingSessionController extends ChangeNotifier {
   bool refreshing = false;
   bool autoRefreshing = false;
   bool autoRefreshFailed = false;
+  InitialReference? _reference;
+  InitialReference? get initialReference {
+    final s = session;
+    final r = _reference;
+    return current &&
+            s != null &&
+            r != null &&
+            s.id == r.id &&
+            s.status == BoardingSessionStatus.tracking &&
+            s.evaluationStatus == BoardingEvaluation.verificationPending &&
+            s.timeline?.boardingIndex == r.boarding &&
+            s.timeline?.targetIndex == r.target
+        ? r
+        : null;
+  }
+
   bool busy = false,
       initialized = false,
       lookupFailed = false,
@@ -69,6 +94,7 @@ class BoardingSessionController extends ChangeNotifier {
     _manualRefreshGeneration++;
     refreshing = false;
     session = null;
+    _reference = null;
     pending = null;
     selectionContext = null;
     message = null;
@@ -78,6 +104,7 @@ class BoardingSessionController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _reference = null;
     _readEpoch++;
     auth.removeListener(_authChanged);
     super.dispose();
@@ -204,6 +231,7 @@ class BoardingSessionController extends ChangeNotifier {
 
   Future<void> _submit({required bool retry}) async {
     final intent = pending!;
+    _reference = null;
     creationState = BoardingCreationState.submitting;
     busy = true;
     _manualRefreshGeneration++;
@@ -225,6 +253,21 @@ class BoardingSessionController extends ChangeNotifier {
         throw const BoardingSessionException(SessionFailure.parsing);
       }
       session = result;
+      final t = result.timeline;
+      if (result.status == BoardingSessionStatus.tracking &&
+          result.evaluationStatus == BoardingEvaluation.verificationPending &&
+          t?.positionBasis == 'INITIAL' &&
+          t?.positionIndex != null &&
+          result.initialRemainingGap != null) {
+        _reference = (
+          id: result.id,
+          index: t!.positionIndex!,
+          boarding: t.boardingIndex,
+          target: t.targetIndex,
+          name: result.initialStopName,
+          gap: result.initialRemainingGap!,
+        );
+      }
       creationState = BoardingCreationState.resolved;
       await _clearResolvedIntent();
     } on BoardingSessionException catch (error) {
@@ -357,6 +400,13 @@ class BoardingSessionController extends ChangeNotifier {
         result.revision < old.revision ||
         (old.isTerminal && result.status != old.status)) {
       return false;
+    }
+    if (result.status != BoardingSessionStatus.tracking ||
+        result.evaluationStatus != BoardingEvaluation.verificationPending ||
+        result.id != _reference?.id ||
+        result.timeline?.boardingIndex != _reference?.boarding ||
+        result.timeline?.targetIndex != _reference?.target) {
+      _reference = null;
     }
     session = result;
     return true;

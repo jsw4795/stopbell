@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:stopbell/features/boarding/boarding_session_view.dart';
+import 'package:stopbell/features/boarding/boarding_session_auto_refresh.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/testing.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
@@ -546,6 +549,137 @@ void main() {
     await c.recover();
     expect(c.canCreate, isTrue);
   });
+  for (final index in [0, 2, 3]) {
+    testWidgets(
+      'initial reference stays at occurrence $index through immediate and periodic GET',
+      (tester) async {
+        await start();
+        final created = longTimelineSessionJson(
+          position: index,
+          basis: 'INITIAL',
+        );
+        created['evaluationStatus'] = 'VERIFICATION_PENDING';
+        created['checkpointObservedAt'] = null;
+        created['initialObservation'] = {
+          'stopName': '참고 지점',
+          'remainingOccurrenceGap': 31 - index,
+        };
+        api.onCreate = () async => BoardingSession.fromJson(created);
+        await create();
+        final latest = longTimelineSessionJson(position: null, basis: null);
+        latest['evaluationStatus'] = 'VERIFICATION_PENDING';
+        latest['checkpointObservedAt'] = null;
+        api.onFind = () async => BoardingSession.fromJson(latest);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: BoardingSessionAutoRefresh(
+                controller: c,
+                child: AnimatedBuilder(
+                  animation: c,
+                  builder: (context, _) => SingleChildScrollView(
+                    child: BoardingSessionDetails(
+                      session: c.session!,
+                      initialReference: c.initialReference,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        final marker = find.byKey(
+          ValueKey(
+            index < 2 ? 'before-boarding-bus-marker' : 'tracking-bus-marker',
+          ),
+        );
+        expect(marker, findsOneWidget);
+        expect(find.text('등록 당시 관측 기준'), findsOneWidget);
+        expect(api.detailCalls, 1);
+        await tester.pump(const Duration(seconds: 20));
+        await tester.pump();
+        expect(api.detailCalls, 2);
+        expect(marker, findsOneWidget);
+        expect(find.text('등록 당시 관측 기준'), findsOneWidget);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+  for (final index in [0, 2, 3]) {
+    test(
+      'creation reference at index $index survives pending reads and clears on READY',
+      () async {
+        await start();
+        final original = longTimelineSessionJson(
+          position: index,
+          basis: 'INITIAL',
+        );
+        original['evaluationStatus'] = 'VERIFICATION_PENDING';
+        original['checkpointObservedAt'] = null;
+        original['initialObservation'] = {
+          'stopName': '참고 지점',
+          'remainingOccurrenceGap': 31 - index,
+        };
+        api.onCreate = () async => BoardingSession.fromJson(original);
+        await create();
+        expect(c.initialReference?.index, index);
+        final latest = longTimelineSessionJson(position: null, basis: null);
+        latest['evaluationStatus'] = 'VERIFICATION_PENDING';
+        latest['checkpointObservedAt'] = null;
+        latest['revision'] = 6;
+        api.onFind = () async => BoardingSession.fromJson(latest);
+        await c.refresh();
+        await c.refresh();
+        expect(c.session!.revision, 6);
+        expect(c.session!.timeline!.positionIndex, isNull);
+        expect(c.initialReference?.index, index);
+        api.onFind = () async =>
+            BoardingSession.fromJson(longTimelineSessionJson(position: 4));
+        await c.refresh();
+        // Lower revision is rejected; use the current revision for READY.
+        final ready = longTimelineSessionJson(position: 4)..['revision'] = 7;
+        api.onFind = () async => BoardingSession.fromJson(ready);
+        await c.refresh();
+        expect(c.initialReference, isNull);
+        latest['revision'] = 8;
+        await c.refresh();
+        expect(c.initialReference, isNull);
+      },
+    );
+  }
+  for (final state in [
+    ('TRACKING', 'RECOVERY_PENDING'),
+    ('SUSPENDED', 'HELD'),
+    ('COMPLETED', 'ENDED'),
+    ('CANCELLED', 'ENDED'),
+    ('EXPIRED', 'ENDED'),
+  ]) {
+    test('initial reference is discarded for $state', () async {
+      await start();
+      final created = longTimelineSessionJson(position: 2, basis: 'INITIAL');
+      created['evaluationStatus'] = 'VERIFICATION_PENDING';
+      created['checkpointObservedAt'] = null;
+      created['initialObservation'] = {
+        'stopName': '참고',
+        'remainingOccurrenceGap': 29,
+      };
+      api.onCreate = () async => BoardingSession.fromJson(created);
+      await create();
+      expect(c.initialReference, isNotNull);
+      api.onFind = () async =>
+          sessionFixture(status: state.$1, evaluation: state.$2, revision: 6);
+      await c.refresh();
+      expect(c.initialReference, isNull);
+      final later = longTimelineSessionJson(position: null, basis: null)
+        ..['evaluationStatus'] = 'VERIFICATION_PENDING'
+        ..['checkpointObservedAt'] = null
+        ..['revision'] = 7;
+      api.onFind = () async => BoardingSession.fromJson(later);
+      await c.refresh();
+      expect(c.initialReference, isNull);
+    });
+  }
   test('manual refresh reports progress, accepts identical responses and blocks duplicates', () async {
     api.currentSession = sessionFixture();
     await start();

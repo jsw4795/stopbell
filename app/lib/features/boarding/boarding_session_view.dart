@@ -119,6 +119,7 @@ class BoardingSessionView extends StatelessWidget {
                       : c.refreshManually,
                   refreshing: c.refreshing,
                   refreshToken: c.manualRefreshToken,
+                  initialReference: c.initialReference,
                   showRefresh: true,
                   constrained: true,
                   actions: actions,
@@ -156,6 +157,7 @@ class BoardingSessionDetails extends StatelessWidget {
     this.showRefresh = false,
     this.refreshing = false,
     this.refreshToken = 0,
+    this.initialReference,
     this.onBack,
     this.constrained = false,
     this.actions = const [],
@@ -163,6 +165,7 @@ class BoardingSessionDetails extends StatelessWidget {
   final VoidCallback? onRefresh, onBack;
   final bool showRefresh, constrained, refreshing;
   final int refreshToken;
+  final InitialReference? initialReference;
   final BoardingSession session;
   final bool stateUncertain;
   final String? boardingName;
@@ -201,7 +204,7 @@ class BoardingSessionDetails extends StatelessWidget {
         !stateUncertain &&
         s.status == BoardingSessionStatus.tracking &&
         s.evaluationStatus == BoardingEvaluation.verificationPending &&
-        s.initialRemainingGap != null;
+        (s.initialRemainingGap != null || initialReference != null);
     final notice = stateUncertain
         ? '변경 결과를 확인하지 못했어요. 상태를 다시 조회해 주세요.'
         : switch (s.status) {
@@ -294,7 +297,7 @@ class BoardingSessionDetails extends StatelessWidget {
               children: [
                 Text('${s.targetName}까지', style: theme.textTheme.bodyMedium),
                 Text(
-                  '${initial ? s.initialRemainingGap : s.remainingOccurrenceGap}개 지점 남음',
+                  '${initial ? (s.initialRemainingGap ?? initialReference?.gap) : s.remainingOccurrenceGap}개 지점 남음',
                   style: theme.textTheme.titleMedium!.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -321,6 +324,7 @@ class BoardingSessionDetails extends StatelessWidget {
           stateUncertain: stateUncertain,
           scrollable: scrollable,
           refreshToken: refreshToken,
+          initialReference: initialReference,
         );
       }
       final fallback = Padding(
@@ -462,7 +466,9 @@ class _TrackingTimeline extends StatefulWidget {
     required this.stateUncertain,
     required this.scrollable,
     required this.refreshToken,
+    required this.initialReference,
   });
+  final InitialReference? initialReference;
   final BoardingSession session;
   final bool stateUncertain, scrollable;
   final int refreshToken;
@@ -509,7 +515,14 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                 t.positionBasis == 'READY') ||
             (s.evaluationStatus == BoardingEvaluation.verificationPending &&
                 t.positionBasis == 'INITIAL'));
-    return usable ? t.positionIndex : null;
+    if (usable) return t.positionIndex;
+    if (!widget.stateUncertain &&
+        s.status == BoardingSessionStatus.tracking &&
+        s.evaluationStatus == BoardingEvaluation.verificationPending &&
+        widget.initialReference?.id == s.id) {
+      return widget.initialReference?.index;
+    }
+    return null;
   }
 
   void _focusInitially(int? position) {
@@ -559,6 +572,11 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
     ).color;
     final position = _position;
     final before = position != null && position < timeline.boardingIndex;
+    final initialPosition =
+        timeline.positionBasis == 'INITIAL' ||
+        (timeline.positionIndex == null &&
+            widget.initialReference != null &&
+            position != null);
     if (_handledRefreshToken != widget.refreshToken) {
       _handledRefreshToken = widget.refreshToken;
       if (widget.scrollable &&
@@ -608,7 +626,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                         key: const ValueKey('before-boarding-bus-marker'),
                         color: accent,
                         size: 28,
-                        semanticLabel: timeline.positionBasis == 'INITIAL'
+                        semanticLabel: initialPosition
                             ? '등록 당시 관측 차량 위치'
                             : '최근 관측 차량 위치',
                       ),
@@ -632,8 +650,9 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                           style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(color: accent),
                         ),
-                        if ((timeline.positionBasis == 'INITIAL'
-                                ? session.initialStopName
+                        if ((initialPosition
+                                ? (session.initialStopName ??
+                                      widget.initialReference?.name)
                                 : session.currentStopName)
                             case final String name)
                           Text(
@@ -645,9 +664,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                         Text(
-                          timeline.positionBasis == 'INITIAL'
-                              ? '등록 당시 관측 기준'
-                              : '최근 관측 기준',
+                          initialPosition ? '등록 당시 관측 기준' : '최근 관측 기준',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -664,7 +681,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
             first: stop.index == timeline.boardingIndex,
             last: stop.index == timeline.targetIndex,
             bus: position == stop.index,
-            initial: timeline.positionBasis == 'INITIAL',
+            initial: initialPosition,
             passed: position != null && stop.index <= position,
             alert:
                 session.notificationOffsetStops != null &&
