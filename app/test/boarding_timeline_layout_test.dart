@@ -113,6 +113,10 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('7000'), findsOneWidget);
+    final panel = find.byKey(const ValueKey('tracking-route-panel'));
+    expect(panel, findsOneWidget);
+    expect(find.descendant(of: panel, matching: scroll), findsOneWidget);
+    expect(tester.getRect(panel).contains(tester.getTopLeft(scroll)), isTrue);
     expect(find.text('3개 지점 남음'), findsOneWidget);
     expect(find.text('최근 확인된 버스 위치'), findsNothing);
     expect(find.textContaining('부근 지나는 중'), findsNothing);
@@ -154,6 +158,22 @@ void main() {
     expect(find.text('현재 지점 부근'), findsOneWidget);
     expect(find.text('승차까지 2개 지점'), findsOneWidget);
     expect(find.text('등록 당시 관측 기준'), findsOneWidget);
+    final bus = find.byKey(const ValueKey('before-boarding-bus-marker'));
+    final firstRow = find.byKey(const ValueKey(102));
+    final firstIcon = find.descendant(
+      of: firstRow,
+      matching: find.byType(Icon),
+    );
+    final rail = find.byKey(const ValueKey('before-boarding-rail'));
+    expect(
+      tester.getCenter(bus).dx,
+      closeTo(tester.getCenter(firstIcon).dx, .1),
+    );
+    expect(
+      tester.getBottomLeft(rail).dy,
+      closeTo(tester.getTopLeft(firstIcon).dy, .1),
+    );
+    expect(find.ancestor(of: bus, matching: find.byType(Card)), findsNothing);
     session.value = BoardingSession.fromJson(
       timelineSession(id: 456, position: 5),
     );

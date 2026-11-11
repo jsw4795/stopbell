@@ -330,6 +330,121 @@ void main() {
   );
 
   testWidgets(
+    'manual refresh shows loading and recenters an identical response',
+    (tester) async {
+      api.currentSession = BoardingSession.fromJson(longTimelineSessionJson());
+      await pump(tester);
+      tester.view.physicalSize = const Size(320, 600);
+      await tester.pumpAndSettle();
+      final scroll = find.byKey(const ValueKey('tracking-timeline-scroll'));
+      final marker = find.byKey(const ValueKey('tracking-bus-marker'));
+      await tester.drag(scroll, const Offset(0, 3000));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(scroll).overlaps(tester.getRect(marker)), isFalse);
+      final reply = Completer<BoardingSession>();
+      api.onFind = () => reply.future;
+      await tester.tap(find.byTooltip('상태 새로고침'));
+      await tester.pump();
+      expect(api.detailCalls, 1);
+      expect(find.byKey(const ValueKey('refresh-in-progress')), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 150));
+      final rotation = find
+          .ancestor(
+            of: find.byKey(const ValueKey('refresh-in-progress')),
+            matching: find.byType(RotationTransition),
+          )
+          .first;
+      expect(
+        tester.widget<RotationTransition>(rotation).turns.value,
+        greaterThan(0),
+      );
+      expect(
+        tester
+            .widget<IconButton>(
+              find
+                  .ancestor(
+                    of: find.byTooltip('상태 새로고침'),
+                    matching: find.byType(IconButton),
+                  )
+                  .first,
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.byTooltip('상태 새로고침'));
+      await tester.pump();
+      expect(api.detailCalls, 1);
+      reply.complete(BoardingSession.fromJson(longTimelineSessionJson()));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('refresh-in-progress')), findsNothing);
+      expect(tester.getRect(scroll).overlaps(tester.getRect(marker)), isTrue);
+      final aligned = tester.getTopLeft(marker).dy;
+      await tester.drag(scroll, const Offset(0, -40));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(scroll).overlaps(tester.getRect(marker)), isTrue);
+      expect((tester.getTopLeft(marker).dy - aligned).abs(), greaterThan(1));
+      await tester.tap(find.byTooltip('상태 새로고침'));
+      await tester.pumpAndSettle();
+      expect(tester.getTopLeft(marker).dy, closeTo(aligned, 1));
+    },
+  );
+
+  testWidgets(
+    'manual refresh returns to pre-boarding vehicle and failure does not move',
+    (tester) async {
+      api.currentSession = BoardingSession.fromJson(
+        longTimelineSessionJson(position: 0),
+      );
+      await pump(tester);
+      tester.view.physicalSize = const Size(320, 600);
+      await tester.pumpAndSettle();
+      final scroll = find.byKey(const ValueKey('tracking-timeline-scroll'));
+      final marker = find.byKey(const ValueKey('before-boarding-bus-marker'));
+      await tester.drag(scroll, const Offset(0, -3000));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(scroll).overlaps(tester.getRect(marker)), isFalse);
+      final scrollState = tester.state<ScrollableState>(
+        find.descendant(of: scroll, matching: find.byType(Scrollable)),
+      );
+      final offset = scrollState.position.pixels;
+      api.onFind = () async =>
+          throw const BoardingSessionException(SessionFailure.network);
+      await tester.tap(find.byTooltip('상태 새로고침'));
+      await tester.pumpAndSettle();
+      expect(scrollState.position.pixels, closeTo(offset, .1));
+      expect(find.byKey(const ValueKey('refresh-in-progress')), findsNothing);
+      api.onFind = () async =>
+          BoardingSession.fromJson(longTimelineSessionJson(position: 0));
+      await tester.tap(find.byTooltip('상태 새로고침'));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(scroll).overlaps(tester.getRect(marker)), isTrue);
+    },
+  );
+
+  testWidgets(
+    'manual refresh with no location does not invent a scroll target',
+    (tester) async {
+      api.currentSession = BoardingSession.fromJson(
+        longTimelineSessionJson(position: null, basis: null),
+      );
+      await pump(tester);
+      tester.view.physicalSize = const Size(320, 600);
+      await tester.pumpAndSettle();
+      final scroll = find.byKey(const ValueKey('tracking-timeline-scroll'));
+      await tester.drag(scroll, const Offset(0, -900));
+      await tester.pumpAndSettle();
+      final scrollState = tester.state<ScrollableState>(
+        find.descendant(of: scroll, matching: find.byType(Scrollable)),
+      );
+      final offset = scrollState.position.pixels;
+      await tester.tap(find.byTooltip('상태 새로고침'));
+      await tester.pumpAndSettle();
+      expect(scrollState.position.pixels, closeTo(offset, .1));
+      expect(find.byKey(const ValueKey('tracking-bus-marker')), findsNothing);
+    },
+  );
+
+  testWidgets(
     'cancel stays at the bottom while content scrolls on a small screen',
     (tester) async {
       api.currentSession = sessionFixture();
@@ -823,8 +938,10 @@ void main() {
       api.onFind = () => old.future;
       await tester.tap(find.byTooltip('상태 새로고침'));
       await tester.pump();
-      await tap(tester, '추적 취소');
-      await tap(tester, '추적 취소 확인');
+      await tester.tap(find.text('추적 취소'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('추적 취소 확인'));
+      await tester.pumpAndSettle();
       old.complete(sessionFixture(revision: 5));
       await tester.pumpAndSettle();
       expect(find.textContaining('사용자 취소로 종료'), findsOneWidget);

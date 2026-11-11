@@ -29,6 +29,9 @@ class BoardingSessionController extends ChangeNotifier {
   final String? userIdentity, sessionIdentity;
   bool _disposed = false;
   int _readEpoch = 0;
+  int _manualRefreshGeneration = 0;
+  int manualRefreshToken = 0;
+  bool refreshing = false;
   bool busy = false,
       initialized = false,
       lookupFailed = false,
@@ -61,6 +64,8 @@ class BoardingSessionController extends ChangeNotifier {
   void _authChanged() {
     if (current || _disposed) return;
     _readEpoch++;
+    _manualRefreshGeneration++;
+    refreshing = false;
     session = null;
     pending = null;
     selectionContext = null;
@@ -199,6 +204,8 @@ class BoardingSessionController extends ChangeNotifier {
     final intent = pending!;
     creationState = BoardingCreationState.submitting;
     busy = true;
+    _manualRefreshGeneration++;
+    refreshing = false;
     _readEpoch++;
     _emit();
     try {
@@ -353,8 +360,8 @@ class BoardingSessionController extends ChangeNotifier {
     return true;
   }
 
-  Future<void> refresh() async {
-    if (!current || session == null || busy) return;
+  Future<bool> refresh() async {
+    if (!current || session == null || busy) return false;
     final id = session!.id;
     final epoch = ++_readEpoch;
     try {
@@ -363,16 +370,18 @@ class BoardingSessionController extends ChangeNotifier {
         generation: generation,
         current: () => current && epoch == _readEpoch,
       );
-      if (current && epoch == _readEpoch) {
-        if (_accept(result)) {
+      if (current && epoch == _readEpoch && session?.id == id) {
+        final accepted = _accept(result);
+        if (accepted) {
           inaccessible = false;
           stateUncertain = false;
           message = null;
         }
         _emit();
+        return accepted;
       }
     } on BoardingSessionException catch (error) {
-      if (current && epoch == _readEpoch) {
+      if (current && epoch == _readEpoch && session?.id == id) {
         inaccessible =
             error.code == 'BOARDING_SESSION_NOT_FOUND' ||
             error.statusCode == 404;
@@ -380,8 +389,35 @@ class BoardingSessionController extends ChangeNotifier {
         _emit();
       }
     } catch (_) {
-      if (current && epoch == _readEpoch) {
+      if (current && epoch == _readEpoch && session?.id == id) {
         message = '현재 상태를 확인하지 못했어요. 다시 조회해 주세요.';
+        _emit();
+      }
+    }
+    return false;
+  }
+
+  /// A button-initiated read is distinct from automatic or recovery reads.
+  Future<void> refreshManually() async {
+    if (!current || session == null || busy || refreshing) return;
+    final id = session!.id;
+    final request = ++_manualRefreshGeneration;
+    refreshing = true;
+    _emit();
+    try {
+      final read = refresh();
+      final epoch = _readEpoch;
+      final accepted = await read;
+      if (current &&
+          request == _manualRefreshGeneration &&
+          epoch == _readEpoch &&
+          session?.id == id &&
+          accepted) {
+        manualRefreshToken++;
+      }
+    } finally {
+      if (current && request == _manualRefreshGeneration) {
+        refreshing = false;
         _emit();
       }
     }
@@ -417,6 +453,8 @@ class BoardingSessionController extends ChangeNotifier {
       return;
     }
     final original = session!;
+    _manualRefreshGeneration++;
+    refreshing = false;
     busy = true;
     message = null;
     _readEpoch++;

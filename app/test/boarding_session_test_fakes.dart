@@ -83,6 +83,27 @@ Map<String, dynamic> timelineSessionJson({int id = 123}) => {
   },
 };
 
+Map<String, dynamic> longTimelineSessionJson({
+  int id = 123,
+  int? position = 20,
+  String? basis = 'READY',
+}) => {
+  ...sessionJson(id: id),
+  'currentStopName': '최근 위치',
+  'timeline': {
+    'provider': 'TAGO',
+    'routeType': 'CITY_LOCAL',
+    'boardingIndex': 2,
+    'targetIndex': 31,
+    'positionIndex': position,
+    'positionBasis': basis,
+    'stops': [
+      for (var i = 2; i <= 31; i++)
+        {'id': i + 100, 'index': i, 'order': i + 1, 'name': '정류장 $i'},
+    ],
+  },
+};
+
 BoardingSession sessionFixture({
   String status = 'TRACKING',
   String evaluation = 'READY',

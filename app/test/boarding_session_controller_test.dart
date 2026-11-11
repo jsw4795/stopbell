@@ -546,6 +546,74 @@ void main() {
     await c.recover();
     expect(c.canCreate, isTrue);
   });
+  test('manual refresh reports progress, accepts identical responses and blocks duplicates', () async {
+    api.currentSession = sessionFixture();
+    await start();
+    final reply = Completer<BoardingSession>();
+    api.onFind = () => reply.future;
+    final refresh = c.refreshManually();
+    expect(c.refreshing, isTrue);
+    expect(api.detailCalls, 1);
+    await c.refreshManually();
+    expect(api.detailCalls, 1);
+    reply.complete(sessionFixture());
+    await refresh;
+    expect(c.refreshing, isFalse);
+    expect(c.manualRefreshToken, 1);
+  });
+  test('manual failures, stale revisions and mismatched identity do not signal success', () async {
+    api.currentSession = sessionFixture();
+    await start();
+    api.onFind = () async =>
+        throw const BoardingSessionException(SessionFailure.network);
+    await c.refreshManually();
+    expect(c.refreshing, isFalse);
+    expect(c.message, isNotNull);
+    expect(c.manualRefreshToken, 0);
+    api.onFind = () async => sessionFixture(revision: 4);
+    await c.refreshManually();
+    expect(c.manualRefreshToken, 0);
+    api.onFind = () async => sessionFixture(id: 999);
+    await c.refreshManually();
+    expect(c.manualRefreshToken, 0);
+    expect(c.session!.id, 123);
+  });
+  test('cancel invalidates an in-flight manual refresh', () async {
+    api.currentSession = sessionFixture();
+    await start();
+    final reply = Completer<BoardingSession>();
+    api.onFind = () => reply.future;
+    final refresh = c.refreshManually();
+    await c.cancel();
+    expect(c.refreshing, isFalse);
+    reply.complete(sessionFixture());
+    await refresh;
+    expect(c.manualRefreshToken, 0);
+    expect(c.session!.status, BoardingSessionStatus.cancelled);
+  });
+  test('logout drops an in-flight manual refresh', () async {
+    api.currentSession = sessionFixture();
+    await start();
+    final reply = Completer<BoardingSession>();
+    api.onFind = () => reply.future;
+    final refresh = c.refreshManually();
+    await auth.logout();
+    reply.complete(sessionFixture());
+    await refresh;
+    expect(c.manualRefreshToken, 0);
+    expect(c.session, isNull);
+  });
+  test('disposed controller ignores a late manual refresh', () async {
+    api.currentSession = sessionFixture();
+    await start();
+    final reply = Completer<BoardingSession>();
+    api.onFind = () => reply.future;
+    final refresh = c.refreshManually();
+    c.dispose();
+    reply.complete(sessionFixture());
+    await refresh;
+    expect(c.manualRefreshToken, 0);
+  });
   test('late GET cannot undo successful cancel; duplicates blocked and current revision used', () async {
     api.currentSession = sessionFixture();
     await start();

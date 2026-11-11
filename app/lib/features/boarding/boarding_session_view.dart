@@ -93,7 +93,9 @@ class BoardingSessionView extends StatelessWidget {
                       ),
                       const Text('세션이 없거나 접근할 수 없어요.'),
                       OutlinedButton(
-                        onPressed: c.busy ? null : c.refresh,
+                        onPressed: c.busy || c.refreshing
+                            ? null
+                            : c.refreshManually,
                         child: const Text('상태 새로고침'),
                       ),
                       if (c.message != null) Text(c.message!),
@@ -111,7 +113,9 @@ class BoardingSessionView extends StatelessWidget {
                   stateUncertain: c.stateUncertain,
                   boardingName: boardingName,
                   onBack: c.busy ? null : onBack,
-                  onRefresh: c.busy ? null : c.refresh,
+                  onRefresh: c.busy || c.refreshing ? null : c.refreshManually,
+                  refreshing: c.refreshing,
+                  refreshToken: c.manualRefreshToken,
                   showRefresh: true,
                   constrained: true,
                   actions: actions,
@@ -147,12 +151,15 @@ class BoardingSessionDetails extends StatelessWidget {
     this.boardingName,
     this.onRefresh,
     this.showRefresh = false,
+    this.refreshing = false,
+    this.refreshToken = 0,
     this.onBack,
     this.constrained = false,
     this.actions = const [],
   });
   final VoidCallback? onRefresh, onBack;
-  final bool showRefresh, constrained;
+  final bool showRefresh, constrained, refreshing;
+  final int refreshToken;
   final BoardingSession session;
   final bool stateUncertain;
   final String? boardingName;
@@ -233,7 +240,7 @@ class BoardingSessionDetails extends StatelessWidget {
               IconButton(
                 onPressed: onRefresh,
                 tooltip: '상태 새로고침',
-                icon: const Icon(Icons.refresh),
+                icon: _RefreshIcon(active: refreshing),
               ),
           ],
         ),
@@ -297,13 +304,10 @@ class BoardingSessionDetails extends StatelessWidget {
       ],
     );
     final routeHeader = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Row(
-        children: [
-          Text('이동 경로', style: theme.textTheme.titleSmall),
-          const SizedBox(width: 8),
-          const Expanded(child: Divider()),
-        ],
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text('이동 경로', style: theme.textTheme.titleSmall),
       ),
     );
     Widget route({required bool scrollable}) {
@@ -313,6 +317,7 @@ class BoardingSessionDetails extends StatelessWidget {
           session: s,
           stateUncertain: stateUncertain,
           scrollable: scrollable,
+          refreshToken: refreshToken,
         );
       }
       final fallback = Padding(
@@ -331,34 +336,102 @@ class BoardingSessionDetails extends StatelessWidget {
       return scrollable ? SingleChildScrollView(child: fallback) : fallback;
     }
 
+    Widget panel({required bool bounded}) {
+      final body = route(scrollable: bounded);
+      return Container(
+        key: const ValueKey('tracking-route-panel'),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerLow,
+          border: Border.all(color: scheme.outlineVariant),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: bounded ? MainAxisSize.max : MainAxisSize.min,
+          children: [
+            routeHeader,
+            if (bounded) Expanded(child: body) else body,
+          ],
+        ),
+      );
+    }
+
     if (!constrained) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [summary, routeHeader, route(scrollable: false)],
+        children: [summary, const SizedBox(height: 8), panel(bounded: false)],
       );
     }
     return LayoutBuilder(
-      builder: (context, constraints) {
-        return Column(
-          children: [
-            Flexible(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: constraints.maxHeight * .6,
-                ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: summary,
-                ),
+      builder: (context, constraints) => Column(
+        children: [
+          Flexible(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: constraints.maxHeight * .6,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: summary,
               ),
             ),
-            routeHeader,
-            Expanded(child: route(scrollable: true)),
-          ],
-        );
-      },
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: panel(bounded: true),
+            ),
+          ),
+        ],
+      ),
     );
   }
+}
+
+class _RefreshIcon extends StatefulWidget {
+  const _RefreshIcon({required this.active});
+  final bool active;
+  @override
+  State<_RefreshIcon> createState() => _RefreshIconState();
+}
+
+class _RefreshIconState extends State<_RefreshIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _rotation = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 750),
+  );
+  @override
+  void initState() {
+    super.initState();
+    if (widget.active) _rotation.repeat();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RefreshIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !oldWidget.active) _rotation.repeat();
+    if (!widget.active && oldWidget.active) {
+      _rotation.stop();
+      _rotation.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _rotation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => RotationTransition(
+    turns: _rotation,
+    child: Icon(
+      Icons.refresh,
+      key: widget.active ? const ValueKey('refresh-in-progress') : null,
+    ),
+  );
 }
 
 class _Badge extends StatelessWidget {
@@ -389,9 +462,11 @@ class _TrackingTimeline extends StatefulWidget {
     required this.session,
     required this.stateUncertain,
     required this.scrollable,
+    required this.refreshToken,
   });
   final BoardingSession session;
   final bool stateUncertain, scrollable;
+  final int refreshToken;
 
   @override
   State<_TrackingTimeline> createState() => _TrackingTimelineState();
@@ -401,11 +476,19 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
   final _markerKey = GlobalKey();
   bool _focused = false, _focusPending = false, _userScrolled = false;
   int _focusGeneration = 0;
+  late int _handledRefreshToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _handledRefreshToken = widget.refreshToken;
+  }
 
   @override
   void didUpdateWidget(covariant _TrackingTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.session.timeline?.positionIndex !=
+    if (oldWidget.refreshToken != widget.refreshToken ||
+        oldWidget.session.timeline?.positionIndex !=
             widget.session.timeline?.positionIndex ||
         oldWidget.session.timeline?.positionBasis !=
             widget.session.timeline?.positionBasis ||
@@ -477,7 +560,30 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
     ).color;
     final position = _position;
     final before = position != null && position < timeline.boardingIndex;
-    _focusInitially(position);
+    if (_handledRefreshToken != widget.refreshToken) {
+      _handledRefreshToken = widget.refreshToken;
+      if (widget.scrollable &&
+          position != null &&
+          position <= timeline.targetIndex) {
+        final token = widget.refreshToken;
+        final id = session.id;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted ||
+              widget.session.id != id ||
+              widget.refreshToken != token ||
+              _position != position) {
+            return;
+          }
+          final marker = _markerKey.currentContext;
+          if (marker != null) {
+            _focused = true;
+            Scrollable.ensureVisible(marker, alignment: .3);
+          }
+        });
+      }
+    } else {
+      _focusInitially(position);
+    }
     final counts = <String, int>{};
     for (final stop in timeline.stops) {
       if (stop.name != null) {
@@ -489,55 +595,64 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (before)
-          Container(
+          IntrinsicHeight(
             key: _markerKey,
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: scheme.primaryContainer.withValues(alpha: .5),
-              border: Border.all(color: accent),
-              borderRadius: BorderRadius.circular(12),
-            ),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(
-                  Icons.directions_bus,
-                  key: const ValueKey('before-boarding-bus-marker'),
-                  color: accent,
-                  size: 28,
-                  semanticLabel: timeline.positionBasis == 'INITIAL'
-                      ? '등록 당시 관측 차량 위치'
-                      : '최근 관측 차량 위치',
-                ),
-                const SizedBox(width: 10),
-                Expanded(
+                SizedBox(
+                  width: 36,
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        '승차 정류장으로 이동 중',
-                        style: Theme.of(context).textTheme.titleSmall,
+                      Icon(
+                        Icons.directions_bus,
+                        key: const ValueKey('before-boarding-bus-marker'),
+                        color: accent,
+                        size: 28,
+                        semanticLabel: timeline.positionBasis == 'INITIAL'
+                            ? '등록 당시 관측 차량 위치'
+                            : '최근 관측 차량 위치',
                       ),
-                      if ((timeline.positionBasis == 'INITIAL'
-                              ? session.initialStopName
-                              : session.currentStopName)
-                          case final String name)
-                        Text(
-                          '$name 부근',
-                          style: Theme.of(context).textTheme.bodySmall,
+                      Expanded(
+                        child: BusRouteRailSegment(
+                          key: const ValueKey('before-boarding-rail'),
+                          color: accent,
                         ),
-                      Text(
-                        '승차까지 ${timeline.boardingIndex - position}개 지점',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      Text(
-                        timeline.positionBasis == 'INITIAL'
-                            ? '등록 당시 관측 기준'
-                            : '최근 관측 기준',
-                        style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '승차 정류장으로 이동 중',
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(color: accent),
+                        ),
+                        if ((timeline.positionBasis == 'INITIAL'
+                                ? session.initialStopName
+                                : session.currentStopName)
+                            case final String name)
+                          Text(
+                            '$name 부근',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        Text(
+                          '승차까지 ${timeline.boardingIndex - position}개 지점',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        Text(
+                          timeline.positionBasis == 'INITIAL'
+                              ? '등록 당시 관측 기준'
+                              : '최근 관측 기준',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
