@@ -13,6 +13,7 @@ import 'boarding_reconfirmation_screen.dart';
 import 'boarding_session_client.dart';
 import 'boarding_session_controller.dart';
 import 'boarding_session_view.dart';
+import 'boarding_session_auto_refresh.dart';
 import 'boarding_stop_screen.dart';
 
 class BoardingHome extends StatefulWidget {
@@ -257,21 +258,25 @@ class _BoardingHomeState extends State<BoardingHome> {
         );
       }
       if (c.session != null && !_reconfirm && !_newSelection) {
-        return BoardingSessionView(
+        return BoardingSessionAutoRefresh(
+          key: ValueKey(c.session!.id),
           controller: c,
-          boardingName: _boardingNameSessionId == c.session!.id
-              ? _boardingName
-              : null,
-          onBack: widget.onBack,
-          onNew: () => setState(() {
-            _newSelection = true;
-            _route = null;
-          }),
-          onReconfirm: () => setState(() {
-            _reconfirm = true;
-            _route = null;
-            _reconfirmContext = c.selectionContext;
-          }),
+          child: BoardingSessionView(
+            controller: c,
+            boardingName: _boardingNameSessionId == c.session!.id
+                ? _boardingName
+                : null,
+            onBack: widget.onBack,
+            onNew: () => setState(() {
+              _newSelection = true;
+              _route = null;
+            }),
+            onReconfirm: () => setState(() {
+              _reconfirm = true;
+              _route = null;
+              _reconfirmContext = c.selectionContext;
+            }),
+          ),
         );
       }
     }

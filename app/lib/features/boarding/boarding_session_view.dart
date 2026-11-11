@@ -66,6 +66,7 @@ class BoardingSessionView extends StatelessWidget {
           onPressed: c.canCreate ? onNew : null,
           child: const Text('새 차량 후보 찾기'),
         ),
+      if (c.autoRefreshFailed) const Text('자동 갱신에 실패해 이전 관측을 표시하고 있어요.'),
       if (c.message != null) Text(c.message!),
       if (c.pending != null)
         OutlinedButton(
@@ -113,7 +114,9 @@ class BoardingSessionView extends StatelessWidget {
                   stateUncertain: c.stateUncertain,
                   boardingName: boardingName,
                   onBack: c.busy ? null : onBack,
-                  onRefresh: c.busy || c.refreshing ? null : c.refreshManually,
+                  onRefresh: c.busy || c.refreshing || c.autoRefreshing
+                      ? null
+                      : c.refreshManually,
                   refreshing: c.refreshing,
                   refreshToken: c.manualRefreshToken,
                   showRefresh: true,

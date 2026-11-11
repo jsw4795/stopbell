@@ -345,7 +345,7 @@ void main() {
       api.onFind = () => reply.future;
       await tester.tap(find.byTooltip('상태 새로고침'));
       await tester.pump();
-      expect(api.detailCalls, 1);
+      expect(api.detailCalls, 2);
       expect(find.byKey(const ValueKey('refresh-in-progress')), findsOneWidget);
       await tester.pump(const Duration(milliseconds: 150));
       final rotation = find
@@ -373,7 +373,7 @@ void main() {
       );
       await tester.tap(find.byTooltip('상태 새로고침'));
       await tester.pump();
-      expect(api.detailCalls, 1);
+      expect(api.detailCalls, 2);
       reply.complete(BoardingSession.fromJson(longTimelineSessionJson()));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('refresh-in-progress')), findsNothing);
@@ -882,16 +882,16 @@ void main() {
       api.currentSession = sessionFixture();
       api.onCancel = () async =>
           throw const BoardingSessionException(SessionFailure.timeout);
+      await pump(tester);
       api.onFind = () async => sessionFixture(
         status: 'EXPIRED',
         evaluation: 'ENDED',
         revision: 6,
         gap: null,
       );
-      await pump(tester);
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
-      expect(api.detailCalls, 1);
+      expect(api.detailCalls, 2);
       expect(find.textContaining('세션 수명 만료'), findsOneWidget);
       expect(find.textContaining('사용자 취소로 종료'), findsNothing);
     },
