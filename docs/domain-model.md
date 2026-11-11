@@ -511,7 +511,7 @@ TRACKING의 stateReason은 정상 진행이면 NULL, 미검증이면 BASELINE_UN
 
 ## Snapshot and Progress
 
-TASK-908은 `UNVERIFIED_REFERENCE`를 진행 검증 근거와 구분한다. 차량 ID·전체 번호·불변 traversal과 함께 최신 미검증 ID/order·두 시각만 저장하며 이를 현재 위치나 검증 checkpoint로 노출하지 않는다. 위치가 없으면 Stop ID NULL/order 0/index -1의 명시적 위치 없음 표현을 사용하고 occurrence를 합성하지 않는다. 미검증 TRACKING도 현재 조회·취소·단일 open 세션·UUID 중복 방지·PT4H 수명에 포함된다. 후보 reference의 60초 유효기간은 성공한 세션의 수명이 아니다.
+TASK-908은 `UNVERIFIED_REFERENCE`를 진행 검증 근거와 구분한다. 차량 ID·전체 번호·불변 traversal과 함께 최신 미검증 ID/order·두 시각만 저장하며 이를 현재 위치나 검증 checkpoint로 노출하지 않는다. 단, 등록 직전 재조회로 확인된 TAGO occurrence는 최초 생성 성공 응답에서만 등록 당시 관측 참고 정보로 표시할 수 있으며 추적 판단 근거가 아니다. 위치가 없으면 Stop ID NULL/order 0/index -1의 명시적 위치 없음 표현을 사용하고 occurrence를 합성하지 않는다. 미검증 TRACKING도 현재 조회·취소·단일 open 세션·UUID 중복 방지·PT4H 수명에 포함된다. 후보 reference의 60초 유효기간은 성공한 세션의 수명이 아니다.
 
 동일 차량과 노선의 위치를 traversal의 occurrence에 대응한다. 서울은 `stId`와 `stOrd`를 함께 사용하고 `stopFlag`가 0·1·null이어도 정확히 대응하면 수용한다. TAGO는 `nodeord`가 유일한 occurrence에 대응하고 `nodeid`가 있으면 일치해야 한다. ID가 없으면 합성하지 않는다. 같은 Stop ID의 재방문은 order로 구분하며 구간순번 `sectOrd`를 정류장 순번으로 대체하지 않는다. 명시적 운행 종료와 차량 식별 충돌은 기존대로 처리한다.
 

@@ -18,6 +18,8 @@ import com.stopbell.boarding.repository.BoardingSessionRepository;
 import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.service.BoardingCandidateMetadataService;
+import com.stopbell.transit.domain.TransitProvider;
+import com.stopbell.boarding.entity.BoardingCheckpoint;
 import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
 import com.stopbell.user.repository.UserRepository;
 import org.hibernate.exception.ConstraintViolationException;
@@ -154,7 +156,17 @@ public class BoardingSessionService {
                     request.effectiveNotificationOffsetStops()));
             notifications.recordInitialPreparation(session);
             sessions.flush();
-            return new CreationResult(response(session), true,
+            var response = response(session);
+            int index = start.checkpoint().getIndex();
+            // TAGO's unverified baseline comes from the registration-time roster recheck.
+            // Seoul can retain an older reference when detail is empty, so do not expose it here.
+            if (latest.provider() == TransitProvider.TAGO
+                    && start.checkpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                    && index >= 0 && index < start.traversal().targetIndex()) {
+                response = response.withInitialObservation(new BoardingSessionResponse.InitialObservation(
+                        latest.traversal().get(index).stopName(), start.traversal().targetIndex() - index));
+            }
+            return new CreationResult(response, true,
                     session.getStateReason() == null ? BoardingTrackingSnapshot.from(session) : null);
         });
     }

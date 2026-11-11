@@ -14,8 +14,10 @@ public record BoardingSessionResponse(
         String targetName, int targetOrder, Integer remainingOccurrenceGap, String currentStopName, Instant checkpointObservedAt,
         Instant providerDataTime, EvaluationStatus evaluationStatus, BoardingStateReason reasonCode,
         Instant expiresAt, Instant endedAt, boolean prepareNotificationEnabled, Integer notificationOffsetStops,
-        String preparationNotificationStatus
+        String preparationNotificationStatus, InitialObservation initialObservation
 ) {
+    public record InitialObservation(String stopName, int remainingOccurrenceGap) { }
+
     public enum EvaluationStatus { VERIFICATION_PENDING, READY, RECOVERY_PENDING, HELD, ENDED }
 
     public static BoardingSessionResponse from(BoardingSession session) {
@@ -36,20 +38,27 @@ public record BoardingSessionResponse(
                 session.getCheckpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
                     ? null : instant(session.getCheckpoint().getObservedAt()), instant(session.getCheckpoint().getProviderDataTime()),
                 evaluation, session.getStateReason(), instant(session.getExpiresAt()), instant(session.getEndedAt()),
-                session.isPrepareNotificationEnabled(), session.getNotificationOffsetStops(), "UNKNOWN");
+                session.isPrepareNotificationEnabled(), session.getNotificationOffsetStops(), "UNKNOWN", null);
     }
 
     public BoardingSessionResponse withPreparationStatus(String status) {
         return new BoardingSessionResponse(id, this.status, revision, routeNumber, vehicleNumber, targetName,
                 targetOrder, remainingOccurrenceGap, currentStopName, checkpointObservedAt, providerDataTime, evaluationStatus,
-                reasonCode, expiresAt, endedAt, prepareNotificationEnabled, notificationOffsetStops, status);
+                reasonCode, expiresAt, endedAt, prepareNotificationEnabled, notificationOffsetStops, status, initialObservation);
     }
 
     public BoardingSessionResponse withCurrentStopName(String name) {
         return new BoardingSessionResponse(id, status, revision, routeNumber, vehicleNumber, targetName,
                 targetOrder, remainingOccurrenceGap, evaluationStatus == EvaluationStatus.READY ? name : null,
                 checkpointObservedAt, providerDataTime, evaluationStatus, reasonCode, expiresAt, endedAt,
-                prepareNotificationEnabled, notificationOffsetStops, preparationNotificationStatus);
+                prepareNotificationEnabled, notificationOffsetStops, preparationNotificationStatus, initialObservation);
+    }
+
+    public BoardingSessionResponse withInitialObservation(InitialObservation observation) {
+        return new BoardingSessionResponse(id, status, revision, routeNumber, vehicleNumber, targetName,
+                targetOrder, remainingOccurrenceGap, currentStopName, checkpointObservedAt, providerDataTime,
+                evaluationStatus, reasonCode, expiresAt, endedAt, prepareNotificationEnabled,
+                notificationOffsetStops, preparationNotificationStatus, observation);
     }
 
     private static Instant instant(LocalDateTime time) {

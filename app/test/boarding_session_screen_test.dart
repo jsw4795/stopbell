@@ -68,6 +68,78 @@ void main() {
     expect(find.text('3개 지점 남음'), findsOneWidget);
   });
 
+  testWidgets('registration observation is distinct from verified progress', (
+    tester,
+  ) async {
+    final session = BoardingSession.fromJson({
+      ...sessionJson(evaluation: 'VERIFICATION_PENDING'),
+      'checkpointObservedAt': null,
+      'initialObservation': {'stopName': '등록 지점', 'remainingOccurrenceGap': 3},
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(children: [BoardingSessionDetails(session: session)]),
+        ),
+      ),
+    );
+    expect(find.text('등록 시 확인된 차량 위치'), findsOneWidget);
+    expect(find.text('등록 지점 부근'), findsOneWidget);
+    expect(find.text('등록 당시 관측 기준'), findsOneWidget);
+    expect(find.text('3개 지점 남음'), findsOneWidget);
+    expect(find.text('최근 관측 기준'), findsNothing);
+  });
+
+  testWidgets('initial gap remains available when its name is missing', (
+    tester,
+  ) async {
+    final session = BoardingSession.fromJson({
+      ...sessionJson(evaluation: 'VERIFICATION_PENDING'),
+      'checkpointObservedAt': null,
+      'initialObservation': {'stopName': null, 'remainingOccurrenceGap': 3},
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(children: [BoardingSessionDetails(session: session)]),
+        ),
+      ),
+    );
+    expect(find.text('차량 위치 확인 중'), findsOneWidget);
+    expect(find.text('3개 지점 남음'), findsOneWidget);
+  });
+
+  for (final state in [
+    ('TRACKING', 'RECOVERY_PENDING'),
+    ('TRACKING', 'READY'),
+    ('SUSPENDED', 'HELD'),
+    ('COMPLETED', 'ENDED'),
+    ('CANCELLED', 'ENDED'),
+  ]) {
+    testWidgets('initial observation is hidden in ${state.$1}/${state.$2}', (
+      tester,
+    ) async {
+      final session = BoardingSession.fromJson({
+        ...sessionJson(status: state.$1, evaluation: state.$2),
+        'initialObservation': {
+          'stopName': '이전 관측',
+          'remainingOccurrenceGap': 3,
+        },
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListView(
+              children: [BoardingSessionDetails(session: session)],
+            ),
+          ),
+        ),
+      );
+      expect(find.textContaining('이전 관측'), findsNothing);
+      expect(find.text('등록 당시 관측 기준'), findsNothing);
+    });
+  }
+
   for (final theme in [StopBellTheme.light, StopBellTheme.dark]) {
     testWidgets(
       'detail fits a narrow screen with large text in ${theme.brightness}',
@@ -86,7 +158,14 @@ void main() {
               ),
               child: Scaffold(
                 body: ListView(
-                  children: [BoardingSessionDetails(session: sessionFixture())],
+                  children: [
+                    BoardingSessionDetails(
+                      session: BoardingSession.fromJson({
+                        ...sessionJson(),
+                        'currentStopName': '아주 긴 정류장 이름을 가진 평내호평역 환승센터 앞',
+                      }),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -234,6 +313,23 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets(
+    'cancel stays at the bottom while content scrolls on a small screen',
+    (tester) async {
+      api.currentSession = sessionFixture();
+      await pump(tester);
+      tester.view.physicalSize = const Size(320, 568);
+      await tester.pumpAndSettle();
+      final cancel = find.widgetWithText(TextButton, '추적 취소');
+      final before = tester.getBottomLeft(cancel).dy;
+      expect(before, greaterThan(500));
+      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.pumpAndSettle();
+      expect(tester.getBottomLeft(cancel).dy, before);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   Future<void> tap(WidgetTester tester, String text) async {
     final finder = find.text(text);

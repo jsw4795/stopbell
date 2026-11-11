@@ -51,56 +51,71 @@ class BoardingSessionView extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = controller;
     final s = c.session!;
-    return ListView(
-      padding: const EdgeInsets.all(16),
+    return Column(
       children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: IconButton(
-            onPressed: c.busy ? null : onBack,
-            tooltip: '버스 도착 알림으로',
-            icon: const Icon(Icons.arrow_back),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IconButton(
+                  onPressed: c.busy ? null : onBack,
+                  tooltip: '버스 도착 알림으로',
+                  icon: const Icon(Icons.arrow_back),
+                ),
+              ),
+              if (c.inaccessible) ...[
+                const Text('세션이 없거나 접근할 수 없어요.'),
+                OutlinedButton(
+                  onPressed: c.busy ? null : c.refresh,
+                  child: const Text('상태 새로고침'),
+                ),
+              ] else ...[
+                BoardingSessionDetails(
+                  session: s,
+                  stateUncertain: c.stateUncertain,
+                  boardingName: boardingName,
+                  onRefresh: c.busy ? null : c.refresh,
+                  showRefresh: true,
+                ),
+                if (s.canReconfirm)
+                  FilledButton(
+                    onPressed: c.busy || c.stateUncertain ? null : onReconfirm,
+                    child: const Text('동일 차량 다시 확인'),
+                  ),
+                if (s.isTerminal)
+                  OutlinedButton(
+                    onPressed: c.canCreate ? onNew : null,
+                    child: const Text('새 차량 후보 찾기'),
+                  ),
+              ],
+              if (c.message != null) Text(c.message!),
+              if (c.pending != null)
+                OutlinedButton(
+                  onPressed: c.busy ? null : c.recover,
+                  child: const Text('저장된 생성 요청 다시 확인'),
+                ),
+              if (c.busy) const Text('서버 응답 확인 중...'),
+            ],
           ),
         ),
-        if (c.inaccessible) ...[
-          const Text('세션이 없거나 접근할 수 없어요.'),
-          OutlinedButton(
-            onPressed: c.busy ? null : c.refresh,
-            child: const Text('상태 새로고침'),
-          ),
-        ] else ...[
-          BoardingSessionDetails(
-            session: s,
-            stateUncertain: c.stateUncertain,
-            boardingName: boardingName,
-            onRefresh: c.busy ? null : c.refresh,
-            showRefresh: true,
-          ),
-          if (s.isOpen)
-            TextButton(
-              onPressed: c.busy || c.stateUncertain
-                  ? null
-                  : () => _cancel(context),
-              child: const Text('추적 취소'),
+        if (!c.inaccessible && s.isOpen)
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: c.busy || c.stateUncertain
+                      ? null
+                      : () => _cancel(context),
+                  child: const Text('추적 취소'),
+                ),
+              ),
             ),
-          if (s.canReconfirm)
-            FilledButton(
-              onPressed: c.busy || c.stateUncertain ? null : onReconfirm,
-              child: const Text('동일 차량 다시 확인'),
-            ),
-          if (s.isTerminal)
-            OutlinedButton(
-              onPressed: c.canCreate ? onNew : null,
-              child: const Text('새 차량 후보 찾기'),
-            ),
-        ],
-        if (c.message != null) Text(c.message!),
-        if (c.pending != null)
-          OutlinedButton(
-            onPressed: c.busy ? null : c.recover,
-            child: const Text('저장된 생성 요청 다시 확인'),
           ),
-        if (c.busy) const Text('서버 응답 확인 중...'),
       ],
     );
   }
@@ -151,6 +166,11 @@ class BoardingSessionDetails extends StatelessWidget {
         s.status == BoardingSessionStatus.tracking &&
         s.evaluationStatus == BoardingEvaluation.ready &&
         s.remainingOccurrenceGap != null;
+    final initial =
+        !stateUncertain &&
+        s.status == BoardingSessionStatus.tracking &&
+        s.evaluationStatus == BoardingEvaluation.verificationPending &&
+        s.initialRemainingGap != null;
     final notice = stateUncertain
         ? '변경 결과를 확인하지 못했어요. 상태를 다시 조회해 주세요.'
         : switch (s.status) {
@@ -161,7 +181,8 @@ class BoardingSessionDetails extends StatelessWidget {
             BoardingSessionStatus.expired => '세션 수명 만료로 종료됐어요.',
             BoardingSessionStatus.unknown => '세션 상태를 확인해 주세요.',
             BoardingSessionStatus.tracking => switch (s.evaluationStatus) {
-              BoardingEvaluation.verificationPending => '차량 위치 확인 중',
+              BoardingEvaluation.verificationPending =>
+                initial ? null : '차량 위치 확인 중',
               BoardingEvaluation.recoveryPending => '현재 차량 진행 정보를 다시 확인하고 있어요.',
               BoardingEvaluation.unknown => '진행 상태를 확인해 주세요.',
               _ => null,
@@ -243,21 +264,28 @@ class BoardingSessionDetails extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('최근 확인된 버스 위치', style: theme.textTheme.labelLarge),
+                Text(
+                  initial ? '등록 시 확인된 차량 위치' : '최근 확인된 버스 위치',
+                  style: theme.textTheme.labelLarge,
+                ),
                 const SizedBox(height: 6),
                 Text(
-                  progress && s.currentStopName != null
+                  initial && s.initialStopName != null
+                      ? '${s.initialStopName} 부근'
+                      : progress && s.currentStopName != null
                       ? '${s.currentStopName} 부근 지나는 중'
                       : '차량 위치 확인 중',
                   style: theme.textTheme.titleMedium,
                 ),
-                if (progress && s.currentStopName != null)
+                if (initial)
+                  Text('등록 당시 관측 기준', style: theme.textTheme.bodySmall)
+                else if (progress && s.currentStopName != null)
                   Text('최근 관측 기준', style: theme.textTheme.bodySmall),
-                if (progress) ...[
+                if (progress || initial) ...[
                   const Divider(height: 32),
                   Text('${s.targetName}까지', style: theme.textTheme.bodyMedium),
                   Text(
-                    '${s.remainingOccurrenceGap}개 지점 남음',
+                    '${initial ? s.initialRemainingGap : s.remainingOccurrenceGap}개 지점 남음',
                     style: theme.textTheme.headlineSmall!.copyWith(
                       fontWeight: FontWeight.bold,
                     ),

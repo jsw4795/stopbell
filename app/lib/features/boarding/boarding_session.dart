@@ -98,6 +98,16 @@ class BoardingSession {
     currentStopName = value['currentStopName'] == null
         ? null
         : boardingText(value['currentStopName']);
+    final initial = value['initialObservation'];
+    if (initial != null && initial is! Map<String, dynamic>) {
+      throw const FormatException();
+    }
+    initialStopName = initial == null || initial['stopName'] == null
+        ? null
+        : boardingText(initial['stopName']);
+    initialRemainingGap = initial == null
+        ? null
+        : boardingInteger(initial['remainingOccurrenceGap'], positive: true);
     checkpointObservedAt = value['checkpointObservedAt'] == null
         ? null
         : boardingInstant(value['checkpointObservedAt']);
@@ -159,7 +169,8 @@ class BoardingSession {
   late final BoardingEvaluation evaluationStatus;
   late final BoardingReason? reasonCode;
   late final int? remainingOccurrenceGap;
-  late final String? currentStopName;
+  late final String? currentStopName, initialStopName;
+  late final int? initialRemainingGap;
   late final DateTime expiresAt;
   late final DateTime? checkpointObservedAt, providerDataTime, endedAt;
 
