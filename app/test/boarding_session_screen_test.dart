@@ -444,6 +444,48 @@ void main() {
     },
   );
 
+  testWidgets('timeline panel fills the area directly above cancel', (
+    tester,
+  ) async {
+    api.currentSession = BoardingSession.fromJson(longTimelineSessionJson());
+    await pump(tester);
+    tester.view.physicalSize = const Size(390, 844);
+    await tester.pumpAndSettle();
+    final panel = tester.getRect(
+      find.byKey(const ValueKey('tracking-route-panel')),
+    );
+    final cancel = tester.getRect(find.widgetWithText(TextButton, '추적 취소'));
+    expect(cancel.top - panel.bottom, inInclusiveRange(0, 12));
+    expect(panel.height, greaterThan(300));
+  });
+
+  testWidgets('small screen and large text keep panel and cancel usable', (
+    tester,
+  ) async {
+    api.currentSession = BoardingSession.fromJson(longTimelineSessionJson());
+    await pump(tester);
+    tester.view.physicalSize = const Size(320, 568);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.pumpAndSettle();
+    final panel = tester.getRect(
+      find.byKey(const ValueKey('tracking-route-panel')),
+    );
+    final cancel = tester.getRect(find.widgetWithText(TextButton, '추적 취소'));
+    expect(tester.takeException(), isNull);
+    expect(panel.height, greaterThan(80));
+    expect(cancel.top - panel.bottom, inInclusiveRange(0, 12));
+    expect(cancel.bottom, lessThanOrEqualTo(568));
+    final scroll = find.byKey(const ValueKey('tracking-timeline-scroll'));
+    final marker = find.byKey(const ValueKey('tracking-bus-marker'));
+    await tester.tap(find.byTooltip('상태 새로고침'));
+    await tester.pumpAndSettle();
+    expect(tester.getRect(scroll).overlaps(tester.getRect(marker)), isTrue);
+    await tester.drag(scroll, const Offset(0, 200));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'cancel stays at the bottom while content scrolls on a small screen',
     (tester) async {
