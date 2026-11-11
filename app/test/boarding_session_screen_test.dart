@@ -63,8 +63,8 @@ void main() {
         ),
       ),
     );
-    expect(find.text('평내호평역 부근 지나는 중'), findsOneWidget);
-    expect(find.text('최근 관측 기준'), findsOneWidget);
+    expect(find.text('평내호평역 부근 지나는 중'), findsNothing);
+    expect(find.text('최근 관측 기준'), findsNothing);
     expect(find.text('3개 지점 남음'), findsOneWidget);
   });
 
@@ -83,9 +83,9 @@ void main() {
         ),
       ),
     );
-    expect(find.text('등록 시 확인된 차량 위치'), findsOneWidget);
-    expect(find.text('등록 지점 부근'), findsOneWidget);
-    expect(find.text('등록 당시 관측 기준'), findsOneWidget);
+    expect(find.text('등록 시 확인된 차량 위치'), findsNothing);
+    expect(find.text('등록 지점 부근'), findsNothing);
+    expect(find.text('등록 당시 관측 기준'), findsNothing);
     expect(find.text('3개 지점 남음'), findsOneWidget);
     expect(find.text('최근 관측 기준'), findsNothing);
   });
@@ -105,7 +105,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('차량 위치 확인 중'), findsOneWidget);
+    expect(find.text('차량 위치 확인 중'), findsNothing);
     expect(find.text('3개 지점 남음'), findsOneWidget);
   });
 
@@ -230,7 +230,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('하차 알림 (확인 필요)'), findsOneWidget);
+    expect(find.text('확인 필요'), findsOneWidget);
     expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
   });
   testWidgets('ready without a gap does not invent progress', (tester) async {
@@ -315,6 +315,21 @@ void main() {
   }
 
   testWidgets(
+    'restored current session renders its timeline and fixed controls',
+    (tester) async {
+      api.currentSession = BoardingSession.fromJson(timelineSessionJson());
+      await pump(tester);
+      expect(
+        find.byKey(const ValueKey('tracking-timeline-scroll')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);
+      expect(find.text('최근 관측 기준'), findsOneWidget);
+      expect(find.text('추적 취소'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
     'cancel stays at the bottom while content scrolls on a small screen',
     (tester) async {
       api.currentSession = sessionFixture();
@@ -324,7 +339,10 @@ void main() {
       final cancel = find.widgetWithText(TextButton, '추적 취소');
       final before = tester.getBottomLeft(cancel).dy;
       expect(before, greaterThan(500));
-      await tester.drag(find.byType(ListView).first, const Offset(0, -300));
+      await tester.drag(
+        find.byType(SingleChildScrollView).last,
+        const Offset(0, -300),
+      );
       await tester.pumpAndSettle();
       expect(tester.getBottomLeft(cancel).dy, before);
       expect(tester.takeException(), isNull);
@@ -606,7 +624,7 @@ void main() {
       expect(api.requestCalls, 1);
       expect(api.currentCalls, 0);
       expect(api.creations, isEmpty);
-      expect(find.text('하차 알림 (종료)'), findsOneWidget);
+      expect(find.text('종료'), findsOneWidget);
       expect(find.textContaining('실제 하차 확인을 뜻하지'), findsOneWidget);
     },
   );
@@ -675,9 +693,9 @@ void main() {
         await pump(tester);
         expect(
           find.text(switch (status) {
-            'COMPLETED' => '하차 알림 (종료)',
-            'CANCELLED' => '하차 알림 (취소)',
-            _ => '하차 알림 (만료)',
+            'COMPLETED' => '종료',
+            'CANCELLED' => '취소',
+            _ => '만료',
           }),
           findsOneWidget,
         );

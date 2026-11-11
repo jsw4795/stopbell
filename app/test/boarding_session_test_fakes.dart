@@ -65,6 +65,24 @@ Map<String, dynamic> sessionJson({
       ? '2026-10-21T02:00:00Z'
       : null,
 };
+Map<String, dynamic> timelineSessionJson({int id = 123}) => {
+  ...sessionJson(id: id),
+  'currentStopName': '관측 지점',
+  'timeline': {
+    'provider': 'TAGO',
+    'routeType': 'CITY_LOCAL',
+    'boardingIndex': 0,
+    'targetIndex': 2,
+    'positionIndex': 1,
+    'positionBasis': 'READY',
+    'stops': [
+      {'id': 10, 'index': 0, 'order': 1, 'name': '승차'},
+      {'id': 11, 'index': 1, 'order': 2, 'name': '관측 지점'},
+      {'id': 12, 'index': 2, 'order': 3, 'name': '목표'},
+    ],
+  },
+};
+
 BoardingSession sessionFixture({
   String status = 'TRACKING',
   String evaluation = 'READY',

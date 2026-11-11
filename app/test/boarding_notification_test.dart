@@ -516,6 +516,20 @@ void main() {
       notifications.dispose();
       f.auth.dispose();
     });
+    testWidgets(
+      'notification detail renders the authoritative timeline marker',
+      (tester) async {
+        response = (_) async => boardingJson(timelineSessionJson());
+        await pump(tester);
+        expect(
+          find.byKey(const ValueKey('tracking-bus-marker')),
+          findsOneWidget,
+        );
+        expect(find.text('관측 지점'), findsOneWidget);
+        expect(find.text('최근 관측 기준'), findsOneWidget);
+        expect(requests.single.method, 'GET');
+      },
+    );
     for (final (status, evaluation) in [
       ('TRACKING', 'READY'),
       ('TRACKING', 'RECOVERY_PENDING'),
@@ -539,13 +553,13 @@ void main() {
           ]);
           expect(storage.records.values.single.toJson(), original.toJson());
           expect(
-            find.textContaining(switch (status) {
-              'TRACKING' => '하차 알림 (추적 중)',
-              'SUSPENDED' => '하차 알림 (보류)',
-              'COMPLETED' => '하차 알림 (종료)',
-              'CANCELLED' => '하차 알림 (취소)',
-              'EXPIRED' => '하차 알림 (만료)',
-              _ => '하차 알림 (확인 필요)',
+            find.text(switch (status) {
+              'TRACKING' => '추적 중',
+              'SUSPENDED' => '보류',
+              'COMPLETED' => '종료',
+              'CANCELLED' => '취소',
+              'EXPIRED' => '만료',
+              _ => '확인 필요',
             }),
             findsOneWidget,
           );
@@ -589,7 +603,7 @@ void main() {
             boardingJson(sessionJson(status: 'COMPLETED', evaluation: 'ENDED'));
         await tester.tap(find.text('다시 조회'));
         await tester.pumpAndSettle();
-        expect(find.text('하차 알림 (종료)'), findsOneWidget);
+        expect(find.text('종료'), findsOneWidget);
         expect(
           requests.map((r) => r.url.path),
           everyElement('/api/v1/boarding-sessions/123'),
@@ -734,7 +748,7 @@ void main() {
         requests.last.headers['authorization'],
         'Bearer ${f.auth.accessToken}',
       );
-      expect(find.text('하차 알림 (추적 중)'), findsOneWidget);
+      expect(find.text('추적 중'), findsOneWidget);
     });
     testWidgets('refresh failure removes exact-ID detail before any retry', (
       tester,

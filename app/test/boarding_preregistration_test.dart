@@ -150,19 +150,11 @@ void main() {
           ),
         ),
       );
-      expect(find.textContaining('하차 알림 (추적 중)'), findsOneWidget);
+      expect(find.textContaining('추적 중'), findsOneWidget);
       expect(pending.status, BoardingSessionStatus.tracking);
       expect(pending.evaluationStatus, BoardingEvaluation.verificationPending);
-      final locationCard = find
-          .ancestor(
-            of: find.text('최근 확인된 버스 위치'),
-            matching: find.byType(Container),
-          )
-          .first;
-      expect(
-        find.descendant(of: locationCard, matching: find.text('차량 위치 확인 중')),
-        findsOneWidget,
-      );
+      expect(find.text('최근 확인된 버스 위치'), findsNothing);
+      expect(find.text('차량 위치 확인 중'), findsOneWidget);
       expect(find.textContaining('부근 지나는 중'), findsNothing);
       expect(find.textContaining('개 지점 남음'), findsNothing);
       expect(find.text('최근 관측 기준'), findsNothing);
