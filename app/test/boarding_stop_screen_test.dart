@@ -224,7 +224,7 @@ void main() {
           tester.widget<Text>(find.text('목표까지 약 1개 지점')).style?.color,
           semantic.targetStop,
         );
-        expect(tester.widget<FilledButton>(next).onPressed, isNull);
+        expect(next, findsNothing);
         expect(find.text('알림 시점'), findsNothing);
         await tap(tester, 'candidate-0');
         expect(find.text('알림 시점'), findsOneWidget);
@@ -265,7 +265,7 @@ void main() {
         // A new response must reset selection even if it returns the same objects.
         await tap(tester, 'find-candidates');
         await tester.pumpAndSettle();
-        expect(tester.widget<FilledButton>(next).onPressed, isNull);
+        expect(next, findsNothing);
         expect(find.text('알림 시점'), findsNothing);
         expect(find.byIcon(Icons.radio_button_checked), findsNothing);
         await tap(tester, 'candidate-0');
@@ -273,11 +273,11 @@ void main() {
         await tester.pumpAndSettle();
         await tap(tester, 'find-candidates');
         await tester.pumpAndSettle();
-        expect(tester.widget<FilledButton>(next).onPressed, isNull);
+        expect(next, findsNothing);
         await tap(tester, 'candidate-0');
         await tap(tester, 'reselect-stops');
         await query(tester);
-        expect(tester.widget<FilledButton>(next).onPressed, isNull);
+        expect(next, findsNothing);
       },
     );
   }

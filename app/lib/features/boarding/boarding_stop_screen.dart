@@ -277,7 +277,11 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         onBack: _back,
         backLabel: _backLabel,
         body: _state == _StopsState.success ? _routeAndCandidates() : _status(),
-        summary: _state == _StopsState.success ? _summary() : null,
+        summary:
+            _state == _StopsState.success &&
+                !(_compactResults && _selectedCandidate == null)
+            ? _summary()
+            : null,
       ),
     );
   }

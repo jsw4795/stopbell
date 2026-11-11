@@ -542,7 +542,7 @@ void main() {
       expect(api.creations, isEmpty);
       expect(find.byType(BoardingConfirmationView), findsNothing);
       final next = find.byKey(const ValueKey('continue-boarding-candidate'));
-      expect(tester.widget<FilledButton>(next).onPressed, isNull);
+      expect(next, findsNothing);
       await tap(tester, '서울70사1234');
       expect(find.byType(BoardingConfirmationView), findsNothing);
       expect(api.creations, isEmpty);
@@ -595,12 +595,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('candidate-0')));
     await tester.pump();
     expect(
-      tester
-          .widget<FilledButton>(
-            find.byKey(const ValueKey('continue-boarding-candidate')),
-          )
-          .onPressed,
-      isNull,
+      find.byKey(const ValueKey('continue-boarding-candidate')),
+      findsNothing,
     );
     expect(api.creations, isEmpty);
   });
@@ -619,7 +615,7 @@ void main() {
       await tap(tester, '서울70사1234');
       await tap(tester, '차량번호 확인 불가');
       final next = find.byKey(const ValueKey('continue-boarding-candidate'));
-      expect(tester.widget<FilledButton>(next).onPressed, isNull);
+      expect(next, findsNothing);
       expect(api.creations, isEmpty);
     },
   );
