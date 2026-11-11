@@ -10,7 +10,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 
-import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.LatestSchemaIntegrationTest;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.dto.BusRouteSearchResponse;
 import com.stopbell.transit.entity.BusRoute;
@@ -24,30 +24,15 @@ import org.hibernate.Session;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
-@ExtendWith(SharedMySqlExtension.class)
-@SpringBootTest(properties = "spring.jpa.properties.hibernate.generate_statistics=true")
-@AutoConfigureMockMvc
-@ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.jpa.properties.hibernate.generate_statistics=true"})
 @Transactional
-class BusRouteSearchIntegrationTest {
-
-    @DynamicPropertySource
-    static void database(DynamicPropertyRegistry registry) {
-        SharedMySqlExtension.database(registry, "route_search_pilot");
-    }
+class BusRouteSearchIntegrationTest extends LatestSchemaIntegrationTest {
 
     @Autowired
     private BusRouteRepository busRouteRepository;

@@ -2,29 +2,19 @@ package com.stopbell.transit.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.LatestSchemaIntegrationTest;
 import com.stopbell.transit.domain.TransitProvider;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
-@ExtendWith(SharedMySqlExtension.class)
-@SpringBootTest(properties = {"transit.monitoring.enabled=false", "notification.dispatch.enabled=false", "notification.fcm.enabled=false"})
-@ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional
-class TransitMetadataPreflightIntegrationTest {
-    @DynamicPropertySource static void database(DynamicPropertyRegistry registry) { SharedMySqlExtension.database(registry, "preflight"); }
+class TransitMetadataPreflightIntegrationTest extends LatestSchemaIntegrationTest {
+
     @Autowired JdbcTemplate jdbc;
     @Autowired TransitMetadataPreflightService service;
 

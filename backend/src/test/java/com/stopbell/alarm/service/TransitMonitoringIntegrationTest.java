@@ -40,6 +40,7 @@ import com.stopbell.transit.mapper.TagoTransitObservationMapper;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.UserRepository;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -55,6 +56,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /** Verifies the Phase 5 monitoring path with real DB, mapping, evaluation, and lifecycle components. */
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest
 @ActiveProfiles("test")

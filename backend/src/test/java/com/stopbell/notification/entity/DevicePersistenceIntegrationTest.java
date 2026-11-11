@@ -5,38 +5,23 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.LocalDateTime;
 
-import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.LatestSchemaIntegrationTest;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
-@ExtendWith(SharedMySqlExtension.class)
-@SpringBootTest
-@ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional
-class DevicePersistenceIntegrationTest {
+class DevicePersistenceIntegrationTest extends LatestSchemaIntegrationTest {
 
     private static final String INSTALLATION_ID = "a1234567-1234-4123-8123-123456789abc";
     private static final String OTHER_INSTALLATION_ID = "b1234567-1234-4123-8123-123456789abc";
     private static final LocalDateTime REGISTERED_AT = LocalDateTime.of(2026, 10, 9, 0, 0);
-
-    @DynamicPropertySource
-    static void database(DynamicPropertyRegistry registry) {
-        SharedMySqlExtension.database(registry, "device_pilot");
-    }
 
     @Autowired
     private EntityManager entityManager;

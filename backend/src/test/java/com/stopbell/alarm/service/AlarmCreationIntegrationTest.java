@@ -30,6 +30,7 @@ import com.stopbell.user.auth.service.JwtTokenService;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.UserRepository;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,6 +48,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest
 @AutoConfigureMockMvc

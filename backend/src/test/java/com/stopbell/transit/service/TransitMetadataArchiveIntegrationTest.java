@@ -7,6 +7,7 @@ import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.domain.TransitSourceSystem;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +20,8 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.annotation.DirtiesContext;
 
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {"transit.monitoring.enabled=false", "notification.dispatch.enabled=false", "notification.fcm.enabled=false"})
 @ActiveProfiles("test")

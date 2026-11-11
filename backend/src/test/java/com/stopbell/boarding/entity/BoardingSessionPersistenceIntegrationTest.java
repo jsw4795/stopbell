@@ -3,35 +3,21 @@ package com.stopbell.boarding.entity;
 import static com.stopbell.boarding.BoardingSessionFixtures.*;
 import static org.assertj.core.api.Assertions.*;
 
-import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.LatestSchemaIntegrationTest;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
 
-@ExtendWith(SharedMySqlExtension.class)
-@SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
-@ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @Transactional
-class BoardingSessionPersistenceIntegrationTest {
-    @DynamicPropertySource
-    static void database(DynamicPropertyRegistry registry) {
-        SharedMySqlExtension.database(registry, "boarding_pilot");
-    }
+class BoardingSessionPersistenceIntegrationTest extends LatestSchemaIntegrationTest {
 
     @Autowired private EntityManager em;
     @Autowired private JdbcTemplate jdbc;

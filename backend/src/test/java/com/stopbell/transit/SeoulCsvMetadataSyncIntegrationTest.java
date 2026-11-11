@@ -18,6 +18,7 @@ import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
 import com.stopbell.transit.repository.BusMetadataSyncStateRepository;
 import com.stopbell.transit.service.BusMetadataBootstrapService;
 import com.stopbell.transit.service.BusMetadataSyncService;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -36,6 +37,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {
         "transit.monitoring.enabled=false",

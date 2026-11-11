@@ -6,35 +6,21 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Instant;
 import java.util.List;
 
-import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.LatestSchemaIntegrationTest;
 import com.stopbell.transit.domain.TransitSourceDataKind;
 import com.stopbell.transit.domain.TransitSourceSystem;
 import com.stopbell.transit.service.TransitSourceMetadataService.SourceRecord;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.context.jdbc.SqlMergeMode;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
-@ExtendWith(SharedMySqlExtension.class)
-@SpringBootTest(properties = {
-        "transit.monitoring.enabled=false",
-        "notification.dispatch.enabled=false",
-        "notification.fcm.enabled=false"
-})
-@ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class TransitSourceMetadataIntegrationTest {
-
-    @DynamicPropertySource
-    static void database(DynamicPropertyRegistry registry) {
-        SharedMySqlExtension.database(registry, "transit_source_metadata");
-    }
+@SqlMergeMode(SqlMergeMode.MergeMode.MERGE)
+@Sql(scripts = "/reset-latest-schema.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
+@Sql(scripts = "/reset-latest-schema.sql", executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD)
+class TransitSourceMetadataIntegrationTest extends LatestSchemaIntegrationTest {
 
     @Autowired TransitSourceMetadataService service;
     @Autowired JdbcTemplate jdbc;

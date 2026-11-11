@@ -34,6 +34,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.security.MessageDigest;
 import java.util.UUID;
 import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,6 +51,8 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {"apple.notifications.enabled=true", "apple.notifications.client-id=test.app", "account.deletion.recovery-enabled=false"})
 @ActiveProfiles("test")

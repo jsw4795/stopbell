@@ -6,12 +6,15 @@ import java.util.Map;
 
 import com.stopbell.StopBellApplication;
 import com.stopbell.support.SharedMySqlExtension;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 
+@Tag("db")
+@Tag("migration")
 @ExtendWith(SharedMySqlExtension.class)
 class FlywayReadinessFailureIntegrationTest {
     private SharedMySqlExtension.Database mysql;

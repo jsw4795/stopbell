@@ -37,12 +37,45 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-tasks.named('test') {
+tasks.withType(Test).configureEach {
     useJUnitPlatform()
     // The JDK snapshots retry settings when its HTTP implementation initializes.
     systemProperty 'jdk.httpclient.redirects.retrylimit', '1'
     systemProperty 'jdk.httpclient.disableRetryConnect', 'true'
     systemProperty 'task811.test.classpath', sourceSets.test.runtimeClasspath.asPath
+    // Shared schemas and singleton state are deliberately confined to one sequential worker.
+    maxParallelForks = 1
+    systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
+    ['junit.jupiter.testclass.order.default', 'junit.jupiter.testmethod.order.default',
+     'junit.jupiter.execution.order.random.seed'].each { key ->
+        if (providers.gradleProperty(key).isPresent()) {
+            systemProperty key, providers.gradleProperty(key).get()
+        }
+    }
+    afterSuite { descriptor, result ->
+        if (descriptor.parent == null) {
+            logger.lifecycle("${name}: executed=${result.testCount}, passed=${result.successfulTestCount}, "
+                    + "failed=${result.failedTestCount}, skipped=${result.skippedTestCount}")
+        }
+    }
+}
+
+// test/build remain the complete verification path. CI selects ciTest only after a safe diff.
+['ciTest', 'migrationTest', 'fastTest', 'dbTest'].each { taskName ->
+    tasks.register(taskName, Test) {
+        group = 'verification'
+        testClassesDirs = sourceSets.test.output.classesDirs
+        classpath = sourceSets.test.runtimeClasspath
+        useJUnitPlatform {
+            if (taskName == 'migrationTest') {
+                includeTags 'migration'
+            } else {
+                excludeTags 'migration'
+                if (taskName == 'fastTest') excludeTags 'db'
+                if (taskName == 'dbTest') includeTags 'db'
+            }
+        }
+    }
 }
 
 tasks.withType(AbstractArchiveTask).configureEach {

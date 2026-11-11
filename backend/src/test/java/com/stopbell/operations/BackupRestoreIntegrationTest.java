@@ -9,6 +9,7 @@ import java.util.Map;
 import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.support.FlywayTestAssertions;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.mysql.MySQLContainer;
 
+@Tag("db")
+@Tag("migration")
 @ExtendWith(SharedMySqlExtension.class)
 @Testcontainers
 class BackupRestoreIntegrationTest {

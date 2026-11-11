@@ -4,12 +4,15 @@ import static org.assertj.core.api.Assertions.*;
 import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.support.FlywayTestAssertions;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.dao.DataAccessException;
 
+@Tag("db")
+@Tag("migration")
 @ExtendWith(SharedMySqlExtension.class)
 class TransitMetadataDiffMigrationTest {
     @Test void migratesV35AndEnforcesRunAndUniqueness(SharedMySqlExtension.Database db) {

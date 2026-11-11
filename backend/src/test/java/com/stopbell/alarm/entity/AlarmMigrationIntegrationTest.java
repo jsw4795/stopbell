@@ -12,6 +12,7 @@ import java.util.Map;
 import com.stopbell.support.SharedMySqlExtension;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,8 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
+@Tag("db")
+@Tag("migration")
 @ExtendWith(SharedMySqlExtension.class)
 class AlarmMigrationIntegrationTest {
 

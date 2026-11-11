@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     paths-ignore:
       - 'docs/**'
@@ -27,6 +28,22 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - name: Verify Backend CI selection
+        working-directory: ${{ github.workspace }}
+        run: python3 -m unittest discover -s tools/tests -p 'test_backend_test_ci.py'
+      - name: Select Backend verification scope
+        id: suite
+        working-directory: ${{ github.workspace }}
+        env:
+          CHANGE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            python3 tools/backend_test_ci.py select --manual
+          else
+            python3 tools/backend_test_ci.py select --base "$CHANGE_BASE"
+          fi
       - name: Set up Java 21
         uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
@@ -39,7 +56,24 @@ jobs:
       - name: Verify Docker is available for Testcontainers
         run: docker info
       - name: Build and run tests
-        run: ./gradlew --no-daemon build
+        env:
+          TEST_SUITE: ${{ steps.suite.outputs.suite }}
+        run: |
+          case "$TEST_SUITE" in
+            full) ./gradlew --no-daemon build ;;
+            regular) ./gradlew --no-daemon assemble ciTest ;;
+            *) echo 'Unknown Backend test scope'; exit 1 ;;
+          esac
+      - name: Report executed and excluded Backend tests
+        if: always() && steps.suite.outputs.suite != ''
+        env:
+          TEST_SUITE: ${{ steps.suite.outputs.suite }}
+        run: |
+          if [ "$TEST_SUITE" = "full" ]; then
+            python3 ../tools/backend_test_ci.py report --suite full --results build/test-results/test
+          else
+            python3 ../tools/backend_test_ci.py report --suite regular --results build/test-results/ciTest
+          fi
 
   flutter:
     name: Flutter analysis and tests

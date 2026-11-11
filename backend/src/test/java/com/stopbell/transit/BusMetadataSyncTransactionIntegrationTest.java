@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 
-import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.LatestSchemaIntegrationTest;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusMetadataSyncState;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
@@ -20,25 +20,15 @@ import com.stopbell.transit.service.BusStopOccurrenceMetadataSnapshot;
 import com.stopbell.transit.service.CompleteBusMetadataSnapshot;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.context.jdbc.SqlMergeMode;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
-@ExtendWith(SharedMySqlExtension.class)
-@SpringBootTest
-@ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class BusMetadataSyncTransactionIntegrationTest {
-
-    @DynamicPropertySource
-    static void database(DynamicPropertyRegistry registry) {
-        SharedMySqlExtension.database(registry, "metadata_sync");
-    }
+@SqlMergeMode(SqlMergeMode.MergeMode.MERGE)
+@Sql(scripts = "/reset-latest-schema.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
+@Sql(scripts = "/reset-latest-schema.sql", executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD)
+class BusMetadataSyncTransactionIntegrationTest extends LatestSchemaIntegrationTest {
 
     @Autowired
     private BusMetadataSyncService metadataSyncService;

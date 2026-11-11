@@ -25,7 +25,7 @@ import com.stopbell.notification.client.NotificationSendRequest;
 import com.stopbell.notification.entity.*;
 import com.stopbell.notification.repository.DeviceRepository;
 import com.stopbell.notification.repository.NotificationDeliveryRepository;
-import com.stopbell.support.SharedMySqlExtension;
+import com.stopbell.support.LatestSchemaIntegrationTest;
 import com.stopbell.transit.domain.TransitEvent;
 import com.stopbell.transit.domain.TransitEventType;
 import com.stopbell.transit.domain.TransitProvider;
@@ -35,15 +35,11 @@ import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.test.context.jdbc.Sql;
+import org.springframework.test.context.jdbc.SqlMergeMode;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
@@ -51,18 +47,12 @@ import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-@ExtendWith(SharedMySqlExtension.class)
-@SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "notification.dispatch.enabled=false"})
-@ActiveProfiles("test")
-@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-class NotificationDispatchIntegrationTest {
+@SqlMergeMode(SqlMergeMode.MergeMode.MERGE)
+@Sql(scripts = "/reset-latest-schema.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
+@Sql(scripts = "/reset-latest-schema.sql", executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD)
+class NotificationDispatchIntegrationTest extends LatestSchemaIntegrationTest {
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 10, 12, 0, 0);
     private static final Clock CLOCK = Clock.fixed(NOW.toInstant(ZoneOffset.UTC), ZoneOffset.UTC);
-
-    @DynamicPropertySource
-    static void database(DynamicPropertyRegistry registry) {
-        SharedMySqlExtension.database(registry, "notification_dispatch");
-    }
 
     @Autowired private EntityManager entityManager;
     @Autowired private JdbcTemplate jdbc;
@@ -78,7 +68,7 @@ class NotificationDispatchIntegrationTest {
 
     @BeforeEach
     void set_up() {
-        // Only this class's isolated Testcontainers database; no local DB is used.
+        // Test data is reset between methods; the latest schema and stateless context are shared.
         jdbc.update("delete from notification_deliveries");
         jdbc.update("delete from notification_events");
         handler = new FixtureHandler();

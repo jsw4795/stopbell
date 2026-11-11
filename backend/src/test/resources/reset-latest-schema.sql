@@ -1,0 +1,29 @@
+-- Class boundaries only: method transactions finish before this isolated cleanup.
+-- Preserve Flyway history, FK/CHECK/UNIQUE enforcement and AUTO_INCREMENT sequences.
+DELETE FROM transit_metadata_change_approvals;
+DELETE FROM transit_metadata_unsafe_change_variants;
+DELETE FROM transit_metadata_unsafe_change_details;
+DELETE FROM transit_metadata_diff_analyses;
+DELETE FROM transit_metadata_archives;
+DELETE FROM transit_metadata_collection_runs;
+DELETE FROM transit_source_metadata;
+DELETE FROM seoul_route_endpoints;
+DELETE FROM bus_route_stop_occurrences;
+DELETE FROM bus_routes;
+DELETE FROM bus_stops;
+DELETE FROM bus_metadata_sync_states;
+DELETE FROM notification_deliveries;
+DELETE FROM notification_events;
+DELETE FROM bus_alarm_targets;
+DELETE FROM alarm_creation_requests;
+DELETE FROM alarms;
+DELETE FROM boarding_sessions;
+DELETE FROM devices;
+DELETE FROM refresh_tokens;
+DELETE FROM apple_credentials;
+DELETE FROM account_deletions;
+DELETE FROM account_deletion_receipts;
+DELETE FROM apple_notification_events;
+DELETE FROM apple_identity_boundaries;
+DELETE FROM apple_deletion_generation;
+DELETE FROM users;

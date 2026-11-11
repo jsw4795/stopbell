@@ -38,6 +38,7 @@ import com.stopbell.user.repository.RefreshTokenRepository;
 import com.stopbell.user.repository.UserRepository;
 import jakarta.persistence.EntityManager;
 import org.hibernate.Session;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -59,6 +60,8 @@ import org.springframework.transaction.annotation.Transactional;
  * Never changes TimeZone.setDefault(). Only the callback thread's Clock factories are fixed;
  * LocalDateTime.now(), JPA callbacks, Hibernate, Connector/J and MySQL remain real.
  */
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE,
         properties = "spring.jpa.hibernate.ddl-auto=validate")

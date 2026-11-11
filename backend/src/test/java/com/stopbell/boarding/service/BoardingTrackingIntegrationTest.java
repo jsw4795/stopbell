@@ -36,6 +36,7 @@ import com.stopbell.notification.repository.*;
 import com.stopbell.transit.service.BoardingRouteSnapshot;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.PageRequest;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.provider.*;
 import com.stopbell.user.repository.UserRepository;
 import org.junit.jupiter.api.*;
@@ -56,6 +57,8 @@ import com.stopbell.transit.dto.tago.*;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.*;
 
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = "spring.jpa.hibernate.ddl-auto=validate")
 @ActiveProfiles("test")

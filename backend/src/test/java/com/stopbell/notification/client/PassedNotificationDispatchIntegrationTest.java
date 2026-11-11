@@ -28,6 +28,7 @@ import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.user.entity.AuthProvider;
 import com.stopbell.user.entity.User;
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Existing isolated MySQL/Flyway test setup; FCM is a mock using the real payload builder only. */
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "notification.dispatch.enabled=false",
         "notification.fcm.enabled=false", "transit.monitoring.enabled=false"})

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolver;
 import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.testcontainers.containers.Container;
 import org.testcontainers.mysql.MySQLContainer;
 
@@ -33,6 +34,10 @@ public class SharedMySqlExtension implements BeforeAllCallback, ParameterResolve
         registry.add("spring.datasource.username", database::getUsername);
         registry.add("spring.datasource.password", database::getPassword);
         return database;
+    }
+
+    static void retainContext(ConfigurableApplicationContext context) {
+        currentServer().contexts.add(context);
     }
 
     @Override
@@ -106,6 +111,7 @@ public class SharedMySqlExtension implements BeforeAllCallback, ParameterResolve
                 .withCommand("--log-bin-trust-function-creators=1");
         private final Map<String, Database> classDatabases = new LinkedHashMap<>();
         private final Set<Database> databases = new LinkedHashSet<>();
+        private final Set<ConfigurableApplicationContext> contexts = new LinkedHashSet<>();
         private int sequence;
 
         private Server() {
@@ -148,6 +154,10 @@ public class SharedMySqlExtension implements BeforeAllCallback, ParameterResolve
         @Override
         public void close() throws SQLException {
             try {
+                // Cached Spring contexts outlive their classes, but must release pools before MySQL.
+                for (ConfigurableApplicationContext context : contexts) {
+                    context.close();
+                }
                 try (var connection = DriverManager.getConnection(mysql.getJdbcUrl(), "root", mysql.getPassword());
                         var statement = connection.prepareStatement(
                                 "SELECT COUNT(*) FROM information_schema.processlist WHERE user = ?")) {

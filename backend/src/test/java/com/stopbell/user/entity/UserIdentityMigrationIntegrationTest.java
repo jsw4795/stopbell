@@ -13,6 +13,7 @@ import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.support.FlywayTestAssertions;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.FlywayException;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,8 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
+@Tag("db")
+@Tag("migration")
 @ExtendWith(SharedMySqlExtension.class)
 class UserIdentityMigrationIntegrationTest {
 

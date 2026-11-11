@@ -26,6 +26,7 @@ import com.stopbell.transit.domain.*;
 import com.stopbell.user.entity.*;
 import com.sun.net.httpserver.HttpServer;
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -42,6 +43,8 @@ import org.springframework.test.context.bean.override.mockito.*;
 import org.springframework.transaction.*;
 import org.springframework.transaction.support.*;
 
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "notification.dispatch.enabled=false",
         "notification.fcm.enabled=false"})

@@ -12,6 +12,7 @@ import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.transit.domain.TransitSourceSystem;
 import com.stopbell.transit.metadata.SeoulCsvMetadataSource;
 import com.stopbell.transit.metadata.TagoMetadataSource;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -24,6 +25,8 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
+@Tag("db")
+@Tag("isolated-db")
 @ExtendWith(SharedMySqlExtension.class)
 @SpringBootTest(properties = {"transit.monitoring.enabled=false", "notification.dispatch.enabled=false", "notification.fcm.enabled=false"})
 @ActiveProfiles("test")
@@ -202,6 +205,7 @@ class TransitMetadataSnapshotPreviewIntegrationTest {
                 "--route-stop-master=" + occurrences, "--page=0", "--size=10"));
         assertThat(rows()).isEqualTo(before);
     }
+    @Tag("migration")
     @Test void cli_refuses_old_schema_without_migrating(SharedMySqlExtension.Database old, @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
         var datasource = new org.springframework.jdbc.datasource.DriverManagerDataSource(old.getJdbcUrl(), old.getUsername(), old.getPassword());
         org.flywaydb.core.Flyway.configure().dataSource(datasource).target("34").load().migrate();

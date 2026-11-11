@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.*;
 import com.stopbell.support.SharedMySqlExtension;
 import com.stopbell.support.FlywayTestAssertions;
 import org.flywaydb.core.Flyway;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,6 +13,8 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
+@Tag("db")
+@Tag("migration")
 @ExtendWith(SharedMySqlExtension.class)
 class TransitMetadataCollectionMigrationTest {
     @Test @DisplayName("V34는 기존 데이터를 보존하고 이력 제약을 적용한다")
