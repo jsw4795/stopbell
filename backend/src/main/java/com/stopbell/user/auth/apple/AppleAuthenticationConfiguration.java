@@ -17,6 +17,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @EnableConfigurationProperties(AppleAuthenticationProperties.class)
 public class AppleAuthenticationConfiguration {
     @Bean
+    AppleChallengeRateLimiter appleChallengeRateLimiter(Clock jwtClock,
+            @org.springframework.beans.factory.annotation.Value("${apple.authentication.challenge-limit-per-minute:10}") int limit) {
+        return new AppleChallengeRateLimiter(jwtClock, limit);
+    }
+
+    @Bean
     AppleCredentialStore appleCredentialStore(JdbcTemplate jdbc, AppleCredentialCipher cipher) {
         return new AppleCredentialStore(jdbc, cipher);
     }

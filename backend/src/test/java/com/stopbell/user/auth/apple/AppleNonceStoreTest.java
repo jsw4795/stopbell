@@ -31,4 +31,20 @@ class AppleNonceStoreTest {
         clock.instant = now.plus(Duration.ofMinutes(5));
         assertThatThrownBy(() -> store.consume(expired)).isInstanceOf(InvalidSocialCredentialException.class);
     }
+
+    @Test
+    void mapsCapacityExhaustionToRateLimitedAndRecoversAfterExpiry() {
+        var clock = new Clock() {
+            Instant instant = Instant.parse("2026-11-01T00:00:00Z");
+            @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
+            @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+            @Override public Instant instant() { return instant; }
+        };
+        var store = new AppleNonceStore(clock);
+        for (int i = 0; i < 10000; i++) store.issue(1);
+        assertThatThrownBy(() -> store.issue(1)).isInstanceOfSatisfying(com.stopbell.common.error.ApiException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(com.stopbell.common.error.ErrorCode.RATE_LIMITED));
+        clock.instant = clock.instant.plus(Duration.ofMinutes(5));
+        assertThat(store.issue(1)).hasSize(43);
+    }
 }

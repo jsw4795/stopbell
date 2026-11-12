@@ -7,6 +7,7 @@ public enum ErrorCode {
     UNAUTHENTICATED(HttpStatus.UNAUTHORIZED, "Authentication is required or invalid."),
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "Access is denied."),
     SOCIAL_IDENTITY_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Social identity verification is temporarily unavailable."),
+    RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Too many requests. Try again later."),
     ALARM_NOT_FOUND(HttpStatus.NOT_FOUND, "Alarm was not found."),
     ALARM_CREATION_REQUEST_CONFLICT(HttpStatus.CONFLICT, "Alarm creation request conflicts with the original request."),
     ALARM_CREATION_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "Alarm creation request was not found."),

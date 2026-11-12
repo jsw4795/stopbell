@@ -146,7 +146,7 @@ class AppleLoginIntegrationTest {
                     new AppleIdentityTokenVerifier(new AppleJwksDecoder(URI.create(origin + "/keys"), 1000, 1000), "app", clock),
                     new AppleCodeExchange(URI.create(origin + "/token"), "app",
                             new AppleClientSecret("app", "team", "key", pem, clock), 1000, 1000), new AppleIdentityBoundary(jdbc));
-            var http = MockMvcBuilders.standaloneSetup(new AppleLoginController(real, credentials, login))
+            var http = MockMvcBuilders.standaloneSetup(new AppleLoginController(real, credentials, login, new AppleChallengeRateLimiter(java.time.Clock.systemUTC(), 1000)))
                     .setControllerAdvice(new GlobalExceptionHandler()).build();
             var json = JsonMapper.builder().build();
             String challenge = http.perform(post("/auth/apple/challenge")).andExpect(status().isOk())

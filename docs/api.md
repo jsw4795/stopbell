@@ -726,7 +726,7 @@ Backend는 `GOOGLE_SERVER_CLIENT_ID`에 설정한 Backend용 Google Server Clien
 
 ### Apple 로그인
 
-Apple 인증을 명시적으로 활성화한 경우 인증 없이 `POST /auth/apple/challenge`를 호출해 `{"nonce":"<서버 nonce>"}`를 받는다. 이어 `POST /auth/apple`에 JSON `{"identityToken":"<Apple ID Token>","authorizationCode":"<Apple code>","nonce":"<서버 nonce>"}`를 전달한다. 성공은 Google과 같은 StopBell Access/Refresh Token JSON과 `200`이며 두 응답은 `Cache-Control: no-store`다. 검증 실패·nonce 재사용은 `401 UNAUTHENTICATED`, Apple 인증 서비스 장애는 `503 SOCIAL_IDENTITY_UNAVAILABLE`, DB 또는 설정 실패는 서버 오류다. 누락·손상된 JSON은 기존 MVC 400 정책을 따른다. 비활성화 시 두 경로에 Controller가 없어 404다.
+Apple 인증을 명시적으로 활성화한 경우 인증 없이 `POST /auth/apple/challenge`를 호출해 `{"nonce":"<서버 nonce>"}`를 받는다. 이어 `POST /auth/apple`에 JSON `{"identityToken":"<Apple ID Token>","authorizationCode":"<Apple code>","nonce":"<서버 nonce>"}`를 전달한다. 성공은 Google과 같은 StopBell Access/Refresh Token JSON과 `200`이며 두 응답은 `Cache-Control: no-store`다. 검증 실패·nonce 재사용은 `401 UNAUTHENTICATED`, Apple 인증 서비스 장애는 `503 SOCIAL_IDENTITY_UNAVAILABLE`, DB 또는 설정 실패는 서버 오류다. `POST /auth/apple/challenge`는 클라이언트 IP(`getRemoteAddr()`, `X-Forwarded-For` 미신뢰)당 1분 10회(`apple.authentication.challenge-limit-per-minute`)로 제한하며 초과 또는 미사용 nonce 저장소 포화 시 `429 RATE_LIMITED`를 반환한다. 누락·손상된 JSON은 기존 MVC 400 정책을 따른다. 비활성화 시 두 경로에 Controller가 없어 404다.
 
 기존에 확인된 Apple 인증 또는 철회 이벤트보다 오래되거나 같은 초에 발급된 인증은 401로 거부한다. nonce는 단일 프로세스에서 5분간 유효하고 시도 시 한 번만 소비된다. 실패하거나 서버 재시작 시 새 challenge와 Apple 인증이 필요하다. 코드 교환 성공 뒤 DB 실패 또는 응답 유실도 기존 코드를 재시도하지 않고 새 Apple 인증으로 복구한다. 인증과 계정 저장의 경계 및 운영 조건은 [Architecture](architecture.md#apple-인증-기반-task-815-a)를 따른다. 동일 이메일이라도 Apple과 Google 계정은 별도 User다.
 
