@@ -234,7 +234,11 @@ class _HomeOverviewState extends State<HomeOverview>
           _createCards(context),
           if (widget.findSessions != null) ..._sessionSections(context),
           const SizedBox(height: StopBellSpacing.xl),
-          _SectionTitle('내 도착 알람', count: _alarmCount),
+          _SectionTitle(
+            '내 도착 알람',
+            icon: Icons.notifications_none_outlined,
+            count: _alarmCount,
+          ),
           const SizedBox(height: StopBellSpacing.sm),
           ..._alarmSection(context),
         ],
@@ -252,30 +256,43 @@ class _HomeOverviewState extends State<HomeOverview>
       icon: Icons.notifications_active_outlined,
       title: '도착 알람',
       subtitle: '정류장 도착 알림',
-      background: colors.primaryContainer,
       accent: colors.primary,
       onTap: widget.onCreateArrival,
     );
     final boarding = widget.onCreateBoarding;
     if (boarding == null) return arrival;
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(child: arrival),
-          const SizedBox(width: StopBellSpacing.md),
-          Expanded(
-            child: _CreateCard(
-              icon: Icons.directions_bus_outlined,
-              title: '하차 알람',
-              subtitle: '버스 하차 알림',
-              background: colors.secondaryContainer,
-              accent: colors.onSecondaryContainer,
-              onTap: boarding,
-            ),
+    final boardingCard = _CreateCard(
+      icon: Icons.directions_bus_outlined,
+      title: '하차 알람',
+      subtitle: '버스 하차 알림',
+      accent: colors.secondary,
+      onTap: boarding,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 큰 글자나 좁은 화면에서는 두 카드를 세로로 쌓아 줄바꿈·넘침을 막는다.
+        final scale = MediaQuery.textScalerOf(context).scale(16) / 16;
+        if (constraints.maxWidth / scale < 360) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              arrival,
+              const SizedBox(height: StopBellSpacing.sm),
+              boardingCard,
+            ],
+          );
+        }
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: arrival),
+              const SizedBox(width: StopBellSpacing.md),
+              Expanded(child: boardingCard),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -284,14 +301,17 @@ class _HomeOverviewState extends State<HomeOverview>
       case _LoadState.loading:
         return const [
           SizedBox(height: StopBellSpacing.xl),
-          _SectionTitle('진행 중인 하차 알람'),
+          _SectionTitle('진행 중인 하차 알람', icon: Icons.directions_bus_outlined),
           SizedBox(height: StopBellSpacing.sm),
           _InlineProgress('하차 알람 확인 중...'),
         ];
       case _LoadState.error:
         return [
           const SizedBox(height: StopBellSpacing.xl),
-          const _SectionTitle('진행 중인 하차 알람'),
+          const _SectionTitle(
+            '진행 중인 하차 알람',
+            icon: Icons.directions_bus_outlined,
+          ),
           const SizedBox(height: StopBellSpacing.sm),
           _InlineError(message: '하차 알람 상태를 불러오지 못했어요.', onRetry: _loadSessions),
         ];
@@ -303,7 +323,10 @@ class _HomeOverviewState extends State<HomeOverview>
         if (session == null) return const [];
         return [
           const SizedBox(height: StopBellSpacing.xl),
-          _SectionTitle(current != null ? '진행 중인 하차 알람' : '최근 종료된 하차 알람'),
+          _SectionTitle(
+            current != null ? '진행 중인 하차 알람' : '최근 종료된 하차 알람',
+            icon: Icons.directions_bus_outlined,
+          ),
           const SizedBox(height: StopBellSpacing.sm),
           _SessionCard(
             key: ValueKey(('session', session.id)),
@@ -353,8 +376,9 @@ class _HomeOverviewState extends State<HomeOverview>
 }
 
 class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title, {this.count});
+  const _SectionTitle(this.title, {required this.icon, this.count});
   final String title;
+  final IconData icon;
   final int? count;
 
   @override
@@ -364,13 +388,25 @@ class _SectionTitle extends StatelessWidget {
       header: true,
       child: Row(
         children: [
+          Icon(icon, size: 22, color: theme.colorScheme.primary),
+          const SizedBox(width: StopBellSpacing.sm),
           Flexible(child: Text(title, style: theme.textTheme.titleLarge)),
           if (count != null) ...[
             const SizedBox(width: StopBellSpacing.sm),
-            Text(
-              '$count',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: StopBellSpacing.sm,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(StopBellSpacing.sm),
+              ),
+              child: Text(
+                '$count개',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ],
@@ -385,48 +421,69 @@ class _CreateCard extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
-    required this.background,
     required this.accent,
     required this.onTap,
   });
 
   final IconData icon;
   final String title, subtitle;
-  final Color background, accent;
+  final Color accent;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Semantics(
       button: true,
       label: '$title 만들기',
       excludeSemantics: true,
       child: Material(
-        color: background,
-        borderRadius: BorderRadius.circular(StopBellRadius.card),
+        color: Color.alphaBlend(accent.withValues(alpha: .08), colors.surface),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(StopBellRadius.card),
+          side: BorderSide(color: accent.withValues(alpha: .24)),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(StopBellRadius.card),
           child: Padding(
-            padding: const EdgeInsets.all(StopBellSpacing.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.all(StopBellSpacing.md),
+            child: Row(
               children: [
-                Icon(icon, color: accent, size: 28),
-                const SizedBox(height: StopBellSpacing.lg),
-                Text(
-                  title,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: .16),
+                    borderRadius: BorderRadius.circular(StopBellRadius.button),
+                  ),
+                  child: Icon(icon, color: accent, size: 20),
+                ),
+                const SizedBox(width: StopBellSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: StopBellSpacing.xs),
-                Text(
-                  subtitle,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
+                Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: colors.onSurfaceVariant,
                 ),
               ],
             ),
@@ -437,14 +494,15 @@ class _CreateCard extends StatelessWidget {
   }
 }
 
+/// 왼쪽 노선 유형색 띠 + 본문 + 이동 화살표. 큰 아이콘은 두지 않는다.
 class _ListCard extends StatelessWidget {
   const _ListCard({
-    required this.leading,
+    required this.accent,
     required this.children,
     required this.onTap,
   });
 
-  final Widget leading;
+  final Color accent;
   final List<Widget> children;
   final VoidCallback? onTap;
 
@@ -462,29 +520,38 @@ class _ListCard extends StatelessWidget {
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 72),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: StopBellSpacing.lg,
-                vertical: StopBellSpacing.md,
-              ),
-              child: Row(
-                children: [
-                  leading,
-                  const SizedBox(width: StopBellSpacing.md),
-                  Expanded(
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  key: const ValueKey('route-accent'),
+                  width: 4,
+                  color: accent,
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      StopBellSpacing.lg,
+                      StopBellSpacing.md,
+                      StopBellSpacing.sm,
+                      StopBellSpacing.md,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: children,
                     ),
                   ),
-                  if (onTap != null) ...[
-                    const SizedBox(width: StopBellSpacing.sm),
-                    Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
-                  ],
-                ],
-              ),
+                ),
+                if (onTap != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: StopBellSpacing.md),
+                    child: Icon(
+                      Icons.chevron_right,
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+              ],
             ),
           ),
         ),
@@ -493,41 +560,103 @@ class _ListCard extends StatelessWidget {
   }
 }
 
-class _LeadingIcon extends StatelessWidget {
-  const _LeadingIcon(this.icon, this.color);
-  final IconData icon;
-  final Color color;
+/// 버스 번호와 오른쪽 상태 칩.
+class _CardHeader extends StatelessWidget {
+  const _CardHeader({
+    required this.routeNumber,
+    required this.routeColor,
+    required this.status,
+  });
+  final String routeNumber;
+  final Color? routeColor;
+  final Widget status;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 40,
-    height: 40,
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(StopBellRadius.button),
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // 공간이 부족하면 상태 칩이 번호 아래로 내려가도록 Wrap을 사용한다.
+    return SizedBox(
+      width: double.infinity,
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: StopBellSpacing.sm,
+        runSpacing: StopBellSpacing.xs,
+        children: [
+          Text(
+            routeNumber,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: routeColor,
+            ),
+          ),
+          status,
+        ],
+      ),
+    );
+  }
+}
+
+/// 작은 아이콘 + 보조 정보 한 줄.
+class _InfoLine extends StatelessWidget {
+  const _InfoLine({required this.icon, required this.child});
+  final IconData icon;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: StopBellSpacing.xs),
+    child: Row(
+      children: [
+        Icon(
+          icon,
+          size: 16,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: StopBellSpacing.sm),
+        Expanded(child: child),
+      ],
     ),
-    child: Icon(icon, color: color, size: 22),
   );
 }
 
 class _StatusChip extends StatelessWidget {
-  const _StatusChip(this.label, this.color);
+  const _StatusChip(this.label, this.color, {this.icon, this.dot = false});
   final String label;
   final Color color;
+  final IconData? icon;
+  final bool dot;
 
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(
       horizontal: StopBellSpacing.sm,
-      vertical: 2,
+      vertical: 3,
     ),
     decoration: BoxDecoration(
-      color: color.withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(StopBellSpacing.sm),
+      color: color.withValues(alpha: .14),
+      borderRadius: BorderRadius.circular(StopBellRadius.button),
     ),
-    child: Text(
-      label,
-      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (dot)
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          )
+        else if (icon != null)
+          Icon(icon, size: 14, color: color),
+        if (dot || icon != null) const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall
+                ?.copyWith(color: color),
+          ),
+        ),
+      ],
     ),
   );
 }
@@ -541,9 +670,15 @@ class _AlarmCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final semantic = StopBellColors.of(context);
-    final statusColor = alarm.status == AlarmStatus.inactive
-        ? theme.colorScheme.onSurfaceVariant
-        : semantic.activeTracking;
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final (statusColor, statusIcon) = switch (alarm.status) {
+      AlarmStatus.inactive => (muted, Icons.notifications_off_outlined),
+      AlarmStatus.active => (
+        semantic.activeTracking,
+        Icons.notifications_active_outlined,
+      ),
+      AlarmStatus.followUp => (semantic.activeTracking, Icons.near_me_outlined),
+    };
     final endpoints = alarm.startStopName != null && alarm.endStopName != null
         ? '${alarm.startStopName} → ${alarm.endStopName}'
         : null;
@@ -555,19 +690,18 @@ class _AlarmCard extends StatelessWidget {
     );
     return _ListCard(
       onTap: onTap,
-      leading: _LeadingIcon(
-        Icons.place_outlined,
-        routeColor ?? theme.colorScheme.primary,
-      ),
+      accent: routeColor ?? theme.colorScheme.outlineVariant,
       children: [
-        Text(
-          alarm.routeNumber,
-          style: theme.textTheme.labelLarge?.copyWith(
-            color: routeColor ?? theme.colorScheme.primary,
-            fontWeight: FontWeight.w700,
+        _CardHeader(
+          routeNumber: alarm.routeNumber,
+          routeColor: routeColor,
+          status: _StatusChip(
+            alarm.status.shortLabel,
+            statusColor,
+            icon: statusIcon,
           ),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: StopBellSpacing.xs),
         Text.rich(
           TextSpan(
             children: [
@@ -579,22 +713,19 @@ class _AlarmCard extends StatelessWidget {
               ),
               TextSpan(
                 text: ' 도착',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
+                style: theme.textTheme.bodyMedium?.copyWith(color: muted),
               ),
             ],
           ),
         ),
         if (endpoints != null)
-          Text(
-            endpoints,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+          _InfoLine(
+            icon: Icons.swap_horiz,
+            child: Text(
+              endpoints,
+              style: theme.textTheme.bodySmall?.copyWith(color: muted),
             ),
           ),
-        const SizedBox(height: StopBellSpacing.xs),
-        _StatusChip(alarm.status.shortLabel, statusColor),
       ],
     );
   }
@@ -615,21 +746,13 @@ class _SessionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final semantic = StopBellColors.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
     final (label, color) = switch (session.status) {
       BoardingSessionStatus.tracking => ('추적 중', semantic.activeTracking),
       BoardingSessionStatus.suspended => ('보류', semantic.heldTracking),
-      BoardingSessionStatus.completed => (
-        '종료',
-        theme.colorScheme.onSurfaceVariant,
-      ),
-      BoardingSessionStatus.cancelled => (
-        '취소',
-        theme.colorScheme.onSurfaceVariant,
-      ),
-      BoardingSessionStatus.expired => (
-        '만료',
-        theme.colorScheme.onSurfaceVariant,
-      ),
+      BoardingSessionStatus.completed => ('종료', muted),
+      BoardingSessionStatus.cancelled => ('취소', muted),
+      BoardingSessionStatus.expired => ('만료', muted),
       BoardingSessionStatus.unknown => ('확인 필요', semantic.warning),
     };
     final ended = session.endedAt;
@@ -644,39 +767,37 @@ class _SessionCard extends StatelessWidget {
       session.timeline?.provider,
       session.timeline?.routeType,
     );
+    final small = theme.textTheme.bodySmall?.copyWith(color: muted);
     return _ListCard(
       onTap: onTap,
-      leading: _LeadingIcon(
-        Icons.directions_bus_outlined,
-        routeColor ?? theme.colorScheme.onSurfaceVariant,
-      ),
+      accent: routeColor ?? theme.colorScheme.outlineVariant,
       children: [
-        Text(
-          session.routeNumber,
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: routeColor,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          '${session.vehicleNumber} · ${session.targetName} 하차',
-          style: theme.textTheme.bodySmall,
+        _CardHeader(
+          routeNumber: session.routeNumber,
+          routeColor: routeColor,
+          status: _StatusChip(label, color, dot: session.isOpen),
         ),
         const SizedBox(height: StopBellSpacing.xs),
-        Wrap(
-          spacing: StopBellSpacing.sm,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            _StatusChip(label, color),
-            if (detail != null)
-              Text(
-                detail,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-          ],
+        _InfoLine(
+          icon: Icons.place_outlined,
+          child: Text(
+            '${session.targetName} 하차',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        _InfoLine(
+          icon: Icons.directions_car_outlined,
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(text: session.vehicleNumber),
+                if (detail != null) TextSpan(text: '  ·  $detail'),
+              ],
+            ),
+            style: small,
+          ),
         ),
       ],
     );

@@ -127,7 +127,7 @@ void main() {
     expect(find.text('평내신명.대주 → 상봉역'), findsOneWidget);
     expect(find.textContaining('→'), findsOneWidget);
     expect(find.text('상봉역 도착'), findsNWidgets(2));
-    expect(find.byIcon(Icons.place_outlined), findsNWidgets(2));
+    expect(find.byIcon(Icons.swap_horiz), findsOneWidget);
   });
 
   testWidgets('Alarm 응답의 기종점은 선택 필드이며 한쪽만 있으면 표시하지 않는다', (tester) async {
@@ -188,8 +188,8 @@ void main() {
     expect(find.text('7000'), findsOneWidget);
     expect(find.textContaining('하차 알람', findRichText: true), findsNWidgets(2));
     expect(find.text('추적 중'), findsOneWidget);
-    expect(find.text('4개 지점 남음'), findsOneWidget);
-    expect(find.text('서울70사1234 · 목적 정류장 하차'), findsOneWidget);
+    expect(find.text('목적 정류장 하차'), findsOneWidget);
+    expect(find.text('서울70사1234  ·  4개 지점 남음'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey(('session', 7))));
     await tester.tap(find.text('하차 알람'));
     expect(current, 1);
@@ -227,7 +227,7 @@ void main() {
     expect(find.text('최근 종료된 하차 알람'), findsOneWidget);
     expect(find.byKey(const ValueKey(('session', 5))), findsNothing);
     expect(find.text('종료'), findsOneWidget);
-    expect(find.text('30분 전 종료'), findsOneWidget);
+    expect(find.text('서울70사1234  ·  30분 전 종료'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey(('session', 6))));
     expect(ended, [6]);
   });
@@ -248,7 +248,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('보류'), findsOneWidget);
-    expect(find.text('차량 재확인 필요'), findsOneWidget);
+    expect(find.text('서울70사1234  ·  차량 재확인 필요'), findsOneWidget);
     expect(find.text('최근 종료된 하차 알람'), findsNothing);
   });
 
@@ -331,10 +331,11 @@ void main() {
           ?.color,
       isNot(green),
     );
-    expect(
-      tester.widget<Icon>(find.byIcon(Icons.place_outlined).first).color,
-      green,
+    final stripe = find.descendant(
+      of: find.byKey(const ValueKey(1)),
+      matching: find.byKey(const ValueKey('route-accent')),
     );
+    expect(tester.widget<Container>(stripe).color, green);
     expect(find.text('일반형시내'), findsNothing);
     final sessionNumber = find.descendant(
       of: find.byKey(const ValueKey(('session', 9))),
@@ -358,13 +359,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('4개 지점 남음'), findsOneWidget);
+    expect(find.text('서울70사1234  ·  4개 지점 남음'), findsOneWidget);
     await tester.pump(const Duration(seconds: 19));
     expect(reads, isEmpty);
     await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     expect(reads, [7]);
-    expect(find.text('2개 지점 남음'), findsOneWidget);
+    expect(find.text('서울70사1234  ·  2개 지점 남음'), findsOneWidget);
     next = sessionFixture(
       id: 7,
       status: 'COMPLETED',
