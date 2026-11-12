@@ -189,6 +189,23 @@ class FakeBoardingSessions implements BoardingSessionClient {
   final reconfirmations = <(int, int, String, String)>[];
   Future<BoardingSession> Function()? onCreate, onFind, onCancel, onReconfirm;
   Future<BoardingSession?> Function()? onCurrent, onRequest;
+  Future<BoardingSessionOverview> Function()? onOverview;
+  List<BoardingSession> recentSessions = const [];
+  int overviewCalls = 0;
+  @override
+  Future<BoardingSessionOverview> findOverview({
+    required int generation,
+    required bool Function() current,
+  }) async {
+    overviewCalls++;
+    if (onOverview != null) return onOverview!();
+    final open = currentSession;
+    return BoardingSessionOverview(
+      current: open != null && open.isOpen ? open : null,
+      recent: recentSessions,
+    );
+  }
+
   @override
   Future<BoardingSession> create(
     Map<String, Object> body, {

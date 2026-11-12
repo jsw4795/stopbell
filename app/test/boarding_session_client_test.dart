@@ -72,6 +72,47 @@ void main() {
       },
     );
   }
+  test('overview reads current and recent ended sessions read-only', () async {
+    respond = (request) async => switch (request.url.queryParameters['scope']) {
+      'current' => boardingJson([sessionJson(id: 9)]),
+      'recent' => boardingJson([
+        sessionJson(id: 8, status: 'COMPLETED', evaluation: 'ENDED', gap: null),
+        sessionJson(id: 7, status: 'EXPIRED', evaluation: 'ENDED', gap: null),
+      ]),
+      _ => boardingJson({}, 400),
+    };
+    final overview = await client.findOverview(
+      generation: auth.generation,
+      current: current,
+    );
+    expect(overview.current?.id, 9);
+    expect(overview.recent.map((session) => session.id), [8, 7]);
+    expect(
+      requests.map((r) => '${r.method} ${r.url.path}?${r.url.query}').toSet(),
+      {
+        'GET /api/v1/boarding-sessions?scope=current',
+        'GET /api/v1/boarding-sessions?scope=recent',
+      },
+    );
+  });
+
+  test('overview rejects open sessions in the recent ended list', () async {
+    respond = (request) async =>
+        request.url.queryParameters['scope'] == 'recent'
+        ? boardingJson([sessionJson(id: 8)])
+        : boardingJson(<Object>[]);
+    await expectLater(
+      client.findOverview(generation: auth.generation, current: current),
+      throwsA(
+        isA<BoardingSessionException>().having(
+          (error) => error.failure,
+          'failure',
+          SessionFailure.parsing,
+        ),
+      ),
+    );
+  });
+
   test('current-number body reaches transport unchanged', () async {
     const currentBody = <String, Object>{
       'clientRequestId': uuid,

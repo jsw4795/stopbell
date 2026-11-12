@@ -62,6 +62,9 @@ public class BoardingSessionController {
         if (query.containsKey("scope") && "current".equals(query.getFirst("scope"))) {
             return service.findCurrent(jwtTokens.extractUserId(jwt));
         }
+        if (query.containsKey("scope") && "recent".equals(query.getFirst("scope"))) {
+            return service.findRecentEnded(jwtTokens.extractUserId(jwt));
+        }
         if (query.containsKey("clientRequestId")) {
             return service.findRequest(jwtTokens.extractUserId(jwt), query.getFirst("clientRequestId"));
         }

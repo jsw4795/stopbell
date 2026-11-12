@@ -93,7 +93,7 @@ Future<AuthSession> pumpApplication(
 }
 
 Future<void> startAlarm(WidgetTester tester) async {
-  await tester.tap(find.text('새 알림 만들기'));
+  await tester.tap(find.text('도착 알람'));
   await tester.pumpAndSettle();
   await tester.enterText(find.byType(TextField), '7000');
   await tester.tap(find.text('검색'));
@@ -216,7 +216,7 @@ void main() {
       expect((await storage.read())?.refreshToken, 'rotated-refresh');
       await tester.tap(find.byTooltip('알람 목록으로'));
       await tester.pumpAndSettle();
-      expect(find.text('ACTIVE · 감시 중'), findsOneWidget);
+      expect(find.text('감시 중'), findsOneWidget);
       expect(requests, [
         'GET /api/v1/alarms',
         'GET /api/v1/bus-routes',
@@ -294,7 +294,7 @@ void main() {
       await tester.tap(find.text('Google로 계속하기'));
       await tester.pumpAndSettle();
       expect(googleCalls, 1);
-      expect(find.text('INACTIVE · 비활성'), findsOneWidget);
+      expect(find.text('비활성'), findsOneWidget);
       expect(find.text('알람 상세'), findsNothing);
       await tester.tap(find.byKey(const ValueKey(15)));
       await tester.pumpAndSettle();

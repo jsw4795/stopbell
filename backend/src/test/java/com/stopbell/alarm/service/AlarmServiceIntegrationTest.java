@@ -78,6 +78,9 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
     private JwtTokenService jwtTokenService;
 
     @Autowired
+    private com.stopbell.transit.repository.TransitSourceMetadataRepository sourceMetadataRepository;
+
+    @Autowired
     private MockMvc mockMvc;
 
     @Autowired
@@ -118,7 +121,7 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         assertThat(target.getSuccessorExternalStopId()).isEqualTo(route.lastExternalStopId());
         assertThat(target.getSuccessorStopOrder()).isEqualTo(7);
         assertThat(response).isEqualTo(new AlarmResponse(
-                alarm.getId(), TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", true, true
+                alarm.getId(), TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", true, true, null, null
         ));
     }
 
@@ -805,7 +808,7 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
     }
 
     @Test
-    @DisplayName("Alarm 목록과 모든 BusAlarmTarget을 한 쿼리로 조회한다")
+    @DisplayName("Alarm 목록과 모든 BusAlarmTarget을 한 쿼리로 조회하고 기종점은 Alarm 수와 무관한 쿼리로 조회한다")
     void find_all_fetches_bus_targets_in_one_query() {
         User owner = user();
         RouteFixture route = route();
@@ -821,7 +824,8 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         try {
             statistics.clear();
             assertThat(alarmService.findAll(owner.getId())).hasSize(3);
-            assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
+            // Alarm·BusAlarmTarget 1회 + 표시용 현재 노선 1회 + TAGO 노선 원본 1회
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
         } finally {
             statistics.setStatisticsEnabled(originallyEnabled);
         }
@@ -868,7 +872,7 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
     }
 
     @Test
-    @DisplayName("Alarm 상세와 BusAlarmTarget을 한 쿼리로 조회한다")
+    @DisplayName("Alarm 상세와 BusAlarmTarget을 한 쿼리로 조회하고 기종점은 고정된 추가 쿼리로 조회한다")
     void find_by_id_fetches_bus_target_in_one_query() {
         User owner = user();
         RouteFixture route = route();
@@ -882,12 +886,75 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         try {
             statistics.clear();
             assertThat(alarmService.findById(owner.getId(), alarmId)).isEqualTo(new AlarmResponse(
-                    alarmId, TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", false, false
+                    alarmId, TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", false, false, null, null
             ));
-            assertThat(statistics.getPrepareStatementCount()).isEqualTo(1);
+            // Alarm·BusAlarmTarget 1회 + 표시용 현재 노선 1회 + TAGO 노선 원본 1회
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
         } finally {
             statistics.setStatisticsEnabled(originallyEnabled);
         }
+    }
+
+    @Test
+    @DisplayName("Alarm 목록은 생성 당시 노선과 일치하는 공식 기종점만 고정된 쿼리 수로 제공한다")
+    void list_alarms_with_official_route_endpoints() throws Exception {
+        User owner = user();
+        RouteFixture verified = route();
+        RouteFixture renumbered = route();
+        RouteFixture unknown = route();
+        rawRoute(verified.externalRouteId(), """
+                {"routeid":"%s","routeno":7000,"startnodenm":"평내신명.대주","endnodenm":"상봉역"}
+                """.formatted(verified.externalRouteId()));
+        rawRoute(renumbered.externalRouteId(), """
+                {"routeid":"%s","routeno":7000,"startnodenm":"기점","endnodenm":"종점"}
+                """.formatted(renumbered.externalRouteId()));
+        Long verifiedId = alarmService.create(owner.getId(), new CreateAlarmRequest(verified.middleId(), false, false)).id();
+        alarmService.create(owner.getId(), new CreateAlarmRequest(verified.middleId(), true, false));
+        Long renumberedId = alarmService.create(owner.getId(), new CreateAlarmRequest(renumbered.middleId(), false, false)).id();
+        Long unknownId = alarmService.create(owner.getId(), new CreateAlarmRequest(unknown.middleId(), false, false)).id();
+        BusRoute changed = routeRepository.findByProviderAndExternalRouteId(TransitProvider.TAGO, renumbered.externalRouteId())
+                .orElseThrow();
+        changed.updateMetadata("7000A", changed.getCityCode());
+        entityManager.flush();
+        entityManager.clear();
+
+        Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+        boolean originallyEnabled = statistics.isStatisticsEnabled();
+        statistics.setStatisticsEnabled(true);
+        try {
+            statistics.clear();
+            List<AlarmResponse> alarms = alarmService.findAll(owner.getId());
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+            assertThat(alarms).hasSize(4);
+            assertThat(alarms).filteredOn(alarm -> alarm.id().equals(verifiedId)).singleElement()
+                    .satisfies(alarm -> {
+                        assertThat(alarm.startStopName()).isEqualTo("평내신명.대주");
+                        assertThat(alarm.endStopName()).isEqualTo("상봉역");
+                    });
+            assertThat(alarms).filteredOn(alarm -> alarm.id().equals(renumberedId) || alarm.id().equals(unknownId))
+                    .hasSize(2)
+                    .allSatisfy(alarm -> {
+                        assertThat(alarm.startStopName()).isNull();
+                        assertThat(alarm.endStopName()).isNull();
+                    });
+        } finally {
+            statistics.setStatisticsEnabled(originallyEnabled);
+        }
+
+        mockMvc.perform(get("/api/v1/alarms/{alarmId}", verifiedId)
+                        .header("Authorization", "Bearer " + jwtTokenService.createAccessToken(owner.getId())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.startStopName").value("평내신명.대주"))
+                .andExpect(jsonPath("$.endStopName").value("상봉역"))
+                .andExpect(jsonPath("$.externalRouteId").doesNotExist());
+    }
+
+    private void rawRoute(String externalRouteId, String payload) {
+        BusRoute route = routeRepository.findByProviderAndExternalRouteId(TransitProvider.TAGO, externalRouteId)
+                .orElseThrow();
+        java.time.Instant now = java.time.Instant.now();
+        sourceMetadataRepository.upsert("TAGO", "ROUTE", externalRouteId, route.getId(), null, null,
+                payload, null, now, now);
     }
 
     private void setCreatedAt(Long alarmId, LocalDateTime createdAt) {

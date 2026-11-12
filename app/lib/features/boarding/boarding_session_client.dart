@@ -28,6 +28,13 @@ abstract interface class BoardingSessionClient {
     required int generation,
     required bool Function() current,
   });
+
+  /// 홈 표시용 읽기 전용 요약: 진행 중 세션(0..1)과 최근 종료 세션.
+  /// 생성 의도 저장소나 탑승 컨트롤러 상태를 읽거나 바꾸지 않는다.
+  Future<BoardingSessionOverview> findOverview({
+    required int generation,
+    required bool Function() current,
+  });
   Future<BoardingSession> cancel(
     int id,
     int revision, {
@@ -47,6 +54,12 @@ abstract interface class BoardingSessionClient {
 bool isBoardingUuid(String value) => RegExp(
   r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
 ).hasMatch(value);
+
+class BoardingSessionOverview {
+  const BoardingSessionOverview({this.current, this.recent = const []});
+  final BoardingSession? current;
+  final List<BoardingSession> recent;
+}
 
 enum SessionFailure { http, timeout, network, parsing }
 
@@ -159,6 +172,43 @@ class BoardingSessionApiClient implements BoardingSessionClient {
     required int generation,
     required bool Function() current,
   }) => _list('scope', 'current', generation, current);
+  @override
+  Future<BoardingSessionOverview> findOverview({
+    required int generation,
+    required bool Function() current,
+  }) async {
+    final results = await Future.wait([
+      _list('scope', 'current', generation, current),
+      _recent(generation, current),
+    ]);
+    return BoardingSessionOverview(
+      current: results[0] as BoardingSession?,
+      recent: results[1] as List<BoardingSession>,
+    );
+  }
+
+  Future<List<BoardingSession>> _recent(
+    int generation,
+    bool Function() current,
+  ) async {
+    final json = await _request(
+      'GET',
+      Uri(path: _path, queryParameters: {'scope': 'recent'}).toString(),
+      generation,
+      current,
+    );
+    try {
+      if (json is! List) throw const FormatException();
+      final sessions = [for (final row in json) BoardingSession.fromJson(row)];
+      if (sessions.any((session) => !session.isTerminal)) {
+        throw const FormatException();
+      }
+      return sessions;
+    } on FormatException {
+      throw const BoardingSessionException(SessionFailure.parsing);
+    }
+  }
+
   @override
   Future<BoardingSession?> findRequest(
     String uuid, {

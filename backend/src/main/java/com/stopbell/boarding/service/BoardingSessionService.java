@@ -1,6 +1,7 @@
 package com.stopbell.boarding.service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
@@ -25,6 +26,7 @@ import com.stopbell.user.repository.UserRepository;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.domain.Limit;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -38,6 +40,10 @@ import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class BoardingSessionService {
+    static final int RECENT_ENDED_LIMIT = 3;
+    static final Duration RECENT_ENDED_WINDOW = Duration.ofHours(24);
+    private static final List<BoardingSessionStatus> ENDED_STATUSES = List.of(
+            BoardingSessionStatus.COMPLETED, BoardingSessionStatus.CANCELLED, BoardingSessionStatus.EXPIRED);
     private final BoardingSessionRepository sessions;
     private final UserRepository users;
     private final BoardingSessionStartValidator validator;
@@ -189,6 +195,20 @@ public class BoardingSessionService {
             current.ifPresent(this::expire);
             return current.filter(session -> session.getStatus().isOpen()).stream()
                     .map(session -> response(session)).toList();
+        });
+    }
+
+    /**
+     * 홈 표시용으로 최근 종료된 세션을 종료 시각 역순으로 제한된 개수만 반환한다.
+     * 만료 기한이 지난 미종료 세션은 기존 조회와 같이 먼저 만료 처리한다.
+     */
+    public List<BoardingSessionResponse> findRecentEnded(Long userId) {
+        return transaction.execute(status -> {
+            authenticated(userId);
+            sessions.findCurrentForUpdate(userId).ifPresent(this::expire);
+            sessions.flush();
+            return sessions.findRecentEnded(userId, ENDED_STATUSES, now().minus(RECENT_ENDED_WINDOW),
+                    Limit.of(RECENT_ENDED_LIMIT)).stream().map(this::response).toList();
         });
     }
 

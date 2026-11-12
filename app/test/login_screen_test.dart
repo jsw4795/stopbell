@@ -320,7 +320,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('새 알림 만들기'));
+    await tester.tap(find.text('도착 알람'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '7000');
     await tester.tap(find.text('검색'));
@@ -351,7 +351,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('새 알림 만들기'));
+    await tester.tap(find.text('도착 알람'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '7000');
     await tester.tap(find.text('검색'));
@@ -461,7 +461,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('새 알림 만들기'));
+    await tester.tap(find.text('도착 알람'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '7000');
     await tester.tap(find.text('검색'));
@@ -518,7 +518,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('새 알림 만들기'));
+        await tester.tap(find.text('도착 알람'));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField), '7000');
         await tester.tap(find.text('검색'));
@@ -541,7 +541,7 @@ void main() {
         await tester.tap(find.byTooltip('알람 목록으로'));
         await tester.pumpAndSettle();
         expect(lists, 2);
-        expect(find.text('7000 · 첫 정류장'), findsOneWidget);
+        expect(find.text('첫 정류장 도착'), findsOneWidget);
       },
     );
   }
@@ -573,7 +573,7 @@ void main() {
       pending.complete([createdAlarm]);
       await tester.pumpAndSettle();
       expect(find.text('Google로 계속하기'), findsOneWidget);
-      expect(find.text('7000 · 첫 정류장'), findsNothing);
+      expect(find.text('첫 정류장 도착'), findsNothing);
       await tester.tap(find.text('Google로 계속하기'));
       auth.result.complete(pair);
       await tester.pumpAndSettle();
@@ -635,7 +635,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('새 알림 만들기'));
+    await tester.tap(find.text('도착 알람'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '7000');
     await tester.tap(find.text('검색'));

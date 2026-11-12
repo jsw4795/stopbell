@@ -16,7 +16,7 @@ import 'alarm_api_client.dart';
 import 'alarm_creation_controller.dart';
 import 'alarm_creation_intent.dart';
 import 'alarm_detail_screen.dart';
-import 'alarm_list_screen.dart';
+import 'home_overview.dart';
 
 enum _Page { list, search, stops, detail, boarding, boardingNotification }
 
@@ -212,52 +212,58 @@ class _AlarmHomeState extends State<AlarmHome> {
         onBack: _showList,
         isNavigationCurrent: () => _current && epoch == _navigationEpoch,
       ),
-      _Page.list => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (_creation.message != null ||
-              _creation.pending != null ||
-              _creation.result != null)
-            _creationRecovery(),
-          if (widget.findBoardingCandidates != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: OutlinedButton(
-                onPressed: () {
-                  if (!_current) return;
-                  setState(() {
-                    _navigationEpoch++;
-                    _page = _Page.boarding;
-                  });
-                },
-                child: const Text('하차 알림 · 차량 후보 찾기'),
+      _Page.list => HomeOverview(
+        key: ValueKey(('home', epoch)),
+        header:
+            _creation.message != null ||
+                _creation.pending != null ||
+                _creation.result != null
+            ? _creationRecovery()
+            : null,
+        findAlarms: widget.client.findAll,
+        findSessions: widget.boardingSessionClient == null
+            ? null
+            : () => widget.boardingSessionClient!.findOverview(
+                generation: _sessionGeneration,
+                current: () =>
+                    _current &&
+                    epoch == _navigationEpoch &&
+                    _page == _Page.list,
               ),
-            ),
-          const Text('버스 도착 알림', textAlign: TextAlign.center),
-          Expanded(
-            child: AlarmListScreen(
-              findAll: widget.client.findAll,
-              onSelect: (id) {
-                if (!_current) return;
-                setState(() {
-                  _navigationEpoch++;
-                  _alarmId = id;
-                  _createdAlarm = null;
-                  _activationUnverified = false;
-                  _page = _Page.detail;
-                });
-              },
-              onCreate: () {
-                if (_current && !_creation.blocked) {
-                  setState(() {
-                    _navigationEpoch++;
-                    _page = _Page.search;
-                  });
-                }
-              },
-            ),
-          ),
-        ],
+        onCreateArrival: () {
+          if (_current && !_creation.blocked) {
+            setState(() {
+              _navigationEpoch++;
+              _page = _Page.search;
+            });
+          }
+        },
+        onCreateBoarding: widget.findBoardingCandidates == null
+            ? null
+            : _openBoarding,
+        onOpenCurrentSession: widget.findBoardingCandidates == null
+            ? null
+            : _openBoarding,
+        onOpenEndedSession: (id) {
+          if (!_current) return;
+          setState(() {
+            _navigationEpoch++;
+            _boardingSessionId = id;
+            _createdAlarm = null;
+            _activationUnverified = false;
+            _page = _Page.boardingNotification;
+          });
+        },
+        onOpenAlarm: (id) {
+          if (!_current) return;
+          setState(() {
+            _navigationEpoch++;
+            _alarmId = id;
+            _createdAlarm = null;
+            _activationUnverified = false;
+            _page = _Page.detail;
+          });
+        },
       ),
       _Page.boarding => BoardingHome(
         authSession: widget.authSession,
@@ -330,70 +336,81 @@ class _AlarmHomeState extends State<AlarmHome> {
     };
   }
 
-  Widget _creationRecovery() => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_creation.message != null) Text(_creation.message!),
-        if (!_creation.initialized)
-          OutlinedButton(
-            onPressed: _creation.initialize,
-            child: const Text('저장된 요청 다시 확인'),
-          ),
-        if (_creation.pending != null) ...[
-          const Text('알람 생성 요청이 서버에 반영됐을 수 있습니다.'),
-          OutlinedButton(
-            onPressed: _creation.busy
-                ? null
-                : () {
-                    final epoch = _navigationEpoch;
-                    _creation.recover(
-                      navigationCurrent: () =>
-                          _current && epoch == _navigationEpoch,
-                    );
-                  },
-            child: const Text('원래 생성 결과 조회'),
-          ),
-          if (_creation.canRetry)
+  void _openBoarding() {
+    if (!_current) return;
+    setState(() {
+      _navigationEpoch++;
+      _page = _Page.boarding;
+    });
+  }
+
+  Widget _creationRecovery() => Card(
+    margin: EdgeInsets.zero,
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_creation.message != null) Text(_creation.message!),
+          if (!_creation.initialized)
+            OutlinedButton(
+              onPressed: _creation.initialize,
+              child: const Text('저장된 요청 다시 확인'),
+            ),
+          if (_creation.pending != null) ...[
+            const Text('알람 생성 요청이 서버에 반영됐을 수 있습니다.'),
             OutlinedButton(
               onPressed: _creation.busy
                   ? null
                   : () {
                       final epoch = _navigationEpoch;
                       _creation.recover(
-                        retry: true,
                         navigationCurrent: () =>
                             _current && epoch == _navigationEpoch,
                       );
                     },
-              child: const Text('원래 요청 재시도'),
-            )
-          else ...[
-            const Text(
-              '요청 시각을 신뢰할 수 없거나 보존 기간이 지났습니다. 새로 생성하면 알람이 중복될 수 있습니다.',
+              child: const Text('원래 생성 결과 조회'),
             ),
-            OutlinedButton(
-              onPressed: _creation.busy ? null : _confirmNewCreation,
-              child: const Text('새 알람 생성 선택'),
-            ),
+            if (_creation.canRetry)
+              OutlinedButton(
+                onPressed: _creation.busy
+                    ? null
+                    : () {
+                        final epoch = _navigationEpoch;
+                        _creation.recover(
+                          retry: true,
+                          navigationCurrent: () =>
+                              _current && epoch == _navigationEpoch,
+                        );
+                      },
+                child: const Text('원래 요청 재시도'),
+              )
+            else ...[
+              const Text(
+                '요청 시각을 신뢰할 수 없거나 보존 기간이 지났습니다. 새로 생성하면 알람이 중복될 수 있습니다.',
+              ),
+              OutlinedButton(
+                onPressed: _creation.busy ? null : _confirmNewCreation,
+                child: const Text('새 알람 생성 선택'),
+              ),
+            ],
           ],
+          if (_creation.result != null)
+            OutlinedButton(
+              onPressed: () {
+                final alarm = _creation.result!;
+                setState(() {
+                  _navigationEpoch++;
+                  _alarmId = alarm.id;
+                  _createdAlarm = alarm;
+                  _activationUnverified = false;
+                  _page = _Page.detail;
+                });
+              },
+              child: const Text('확인한 알람 보기'),
+            ),
         ],
-        if (_creation.result != null)
-          OutlinedButton(
-            onPressed: () {
-              final alarm = _creation.result!;
-              setState(() {
-                _navigationEpoch++;
-                _alarmId = alarm.id;
-                _createdAlarm = alarm;
-                _activationUnverified = false;
-                _page = _Page.detail;
-              });
-            },
-            child: const Text('확인한 알람 보기'),
-          ),
-      ],
+      ),
     ),
   );
 

@@ -462,6 +462,7 @@ void main() {
     late MemoryBoardingIntents storage;
     late Future<http.Response> Function(http.Request) response;
     final requests = <http.Request>[];
+    final homeRequests = <http.Request>[];
     setUp(() async {
       f = PushFixture();
       await f.initialize();
@@ -470,7 +471,13 @@ void main() {
       storage = MemoryBoardingIntents();
       requests.clear();
       response = (_) async => boardingJson(sessionJson());
+      homeRequests.clear();
       final transport = MockClient((request) async {
+        // 홈 요약 조회(scope=current/recent)는 알림 이동 경로와 분리해 기록한다.
+        if (request.url.queryParameters.containsKey('scope')) {
+          homeRequests.add(request);
+          return boardingJson(<Object>[]);
+        }
         requests.add(request);
         return response(request);
       });
@@ -548,6 +555,10 @@ void main() {
             sessionJson(status: status, evaluation: evaluation, gap: 999),
           );
           await pump(tester);
+          expect(homeRequests.map((r) => r.url.queryParameters['scope']), [
+            'current',
+            'recent',
+          ]);
           expect(requests.map((r) => '${r.method} ${r.url}'), [
             'GET ${boardingBaseUrl.resolve('/api/v1/boarding-sessions/123')}',
           ]);

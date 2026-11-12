@@ -1,5 +1,6 @@
 package com.stopbell.transit.repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,6 +15,8 @@ public interface BusRouteRepository extends JpaRepository<BusRoute, Long> {
     Optional<BusRoute> findByProviderAndExternalRouteId(TransitProvider provider, String externalRouteId);
 
     List<BusRoute> findAllByProvider(TransitProvider provider);
+
+    List<BusRoute> findAllByProviderAndExternalRouteIdIn(TransitProvider provider, Collection<String> externalRouteIds);
 
     @Query(value = """
             SELECT br.* FROM bus_routes br

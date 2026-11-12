@@ -124,7 +124,7 @@ void main() {
   }
 
   Future<void> prepare(WidgetTester tester) async {
-    await tap(tester, '하차 알림 · 차량 후보 찾기');
+    await tap(tester, '하차 알람');
     await tester.enterText(find.byType(TextField), '7000');
     await tap(tester, '검색');
     await tester.tap(find.byKey(const ValueKey(754)));
@@ -276,7 +276,7 @@ void main() {
         ]);
       };
       await tap(tester, '버스 도착 알림으로');
-      await tap(tester, '하차 알림 · 차량 후보 찾기');
+      await tap(tester, '하차 알람');
       expect(find.textContaining('세션 수명 만료'), findsOneWidget);
       expect(
         requests.where(

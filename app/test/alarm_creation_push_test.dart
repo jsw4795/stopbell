@@ -18,7 +18,7 @@ import 'alarm_screen_test.dart' show StubAlarms, sample, stop, withStatus;
 import 'notification_test_fakes.dart';
 
 Future<void> selectStop(WidgetTester tester) async {
-  await tester.tap(find.text('새 알림 만들기'));
+  await tester.tap(find.text('도착 알람'));
   await tester.pumpAndSettle();
   await tester.enterText(find.byType(TextField), '7000');
   await tester.tap(find.text('검색'));

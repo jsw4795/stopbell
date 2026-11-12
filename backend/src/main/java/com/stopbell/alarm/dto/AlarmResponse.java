@@ -10,6 +10,8 @@ public record AlarmResponse(
         String routeNumber,
         String stopName,
         boolean notifyOneStopBefore,
-        boolean notifyOneStopAfter
+        boolean notifyOneStopAfter,
+        String startStopName,
+        String endStopName
 ) {
 }

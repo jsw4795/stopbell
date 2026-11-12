@@ -11,6 +11,8 @@ class Alarm {
     required this.stopName,
     required this.notifyOneStopBefore,
     required this.notifyOneStopAfter,
+    this.startStopName,
+    this.endStopName,
   });
 
   final int id;
@@ -20,6 +22,10 @@ class Alarm {
   final String stopName;
   final bool notifyOneStopBefore;
   final bool notifyOneStopAfter;
+
+  /// 공식 원본에서 검증된 노선 기·종점. 확인할 수 없으면 둘 다 null이다.
+  final String? startStopName;
+  final String? endStopName;
 
   factory Alarm.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) throw const FormatException();
@@ -49,6 +55,9 @@ class Alarm {
         after is! bool) {
       throw const FormatException();
     }
+    final start = _optionalText(value['startStopName']);
+    final end = _optionalText(value['endStopName']);
+    final hasEndpoints = start != null && end != null;
     return Alarm(
       id: id,
       transitType: transitType,
@@ -57,7 +66,16 @@ class Alarm {
       stopName: stopName,
       notifyOneStopBefore: before,
       notifyOneStopAfter: after,
+      startStopName: hasEndpoints ? start : null,
+      endStopName: hasEndpoints ? end : null,
     );
+  }
+
+  static String? _optionalText(Object? value) {
+    if (value == null) return null;
+    if (value is! String) throw const FormatException();
+    final text = value.trim();
+    return text.isEmpty ? null : text;
   }
 }
 
@@ -66,6 +84,15 @@ extension AlarmStatusLabel on AlarmStatus {
     AlarmStatus.inactive => 'INACTIVE · 비활성',
     AlarmStatus.active => 'ACTIVE · 감시 중',
     AlarmStatus.followUp => 'FOLLOW_UP · 한 정거장 후 추적 중',
+  };
+}
+
+extension AlarmStatusShortLabel on AlarmStatus {
+  /// 홈 목록 칩용 짧은 표기. 상세 화면은 기존 [AlarmStatusLabel.label]을 유지한다.
+  String get shortLabel => switch (this) {
+    AlarmStatus.inactive => '비활성',
+    AlarmStatus.active => '감시 중',
+    AlarmStatus.followUp => '한 정거장 후 추적 중',
   };
 }
 

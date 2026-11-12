@@ -7,7 +7,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stopbell/features/alarm/alarm.dart';
 import 'package:stopbell/features/alarm/alarm_api_client.dart';
 import 'package:stopbell/features/alarm/alarm_detail_screen.dart';
-import 'package:stopbell/features/alarm/alarm_list_screen.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/features/transit/bus_route_stop_screen.dart';
@@ -93,20 +92,6 @@ class StubAlarms extends Fake implements AlarmClient {
   }
 }
 
-Widget listScreen(
-  StubAlarms client, {
-  void Function(int)? onSelect,
-  VoidCallback? onCreate,
-}) => MaterialApp(
-  home: Scaffold(
-    body: AlarmListScreen(
-      findAll: client.findAll,
-      onSelect: onSelect ?? (_) {},
-      onCreate: onCreate ?? () {},
-    ),
-  ),
-);
-
 Widget detailScreen(
   StubAlarms client, {
   Alarm? created,
@@ -159,55 +144,6 @@ const stop = BusRouteStopOccurrence(
 );
 
 void main() {
-  testWidgets('list loading, error retry, server order and status labels', (
-    tester,
-  ) async {
-    final first = Completer<List<Alarm>>();
-    final client = StubAlarms();
-    var calls = 0;
-    client.list = () {
-      calls++;
-      return calls == 1
-          ? first.future
-          : Future.value([
-              withStatus(AlarmStatus.followUp),
-              withStatus(AlarmStatus.active),
-              sample,
-            ]);
-    };
-    int? selected;
-    var create = 0;
-    await tester.pumpWidget(
-      listScreen(
-        client,
-        onSelect: (id) => selected = id,
-        onCreate: () => create++,
-      ),
-    );
-    expect(find.text('알람 목록 조회 중...'), findsOneWidget);
-    first.completeError(Exception('private failure'));
-    await tester.pumpAndSettle();
-    expect(find.text('알람 목록을 불러오지 못했습니다.'), findsOneWidget);
-    expect(find.textContaining('private failure'), findsNothing);
-    await tester.tap(find.text('다시 시도'));
-    await tester.pumpAndSettle();
-    expect(find.text('FOLLOW_UP · 한 정거장 후 추적 중'), findsOneWidget);
-    expect(find.text('ACTIVE · 감시 중'), findsOneWidget);
-    expect(find.text('INACTIVE · 비활성'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey(15)).first);
-    expect(selected, 15);
-    await tester.tap(find.text('새 알림 만들기'));
-    expect(create, 1);
-  });
-
-  testWidgets('empty list is normal', (tester) async {
-    final client = StubAlarms()..list = () async => [];
-    await tester.pumpWidget(listScreen(client));
-    await tester.pumpAndSettle();
-    expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
-    expect(find.text('새 알림 만들기'), findsOneWidget);
-  });
-
   testWidgets(
     'start creates then activates and blocks input throughout both requests',
     (tester) async {

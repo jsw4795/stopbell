@@ -149,9 +149,13 @@ Request body:
   "routeNumber": "7000",
   "stopName": "사색의광장",
   "notifyOneStopBefore": true,
-  "notifyOneStopAfter": false
+  "notifyOneStopAfter": false,
+  "startStopName": "수원역",
+  "endStopName": "사색의광장"
 }
 ```
+
+`startStopName`·`endStopName`(UI-5)은 nullable 표시 전용 노선 기·종점이며 모든 Alarm response(생성·생성 결과 조회·목록·상세·활성화·비활성화)에 포함된다. Alarm snapshot의 Provider·외부 노선 ID로 현재 노선을 찾고 노선번호와 `cityCode`가 snapshot과 같을 때만 [버스 노선 검색](#버스-노선-검색)과 같은 공식 원본 기·종점 규칙(TAGO 노선 원본, 서울 TOPIS 기종점)을 적용한다. 노선이 없거나 달라졌거나 원본이 없거나 두 이름이 같으면 둘 다 null이며 추측하지 않는다. 기존 Client는 이 필드를 무시해도 되고 Alarm 판정·알림에는 사용하지 않는다.
 
 `targetStopOccurrenceId`가 존재하지 않으면 `404 Not Found`다. 첫 occurrence에 `notifyOneStopBefore: true` 또는 마지막 occurrence에 `notifyOneStopAfter: true`를 요청하면 `400 Bad Request`다. Backend는 해당 option을 `false`로 변경해 생성하지 않는다. first/last 판정은 `stopOrder`가 1 또는 최대값인지가 아니라 predecessor/successor occurrence의 실제 존재 여부를 사용한다.
 
@@ -193,7 +197,9 @@ GET /api/v1/alarms
     "routeNumber": "7000",
     "stopName": "사색의광장",
     "notifyOneStopBefore": false,
-    "notifyOneStopAfter": true
+    "notifyOneStopAfter": true,
+    "startStopName": null,
+    "endStopName": null
   }
 ]
 ```
@@ -515,9 +521,10 @@ Content-Type: application/json
 GET /api/v1/boarding-sessions/{sessionId}
 GET /api/v1/boarding-sessions?scope=current
 GET /api/v1/boarding-sessions?clientRequestId={uuid}
+GET /api/v1/boarding-sessions?scope=recent
 ```
 
-상세는 소유한 terminal 세션도 200으로 반환한다. 부재/다른 owner는 동일 404다. scope=current는 TRACKING/SUSPENDED의 0..1개 array, clientRequestId 조회는 terminal 포함 0..1개 array를 200으로 반환한다. 두 query는 동시 지정하지 않는다. 재시작 후 local session ID를 잃었거나 생성 응답이 유실되어도 이 조회로 복구한다. Flutter의 durable pending intent·같은 로그인 경계·조회 0개 및 명시적 재시도 정책은 [Client 실행 구조](architecture.md#flutter-탑승-확정과-세션-관리-task-907-2단계)를 따른다.
+상세는 소유한 terminal 세션도 200으로 반환한다. 부재/다른 owner는 동일 404다. scope=current는 TRACKING/SUSPENDED의 0..1개 array, clientRequestId 조회는 terminal 포함 0..1개 array를 200으로 반환한다. scope=recent(UI-5 홈)는 소유한 COMPLETED/CANCELLED/EXPIRED 세션 중 최근 24시간 안에 종료된 최대 3개를 `endedAt` 내림차순(같으면 `id` 내림차순) array로 반환하며, 조회 전 기한이 지난 미종료 세션은 다른 조회와 같이 만료 처리한다. 읽기 전용 표시 목록이며 생성 응답 유실 복구나 알림 tap 대상 조회를 대체하지 않는다. query는 하나만 지정한다. 재시작 후 local session ID를 잃었거나 생성 응답이 유실되어도 이 조회로 복구한다. Flutter의 durable pending intent·같은 로그인 경계·조회 0개 및 명시적 재시도 정책은 [Client 실행 구조](architecture.md#flutter-탑승-확정과-세션-관리-task-907-2단계)를 따른다.
 
 Session response는 `id`, `status`, `revision`, `routeNumber`, `vehicleNumber`, `targetName`, `targetOrder`, `remainingOccurrenceGap`(nullable), `currentStopName`(nullable), `checkpointObservedAt`(검증 전 nullable), `providerDataTime`(nullable), `evaluationStatus`(VERIFICATION_PENDING/READY/RECOVERY_PENDING/HELD/ENDED), `reasonCode`(nullable), `expiresAt`, `endedAt`(nullable), `notificationOffsetStops`(1/2, 기존 정책은 null), `preparationNotificationStatus`를 제공한다. 기존 prepareNotificationEnabled는 이전 정책 표시 호환 필드다. 알림 상태는 NOT_CREATED/PENDING/ACCEPTED/NO_RECIPIENT/FAILED/EXPIRED이며 ACCEPTED는 전송 서비스 접수이고 기기 표시 증명이 아니다. 하나 이상 ACCEPTED면 ACCEPTED, 그 외 하나 이상 PENDING이면 PENDING, 수신자 없음이면 NO_RECIPIENT, 그 외 FAILED 우선으로 집계한다. `currentStopName`은 READY일 때만 검증된 checkpoint index의 불변 traversal occurrence에 저장된 occurrence ID로 기존 metadata를 조회하고 Provider·노선·정류장 ID와 순서가 스냅샷과 일치할 때의 이름이며, 조회할 수 없으면 null이다. 최근 관측 지점의 근사 안내이며 실시간 GPS나 이동 중임을 증명하지 않는다. gap은 Provider 진행 기준의 occurrence edge 수이며 실제 정차 수·정확한 현 위치·거리/ETA가 아니다. 복구 전에는 cached gap을 현재 값처럼 반환하지 않고 null과 RECOVERY_PENDING을 표시한다. TRACKING + VERIFICATION_PENDING의 유효한 TAGO 미검증 checkpoint가 목적지 이전이면 생성·중복 요청·GET에서 `initialObservation`(nullable, `stopName` nullable, `remainingOccurrenceGap`)과 저장된 `checkpointObservedAt`을 제공한다. 이는 마지막으로 저장된 미검증 참고 관측이며 등록 당시 또는 후속 관측일 수 있고 현재 위치나 READY 판단 근거가 아니다. 서울 미검증 checkpoint에는 제공하지 않는다. `timeline`은 승차 identity를 보존한 세션에만 제공하며 이전 세션은 null이다. `provider`, nullable `routeType`, 전체 snapshot 기준 `boardingIndex`·`targetIndex`, nullable `positionIndex`·`positionBasis`(READY/INITIAL), 승차부터 목표까지 순서대로 `stops`(occurrence `id`, snapshot `index`, `order`, nullable `name`)를 포함한다. 이름은 현재 metadata의 occurrence ID·order·stop ID·provider·노선·city가 snapshot과 일치할 때만 제공한다. READY는 검증된 위치이며 INITIAL은 위 미검증 참고 관측이다. 보류·복구·종료에는 현재 위치를 제공하지 않는다. 정류장 선택의 반복 occurrence는 ID와 index로 구분하며 이 응답은 판정에 사용하지 않는다. raw Provider ID/전체 traversal/fingerprint/gate 내부 값/FID는 노출하지 않는다.
 

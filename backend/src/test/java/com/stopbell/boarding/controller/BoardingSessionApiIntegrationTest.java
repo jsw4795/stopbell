@@ -473,6 +473,43 @@ class BoardingSessionApiIntegrationTest {
     }
 
     @Test
+    @DisplayName("최근 종료 조회는 소유한 24시간 이내 종료 세션 최대 3개를 종료 역순으로 반환하고 기한이 지난 세션을 먼저 만료한다")
+    void recent_ended_sessions_are_owned_limited_and_ordered() throws Exception {
+        supportFixture();
+        List<Long> cancelled = new java.util.ArrayList<>();
+        for (int index = 0; index < 3; index++) {
+            var session = service.create(owner.getId(), request(UUID.randomUUID().toString(), "ref")).response();
+            cancelled.add(service.cancel(owner.getId(), session.id(), session.revision()).id());
+        }
+        var othersSession = service.create(other.getId(), request(UUID.randomUUID().toString(), "ref")).response();
+        service.cancel(other.getId(), othersSession.id(), othersSession.revision());
+        long open = service.create(owner.getId(), request(UUID.randomUUID().toString(), "ref")).response().id();
+
+        mvc.perform(auth(get("/api/v1/boarding-sessions?scope=recent"), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[0].id").value(cancelled.get(2)))
+                .andExpect(jsonPath("$[0].status").value("CANCELLED"))
+                .andExpect(jsonPath("$[1].id").value(cancelled.get(1)))
+                .andExpect(jsonPath("$[2].id").value(cancelled.get(0)));
+
+        time.set(NOW.plus(java.time.Duration.ofHours(23)));
+        mvc.perform(auth(get("/api/v1/boarding-sessions?scope=recent"), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[0].id").value(open))
+                .andExpect(jsonPath("$[0].status").value("EXPIRED"))
+                .andExpect(jsonPath("$[1].id").value(cancelled.get(2)))
+                .andExpect(jsonPath("$[2].id").value(cancelled.get(1)));
+        mvc.perform(auth(get("/api/v1/boarding-sessions?scope=current"), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        time.set(NOW.plus(java.time.Duration.ofHours(25)));
+        mvc.perform(auth(get("/api/v1/boarding-sessions?scope=recent"), owner)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].id").value(open));
+        mvc.perform(get("/api/v1/boarding-sessions?scope=recent")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
     @DisplayName("SUSPENDED 세션 취소는 current revision을 요구하며 오래된 변경 결과가 취소를 되살리지 못한다")
     void cancel_requires_current_revision() throws Exception {
         supportFixture();
@@ -492,7 +529,8 @@ class BoardingSessionApiIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"", "?scope=all", "?scope=current&clientRequestId=aaaaaaaa-1111-4111-8111-111111111111",
-            "?scope=current&scope=current", "?clientRequestId=bad", "?scope=current&extra=x", "?clientRequestId="})
+            "?scope=current&scope=current", "?clientRequestId=bad", "?scope=current&extra=x", "?clientRequestId=",
+            "?scope=recent&scope=recent", "?scope=recent&clientRequestId=aaaaaaaa-1111-4111-8111-111111111111"})
     @DisplayName("누락되거나 중복되거나 지원하지 않는 조회 query는 400이다")
     void invalid_query(String query) throws Exception {
         mvc.perform(auth(get("/api/v1/boarding-sessions" + query), owner)).andExpect(status().isBadRequest())
