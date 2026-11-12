@@ -203,7 +203,7 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('하위 화면에서 헤더 StopBell을 탭하면 홈으로 돌아간다', (tester) async {
+  testWidgets('하위 화면의 뒤로가기로 홈에 돌아간다', (tester) async {
     await tester.pumpWidget(
       app(session(FakeAuthenticator(), FakeStorage(pair: pair))),
     );
@@ -217,9 +217,10 @@ void main() {
     await tester.tap(find.text('도착 알람'));
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsOneWidget);
-    expect(header, findsOneWidget);
+    expect(header, findsNothing);
+    expect(find.byTooltip('설정'), findsNothing);
 
-    await tester.tap(header);
+    await tester.tap(find.byTooltip('알람 목록으로'));
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
     expect(find.text('도착 알람'), findsOneWidget);

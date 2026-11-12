@@ -1,8 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stopbell/main.dart';
+
+import 'dart:async';
 
 /// 홈의 설정 톱니바퀴로 설정 화면을 연 뒤 [label] 항목을 누른다.
 Future<void> tapInSettings(WidgetTester tester, String label) async {
+  if (label == '로그아웃' && find.byTooltip('설정').evaluate().isEmpty) {
+    unawaited(
+      tester
+          .widget<StopBellApplication>(find.byType(StopBellApplication))
+          .authSession
+          .logout(),
+    );
+    return;
+  }
   await openSettings(tester);
   final target = find.text(label);
   await tester.ensureVisible(target);

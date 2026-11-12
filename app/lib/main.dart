@@ -541,43 +541,29 @@ class _LoginScreenState extends State<LoginScreen> {
         if (widget.authSession.state == AuthState.authenticated &&
             !widget.authSession.isLoggingOut) {
           return Scaffold(
-            appBar: AppBar(
-              title: GestureDetector(
-                key: const ValueKey('header-home'),
-                behavior: HitTestBehavior.opaque,
-                onTap: () {
-                  Navigator.of(context).popUntil((route) => route.isFirst);
-                  _homeRequests.value++;
-                },
-                child: const Text('StopBell'),
-              ),
-              actions: [
-                IconButton(
-                  tooltip: '설정',
-                  icon: const Icon(Icons.settings_outlined),
-                  onPressed: _isLoading ? null : _openSettings,
-                ),
-              ],
-            ),
             body: Column(
               children: [
                 Expanded(
-                  child: AlarmHome(
-                    key: ValueKey(widget.authSession.generation),
-                    homeRequests: _homeRequests,
-                    client: widget.alarmClient,
-                    notifications: widget.notifications,
-                    beforeBoardingCreate: (context) =>
-                        prepareBoardingPush(context, widget.push),
-                    beforeActivate: widget.push == null
-                        ? null
-                        : (context) => prepareAlarmPush(context, widget.push!),
-                    authSession: widget.authSession,
-                    searchRoutes: widget.searchRoutes,
-                    findStops: widget.findStops,
-                    findBoardingCandidates: widget.findBoardingCandidates,
-                    boardingSessionClient: widget.boardingSessionClient,
-                    boardingIntentStorage: widget.boardingIntentStorage,
+                  child: SafeArea(
+                    child: AlarmHome(
+                      onOpenSettings: _isLoading ? null : _openSettings,
+                      key: ValueKey(widget.authSession.generation),
+                      homeRequests: _homeRequests,
+                      client: widget.alarmClient,
+                      notifications: widget.notifications,
+                      beforeBoardingCreate: (context) =>
+                          prepareBoardingPush(context, widget.push),
+                      beforeActivate: widget.push == null
+                          ? null
+                          : (context) =>
+                                prepareAlarmPush(context, widget.push!),
+                      authSession: widget.authSession,
+                      searchRoutes: widget.searchRoutes,
+                      findStops: widget.findStops,
+                      findBoardingCandidates: widget.findBoardingCandidates,
+                      boardingSessionClient: widget.boardingSessionClient,
+                      boardingIntentStorage: widget.boardingIntentStorage,
+                    ),
                   ),
                 ),
                 if (_isLoading) const Text('로그아웃 중...'),

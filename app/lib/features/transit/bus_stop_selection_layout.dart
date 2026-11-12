@@ -36,64 +36,43 @@ class BusStopSelectionLayout extends StatelessWidget {
           builder: (context, constraints) => Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              AppBar(
+                primary: false,
+                leading: IconButton(
+                  tooltip: backLabel,
+                  onPressed: onBack,
+                  icon: const Icon(Icons.arrow_back),
+                ),
+                title: Text(title),
+                actions: [
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      right: StopBellSpacing.screenPadding,
+                    ),
+                    child: ExcludeSemantics(
+                      child: Icon(
+                        Icons.directions_bus_outlined,
+                        color: iconColor ?? colors.primary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  StopBellSpacing.sm,
-                  StopBellSpacing.xs,
-                  StopBellSpacing.screenPadding,
-                  StopBellSpacing.sm,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: StopBellSpacing.screenPadding,
                 ),
                 child: Row(
                   children: [
-                    IconButton(
-                      tooltip: backLabel,
-                      onPressed: onBack,
-                      icon: const Icon(Icons.arrow_back),
-                    ),
-                    const SizedBox(width: StopBellSpacing.xs),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            route.routeNumber,
-                            style: theme.textTheme.headlineLarge,
-                          ),
-                          Wrap(
-                            spacing: StopBellSpacing.sm,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Text(
-                                route.regionName,
-                                style: theme.textTheme.labelMedium?.copyWith(
-                                  color: colors.onSurfaceVariant,
-                                ),
-                              ),
-                              Text(
-                                title,
-                                style: theme.textTheme.labelSmall?.copyWith(
-                                  color: colors.secondary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                    Text(
+                      route.routeNumber,
+                      style: theme.textTheme.headlineSmall,
                     ),
                     const SizedBox(width: StopBellSpacing.sm),
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: colors.primaryContainer,
-                        borderRadius: BorderRadius.circular(
-                          StopBellRadius.card,
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(StopBellSpacing.sm),
-                        child: Icon(
-                          Icons.directions_bus_outlined,
-                          color: iconColor ?? colors.onPrimaryContainer,
-                        ),
+                    Expanded(
+                      child: Text(
+                        route.regionName,
+                        style: theme.textTheme.labelMedium,
                       ),
                     ),
                   ],

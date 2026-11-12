@@ -314,7 +314,8 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        ListTile(
+        AppBar(
+          primary: false,
           leading: IconButton(
             tooltip: '알람 목록으로',
             icon: const Icon(Icons.arrow_back),

@@ -314,15 +314,14 @@ class _BoardingHomeState extends State<BoardingHome> {
           )
         : Column(
             children: [
-              Row(
-                children: [
-                  IconButton(
-                    tooltip: '도착 알람으로',
-                    onPressed: widget.onBack,
-                    icon: const Icon(Icons.arrow_back),
-                  ),
-                  const Text('하차 알람 · 노선 선택'),
-                ],
+              AppBar(
+                primary: false,
+                leading: IconButton(
+                  tooltip: '도착 알람으로',
+                  onPressed: widget.onBack,
+                  icon: const Icon(Icons.arrow_back),
+                ),
+                title: const Text('하차 알람 · 노선 선택'),
               ),
               Expanded(
                 child: BusRouteSearchScreen(

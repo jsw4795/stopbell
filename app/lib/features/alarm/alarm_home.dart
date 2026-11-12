@@ -36,8 +36,10 @@ class AlarmHome extends StatefulWidget {
     this.boardingIntentStorage,
     this.alarmIntentStorage,
     this.homeRequests,
+    this.onOpenSettings,
   });
 
+  final VoidCallback? onOpenSettings;
   final AlarmClient client;
   final NotificationLifecycle? notifications;
   final Future<bool> Function(BuildContext)? beforeActivate,
@@ -228,66 +230,91 @@ class _AlarmHomeState extends State<AlarmHome> {
         onBack: _showList,
         isNavigationCurrent: () => _current && epoch == _navigationEpoch,
       ),
-      _Page.list => HomeOverview(
-        // 복구로 원래 알람을 확인하면 목록을 다시 조회해 바로 보이게 한다.
-        key: ValueKey(('home', epoch, _creation.result?.id)),
-        header: _creation.message != null || _creation.pending != null
-            ? _creationRecovery()
-            : null,
-        findAlarms: widget.client.findAll,
-        findSessions: widget.boardingSessionClient == null
-            ? null
-            : () => widget.boardingSessionClient!.findOverview(
-                generation: _sessionGeneration,
-                current: () =>
-                    _current &&
-                    epoch == _navigationEpoch &&
-                    _page == _Page.list,
+      _Page.list => Column(
+        children: [
+          AppBar(
+            primary: false,
+            title: GestureDetector(
+              key: const ValueKey('header-home'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                Navigator.of(context).popUntil((route) => route.isFirst);
+                _showList();
+              },
+              child: const Text('StopBell'),
+            ),
+            actions: [
+              IconButton(
+                tooltip: '설정',
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: widget.onOpenSettings,
               ),
-        refreshSession: widget.boardingSessionClient == null
-            ? null
-            : (id) => widget.boardingSessionClient!.find(
-                id,
-                generation: _sessionGeneration,
-                current: () =>
-                    _current &&
-                    epoch == _navigationEpoch &&
-                    _page == _Page.list,
-              ),
-        onCreateArrival: () {
-          if (_current && !_creation.blocked) {
-            setState(() {
-              _navigationEpoch++;
-              _page = _Page.search;
-            });
-          }
-        },
-        onCreateBoarding: widget.findBoardingCandidates == null
-            ? null
-            : _openBoarding,
-        onOpenCurrentSession: widget.findBoardingCandidates == null
-            ? null
-            : _openBoarding,
-        onOpenEndedSession: (id) {
-          if (!_current) return;
-          setState(() {
-            _navigationEpoch++;
-            _boardingSessionId = id;
-            _createdAlarm = null;
-            _activationUnverified = false;
-            _page = _Page.boardingNotification;
-          });
-        },
-        onOpenAlarm: (id) {
-          if (!_current) return;
-          setState(() {
-            _navigationEpoch++;
-            _alarmId = id;
-            _createdAlarm = null;
-            _activationUnverified = false;
-            _page = _Page.detail;
-          });
-        },
+            ],
+          ),
+          Expanded(
+            child: HomeOverview(
+              // 복구로 원래 알람을 확인하면 목록을 다시 조회해 바로 보이게 한다.
+              key: ValueKey(('home', epoch, _creation.result?.id)),
+              header: _creation.message != null || _creation.pending != null
+                  ? _creationRecovery()
+                  : null,
+              findAlarms: widget.client.findAll,
+              findSessions: widget.boardingSessionClient == null
+                  ? null
+                  : () => widget.boardingSessionClient!.findOverview(
+                      generation: _sessionGeneration,
+                      current: () =>
+                          _current &&
+                          epoch == _navigationEpoch &&
+                          _page == _Page.list,
+                    ),
+              refreshSession: widget.boardingSessionClient == null
+                  ? null
+                  : (id) => widget.boardingSessionClient!.find(
+                      id,
+                      generation: _sessionGeneration,
+                      current: () =>
+                          _current &&
+                          epoch == _navigationEpoch &&
+                          _page == _Page.list,
+                    ),
+              onCreateArrival: () {
+                if (_current && !_creation.blocked) {
+                  setState(() {
+                    _navigationEpoch++;
+                    _page = _Page.search;
+                  });
+                }
+              },
+              onCreateBoarding: widget.findBoardingCandidates == null
+                  ? null
+                  : _openBoarding,
+              onOpenCurrentSession: widget.findBoardingCandidates == null
+                  ? null
+                  : _openBoarding,
+              onOpenEndedSession: (id) {
+                if (!_current) return;
+                setState(() {
+                  _navigationEpoch++;
+                  _boardingSessionId = id;
+                  _createdAlarm = null;
+                  _activationUnverified = false;
+                  _page = _Page.boardingNotification;
+                });
+              },
+              onOpenAlarm: (id) {
+                if (!_current) return;
+                setState(() {
+                  _navigationEpoch++;
+                  _alarmId = id;
+                  _createdAlarm = null;
+                  _activationUnverified = false;
+                  _page = _Page.detail;
+                });
+              },
+            ),
+          ),
+        ],
       ),
       _Page.boarding => BoardingHome(
         authSession: widget.authSession,
@@ -301,15 +328,14 @@ class _AlarmHomeState extends State<AlarmHome> {
       ),
       _Page.search => Column(
         children: [
-          Row(
-            children: [
-              IconButton(
-                tooltip: '알람 목록으로',
-                onPressed: _showList,
-                icon: const Icon(Icons.arrow_back),
-              ),
-              const Text('도착 알람 · 노선 선택'),
-            ],
+          AppBar(
+            primary: false,
+            leading: IconButton(
+              tooltip: '알람 목록으로',
+              onPressed: _showList,
+              icon: const Icon(Icons.arrow_back),
+            ),
+            title: const Text('도착 알람 · 노선 선택'),
           ),
           Expanded(
             child: BusRouteSearchScreen(
