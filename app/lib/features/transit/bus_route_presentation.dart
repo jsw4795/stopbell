@@ -87,3 +87,10 @@ class BusRoutePresentation {
     return BusRoutePresentation(null, neutral);
   }
 }
+
+/// 노선 유형 표시색. 미분류·미검증 유형이면 null이다(호출부가 기본색을 쓴다).
+Color? routeTypeColor(BuildContext context, BusRoute route) {
+  final brightness = Theme.of(context).brightness;
+  final presentation = BusRoutePresentation.forRoute(route, brightness);
+  return presentation.hasTypeColor(brightness) ? presentation.color : null;
+}

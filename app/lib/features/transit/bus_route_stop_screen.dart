@@ -7,6 +7,7 @@ import '../alarm/alarm_api_client.dart';
 import '../alarm/alarm_creation_controller.dart';
 import 'bus_route.dart';
 import 'bus_route_stop_occurrence.dart';
+import 'bus_route_presentation.dart';
 import 'bus_route_timeline.dart';
 import 'bus_route_vehicle_bar.dart';
 import 'bus_route_vehicle_client.dart';
@@ -356,6 +357,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           targetId: _selectedOccurrenceId,
           onSelect: _creating || _outcomeUnknown ? null : _select,
           vehicles: vehicles?.data?.vehicles,
+          vehicleColor: routeTypeColor(context, widget.route),
         );
         if (vehicles == null) return timeline();
         return Column(

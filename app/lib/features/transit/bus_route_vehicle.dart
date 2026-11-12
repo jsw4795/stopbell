@@ -1,11 +1,15 @@
 enum BusRouteVehiclesStatus { available, empty, partial, stale }
 
+/// atStop: occurrence 정류장에 있음, departed: 출발해 다음 정류장 사이에 있음.
+enum BusVehiclePosition { atStop, departed }
+
 enum BusVehicleSeatStatus { available, none, unavailable }
 
 class BusRouteVehicle {
   const BusRouteVehicle({
     required this.vehicleNumber,
     required this.occurrenceId,
+    required this.position,
     required this.seatStatus,
     required this.seatRemaining,
     required this.congestion,
@@ -15,6 +19,7 @@ class BusRouteVehicle {
 
   /// 차량이 마지막으로 지나간 검증된 occurrence. 모호하면 null.
   final int? occurrenceId;
+  final BusVehiclePosition position;
   final BusVehicleSeatStatus seatStatus;
   final int? seatRemaining;
 
@@ -32,6 +37,11 @@ class BusRouteVehicle {
     if (value is! Map<String, dynamic>) throw const FormatException();
     final number = value['vehicleNumber'];
     final occurrence = value['occurrenceId'];
+    final position = switch (value['positionState']) {
+      'AT_STOP' => BusVehiclePosition.atStop,
+      'DEPARTED' => BusVehiclePosition.departed,
+      _ => throw const FormatException(),
+    };
     final seat = value['seat'];
     final congestion = value['congestion'];
     if (number is! String ||
@@ -61,6 +71,7 @@ class BusRouteVehicle {
     return BusRouteVehicle(
       vehicleNumber: number,
       occurrenceId: occurrence as int?,
+      position: position,
       seatStatus: status,
       seatRemaining: remaining as int?,
       congestion: congestion as int?,

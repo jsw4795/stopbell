@@ -94,6 +94,7 @@ class BusRouteTimeline extends StatefulWidget {
     this.isSelectable,
     this.selectionLocked = false,
     this.vehicles,
+    this.vehicleColor,
   });
 
   final List<BusRouteStopOccurrence> stops;
@@ -107,6 +108,9 @@ class BusRouteTimeline extends StatefulWidget {
   /// 선택 입력. null이면 기존과 동일하게 그린다. occurrenceId가 없는 차량은
   /// 노선도에 찍지 않는다.
   final List<BusRouteVehicle>? vehicles;
+
+  /// 차량 아이콘 색(노선 유형 표시색). null이면 기본 차량 위치색.
+  final Color? vehicleColor;
 
   @override
   State<BusRouteTimeline> createState() => _BusRouteTimelineState();
@@ -178,6 +182,21 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
     }
     return map;
   }
+
+  /// 이 정류장 동그라미 위치에 그릴 차량 수. 마지막 정류장은 출발 상태도 여기에 그린다.
+  int _atStopCount(int index) {
+    final last = index == widget.stops.length - 1;
+    return (_byOccurrence[widget.stops[index].id] ?? const <BusRouteVehicle>[])
+        .where((v) => last || v.position == BusVehiclePosition.atStop)
+        .length;
+  }
+
+  /// 이전 정류장을 출발해 이 정류장과의 사이(레일 중앙)에 있는 차량 수.
+  int _betweenCount(int index) => index == 0
+      ? 0
+      : (_byOccurrence[widget.stops[index - 1].id] ?? const <BusRouteVehicle>[])
+            .where((v) => v.position == BusVehiclePosition.departed)
+            .length;
 
   String? _rowDetails(int index) {
     final stop = widget.stops[index];
@@ -321,7 +340,10 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                         hasSelectedLeg &&
                         index >= boardingIndex &&
                         index < targetIndex,
-                    vehicleCount: _byOccurrence[stop.id]?.length ?? 0,
+                    atStopCount: _atStopCount(index),
+                    betweenCount: _betweenCount(index),
+                    vehicleColor:
+                        widget.vehicleColor ?? stopColors.busLocation,
                     unavailable: !selectable,
                     onTap: widget.onSelect == null || !selectable
                         ? null
@@ -471,7 +493,9 @@ class _StopRow extends StatelessWidget {
     required this.outgoingSelected,
     required this.onTap,
     required this.unavailable,
-    this.vehicleCount = 0,
+    this.atStopCount = 0,
+    this.betweenCount = 0,
+    required this.vehicleColor,
   });
 
   static const railWidth = 56.0;
@@ -487,7 +511,9 @@ class _StopRow extends StatelessWidget {
   final bool outgoingSelected;
   final VoidCallback? onTap;
   final bool unavailable;
-  final int vehicleCount;
+  final int atStopCount;
+  final int betweenCount;
+  final Color vehicleColor;
 
   @override
   Widget build(BuildContext context) {
@@ -540,6 +566,7 @@ class _StopRow extends StatelessWidget {
                     width: railWidth,
                     child: Stack(
                       fit: StackFit.expand,
+                      clipBehavior: Clip.none,
                       children: [
                         // The rail halves meet at each marker's center. Keep
                         // their geometry independent of the label and marker.
@@ -565,12 +592,6 @@ class _StopRow extends StatelessWidget {
                             ),
                           ],
                         ),
-                        if (vehicleCount > 0)
-                          PositionedDirectional(
-                            start: 6,
-                            bottom: 3,
-                            child: _VehicleMarker(count: vehicleCount),
-                          ),
                         Center(
                           child: Container(
                             width: selected || turn ? 24 : 12,
@@ -601,6 +622,28 @@ class _StopRow extends StatelessWidget {
                             ),
                           ),
                         ),
+                        // 정류장 도착: 동그라미와 겹침. 출발: 이전 정류장과 이 정류장
+                        // 사이(행 경계 = 레일 중앙)에 걸친다. 다음 행이 위에 그려지므로
+                        // 경계 마커는 아래 행에서 위쪽으로 삐져나오게 그린다.
+                        if (atStopCount > 0)
+                          Center(
+                            child: _VehicleMarker(
+                              count: atStopCount,
+                              color: vehicleColor,
+                            ),
+                          ),
+                        if (betweenCount > 0)
+                          Positioned(
+                            top: -_VehicleMarker.size / 2,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: _VehicleMarker(
+                                count: betweenCount,
+                                color: vehicleColor,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -664,7 +707,21 @@ List<InlineSpan> _vehicleSpans(BusRouteVehicle vehicle, _TextMetrics metrics) {
     _ => metrics.detail.color,
   };
   return [
-    TextSpan(text: '\n버스 ${vehicle.shortNumber}', style: style),
+    TextSpan(
+      children: [
+        const TextSpan(text: '\n'),
+        // 아이콘 글리프를 글자로 넣어 행 높이 측정(TextPainter)에 그대로 쓴다.
+        TextSpan(
+          text: String.fromCharCode(Icons.directions_bus.codePoint),
+          style: TextStyle(
+            fontFamily: Icons.directions_bus.fontFamily,
+            package: Icons.directions_bus.fontPackage,
+          ),
+        ),
+        TextSpan(text: ' ${vehicle.shortNumber}'),
+      ],
+      style: style,
+    ),
     if (seat != null) TextSpan(text: ' · $seat', style: style),
     if (congestion != null)
       TextSpan(
@@ -675,39 +732,37 @@ List<InlineSpan> _vehicleSpans(BusRouteVehicle vehicle, _TextMetrics metrics) {
 }
 
 class _VehicleMarker extends StatelessWidget {
-  const _VehicleMarker({required this.count});
+  const _VehicleMarker({required this.count, required this.color});
 
+  static const size = 28.0;
   final int count;
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
-    final color = StopBellColors.of(context).busLocation;
     final surface = Theme.of(context).colorScheme.surface;
     return Semantics(
       label: count > 1 ? '버스 $count대' : '버스',
       excludeSemantics: true,
       child: Container(
-        constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-        padding: const EdgeInsets.symmetric(horizontal: 3),
+        width: size,
+        height: size,
         decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(10),
+          shape: BoxShape.circle,
+          color: surface,
+          border: Border.all(color: color, width: 1.5),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.directions_bus, size: 13, color: surface),
-            if (count > 1)
-              Text(
+        alignment: Alignment.center,
+        child: count > 1
+            ? Text(
                 '$count',
                 style: TextStyle(
-                  color: surface,
-                  fontSize: 10,
+                  color: color,
+                  fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
-              ),
-          ],
-        ),
+              )
+            : Icon(Icons.directions_bus, size: 18, color: color),
       ),
     );
   }

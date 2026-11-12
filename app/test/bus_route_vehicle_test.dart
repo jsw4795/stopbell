@@ -17,11 +17,13 @@ import 'alarm_test_fakes.dart';
 Map<String, dynamic> vehicleJson(
   String number, {
   int? occurrence,
+  String position = 'AT_STOP',
   Map<String, dynamic>? seat,
   int? congestion,
 }) => {
   'vehicleNumber': number,
   'occurrenceId': occurrence,
+  'positionState': position,
   'seat': seat ?? {'status': 'UNAVAILABLE', 'remaining': null},
   'congestion': congestion,
 };
@@ -39,12 +41,14 @@ BusRouteVehicles vehicles(
 BusRouteVehicle bus(
   String number, {
   int? at,
+  bool departed = false,
   BusVehicleSeatStatus seat = BusVehicleSeatStatus.unavailable,
   int? remaining,
   int? congestion,
 }) => BusRouteVehicle(
   vehicleNumber: number,
   occurrenceId: at,
+  position: departed ? BusVehiclePosition.departed : BusVehiclePosition.atStop,
   seatStatus: seat,
   seatRemaining: remaining,
   congestion: congestion,
@@ -176,7 +180,7 @@ void main() {
 
     testWidgets('차량이 없으면 차량 문구를 그리지 않는다', (tester) async {
       await tester.pumpWidget(app(null));
-      expect(find.textContaining('버스 '), findsNothing);
+      expect(find.textContaining('3491'), findsNothing);
     });
 
     testWidgets('정류장 행에 좌석·혼잡도를 묶어 보여 주고 위치 불명 차량은 찍지 않는다', (tester) async {
@@ -197,11 +201,47 @@ void main() {
           bus('서울70사1234', congestion: 1),
         ]),
       );
-      expect(find.textContaining('버스 3491 · 12석'), findsOneWidget);
-      expect(find.textContaining('버스 5555 · 만석 · 매우혼잡'), findsOneWidget);
+      expect(find.textContaining('3491 · 12석'), findsOneWidget);
+      expect(find.textContaining('5555 · 만석 · 매우혼잡'), findsOneWidget);
       expect(find.textContaining('1234'), findsNothing);
-      expect(find.byIcon(Icons.directions_bus), findsOneWidget);
       expect(find.text('2'), findsOneWidget);
+    });
+
+    testWidgets('도착 차량은 정류장 동그라미 중심에, 출발 차량은 다음 정류장과의 사이에 그리며 색을 적용한다', (tester) async {
+      const color = Color(0xffe53935);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StopBellTheme.light,
+          home: Scaffold(
+            body: BusRouteTimeline(
+              stops: stops,
+              onSelect: (_) {},
+              vehicleColor: color,
+              vehicles: [
+                bus('1111', at: 1),
+                bus('2222', at: 2, departed: true),
+              ],
+            ),
+          ),
+        ),
+      );
+      final rail = find.byKey(const ValueKey(1));
+      final markers = find.byWidgetPredicate(
+        (w) => w is Icon && w.icon == Icons.directions_bus && w.size == 18,
+      );
+      expect(markers, findsNWidgets(2));
+      for (final icon in tester.widgetList<Icon>(markers)) {
+        expect(icon.color, color);
+      }
+      final first = tester.getCenter(find.textContaining('가정류장'));
+      final atStop = tester.getCenter(markers.first);
+      final between = tester.getCenter(markers.last);
+      final row1 = tester.getRect(rail);
+      final row2 = tester.getRect(find.byKey(const ValueKey(3)));
+      expect(atStop.dy, closeTo(row1.center.dy, 1));
+      expect(between.dy, closeTo(row2.top, 1));
+      expect(atStop.dx, closeTo(between.dx, 0.1));
+      expect(first.dy, closeTo(row1.center.dy, 30));
     });
 
     testWidgets('마커가 있어도 정류장 선택 탭이 동작하고 큰 글자에서도 넘치지 않는다', (tester) async {

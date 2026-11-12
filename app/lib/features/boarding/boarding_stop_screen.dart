@@ -4,6 +4,7 @@ import '../../core/theme/stopbell_colors.dart';
 import '../../core/theme/stopbell_spacing.dart';
 import '../auth/auth_session.dart';
 import '../transit/bus_route.dart';
+import '../transit/bus_route_presentation.dart';
 import '../transit/bus_route_stop_occurrence.dart';
 import '../transit/bus_route_timeline.dart';
 import '../transit/bus_route_vehicle_bar.dart';
@@ -382,6 +383,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       selectionLocked: _picker == _Picker.review,
       rowKey: (id) => ValueKey('occurrence-$id'),
       vehicles: vehicles?.data?.vehicles,
+      vehicleColor: routeTypeColor(context, widget.route),
       onSelect: _staleStops || _result != null || _picker == _Picker.review
           ? null
           : _select,
