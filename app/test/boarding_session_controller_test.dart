@@ -90,6 +90,19 @@ void main() {
       expect(api.creations, isEmpty);
     },
   );
+  test('startup displays the server supplied unverified reference', () async {
+    final saved = longTimelineSessionJson(position: 0, basis: 'INITIAL')
+      ..['evaluationStatus'] = 'VERIFICATION_PENDING'
+      ..['initialObservation'] = {
+        'stopName': '참고 지점',
+        'remainingOccurrenceGap': 31,
+      };
+    api.currentSession = BoardingSession.fromJson(saved);
+    await start();
+    expect(c.initialReference?.index, 0);
+    expect(c.initialReference?.name, '참고 지점');
+    expect(api.creations, isEmpty);
+  });
   test(
     'current query error is never absence or permission to create',
     () async {
@@ -566,7 +579,14 @@ void main() {
         };
         api.onCreate = () async => BoardingSession.fromJson(created);
         await create();
-        final latest = longTimelineSessionJson(position: null, basis: null);
+        final latest = longTimelineSessionJson(
+          position: index,
+          basis: 'INITIAL',
+        );
+        latest['initialObservation'] = {
+          'stopName': '참고 지점',
+          'remainingOccurrenceGap': 31 - index,
+        };
         latest['evaluationStatus'] = 'VERIFICATION_PENDING';
         latest['checkpointObservedAt'] = null;
         api.onFind = () async => BoardingSession.fromJson(latest);
@@ -595,13 +615,13 @@ void main() {
           ),
         );
         expect(marker, findsOneWidget);
-        expect(find.text('등록 당시 관측 기준'), findsOneWidget);
+        expect(find.text('미검증 참고 관측 기준'), findsOneWidget);
         expect(api.detailCalls, 1);
         await tester.pump(const Duration(seconds: 20));
         await tester.pump();
         expect(api.detailCalls, 2);
         expect(marker, findsOneWidget);
-        expect(find.text('등록 당시 관측 기준'), findsOneWidget);
+        expect(find.text('미검증 참고 관측 기준'), findsOneWidget);
         await tester.pumpWidget(const SizedBox());
       },
     );
@@ -624,7 +644,14 @@ void main() {
         api.onCreate = () async => BoardingSession.fromJson(original);
         await create();
         expect(c.initialReference?.index, index);
-        final latest = longTimelineSessionJson(position: null, basis: null);
+        final latest = longTimelineSessionJson(
+          position: index,
+          basis: 'INITIAL',
+        );
+        latest['initialObservation'] = {
+          'stopName': '참고 지점',
+          'remainingOccurrenceGap': 31 - index,
+        };
         latest['evaluationStatus'] = 'VERIFICATION_PENDING';
         latest['checkpointObservedAt'] = null;
         latest['revision'] = 6;
@@ -632,7 +659,7 @@ void main() {
         await c.refresh();
         await c.refresh();
         expect(c.session!.revision, 6);
-        expect(c.session!.timeline!.positionIndex, isNull);
+        expect(c.session!.timeline!.positionIndex, index);
         expect(c.initialReference?.index, index);
         api.onFind = () async =>
             BoardingSession.fromJson(longTimelineSessionJson(position: 4));

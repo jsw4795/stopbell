@@ -159,16 +159,6 @@ public class BoardingSessionService {
             notifications.recordInitialPreparation(session);
             sessions.flush();
             var response = response(session);
-            int index = start.checkpoint().getIndex();
-            // TAGO's unverified baseline comes from the registration-time roster recheck.
-            // Seoul can retain an older reference when detail is empty, so do not expose it here.
-            if (latest.provider() == TransitProvider.TAGO
-                    && start.checkpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
-                    && index >= 0 && index < start.traversal().targetIndex()) {
-                response = response.withInitialObservation(new BoardingSessionResponse.InitialObservation(
-                        latest.traversal().get(index).stopName(), start.traversal().targetIndex() - index));
-                response = response.withTimeline(timeline(session, index, "INITIAL"));
-            }
             return new CreationResult(response, true,
                     session.getStateReason() == null ? BoardingTrackingSnapshot.from(session) : null);
         });
@@ -359,12 +349,24 @@ public class BoardingSessionService {
         var response = runtime.response(session, now()).withPreparationStatus(notifications.preparationStatus(session.getId()));
         Integer position = response.evaluationStatus() == BoardingSessionResponse.EvaluationStatus.READY
                 ? session.getCheckpoint().getIndex() : null;
+        var traversal = session.getTraversal();
+        var checkpoint = session.getCheckpoint();
+        if (response.evaluationStatus() == BoardingSessionResponse.EvaluationStatus.VERIFICATION_PENDING
+                && traversal.provider() == TransitProvider.TAGO && checkpoint.getIndex() >= 0
+                && checkpoint.getIndex() < traversal.targetIndex()) {
+            checkpoint.validateAgainst(traversal);
+            int index = checkpoint.getIndex();
+            var occurrence = traversal.occurrences().get(index);
+            String name = occurrences.findSnapshotStopName(occurrence.occurrenceId(), occurrence.order(), traversal.provider(),
+                    occurrence.externalStopId(), traversal.externalRouteId(), traversal.cityCode()).orElse(null);
+            return response.withInitialObservation(new BoardingSessionResponse.InitialObservation(name, traversal.targetIndex() - index))
+                    .withTimeline(timeline(session, index, "INITIAL"));
+        }
         response = response.withTimeline(timeline(session, position, position == null ? null : "READY"));
         if (position == null) return response;
-        var traversal = session.getTraversal();
         var occurrence = traversal.occurrences().get(position);
         return response.withCurrentStopName(occurrences.findSnapshotStopName(occurrence.occurrenceId(), occurrence.order(), traversal.provider(),
-                occurrence.externalStopId(), traversal.externalRouteId()).orElse(null));
+                occurrence.externalStopId(), traversal.externalRouteId(), traversal.cityCode()).orElse(null));
     }
 
     private BoardingSessionResponse.Timeline timeline(BoardingSession session, Integer position, String basis) {

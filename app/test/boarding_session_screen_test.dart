@@ -85,7 +85,7 @@ void main() {
     );
     expect(find.text('등록 시 확인된 차량 위치'), findsNothing);
     expect(find.text('등록 지점 부근'), findsNothing);
-    expect(find.text('등록 당시 관측 기준'), findsNothing);
+    expect(find.text('미검증 참고 관측 기준'), findsNothing);
     expect(find.text('3개 지점 남음'), findsOneWidget);
     expect(find.text('최근 관측 기준'), findsNothing);
   });
@@ -136,7 +136,7 @@ void main() {
         ),
       );
       expect(find.textContaining('이전 관측'), findsNothing);
-      expect(find.text('등록 당시 관측 기준'), findsNothing);
+      expect(find.text('미검증 참고 관측 기준'), findsNothing);
     });
   }
 

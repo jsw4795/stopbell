@@ -39,8 +39,12 @@ public record BoardingSessionResponse(
                 session.getRouteNumber(), session.getVehicleNumber(), session.getTargetName(),
                 traversal.occurrences().get(traversal.targetIndex()).order(),
                 evaluation == EvaluationStatus.READY ? verifiedGap : null, null,
-                session.getCheckpoint().getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
-                    ? null : instant(session.getCheckpoint().getObservedAt()), instant(session.getCheckpoint().getProviderDataTime()),
+                session.getCheckpoint().getEvidence() != BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE
+                        || (evaluation == EvaluationStatus.VERIFICATION_PENDING
+                            && traversal.provider() == com.stopbell.transit.domain.TransitProvider.TAGO
+                            && session.getCheckpoint().getIndex() >= 0
+                            && session.getCheckpoint().getIndex() < traversal.targetIndex())
+                    ? instant(session.getCheckpoint().getObservedAt()) : null, instant(session.getCheckpoint().getProviderDataTime()),
                 evaluation, session.getStateReason(), instant(session.getExpiresAt()), instant(session.getEndedAt()),
                 session.isPrepareNotificationEnabled(), session.getNotificationOffsetStops(), "UNKNOWN", null, null);
     }

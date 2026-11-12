@@ -144,7 +144,7 @@ void main() {
       ),
     );
     expectMarkerVisible(tester, const ValueKey('tracking-bus-marker'));
-    expect(find.text('등록 당시 관측 기준'), findsOneWidget);
+    expect(find.text('미검증 참고 관측 기준'), findsOneWidget);
     session.value = BoardingSession.fromJson(
       timelineSession(
         id: 456,
@@ -157,7 +157,7 @@ void main() {
     expectMarkerVisible(tester, const ValueKey('before-boarding-bus-marker'));
     expect(find.text('현재 지점 부근'), findsOneWidget);
     expect(find.text('승차까지 2개 지점'), findsOneWidget);
-    expect(find.text('등록 당시 관측 기준'), findsOneWidget);
+    expect(find.text('미검증 참고 관측 기준'), findsOneWidget);
     final bus = find.byKey(const ValueKey('before-boarding-bus-marker'));
     final firstRow = find.byKey(const ValueKey(102));
     final firstIcon = find.descendant(

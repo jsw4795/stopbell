@@ -646,7 +646,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '승차 정류장으로 이동 중',
+                          initialPosition ? '승차 전 참고 관측' : '승차 정류장으로 이동 중',
                           style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(color: accent),
                         ),
@@ -664,7 +664,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                         Text(
-                          initialPosition ? '등록 당시 관측 기준' : '최근 관측 기준',
+                          initialPosition ? '미검증 참고 관측 기준' : '최근 관측 기준',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -793,7 +793,7 @@ class _TrackingRow extends StatelessWidget {
                     Text('하차 준비 알림 지점', style: theme.textTheme.bodySmall),
                   if (bus)
                     Text(
-                      initial ? '등록 당시 관측 기준' : '최근 관측 기준',
+                      initial ? '미검증 참고 관측 기준' : '최근 관측 기준',
                       style: theme.textTheme.bodySmall,
                     ),
                   if (showOrder)

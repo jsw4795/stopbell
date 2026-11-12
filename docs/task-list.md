@@ -1995,6 +1995,7 @@ Phase 등록 당시 계획과 아래 날짜별 구현·검증 기록을 보존�
   - 선행 관계: Phase 6 및 TASK-904~906 완료 후 수행한다. 화면 구성 검토는 TASK-903 계약 확정 뒤 가능하나 API/Notification 연결 전에는 완료 처리하지 않는다.
 
 - [ ] TASK-908 실제 버스 탑승 E2E 검증
+  - TAGO 정상 목록 누락 시 checkpoint와 TRACKING을 유지하고 DB의 미검증 참고 checkpoint를 생성·GET에서 공유한다. 회차 및 전체 노선 마지막 occurrence 누락만으로 종료하지 않는다. 실제 버스/iPhone E2E는 미완료다.
   - 2026-11-11 후행 정책: 차량과 occurrence의 정확한 대응 및 간격으로 준비·목적지 Event를 각각 최대 한 번 판단한다. Provider 시각·stopFlag·이전 index·관측 공백만으로 차단하지 않는다. Backend 전체 1,896개와 Flutter 전체 807개·analyze가 통과했다. 자동 검증은 실제 Provider/FCM·iPhone E2E를 대체하지 않으며, 다른 운행 회차와 오래된 응답은 확실히 구분하지 못할 수 있다. 현행 계약은 [Domain](domain-model.md#snapshot-and-progress)을 따른다.
   - TAGO 실기기 검증 (2026-11-05): 핵심 실험 구현 후 실제 iPhone에서 남양주 165번은 별도 세션의 2·1정거장 전 Push와 2정거장 전 세션의 `COMPLETED`를 확인했다. M2352는 ID 누락 대응 수정 후 차량 선택·진행·2정거장 전 Push·`COMPLETED`까지 전체 E2E를 확인했다. 환경, 관측과 한계는 [증거 보고서 §34](research/TASK-908-provider-evidence.md#34-경기-tago-실제-iphone-e2e-검증-2026-11-05), 구현·자동 검증은 [§33](research/TASK-908-provider-evidence.md#33-tago-순서-단독-진행과-m2352-2026-11-05)을 따른다. 전체 노선·원본 최신성 및 지연·운행 식별·장애/재시작 복구·회차·다중 사용자와 아래 완료 기준의 잔여 시나리오는 미검증이므로 TASK는 미완료다.
   - TAGO 실험 정책 확정 (2026-11-05): 원본 최신성·동일 운행의 잔여 위험을 수용해 기본 OFF 실험을 도입하고 단일 준비 알림 계약을 유지했다. [증거 보고서 §32](research/TASK-908-provider-evidence.md#32-tago-하차-추적-실험-정책-2026-11-05)와 [로컬 실행](local-development.md#tago-하차-추적-실험)을 따른다. 당시 남양주 165번 실제 iPhone E2E는 미실행이었다.

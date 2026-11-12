@@ -69,6 +69,12 @@ public class BoardingSessionPollingService {
                     } catch (TransitProviderClientException exception) {
                         input = BoardingVehicleTracker.Input.held(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
                     }
+                    // A successful TAGO roster can temporarily omit the selected vehicle.
+                    // Preserve the committed checkpoint and gate until actual evidence returns.
+                    if (session.provider() == TransitProvider.TAGO
+                            && input.reason() == BoardingStateReason.VEHICLE_MISSING) {
+                        continue;
+                    }
                     decision = input.reason() != null ? BoardingTrackingDecision.held(input.reason())
                             : evaluator.evaluate(session, input.observation(), now());
                 }

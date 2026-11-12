@@ -463,7 +463,7 @@ TAGO Arrival의 `arrprevstationcnt`와 `arrtime`은 Route/Stop 수준의 auxilia
 
 후보는 Provider/Route 문맥 안의 transient 차량 reference와 확인용 번호의 대응을 보존한다. TAGO는 vehicleno, 서울은 vehId와 plainNo의 구분을 유지하고 번호를 대체 ID로 합성하지 않는다. 위치 ID가 없다는 사실만으로 식별 가능한 후보를 버리지 않으며, 검증된 order 참고도 누락된 Stop ID나 정확한 정차 위치를 합성하지 않는다.
 
-재조회는 확정 대상의 identity를 변경하지 않는다. 확정 차량 소실·식별 변경과 명시적 운행 종료는 판단 보류·사용자 재확인 또는 종료의 입력이며 다른 차량으로 자동 전환·재연결하지 않는다. 기존 Alarm의 다중 차량 tracking cycle·FOLLOW_UP을 탑승 세션으로 간주하지 않는다.
+재조회는 확정 대상의 identity를 변경하지 않는다. TAGO 정상 목록에서 차량이 일시 누락되면 checkpoint와 상태를 보존하며, 식별 변경과 명시적 운행 종료는 판단 보류·사용자 재확인 또는 종료의 입력이며 다른 차량으로 자동 전환·재연결하지 않는다. 기존 Alarm의 다중 차량 tracking cycle·FOLLOW_UP을 탑승 세션으로 간주하지 않는다.
 
 후보 생성·표시 정렬·보류 규칙과 지원 범위는 [ADR-011](adr/ADR-011-bus-vehicle-recommendation-and-user-confirmation.md), 사용자 보장은 [요구사항](requirements.md#phase-9-탑승-차량-추천과-확인)을 따른다. 아래 BoardingSession은 TASK-903에서 확정한 후속 계약이며 후보·화면 선택과 추적 시작을 구분한다.
 
@@ -500,7 +500,7 @@ COMPLETED는 실제 정차·사용자 하차나 Push 성공을 뜻하지 않는�
 | --- | --- |
 | BASELINE_UNVERIFIED | TRACKING의 위치 근거 부족. 정확한 occurrence를 확인한 뒤 판단 |
 | TEMPORARY_PROVIDER_FAILURE / STALE_PROGRESS | 유효 관측을 자동 재조회. 시간 공백만으로 재개를 차단하지 않음 |
-| VEHICLE_MISSING / IDENTITY_CONFLICT / TRAVERSAL_AMBIGUOUS | 재확인 필요. 단순 재등장·번호 일치로 사유를 자동 제거하지 않음 |
+| VEHICLE_MISSING(서울) / IDENTITY_CONFLICT / TRAVERSAL_AMBIGUOUS | 재확인 필요. 단순 재등장·번호 일치로 사유를 자동 제거하지 않음 |
 | METADATA_CHANGED | 구조 변경 보류. 기존 불변 snapshot과 다시 일치하지 않으면 취소 후 목적지를 새로 선택하며 자동 치환 없음 |
 | ARRIVAL_OBSERVED / PASSED_OBSERVED | COMPLETED 종료 사유 |
 | USER_CANCELLED / SESSION_LIFETIME_EXPIRED | CANCELLED / EXPIRED 종료 사유 |
@@ -511,7 +511,9 @@ TRACKING의 stateReason은 정상 진행이면 NULL, 미검증이면 BASELINE_UN
 
 ## Snapshot and Progress
 
-TASK-908은 `UNVERIFIED_REFERENCE`를 진행 검증 근거와 구분한다. 차량 ID·전체 번호·불변 traversal과 함께 최신 미검증 ID/order·두 시각만 저장하며 이를 현재 위치나 검증 checkpoint로 노출하지 않는다. 단, 등록 직전 재조회로 확인된 TAGO occurrence는 최초 생성 성공 응답에서만 등록 당시 관측 참고 정보로 표시할 수 있으며 추적 판단 근거가 아니다. 위치가 없으면 Stop ID NULL/order 0/index -1의 명시적 위치 없음 표현을 사용하고 occurrence를 합성하지 않는다. 미검증 TRACKING도 현재 조회·취소·단일 open 세션·UUID 중복 방지·PT4H 수명에 포함된다. 후보 reference의 60초 유효기간은 성공한 세션의 수명이 아니다.
+TAGO 정상 목록의 선택 차량 누락은 횟수와 관계없이 기존 TRACKING checkpoint·revision을 유지하고 새 관측이나 Event를 만들지 않는다. 회차 지점은 전체 노선의 마지막 occurrence와 다르며 누락만으로 운행 종료를 추정하지 않는다. 전체 마지막 occurrence 이후 누락은 개념적으로 운행 종료 후보이나 누락만으로 확정할 근거는 없다. 현행 목적지가 전체 마지막 occurrence 이하이므로 검증된 마지막 occurrence 관측 시 이미 목적지 도달·통과로 COMPLETED되어 후속 누락 후보를 별도로 기록하지 않는다. 목적지 도달에 따른 COMPLETED 의미는 변하지 않는다.
+
+TASK-908은 `UNVERIFIED_REFERENCE`를 진행 검증 근거와 구분한다. 차량 ID·전체 번호·불변 traversal과 함께 최신 미검증 ID/order·두 시각만 저장하며 이를 현재 위치나 검증 checkpoint로 노출하지 않는다. 단, TRACKING의 유효한 TAGO 미검증 checkpoint는 저장된 관측 시각과 occurrence를 이용해 생성 및 조회에서 미검증 참고 정보로 표시한다. 이는 후속 미검증 관측으로 갱신될 수 있으며 현재 위치나 추적 판단 근거가 아니다. 위치가 없으면 Stop ID NULL/order 0/index -1의 명시적 위치 없음 표현을 사용하고 occurrence를 합성하지 않는다. 미검증 TRACKING도 현재 조회·취소·단일 open 세션·UUID 중복 방지·PT4H 수명에 포함된다. 후보 reference의 60초 유효기간은 성공한 세션의 수명이 아니다.
 
 동일 차량과 노선의 위치를 traversal의 occurrence에 대응한다. 서울은 `stId`와 `stOrd`를 함께 사용하고 `stopFlag`가 0·1·null이어도 정확히 대응하면 수용한다. TAGO는 `nodeord`가 유일한 occurrence에 대응하고 `nodeid`가 있으면 일치해야 한다. ID가 없으면 합성하지 않는다. 같은 Stop ID의 재방문은 order로 구분하며 구간순번 `sectOrd`를 정류장 순번으로 대체하지 않는다. 명시적 운행 종료와 차량 식별 충돌은 기존대로 처리한다.
 
@@ -529,7 +531,7 @@ TASK-908은 `UNVERIFIED_REFERENCE`를 진행 검증 근거와 구분한다. 차�
 
 ## Recovery
 
-재시작 후 전송 gate는 기본적으로 닫혀 있고, Provider 응답을 관측해 정확한 차량·노선·occurrence와 DB revision을 확인한 결과를 commit한 뒤 연다. 같은 응답도 재평가할 수 있으며 기존 Event를 중복 생성하지 않는다. Provider 장애는 자동 재조회하고, 명시적 소실·차량 식별 충돌·운행 종료 등 기존 보류 사유는 재확인이 필요하다. 시각 경과나 위치 역행만을 회차 변경으로 간주하지 않으며 다른 회차를 판별하지 못하는 한계가 있다. 취소·만료와 현재 revision 및 Event 기한은 유지한다.
+재시작 후 전송 gate는 기본적으로 닫혀 있고, Provider 응답을 관측해 정확한 차량·노선·occurrence와 DB revision을 확인한 결과를 commit한 뒤 연다. 같은 응답도 재평가할 수 있으며 기존 Event를 중복 생성하지 않는다. Provider 장애는 자동 재조회하고, 서울의 차량 소실·차량 식별 충돌·명시적 운행 종료 등 기존 보류 사유는 재확인이 필요하다. 시각 경과나 위치 역행만을 회차 변경으로 간주하지 않으며 다른 회차를 판별하지 못하는 한계가 있다. 취소·만료와 현재 revision 및 Event 기한은 유지한다.
 
 ## Ownership and Notification Boundary
 

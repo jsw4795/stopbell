@@ -155,6 +155,8 @@ TASK-903의 설계에 TASK-908의 현행 정책을 반영한 요구사항이다.
 - 초기 세션 수명과 알림 TTL은 각각 PT4H와 PT30S이며 조정 가능한 운영값이다. 새 설정으로 기존 저장 기한을 늘리지 않는다. 정확한 설정·만료 실행은 [Architecture](architecture.md#탑승-세션-실행과-notification-연계-task-903)를 따른다.
 - GPS 비의존과 서울 조건부 지원을 유지한다. TAGO는 기본 OFF 실험 기능에서 정상 응답을 최신 가용 위치로 가정하며 원본 최신성과 동일 운행은 보장하지 않는다. 기존 Alarm/Notification 계약을 보존하며 구현과 실제 iPhone 현장 검증을 구분한다. 기존 도착 Alarm의 미정차 개선은 별도 후속 범위다.
 
+TAGO 정상 목록에서 선택 차량이 일시 누락되어도 기존 추적을 유지한다. 미검증 TAGO 참고 관측은 저장된 시각의 참고 정보로 표시하며 검증된 현재 위치로 표현하지 않는다. 회차 지점 또는 전체 노선 마지막 지점의 누락만으로 운행 종료를 확정하지 않는다.
+
 ### V1 Push Notification 계약
 
 - StopBell Device identity는 Client가 앱 installation마다 생성한 `installationId`를 기준으로 하며 User-scoped identity가 아니다. 하나의 `installationId`에는 동시에 current owner가 최대 한 명이어야 하고, 같은 installation에서 User가 바뀌면 atomic ownership takeover 또는 동등한 계약으로 이전·신규 ownership이 함께 enabled 상태로 남지 않게 한다. Firebase의 현재 push targeting identifier는 rotation/re-registration 가능한 delivery reference로 분리하고 APNs device token은 StopBell Device identity로 사용하지 않는다. TASK-702에서 확정한 단일 Firebase Project의 현재 FID uniqueness 정책은 `database.md`의 devices Schema를 따른다.

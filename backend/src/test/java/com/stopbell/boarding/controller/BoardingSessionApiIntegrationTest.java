@@ -138,11 +138,12 @@ class BoardingSessionApiIntegrationTest {
             var boarding = occurrence("t28", 28);
             target = occurrence("t29", 29);
             var position = new java.util.concurrent.atomic.AtomicInteger(27);
+            var missing = new java.util.concurrent.atomic.AtomicBoolean(false);
             when(tago.fetchVehicleLocations(any())).thenAnswer(invocation -> new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse(
                     new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Response(
                             new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Header("00", null),
                             new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Body(
-                                    new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Items(List.of(
+                                    new com.stopbell.transit.dto.tago.TagoVehicleLocationResponse.Items(missing.get() ? List.of() : List.of(
                                             new com.stopbell.transit.dto.tago.TagoVehicleLocationItem("경기74아3417", null,
                                                     position.get(), null, null))), 1, 1, 1000))));
             var candidate = candidates.find(owner.getId(), route.getId(), target.getId(), boarding.getId()).candidates().getFirst();
@@ -161,9 +162,13 @@ class BoardingSessionApiIntegrationTest {
             assertThat(created.response().timeline().positionBasis()).isEqualTo("INITIAL");
             assertThat(created.response().timeline().stops()).extracting(BoardingSessionResponse.TimelineStop::id)
                     .containsExactly(boarding.getId(), target.getId());
-            assertThat(service.find(owner.getId(), created.response().id()).timeline().positionIndex()).isNull();
-            assertThat(service.find(owner.getId(), created.response().id()).initialObservation()).isNull();
-            assertThat(service.create(owner.getId(), request).response().initialObservation()).isNull();
+            var fetched = service.find(owner.getId(), created.response().id());
+            assertThat(fetched.timeline().positionIndex()).isZero();
+            assertThat(fetched.initialObservation()).isEqualTo(created.response().initialObservation());
+            assertThat(fetched.checkpointObservedAt()).isEqualTo(created.response().checkpointObservedAt());
+            runtime.forget(created.response().id());
+            assertThat(service.find(owner.getId(), created.response().id()).initialObservation()).isEqualTo(fetched.initialObservation());
+            assertThat(service.create(owner.getId(), request).response().initialObservation()).isEqualTo(fetched.initialObservation());
             jdbc.update("update bus_stops set external_stop_id='changed-stop' where id=(select stop_id from bus_route_stop_occurrences where id=?)", boarding.getId());
             assertThat(service.find(owner.getId(), created.response().id()).timeline().stops().getFirst().name()).isNull();
             jdbc.update("update bus_stops set external_stop_id='t28' where id=(select stop_id from bus_route_stop_occurrences where id=?)", boarding.getId());
@@ -173,6 +178,15 @@ class BoardingSessionApiIntegrationTest {
             assertThat(initial.getStopOrder()).isEqualTo(26);
             assertThat(initial.getProviderDataTime()).isNull();
             assertThat(events.count()).isZero();
+            missing.set(true);
+            time.set(NOW.plusSeconds(10));
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            var afterMissing = sessions.findById(created.response().id()).orElseThrow();
+            assertThat(afterMissing.getStatus()).isEqualTo(BoardingSessionStatus.TRACKING);
+            assertThat(afterMissing.getRevision()).isEqualTo(created.response().revision());
+            assertThat(afterMissing.getCheckpoint()).isEqualTo(initial);
+            assertThat(events.count()).isZero();
+            missing.set(false);
             position.set(27);
             time.set(NOW.plusSeconds(20));
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
@@ -184,6 +198,16 @@ class BoardingSessionApiIntegrationTest {
             assertThat(ready.remainingOccurrenceGap()).isEqualTo(2);
             assertThat(ready.timeline().positionIndex()).isEqualTo(1);
             assertThat(ready.timeline().positionBasis()).isEqualTo("READY");
+            var readyCheckpoint = sessions.findById(created.response().id()).orElseThrow().getCheckpoint();
+            missing.set(true);
+            time.set(NOW.plusSeconds(30));
+            polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
+            var readyAfterMissing = service.find(owner.getId(), created.response().id());
+            assertThat(readyAfterMissing.status()).isEqualTo(BoardingSessionStatus.TRACKING);
+            assertThat(readyAfterMissing.revision()).isEqualTo(ready.revision());
+            assertThat(sessions.findById(created.response().id()).orElseThrow().getCheckpoint()).isEqualTo(readyCheckpoint);
+            assertThat(events.count()).isEqualTo(1);
+            missing.set(false);
             position.set(28);
             time.set(NOW.plusSeconds(40));
             polling.poll(new com.stopbell.transit.service.VehiclePollingCycle(tago, seoul, detail, clock));
@@ -256,7 +280,7 @@ class BoardingSessionApiIntegrationTest {
         assertThat(created.response().currentStopName()).isEqualTo("s1");
         assertThat(created.response().initialObservation()).isNull();
         assertThat(occurrences.findSnapshotStopName(first.getId(), 10, TransitProvider.SEOUL_BUS,
-                "incorrect-stop", route.getExternalRouteId())).isEmpty();
+                "incorrect-stop", route.getExternalRouteId(), null)).isEmpty();
         assertThat(created.response().status()).isEqualTo(BoardingSessionStatus.TRACKING);
         assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isZero();
         time.set(NOW.plusSeconds(20));

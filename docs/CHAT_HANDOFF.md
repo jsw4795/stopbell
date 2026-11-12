@@ -15,7 +15,9 @@
 5. 새로운 개발 단계에 진입하면 [로드맵](roadmap.md)의 해당 단계만 확인한다.
 6. 기타 문서는 구체적인 계약·설계·이력 확인이 필요할 때 관련 섹션을 찾아 읽는다. [문서 조회 기준](development-guidelines.md#문서-조회-기준)을 따르며 Flutter UI-0~UI-8 전체 목표와 이후 전달되는 최신 작업 결과를 유지한다.
 
-## 현재 위치 — 2026-11-11 기준
+## 현재 위치 — 2026-11-12 기준
+
+- TAGO 정상 차량 목록의 일시 누락은 TRACKING과 checkpoint를 보존하며, DB 미검증 checkpoint를 생성·조회에서 참고 위치로 제공한다. 누락만으로 회차나 전체 노선 마지막 지점의 운행 종료를 확정하지 않는다. 자세한 계약은 [Domain](domain-model.md#snapshot-and-progress), [API](api.md#탑승-세션-api-task-903)를 따른다. TASK-908 전체 E2E는 미완료다.
 
 - 2026-11-11 후행 하차 추적 정책은 정확한 차량·노선·occurrence와 간격으로 판단하고 준비와 목적지 Event를 각각 최대 한 번 생성한다. Provider 시각·stopFlag·이전 index·관측 공백만으로 차단하지 않는다. 최초 미검증 checkpoint 이후에도 정확한 목적지 occurrence를 확인하면 이전 방문 기록 없이 완료한다. 다른 운행 회차를 구분하지 못할 가능성은 사용자가 수용했으며 TASK-908 실제 기기 검증은 미완료다. [현행 계약](domain-model.md#snapshot-and-progress)
 - 공식 노선 유형 Backend는 `d9300c2`에서 구현됐으며 기존 개발 DB 유형 보강도 완료됐다. HEAD와 작업 트리는 매번 다시 확인한다.

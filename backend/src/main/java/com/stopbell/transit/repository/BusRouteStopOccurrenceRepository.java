@@ -19,9 +19,10 @@ public interface BusRouteStopOccurrenceRepository extends JpaRepository<BusRoute
             where occurrence.id = :id and occurrence.stopOrder = :stopOrder
               and stop.provider = :provider and stop.externalStopId = :externalStopId
               and route.provider = :provider and route.externalRouteId = :externalRouteId
+              and ((:cityCode is null and route.cityCode is null) or route.cityCode = :cityCode)
             """)
     Optional<String> findSnapshotStopName(Long id, int stopOrder, TransitProvider provider,
-            String externalStopId, String externalRouteId);
+            String externalStopId, String externalRouteId, String cityCode);
 
     @Query("""
             select occurrence from BusRouteStopOccurrence occurrence
