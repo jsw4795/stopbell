@@ -67,6 +67,7 @@ class BoardingBusTimeline extends StatefulWidget {
     required this.buses,
     required this.selected,
     required this.canSelect,
+    this.holdReason,
     required this.onSelect,
     required this.vehicleColor,
   });
@@ -76,6 +77,9 @@ class BoardingBusTimeline extends StatefulWidget {
   final List<BoardingBusEntry> buses;
   final BoardingCandidate? selected;
   final bool Function(BoardingCandidate) canSelect;
+
+  /// 선택 불가 후보의 짧은 사유(없으면 null).
+  final String? Function(BoardingCandidate)? holdReason;
   final ValueChanged<BoardingCandidate> onSelect;
   final Color vehicleColor;
 
@@ -587,6 +591,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     final vehicle = bus.vehicle;
     final selected = identical(bus.candidate, widget.selected);
     final enabled = widget.canSelect(bus.candidate);
+    final reason = widget.holdReason?.call(bus.candidate);
     final detail = [?vehicle.seatLabel, ?vehicle.congestionLabel].join(' · ');
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(StopBellRadius.card),
@@ -599,6 +604,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
       button: true,
       enabled: enabled,
       selected: selected,
+      hint: reason,
       child: Material(
         color: selected
             ? Color.alphaBlend(route.withValues(alpha: 0.10), colors.surface)
@@ -646,9 +652,13 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
                           ],
                         ),
                         Text(
-                          _distance(bus, boarding, target),
+                          reason ?? _distance(bus, boarding, target),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: colors.onSurfaceVariant,
+                            color: reason != null
+                                ? StopBellColors.of(context).warning
+                                : colors.onSurfaceVariant,
                           ),
                         ),
                       ],

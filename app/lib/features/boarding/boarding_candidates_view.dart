@@ -176,12 +176,12 @@ class _CompactCandidateCard extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final semantic = StopBellColors.of(context);
-    final canSelect = canChoose && !duplicate && candidate.canCreateWithNumber;
-    final holdReason = canSelect
-        ? null
-        : duplicate
-        ? '선택 보류 · 차량번호 중복'
-        : _holdReason(candidate, canChoose);
+    final holdReason = compactHoldReason(
+      candidate,
+      canChoose: canChoose,
+      duplicate: duplicate,
+    );
+    final canSelect = holdReason == null;
     final onTap = canSelect && onSelect != null
         ? () => onSelect!(candidate)
         : null;
@@ -294,6 +294,17 @@ class _CompactCandidateCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 컴팩트 후보가 선택 불가일 때의 짧은 사유. 선택 가능하면 null.
+String? compactHoldReason(
+  BoardingCandidate candidate, {
+  required bool canChoose,
+  required bool duplicate,
+}) {
+  if (canChoose && !duplicate && candidate.canCreateWithNumber) return null;
+  if (duplicate) return '선택 보류 · 차량번호 중복';
+  return _holdReason(candidate, canChoose);
 }
 
 String _holdReason(BoardingCandidate candidate, bool canChoose) {

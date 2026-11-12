@@ -147,6 +147,11 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    testWidgets('선택 불가 버스 카드에 사유를 보여 준다', (tester) async {
+      await pumpTimeline(tester, holdReason: (_) => '선택 보류 · 차량번호 중복');
+      expect(find.text('선택 보류 · 차량번호 중복'), findsWidgets);
+    });
+
     testWidgets('거리 라벨·접기·펼치기·버스 탭 선택', (tester) async {
       tester.view.physicalSize = const Size(600, 3000);
       tester.view.devicePixelRatio = 1;
@@ -250,11 +255,6 @@ void main() {
   });
 
   group('BoardingBusTimeline start range', () {
-    testWidgets('선택 불가 버스 카드에 사유를 보여 준다', (tester) async {
-      await pumpTimeline(tester, holdReason: (_) => '선택 보류 · 차량번호 중복');
-      expect(find.text('선택 보류 · 차량번호 중복'), findsWidgets);
-    });
-
     testWidgets('승차 전 버스가 없으면 승차 정류장부터 그린다', (tester) async {
       tester.view.physicalSize = const Size(600, 3000);
       tester.view.devicePixelRatio = 1;
@@ -317,7 +317,6 @@ void main() {
       addTearDown(auth.dispose);
       addTearDown(transport.close);
       var vehicleCalls = 0, candidateCalls = 0;
-      BoardingCandidate? opened;
 
       await tester.pumpWidget(
         MaterialApp(
@@ -342,8 +341,12 @@ void main() {
                     candidateCalls++;
                     return _candidates();
                   },
-              onSelectCandidate: (c, _, {required boarding, required target}) =>
-                  opened = c,
+              onSelectCandidate: (
+                c,
+                _, {
+                required boarding,
+                required target,
+              }) {},
               onBack: () {},
             ),
           ),
