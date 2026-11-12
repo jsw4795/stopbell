@@ -167,13 +167,13 @@ class _SettingsScreenState extends State<SettingsScreen>
                 enabled: false,
                 leading: Icon(Icons.privacy_tip_outlined),
                 title: Text('개인정보처리방침'),
-                subtitle: Text('준비 중'),
+                trailing: _PreparingChip(),
               ),
               ListTile(
                 enabled: false,
                 leading: Icon(Icons.description_outlined),
                 title: Text('서비스 이용약관'),
-                subtitle: Text('준비 중'),
+                trailing: _PreparingChip(),
               ),
             ],
           ),
@@ -188,13 +188,17 @@ class _SettingsScreenState extends State<SettingsScreen>
             ],
           ),
           if (widget.onDeleteAccount != null) ...[
-            const SizedBox(height: StopBellSpacing.xl * 2),
-            Center(
+            const SizedBox(height: StopBellSpacing.xl),
+            Align(
+              alignment: Alignment.centerLeft,
               child: TextButton(
                 key: const ValueKey('delete-account'),
                 style: TextButton.styleFrom(
-                  foregroundColor: colors.onSurfaceVariant,
-                  textStyle: theme.textTheme.bodySmall,
+                  foregroundColor: colors.error,
+                  minimumSize: const Size(
+                    StopBellSpacing.minimumTouchSize,
+                    StopBellSpacing.minimumTouchSize,
+                  ),
                 ),
                 onPressed: widget.onDeleteAccount,
                 child: const Text('회원 탈퇴'),
@@ -202,6 +206,31 @@ class _SettingsScreenState extends State<SettingsScreen>
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _PreparingChip extends StatelessWidget {
+  const _PreparingChip();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: StopBellSpacing.sm,
+        vertical: 3,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(StopBellRadius.button),
+      ),
+      child: Text(
+        '준비 중',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
       ),
     );
   }

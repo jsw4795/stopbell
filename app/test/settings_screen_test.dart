@@ -56,8 +56,22 @@ void main() {
       );
       expect(tile.enabled, isFalse);
     }
+    expect(find.text('준비 중'), findsNWidgets(2));
     expect(find.text('회원 탈퇴'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('회원 탈퇴는 로그아웃 아래 빨간 버튼으로 떨어져 있다', (tester) async {
+    await pump(tester, onDelete: () async {});
+    final button = find.byKey(const ValueKey('delete-account'));
+    final logoutBottom = tester.getBottomLeft(find.text('로그아웃')).dy;
+    expect(tester.getTopLeft(button).dy - logoutBottom, greaterThan(24));
+    expect(tester.getSize(button).height, greaterThanOrEqualTo(44));
+    final style = tester.widget<TextButton>(button).style!;
+    expect(
+      style.foregroundColor!.resolve({}),
+      StopBellTheme.light.colorScheme.error,
+    );
   });
 
   testWidgets('로그아웃은 설정을 닫고 기존 흐름을 호출한다', (tester) async {
