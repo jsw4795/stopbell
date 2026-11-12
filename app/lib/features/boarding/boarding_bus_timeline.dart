@@ -351,7 +351,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
           ],
         ),
       ),
-      color: arrived ? null : tint,
+      color: tint,
       key: arrived ? null : key,
     );
     if (!arrived) return stopRow;
@@ -361,9 +361,9 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     final h = _cardHeight;
     final cardsEnd = buses.length * (_cardGap + h) + _cardGap;
     final markerY = cardsEnd + _centerY;
+    // 강조 배경은 정류장 이름 행([stopRow])만 칠하고 카드·연결선 영역은 비운다.
     return Container(
       key: key,
-      color: tint,
       child: Stack(
         children: [
           Column(

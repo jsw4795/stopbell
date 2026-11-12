@@ -91,6 +91,56 @@ void main() {
     expect(split.others, isEmpty);
   });
 
+  for (final brightness in Brightness.values) {
+    testWidgets('도착 버스가 있어도 강조 배경은 정류장 이름 행만 칠한다 ($brightness)', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1000, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final split = splitBoardingBuses(
+        candidates: [BoardingCandidate.fromJson(candidateJson())],
+        vehicles: BusRouteVehicles.fromJson({
+          'observedAt': '2026-11-12T01:00:00Z',
+          'status': 'AVAILABLE',
+          'vehicles': [_vehicle('서울70사1234', 10, 'AT_STOP')],
+        }).vehicles,
+        stops: _stops,
+        targetId: 20,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: brightness == Brightness.light
+              ? StopBellTheme.light
+              : StopBellTheme.dark,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: BoardingBusTimeline(
+                stops: _stops,
+                boardingId: 10,
+                targetId: 20,
+                buses: split.drawn,
+                selected: null,
+                canSelect: (_) => true,
+                onSelect: (_) {},
+                vehicleColor: Colors.blue,
+              ),
+            ),
+          ),
+        ),
+      );
+      Iterable<Container> tinted(Finder of) => tester
+          .widgetList<Container>(
+            find.ancestor(of: of, matching: find.byType(Container)),
+          )
+          .where((c) => c.color != null);
+      // 정류장 이름 행에는 강조 배경이 있고, 버스 카드에는 깔리지 않는다.
+      expect(tinted(find.textContaining('정류장10')), isNotEmpty);
+      expect(tinted(find.textContaining('1234')), isEmpty);
+    });
+  }
+
   test('후보 progress가 목표 이후인 미연결 후보도 제외한다', () {
     final past = BoardingCandidate.fromJson(
       candidateJson()
