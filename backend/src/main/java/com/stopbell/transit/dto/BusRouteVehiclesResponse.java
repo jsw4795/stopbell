@@ -38,4 +38,10 @@ public record BusRouteVehiclesResponse(Instant observedAt, Status status, List<V
     public BusRouteVehiclesResponse withStatus(Status newStatus) {
         return new BusRouteVehiclesResponse(observedAt, newStatus, vehicles);
     }
+
+    public BusRouteVehiclesResponse withoutSeats() {
+        return new BusRouteVehiclesResponse(observedAt, status, vehicles.stream().map(vehicle -> new Vehicle(
+                vehicle.vehicleNumber(), vehicle.occurrenceId(), vehicle.positionState(), Seat.UNAVAILABLE,
+                vehicle.congestion())).toList());
+    }
 }

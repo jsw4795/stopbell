@@ -106,7 +106,10 @@ public class BusRouteVehicleService {
             }
         }
         try {
-            BusRouteVehiclesResponse result = load(route, cached);
+            // A previous holder may have refreshed the cache between our read and acquiring the call right.
+            Entry latest = cache.get(route.routeId());
+            BusRouteVehiclesResponse result = latest != null && clock.instant().isBefore(latest.validUntil())
+                    ? latest.response() : load(route, latest);
             mine.complete(result);
             return result;
         } catch (RuntimeException exception) {
@@ -127,7 +130,8 @@ public class BusRouteVehicleService {
             return fresh;
         } catch (PositionUnavailable unavailable) {
             if (previous != null && !previous.response().observedAt().plus(staleMaxAge).isBefore(now)) {
-                var stale = previous.response().withStatus(Status.STALE);
+                // Seat counts are not trustworthy once stale; positions and crowding level are kept.
+                var stale = previous.response().withStatus(Status.STALE).withoutSeats();
                 cache.put(route.routeId(), new Entry(stale, now.plus(ttl)));
                 return stale;
             }

@@ -239,6 +239,43 @@ class BusRouteVehicleServiceTest {
     }
 
     @Test
+    @DisplayName("호출권을 얻은 직후 캐시가 이미 갱신돼 있으면 Provider를 다시 호출하지 않는다")
+    @SuppressWarnings("unchecked")
+    void rechecks_cache_after_acquiring_call_right() throws Exception {
+        gyeonggi(BusRouteType.VILLAGE, stops());
+        when(gbis.fetch(any())).thenReturn(gbisResponse(gbisItem("경기74아3491", 2, 5, null, 1)));
+        var service = service();
+        service.find(1L);
+        clock.now = clock.now.plusSeconds(20);
+        var cache = (java.util.Map<Long, Object>) org.springframework.test.util.ReflectionTestUtils
+                .getField(service, "cache");
+        Object expired = cache.get(1L);
+        var entryType = expired.getClass();
+        var ctor = entryType.getDeclaredConstructors()[0];
+        ctor.setAccessible(true);
+        var response = (BusRouteVehiclesResponse) entryType.getDeclaredMethod("response").invoke(expired);
+        // Another request refreshes the cache right before this one wins the call right.
+        var racing = new java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.CompletableFuture<BusRouteVehiclesResponse>>() {
+            @Override
+            public java.util.concurrent.CompletableFuture<BusRouteVehiclesResponse> putIfAbsent(Long key,
+                    java.util.concurrent.CompletableFuture<BusRouteVehiclesResponse> value) {
+                try {
+                    var refreshed = ctor.newInstance(response, clock.now.plusSeconds(15));
+                    cache.put(key, refreshed);
+                } catch (ReflectiveOperationException exception) {
+                    throw new IllegalStateException(exception);
+                }
+                return super.putIfAbsent(key, value);
+            }
+        };
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "inFlight", racing);
+
+        assertThat(service.find(1L).status()).isEqualTo(Status.AVAILABLE);
+        verify(gbis, times(1)).fetch(any());
+        assertThat(racing).isEmpty();
+    }
+
+    @Test
     @DisplayName("일일 상한에 도달하면 Provider를 호출하지 않고 마지막 성공 결과를 STALE로, 없으면 503으로 응답한다")
     void daily_limit_returns_stale_or_unavailable() {
         gyeonggi(BusRouteType.VILLAGE, stops());
@@ -271,7 +308,10 @@ class BusRouteVehicleServiceTest {
         service.find(1L);
         clock.now = clock.now.plusSeconds(20);
 
-        assertThat(service.find(1L).status()).isEqualTo(Status.STALE);
+        var stale = service.find(1L);
+        assertThat(stale.status()).isEqualTo(Status.STALE);
+        assertThat(stale.vehicles().get(0).seat()).isEqualTo(BusRouteVehiclesResponse.Seat.UNAVAILABLE);
+        assertThat(stale.vehicles().get(0).occurrenceId()).isNotNull();
         clock.now = clock.now.plus(Duration.ofMinutes(6));
         assertThatThrownBy(() -> service.find(1L)).isInstanceOf(ApiException.class);
     }
