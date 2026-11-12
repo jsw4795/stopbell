@@ -554,7 +554,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
               ),
               child: Text(
                 label,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
