@@ -156,7 +156,12 @@ void main() {
       expect(find.text('정류장 6개'), findsOneWidget);
       // 버스 주변·승차·목표만 보이고 나머지는 1개여도 접는다.
       expect(find.text('정류장 1개'), findsOneWidget);
-      expect(find.text('정류장 3개'), findsNWidgets(2));
+      expect(find.text('정류장 3개'), findsOneWidget);
+      expect(find.text('정류장 4개'), findsOneWidget);
+      // 도착 버스는 이전 정류장과 도착 정류장만 보이고 다음 정류장은 접힌다.
+      expect(find.text('정류장4'), findsOneWidget);
+      expect(find.text('정류장5'), findsOneWidget);
+      expect(find.text('정류장6'), findsNothing);
       expect(find.text('정류장12'), findsOneWidget); // 출발 버스의 출발 정류장
       expect(find.text('정류장13'), findsOneWidget); // 다음 정류장
       expect(find.text('정류장11'), findsNothing);

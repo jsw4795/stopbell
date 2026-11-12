@@ -113,12 +113,12 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
           .putIfAbsent(index[bus.vehicle.occurrenceId]!, () => [])
           .add(bus);
     }
-    // 기준점(승차·목표)과 버스 주변만 보인다: 도착 버스는 앞·뒤 1개, 출발 버스는
+    // 기준점(승차·목표)과 버스 주변만 보인다: 도착 버스는 이전·도착 정류장, 출발 버스는
     // 출발한 정류장과 다음 정류장. 나머지는 개수와 무관하게 접는다.
     final big = <int>{
       boarding,
       target,
-      for (final i in atStop.keys) ...[i - 1, i, i + 1],
+      for (final i in atStop.keys) ...[i - 1, i],
       for (final i in between.keys) ...[i, i + 1],
     }..removeWhere((i) => i < 0 || i > target);
 
