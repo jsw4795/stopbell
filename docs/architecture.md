@@ -204,7 +204,7 @@ Flutter 구현은 사용자 확정 → Push 준비 → `Random.secure` UUID v4 �
 
 정류장 선택과 후보 결과는 같은 `BoardingStopScreen`에 있으며 후보 결과를 표시하는 동안에도 노선도의 스크롤 상태를 유지한다. 상단 뒤로 가기와 Android 시스템 뒤로 가기는 진행 중 후보 요청 또는 표시 중인 후보를 무효화하고 기존 선택으로 복귀한다. iOS 가장자리 스와이프는 별도 Navigator Route가 없는 이 화면 전환에는 연결되지 않는다.
 
-1단계의 후보 조회·비교와 2단계의 확정·세션 관리가 구현됐다. 차량 선택 접수와 진행 검증·추적 지원을 구분하고 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 제한을 안내한다. 3단계의 세션 FCM 수신/tap 구현과 검증 경계는 아래 별도 절을 따른다. 새 Dependency, GPS/위치 권한, polling이나 후보 목록의 영속 저장은 추가하지 않는다.
+1단계의 후보 조회·비교와 2단계의 확정·세션 관리가 구현됐다. 차량 선택 접수와 진행 검증·추적 지원을 구분하고 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 제한을 안내한다. 3단계의 세션 FCM 수신/tap 구현과 검증 경계는 아래 별도 절을 따른다. 새 Dependency, GPS/위치 권한, 후보 목록의 영속 저장은 추가하지 않는다. 세션 화면의 표시 중 자동 조회는 아래 세션 상세 절을 따른다.
 
 ### Flutter 탑승 확정과 세션 관리 (TASK-907 2단계)
 
@@ -214,7 +214,7 @@ Flutter 구현은 사용자 확정 → Push 준비 → `Random.secure` UUID v4 �
 
 생성 상태는 미시작/전송 중/결과 불확실/해결됨을 구분한다. timeout·통신·파싱·해석할 수 없는 응답과 일반 5xx는 원래 identity를 보존한다. 신규 최초 요청에서 Provider 조회 실패를 명시한 `TRANSIT_TEMPORARILY_UNAVAILABLE`은 생성 거절로 처리한다. 새 UUID/body로 대체하지 않고 `clientRequestId` GET으로 먼저 복구한다. 재진입·프로세스 재시작도 같은 User/login session인 레코드만 조회하며 자동 POST는 하지 않는다. 동시 생성의 영속 결과는 같아도 생성 commit의 runtime 공개 경계에 따라 순간적인 READY/RECOVERY_PENDING과 gap은 다를 수 있다. 조회 0개는 처리 중일 수 있으므로 불확실 상태를 유지하고, 사용자의 명시적 재시도만 동일 UUID/body로 허용한다. 불확실했던 재시도의 4xx도 이전 POST 실패의 증거로 사용하지 않는다. 정상 응답 또는 UUID 조회로 terminal을 포함한 세션을 확인한 뒤 레코드를 정리하며 정리 실패 중에는 새 생성 의도를 막는다. 이전 로그인 레코드가 Keychain에 남아도 새 로그인에서는 복구·재전송·표시하지 않는다.
 
-진입 시 pending 복구를 우선하고, 없으면 `scope=current`로 미종료 세션을 복원한다. 조회 오류는 세션 없음이 아니며 재조회 전 생성을 차단한다. 상세는 명시적 새로고침만 제공하고 주기 polling을 추가하지 않는다. READY인 TRACKING에서만 검증 간격을 표시하며 나머지 상태나 변경 결과 불확실 중에는 과거 gap을 숨긴다. 취소는 사용자 확인 뒤 현재 revision으로 요청하고, 실제 반환된 terminal 상태를 보존한다. mutation 응답 유실/충돌은 상세 GET으로 확인하며 재조회도 실패하면 추가 mutation을 막는다. 조회 epoch와 mutation 전후 무효화, revision·Session ID·전체 차량번호·terminal 검증으로 늦은 GET이 새 상태를 되돌리지 않게 한다.
+진입 시 pending 복구를 우선하고, 없으면 `scope=current`로 미종료 세션을 복원한다. 조회 오류는 세션 없음이 아니며 재조회 전 생성을 차단한다. 상세는 명시적 새로고침과, 화면 표시 중(foreground·현재 route·TRACKING)에만 도는 20초 주기 세션 GET(`boarding_session_auto_refresh.dart`, 홈 개요 포함)을 사용한다. 이 자동 조회는 세션 상세 GET에 한하며 차량 위치 조회와 무관하다. READY인 TRACKING에서만 검증 간격을 표시하며 나머지 상태나 변경 결과 불확실 중에는 과거 gap을 숨긴다. 취소는 사용자 확인 뒤 현재 revision으로 요청하고, 실제 반환된 terminal 상태를 보존한다. mutation 응답 유실/충돌은 상세 GET으로 확인하며 재조회도 실패하면 추가 mutation을 막는다. 조회 epoch와 mutation 전후 무효화, revision·Session ID·전체 차량번호·terminal 검증으로 늦은 GET이 새 상태를 되돌리지 않게 한다.
 
 재확인은 같은 Session에서 새 후보 조회와 목록 선택으로 시작한다. 전체 번호를 입력하지 않는다. 같은 Auth Session 안에 정확한 선택 ID가 남아 있으면 그 문맥으로 조회하고, 없거나 다시 선택이 필요하면 사용자가 Route/occurrence를 재선택한다. response의 routeNumber/targetName/order로 내부 ID를 추측하지 않는다. 다른 차량 번호는 Client에서도 거부하며 같은 차량/경로/운행의 최종 검증은 Backend가 수행한다. 모든 비동기 반영과 늦은 401 refresh/replay는 Auth generation·login/User identity·화면 수명으로 보호한다. 성공 경로는 Fake/Mock으로 검증하며 실제 Provider 지원 보류를 해제하지 않는다.
 
@@ -232,7 +232,7 @@ Fake 수신 callback과 Mock/Fake API로 자동 검증한다. 실제 OS terminat
 
 ### 노선 차량 위치 조회 캐시와 호출 상한 (UI-7)
 
-`BusRouteVehicleService`는 읽기 전용이며 Boarding·Alarm·Scheduler와 코드·상태를 공유하지 않는다. 결과는 Route ID별 메모리 캐시(`transit.vehicle-view.cache-ttl`, 기본 15초)에 두고, 같은 Route의 동시 요청은 하나의 Provider 호출로 합친다. Provider 실패나 일일 상한 시 `transit.vehicle-view.stale-max-age`(기본 5분) 안의 마지막 성공 결과를 `STALE`로 반환한다. 경기는 TAGO 위치를 기준으로, 좌석 유형(11·12·14·16·17·21·22)과 일반형 혼잡도 유형(13·15·23)만 GBIS를 호출해 정규화(공백·하이픈 제거) 번호와 노선이 모두 하나씩 일치할 때 결합한다.
+`BusRouteVehicleService`는 읽기 전용이며 Boarding·Alarm·Scheduler와 코드·상태를 공유하지 않는다. 결과는 Route ID별 메모리 캐시(`transit.vehicle-view.cache-ttl`, 기본 15초)에 두고, 같은 Route의 동시 요청은 하나의 Provider 호출로 합친다. Provider 실패나 일일 상한 시 `transit.vehicle-view.stale-max-age`(기본 5분) 안의 마지막 성공 결과를 `STALE`로 반환한다. 2026-11-12 확정 정책으로 경기는 GBIS를 위치(`stationSeq`→occurrence 순번)·`positionState`(`stateCd`)·좌석·혼잡도의 단일 소스로 1회 호출하며 TAGO 호출과 번호 결합은 하지 않는다. 좌석은 GBIS 좌석 유형(11·12·14·16·21·22)에만, 혼잡도는 혼잡도 유형(13·15·23)에만 채운다. 서울은 버스위치 roster를 쓰고 좌석은 제공하지 않는다. STALE 응답은 위치·`positionState`·혼잡도를 유지하되 좌석은 신선도를 보장할 수 없어 `UNAVAILABLE`로 바꾼다. 하차 추적·후보 API는 TAGO를 그대로 쓴다.
 
 `ProviderDailyCallBudget`은 KST 일 단위, Provider별 호출 수를 메모리로 센다. 기본값은 서울 800, TAGO 8,000, GBIS 500이며 `transit.vehicle-view.daily-limit.{seoul,tago,gbis}`로 바꾼다. 값은 Alarm 모니터링 등 다른 호출을 위한 여유를 남기려는 보수적 추정이며 계정별 공식 한도를 확인한 값이 아니다. 운영 전에 실제 한도에 맞춰 조정한다. 이 카운터는 UI-7 호출만 세고 재시작 시 초기화된다. GBIS 오류는 `TransitProvider` enum에 값을 추가하지 않고(DB CHECK 제약·`values()` 순회 영향 방지) provider `TAGO`와 source 라벨 `GBIS`로 구분한다.
 

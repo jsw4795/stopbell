@@ -143,7 +143,7 @@ JWT Access Token이 필요한 읽기 전용 API다. 노선 선택 화면의 차�
 ```
 
 - `observedAt`: 서버 Provider 조회 시각이다. 캐시 응답은 조회 시각을 유지하고 STALE도 마지막 성공 시각이다.
-- `status`: `AVAILABLE`(모두 확인), `EMPTY`(Provider가 운행 차량 없음으로 응답), `PARTIAL`(일부 차량의 위치 순번을 노선에 대응시킬 수 없음), `STALE`(Provider 실패·일일 상한으로 최근 5분 내 마지막 성공 결과 반환). Provider 실패를 `EMPTY`로 응답하지 않는다.
+- `status`: `AVAILABLE`(모두 확인), `EMPTY`(Provider가 운행 차량 없음으로 응답), `PARTIAL`(일부 차량의 위치 순번을 노선에 대응시킬 수 없음), `STALE`(Provider 실패·일일 상한으로 최근 5분 내 마지막 성공 결과 반환). STALE에서는 위치·`positionState`·혼잡도는 유지하고 좌석은 `UNAVAILABLE`로 바꾼다. Provider 실패를 `EMPTY`로 응답하지 않는다.
 - `vehicleNumber`: 전체 차량번호.
 - `occurrenceId`: 마지막 통과·도착 occurrence이며 위치 순번이 노선에 없으면 해당 차량만 `null`이다. 경기는 GBIS `stationSeq`, 서울은 `sectOrd`를 occurrence `order`에 대응시킨다. 정류장 ID는 비교하지 않으며 반복 정류장 노선도 순번으로 구분한다. 경기는 유형과 무관하게 GBIS 한 번 호출로 위치·상태·좌석·혼잡도를 모두 얻고 TAGO는 호출하지 않는다.
 - `positionState`: `AT_STOP`(occurrence 정류장에 있음) 또는 `DEPARTED`(출발해 다음 정류장 사이). 경기 GBIS `stateCd` 1은 `AT_STOP`, 0·2는 `DEPARTED`; 서울 `stopFlag` 1은 `AT_STOP`, 그 외는 `DEPARTED`다.
