@@ -252,8 +252,10 @@ void main() {
     switches = tester
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))
         .toList();
-    expect(switches.map((item) => item.value), [false, false]);
-    expect(switches.map((item) => item.onChanged != null), [false, true]);
+    // 불가능한 '전' 옵션은 숨기고 값은 초기화된다.
+    expect(find.text('한 정류장 전 알림'), findsNothing);
+    expect(switches.map((item) => item.value), [false]);
+    expect(find.text('한 정류장 후 알림'), findsOneWidget);
     expect(
       tester
           .widget<Semantics>(
@@ -290,8 +292,8 @@ void main() {
     switches = tester
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))
         .toList();
-    expect(switches.map((item) => item.value), [false, false]);
-    expect(switches.map((item) => item.onChanged != null), [true, false]);
+    expect(find.text('한 정류장 후 알림'), findsNothing);
+    expect(switches.map((item) => item.value), [false]);
     expect(find.textContaining('이전: 중간 정류장 · 다음: 없음'), findsOneWidget);
     expect(
       tester
@@ -346,4 +348,25 @@ void main() {
       );
     },
   );
+
+  testWidgets('불가능한 전후 알림 스위치는 숨기고 둘 다 불가능하면 영역을 숨긴다', (tester) async {
+    const neither = BusRouteStopOccurrence(
+      id: 50,
+      name: '단일 정류장',
+      order: 50,
+      canNotifyOneStopBefore: false,
+      canNotifyOneStopAfter: false,
+    );
+    await tester.pumpWidget(
+      screen((_) async => [first, middle, last, neither]),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey(50)));
+    await tester.pumpAndSettle();
+    expect(find.byType(SwitchListTile), findsNothing);
+    expect(find.text('알람 시작'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey(22)));
+    await tester.pumpAndSettle();
+    expect(find.byType(SwitchListTile), findsNWidgets(2));
+  });
 }
