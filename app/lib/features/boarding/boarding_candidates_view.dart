@@ -22,7 +22,9 @@ class BoardingCandidatesView extends StatelessWidget {
     required this.receivedAt,
     this.onSelect,
   }) : progressLabel = null,
-       selected = null;
+       selected = null,
+       visible = null,
+       showIntro = true;
 
   const BoardingCandidatesView.compact({
     super.key,
@@ -31,6 +33,8 @@ class BoardingCandidatesView extends StatelessWidget {
     required BoardingCandidateProgressLabelBuilder this.progressLabel,
     required this.selected,
     this.onSelect,
+    this.visible,
+    this.showIntro = true,
   });
 
   final BoardingCandidates result;
@@ -38,6 +42,12 @@ class BoardingCandidatesView extends StatelessWidget {
   final ValueChanged<BoardingCandidate>? onSelect;
   final BoardingCandidateProgressLabelBuilder? progressLabel;
   final BoardingCandidate? selected;
+
+  /// compact에서 카드로 보일 후보(null이면 전체). 노선도에 그린 버스를 뺄 때 쓴다.
+  final List<BoardingCandidate>? visible;
+
+  /// compact의 제목·상태 안내·힌트 표시 여부.
+  final bool showIntro;
 
   @override
   Widget build(BuildContext context) {
@@ -56,42 +66,45 @@ class BoardingCandidatesView extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       spacing: StopBellSpacing.md,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          spacing: StopBellSpacing.xs,
-          children: [
-            Text('차량 후보 선택', style: theme.textTheme.headlineSmall),
-            if (statusMessage != null)
-              Semantics(liveRegion: true, child: Text(statusMessage)),
-            if (canChoose && result.candidates.isNotEmpty)
-              Text(
-                result.candidates.any(
-                      (candidate) => compactLabel == null
-                          ? canConfirmBoardingCandidate(candidate)
-                          : candidate.canCreateWithNumber &&
-                                result.candidates
-                                        .where(
-                                          (other) =>
-                                              other.vehicleNumber != null &&
-                                              other.vehicleNumber ==
-                                                  candidate.vehicleNumber,
-                                        )
-                                        .length ==
-                                    1,
-                    )
-                    ? '전체 차량번호를 보고 원하는 차량을 직접 선택하세요.'
-                    : '현재 선택 가능한 차량이 없어요. 차량별 보류 사유를 확인해 주세요.',
-                style: theme.textTheme.bodySmall,
-              ),
-          ],
-        ),
-        if (compactLabel != null && result.candidates.isNotEmpty)
+        if (showIntro)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: StopBellSpacing.xs,
+            children: [
+              Text('차량 후보 선택', style: theme.textTheme.headlineSmall),
+              if (statusMessage != null)
+                Semantics(liveRegion: true, child: Text(statusMessage)),
+              if (canChoose && result.candidates.isNotEmpty)
+                Text(
+                  result.candidates.any(
+                        (candidate) => compactLabel == null
+                            ? canConfirmBoardingCandidate(candidate)
+                            : candidate.canCreateWithNumber &&
+                                  result.candidates
+                                          .where(
+                                            (other) =>
+                                                other.vehicleNumber != null &&
+                                                other.vehicleNumber ==
+                                                    candidate.vehicleNumber,
+                                          )
+                                          .length ==
+                                      1,
+                      )
+                      ? '전체 차량번호를 보고 원하는 차량을 직접 선택하세요.'
+                      : '현재 선택 가능한 차량이 없어요. 차량별 보류 사유를 확인해 주세요.',
+                  style: theme.textTheme.bodySmall,
+                ),
+            ],
+          ),
+        if (showIntro && compactLabel != null && result.candidates.isNotEmpty)
           Text(
             '시각은 서버 조회 기준이에요. 최근 관측은 진행 참고 지점이며 간격에는 미정차·경유가 포함될 수 있어요.',
             style: theme.textTheme.bodySmall,
           ),
         for (final (index, candidate) in result.candidates.indexed)
-          if (compactLabel != null)
+          if (visible != null && !visible!.contains(candidate))
+            ...const <Widget>[]
+          else if (compactLabel != null)
             _CompactCandidateCard(
               key: ValueKey('candidate-$index'),
               candidate: candidate,

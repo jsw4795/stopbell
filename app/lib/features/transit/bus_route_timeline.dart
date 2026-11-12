@@ -342,8 +342,7 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                         index < targetIndex,
                     atStopCount: _atStopCount(index),
                     betweenCount: _betweenCount(index),
-                    vehicleColor:
-                        widget.vehicleColor ?? stopColors.busLocation,
+                    vehicleColor: widget.vehicleColor ?? stopColors.busLocation,
                     unavailable: !selectable,
                     onTap: widget.onSelect == null || !selectable
                         ? null
@@ -627,18 +626,18 @@ class _StopRow extends StatelessWidget {
                         // 경계 마커는 아래 행에서 위쪽으로 삐져나오게 그린다.
                         if (atStopCount > 0)
                           Center(
-                            child: _VehicleMarker(
+                            child: BusVehicleMarker(
                               count: atStopCount,
                               color: vehicleColor,
                             ),
                           ),
                         if (betweenCount > 0)
                           Positioned(
-                            top: -_VehicleMarker.size / 2,
+                            top: -BusVehicleMarker.size / 2,
                             left: 0,
                             right: 0,
                             child: Center(
-                              child: _VehicleMarker(
+                              child: BusVehicleMarker(
                                 count: betweenCount,
                                 color: vehicleColor,
                               ),
@@ -731,8 +730,8 @@ List<InlineSpan> _vehicleSpans(BusRouteVehicle vehicle, _TextMetrics metrics) {
   ];
 }
 
-class _VehicleMarker extends StatelessWidget {
-  const _VehicleMarker({required this.count, required this.color});
+class BusVehicleMarker extends StatelessWidget {
+  const BusVehicleMarker({super.key, required this.count, required this.color});
 
   static const size = 28.0;
   final int count;

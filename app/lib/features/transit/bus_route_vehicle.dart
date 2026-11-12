@@ -33,6 +33,20 @@ class BusRouteVehicle {
     return digits.length > 4 ? digits.substring(digits.length - 4) : digits;
   }
 
+  /// 차량번호 비교용(공백·하이픈 제거).
+  String get normalizedNumber => normalizeVehicleNumber(vehicleNumber);
+
+  String? get seatLabel => switch (seatStatus) {
+    BusVehicleSeatStatus.available => '$seatRemaining석',
+    BusVehicleSeatStatus.none => '만석',
+    BusVehicleSeatStatus.unavailable => null,
+  };
+
+  String? get congestionLabel => switch (congestion) {
+    null => null,
+    final level => const ['여유', '보통', '혼잡', '매우혼잡'][level - 1],
+  };
+
   factory BusRouteVehicle.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) throw const FormatException();
     final number = value['vehicleNumber'];
@@ -111,3 +125,6 @@ class BusRouteVehicles {
     );
   }
 }
+
+String normalizeVehicleNumber(String value) =>
+    value.replaceAll(RegExp(r'[\s-]'), '');

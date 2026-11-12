@@ -12,6 +12,7 @@ import '../transit/bus_route_vehicle_client.dart';
 import '../transit/bus_route_vehicle_controller.dart';
 import '../transit/bus_stop_selection_layout.dart';
 import '../transit/stop_display_name.dart';
+import 'boarding_bus_timeline.dart';
 import 'boarding_candidate_client.dart';
 import 'boarding_candidate_progress_label.dart';
 import 'boarding_candidates.dart';
@@ -202,6 +203,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       return;
     }
     _invalidateCandidates();
+    _vehicles?.refresh();
     final epoch = _candidateEpoch;
     final routeId = widget.route.id;
     final boardingId = _boarding?.id;
@@ -383,7 +385,9 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       selectionLocked: _picker == _Picker.review,
       rowKey: (id) => ValueKey('occurrence-$id'),
       vehicles: vehicles?.data?.vehicles,
-      vehicleColor: routeTypeColor(context, widget.route),
+      vehicleColor:
+          routeTypeColor(context, widget.route) ??
+          StopBellColors.of(context).busLocation,
       onSelect: _staleStops || _result != null || _picker == _Picker.review
           ? null
           : _select,
@@ -453,26 +457,82 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         ],
       ),
       const Divider(height: StopBellSpacing.lg),
-      BoardingCandidatesView.compact(
-        result: result,
-        receivedAt: _receivedAt!,
-        progressLabel: (candidate) => boardingCandidateProgressLabel(
-          candidate,
-          _stops,
-          boardingId: boarding.id,
-          targetId: target.id,
-        ),
-        selected: _selectedCandidate,
-        onSelect: widget.onSelectCandidate == null
-            ? null
-            : (candidate) {
-                if (_canUseCandidate(candidate)) {
-                  setState(() => _selectedCandidate = candidate);
-                }
-              },
-      ),
+      _candidateBuses(result, boarding, target),
     ],
   );
+
+  /// 차량 위치 API가 있으면 후보와 차량번호로 연결해 노선도에 그리고, 못 그린 후보는
+  /// 아래 목록에 둔다. 없으면 기존 후보 목록만 보여 준다.
+  Widget _candidateBuses(
+    BoardingCandidates result,
+    BusRouteStopOccurrence boarding,
+    BusRouteStopOccurrence target,
+  ) {
+    final vehicles = _vehicles;
+    void select(BoardingCandidate candidate) {
+      if (_canUseCandidate(candidate)) {
+        setState(() => _selectedCandidate = candidate);
+      }
+    }
+
+    BoardingCandidatesView list({
+      List<BoardingCandidate>? visible,
+      bool showIntro = true,
+    }) => BoardingCandidatesView.compact(
+      result: result,
+      receivedAt: _receivedAt!,
+      progressLabel: (candidate) => boardingCandidateProgressLabel(
+        candidate,
+        _stops,
+        boardingId: boarding.id,
+        targetId: target.id,
+      ),
+      selected: _selectedCandidate,
+      visible: visible,
+      showIntro: showIntro,
+      onSelect: widget.onSelectCandidate == null ? null : select,
+    );
+
+    if (vehicles == null) return list();
+    return ListenableBuilder(
+      listenable: vehicles,
+      builder: (_, _) {
+        final split = splitBoardingBuses(
+          candidates: result.candidates,
+          vehicles: vehicles.data?.vehicles ?? const [],
+          stops: _stops,
+          targetId: target.id,
+        );
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: StopBellSpacing.md,
+          children: [
+            list(visible: const []),
+            BusRouteVehicleBar(controller: vehicles),
+            if (split.drawn.isNotEmpty)
+              BoardingBusTimeline(
+                stops: _stops,
+                boardingId: boarding.id,
+                targetId: target.id,
+                buses: split.drawn,
+                selected: _selectedCandidate,
+                canSelect: (candidate) =>
+                    widget.onSelectCandidate != null &&
+                    _canUseCandidate(candidate),
+                onSelect: select,
+                vehicleColor:
+                    routeTypeColor(context, widget.route) ??
+                    StopBellColors.of(context).busLocation,
+              ),
+            if (split.others.isNotEmpty) ...[
+              Text('위치 확인 불가', style: Theme.of(context).textTheme.titleSmall),
+              list(visible: split.others, showIntro: false),
+            ],
+          ],
+        );
+      },
+    );
+  }
 
   Widget _summary() {
     if (_compactResults) {
