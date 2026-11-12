@@ -4,6 +4,10 @@
 - 날짜: 2026-10-19
 - 대상: TASK-902 설계. Backend/Flutter 구현과 DB Schema 변경은 포함하지 않음
 
+## 2026-11-12 후행 결정: TAGO 차량 일시 누락
+
+아래의 과거 결정 및 사례와 충돌하면 이 후행 결정이 우선한다. TAGO 정상 응답에서 선택 차량이 누락되어도 TRACKING과 checkpoint·revision을 유지하며 누락 중 새 관측이나 Notification Event를 만들지 않는다. 차량이 재등장하면 기존 identity·occurrence·진행 검증을 거쳐 갱신한다. 단순 누락으로 운행 종료나 회차 변경을 확정하지 않으며, 회차 지점과 전체 노선 마지막 occurrence를 구분한다. 서울버스의 차량 소실 정책과 식별 충돌·Provider 오류의 기존 처리는 유지한다. 현재 상세 계약과 종점 판단의 한계는 [Domain](../domain-model.md#snapshot-and-progress)을 따른다.
+
 ## TASK-908 변경 (2026-10-29)
 
 이 문서의 번호 입력·실제 번호 대조·번호 일치 우선 정렬과 관련 예시는 TASK-902 당시 결정 기록이며 TASK-908에서 대체했다. 현행 UX는 목록에서 명시적으로 차량을 선택하고 번호 입력 없이 등록한다. 승차 지점 이전/같음/이후 관측 관계를 구분하고 이전 기준 후보, 이후 기준 후보, 위치 미확인 순으로 묶어 각 그룹의 배열 간격 절댓값으로 보조 정렬한다. 자동 선택·탑승 확률 추정은 없다. GPS 비의존·차량 내부 식별·불확실성·다른 차량 자동 전환 금지와 Provider 의미 검증 제한은 유지한다. 현행 즉시 TRACKING 등록·관측 readiness는 [ADR-012](ADR-012-boarding-session-and-alight-notification-contract.md), HTTP 필드는 [API](../api.md#탑승-세션-api-task-903)가 소유한다.

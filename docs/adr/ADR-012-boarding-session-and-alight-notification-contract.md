@@ -4,6 +4,10 @@
 - 날짜: 2026-10-19
 - 대상: TASK-903 설계 완료. Backend/Flutter, Migration, 실제 Provider/FCM 호출은 포함하지 않음
 
+## 2026-11-12 후행 결정: TAGO 차량 일시 누락
+
+아래의 과거 결정 및 사례와 충돌하면 이 후행 결정이 우선한다. TAGO 정상 응답에서 선택 차량이 누락되어도 TRACKING과 checkpoint·revision을 유지하며 누락 중 새 관측이나 Notification Event를 만들지 않는다. 차량이 재등장하면 기존 identity·occurrence·진행 검증을 거쳐 갱신한다. 단순 누락으로 운행 종료나 회차 변경을 확정하지 않으며, 회차 지점과 전체 노선 마지막 occurrence를 구분한다. 서울버스의 차량 소실 정책과 식별 충돌·Provider 오류의 기존 처리는 유지한다. 현재 상세 계약과 종점 판단의 한계는 [Domain](../domain-model.md#snapshot-and-progress)을 따른다.
+
 ## 2026-11-11 후행 결정
 
 아래 ADR의 과거 결정과 TASK 이력은 보존하며, 충돌하는 부분은 이 2026-11-11 후행 결정이 우선한다. 기존 freshness·시각 단조성·역행·관측 공백·stopFlag 차단과 신규 세션 목적지 Push 제외 결정은 후행 정책으로 대체한다. 최초 미검증 checkpoint 이후에도 정확한 목적지 occurrence를 확인하면 이전 방문이나 최초 검증 기준점 없이 완료한다. 다른 운행 회차를 구분하지 못할 가능성은 사용자가 수용했다. 정확한 차량·노선·occurrence를 확인해 간격으로 판단하고 준비와 목적지 Event를 각각 최대 한 번 생성한다. 과거 응답의 실제 최신성은 보장하지 않는다. 현재 계약은 [Domain](../domain-model.md#snapshot-and-progress)과 [요구사항](../requirements.md#phase-9-탑승-세션과-하차-준비-알림)을 따른다.
