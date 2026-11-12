@@ -89,6 +89,9 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
   final _boardingKey = GlobalKey();
   final _expanded = <int>{};
 
+  /// 첫 표시 정류장 index. 그보다 앞 구간은 그리지 않고 레일도 여기서 시작한다.
+  int _first = 0;
+
   @override
   void initState() {
     super.initState();
@@ -122,8 +125,9 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
       for (final i in between.keys) ...[i, i + 1],
     }..removeWhere((i) => i < 0 || i > target);
 
+    _first = big.reduce(math.min);
     final rows = <Widget>[];
-    var i = 0;
+    var i = _first;
     while (i <= target) {
       if (big.contains(i)) {
         rows.add(_stopRow(i, boarding, target, true, atStop[i]));
@@ -156,7 +160,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
 
   /// leg(j): j번째와 j+1번째 정류장 사이 구간 색(승차~목표만 강조).
   Color? _leg(int j, int boarding, int target) {
-    if (j < 0 || j >= target) return null;
+    if (j < _first || j >= target) return null;
     return j >= boarding
         ? StopBellColors.of(context).targetStop
         : Theme.of(context).colorScheme.outline;

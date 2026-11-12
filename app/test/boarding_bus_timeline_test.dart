@@ -111,7 +111,10 @@ void main() {
   group('BoardingBusTimeline', () {
     BoardingCandidate? picked;
 
-    Future<void> pumpTimeline(WidgetTester tester) async {
+    Future<void> pumpTimeline(
+      WidgetTester tester, {
+      bool Function(BoardingBusEntry)? where,
+    }) async {
       picked = null;
       final candidates = _candidates();
       final split = splitBoardingBuses(
@@ -129,7 +132,7 @@ void main() {
                 stops: _stops,
                 boardingId: 10,
                 targetId: 20,
-                buses: split.drawn,
+                buses: split.drawn.where(where ?? (_) => true).toList(),
                 selected: picked,
                 canSelect: (_) => true,
                 onSelect: (c) => picked = c,
@@ -156,7 +159,9 @@ void main() {
       expect(find.text('정류장 6개'), findsOneWidget);
       // 버스 주변·승차·목표만 보이고 나머지는 1개여도 접는다.
       expect(find.text('정류장 1개'), findsOneWidget);
-      expect(find.text('정류장 3개'), findsOneWidget);
+      // 승차 전 가장 앞 버스(도착, 정류장5)의 이전 정류장(정류장4)부터 그린다.
+      expect(find.text('정류장 3개'), findsNothing);
+      expect(find.text('정류장3'), findsNothing);
       expect(find.text('정류장 4개'), findsOneWidget);
       // 도착 버스는 이전 정류장과 도착 정류장만 보이고 다음 정류장은 접힌다.
       expect(find.text('정류장4'), findsOneWidget);
@@ -239,6 +244,58 @@ void main() {
       final rowLeft = tester.getTopLeft(departed).dx - 68;
       await tester.tapAt(Offset(rowLeft + 60, tester.getCenter(departed).dy));
       expect(picked?.vehicleNumber, '경기70아 5678');
+    });
+  });
+
+  group('BoardingBusTimeline start range', () {
+    testWidgets('승차 전 버스가 없으면 승차 정류장부터 그린다', (tester) async {
+      tester.view.physicalSize = const Size(600, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final split = splitBoardingBuses(
+        candidates: _candidates().candidates,
+        vehicles: _vehicles().vehicles,
+        stops: _stops,
+        targetId: 20,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StopBellTheme.light,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: BoardingBusTimeline(
+                stops: _stops,
+                boardingId: 10,
+                targetId: 20,
+                // 승차 후(출발, 정류장12)에 있는 버스만 남긴다.
+                buses: [
+                  for (final b in split.drawn)
+                    if (b.vehicle.occurrenceId! > 10) b,
+                ],
+                selected: null,
+                canSelect: (_) => true,
+                onSelect: (_) {},
+                vehicleColor: Colors.blue,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('정류장10', findRichText: true), findsOneWidget);
+      expect(find.text('정류장9'), findsNothing);
+      expect(find.text('정류장5'), findsNothing);
+      // 승차 이전 구간은 접힘 행도 없다(첫 접힘 행은 승차~버스 사이).
+      expect(
+        find.byKey(const ValueKey('boarding-bus-collapsed-0')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('boarding-bus-collapsed-3')),
+        findsNothing,
+      );
     });
   });
 
