@@ -159,39 +159,67 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
         : Theme.of(context).colorScheme.outline;
   }
 
-  Widget _rail(Color? top, Color? bottom, Widget? marker, double markerSize) =>
-      SizedBox(
-        width: _railWidth,
-        child: Stack(
-          fit: StackFit.expand,
-          clipBehavior: Clip.none,
-          children: [
-            if (top != null)
-              Positioned(
-                left: _railWidth / 2 - 1,
-                width: 2,
-                top: 0,
-                height: _centerY,
-                child: ColoredBox(color: top),
+  /// [centered]면 마커를 행 세로 중앙에 둔다(카드 중앙을 가리키는 출발 버스용).
+  Widget _rail(
+    Color? top,
+    Color? bottom,
+    Widget? marker, {
+    double markerSize = 0,
+    bool centered = false,
+  }) => SizedBox(
+    width: _railWidth,
+    child: centered
+        ? Stack(
+            fit: StackFit.expand,
+            clipBehavior: Clip.none,
+            children: [
+              Column(
+                children: [
+                  for (final color in [top, bottom])
+                    Expanded(
+                      child: Align(
+                        child: SizedBox(
+                          width: 2,
+                          height: double.infinity,
+                          child: ColoredBox(color: color ?? Colors.transparent),
+                        ),
+                      ),
+                    ),
+                ],
               ),
-            if (bottom != null)
-              Positioned(
-                left: _railWidth / 2 - 1,
-                width: 2,
-                top: _centerY,
-                bottom: 0,
-                child: ColoredBox(color: bottom),
-              ),
-            if (marker != null)
-              Positioned(
-                top: _centerY - markerSize / 2,
-                left: 0,
-                right: 0,
-                child: Center(child: marker),
-              ),
-          ],
-        ),
-      );
+              if (marker != null) Center(child: marker),
+            ],
+          )
+        : Stack(
+            fit: StackFit.expand,
+            clipBehavior: Clip.none,
+            children: [
+              if (top != null)
+                Positioned(
+                  left: _railWidth / 2 - 1,
+                  width: 2,
+                  top: 0,
+                  height: _centerY,
+                  child: ColoredBox(color: top),
+                ),
+              if (bottom != null)
+                Positioned(
+                  left: _railWidth / 2 - 1,
+                  width: 2,
+                  top: _centerY,
+                  bottom: 0,
+                  child: ColoredBox(color: bottom),
+                ),
+              if (marker != null)
+                Positioned(
+                  top: _centerY - markerSize / 2,
+                  left: 0,
+                  right: 0,
+                  child: Center(child: marker),
+                ),
+            ],
+          ),
+  );
 
   Widget _row(Widget rail, Widget content, {Color? color, Key? key}) =>
       Container(
@@ -261,7 +289,9 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
         _leg(i - 1, boarding, target),
         _leg(i, boarding, target),
         marker,
-        buses != null && buses.isNotEmpty ? BusVehicleMarker.size : dotSize,
+        markerSize: buses != null && buses.isNotEmpty
+            ? BusVehicleMarker.size
+            : dotSize,
       ),
       Padding(
         padding: EdgeInsets.symmetric(
@@ -289,7 +319,10 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
               style: style,
             ),
             for (final bus in buses ?? const <BoardingBusEntry>[])
-              _chip(bus, boarding, target),
+              Padding(
+                padding: const EdgeInsets.only(bottom: StopBellSpacing.xs),
+                child: _chip(bus, boarding, target),
+              ),
           ],
         ),
       ),
@@ -307,13 +340,10 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
   Widget _betweenRow(int i, BoardingBusEntry bus, int boarding, int target) {
     final leg = _leg(i, boarding, target);
     return _row(
-      _rail(leg, leg, _busMarker([bus]), BusVehicleMarker.size),
+      _rail(leg, leg, _busMarker([bus]), centered: true),
       Padding(
-        padding: const EdgeInsets.symmetric(vertical: StopBellSpacing.xs),
-        child: Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: _chip(bus, boarding, target),
-        ),
+        padding: const EdgeInsets.symmetric(vertical: StopBellSpacing.sm),
+        child: _chip(bus, boarding, target),
       ),
     );
   }
@@ -323,7 +353,6 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
       _leg(start - 1, boarding, target),
       _leg(start + count - 1, boarding, target),
       null,
-      0,
     ),
     InkWell(
       key: ValueKey('boarding-bus-collapsed-$start'),
@@ -355,6 +384,8 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     return left == 0 ? '목표 정류장' : '목표까지 $left정거장';
   }
 
+  /// 정류장 이름 시작선부터 오른쪽 여백까지 채우는 말풍선형 선택 카드.
+  /// 꼬리는 레일의 버스 마커를 가리킨다(도착: 위쪽, 출발: 세로 중앙).
   Widget _chip(BoardingBusEntry bus, int boarding, int target) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
@@ -363,60 +394,106 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     final selected = identical(bus.candidate, widget.selected);
     final enabled = widget.canSelect(bus.candidate);
     final detail = [?vehicle.seatLabel, ?vehicle.congestionLabel].join(' · ');
+    final shape = BusBubbleBorder(
+      tailAtTop: vehicle.position == BusVehiclePosition.atStop,
+      side: BorderSide(
+        color: selected ? stopColors.targetStop : colors.outlineVariant,
+        width: selected ? 2 : 1,
+      ),
+    );
     return Semantics(
       button: true,
       enabled: enabled,
       selected: selected,
       child: Material(
-        color: selected ? colors.primaryContainer : colors.surfaceContainer,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(StopBellRadius.field),
-          side: BorderSide(
-            color: selected ? stopColors.targetStop : colors.outlineVariant,
-            width: selected ? 2 : 1,
-          ),
-        ),
+        color: selected
+            ? Color.alphaBlend(
+                stopColors.targetStop.withValues(alpha: 0.16),
+                colors.surface,
+              )
+            : colors.surface,
+        shape: shape,
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           key: ValueKey('boarding-bus-${vehicle.normalizedNumber}'),
-          customBorder: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(StopBellRadius.field),
-          ),
+          customBorder: shape,
           onTap: enabled ? () => widget.onSelect(bus.candidate) : null,
           child: Opacity(
             opacity: enabled ? 1 : 0.6,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: StopBellSpacing.sm,
-                vertical: StopBellSpacing.xs,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text.rich(
-                    TextSpan(
-                      children: [
-                        const WidgetSpan(
-                          alignment: PlaceholderAlignment.middle,
-                          child: Icon(Icons.directions_bus, size: 14),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 60),
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(width: 4, color: widget.vehicleColor),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: StopBellSpacing.md,
+                          vertical: StopBellSpacing.sm,
                         ),
-                        TextSpan(
-                          text:
-                              ' ${vehicle.shortNumber}'
-                              '${detail.isEmpty ? '' : ' · $detail'}',
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.directions_bus,
+                                        size: 18,
+                                        color: widget.vehicleColor,
+                                      ),
+                                      const SizedBox(width: StopBellSpacing.xs),
+                                      Text(
+                                        vehicle.shortNumber,
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                      if (detail.isNotEmpty) ...[
+                                        const SizedBox(
+                                          width: StopBellSpacing.sm,
+                                        ),
+                                        Expanded(
+                                          child: Text(
+                                            detail,
+                                            textAlign: TextAlign.end,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: theme.textTheme.bodySmall,
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                  Text(
+                                    _distance(bus, boarding, target),
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: colors.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: StopBellSpacing.sm),
+                            Icon(
+                              selected
+                                  ? Icons.check_circle
+                                  : Icons.radio_button_unchecked,
+                              color: selected
+                                  ? stopColors.targetStop
+                                  : colors.outline,
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    _distance(bus, boarding, target),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -424,4 +501,54 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
       ),
     );
   }
+}
+
+/// 왼쪽 변 바깥으로 삼각 꼬리가 튀어나온 둥근 사각형(테두리·배경이 이어진다).
+/// 꼬리 위치: [tailAtTop] 위쪽, 아니면 세로 중앙.
+@visibleForTesting
+class BusBubbleBorder extends ShapeBorder {
+  const BusBubbleBorder({required this.tailAtTop, required this.side});
+
+  static const tailWidth = 8.0;
+  static const _tailHalfHeight = 7.0;
+  static const _tailTopInset = 16.0;
+  final bool tailAtTop;
+  final BorderSide side;
+
+  @override
+  EdgeInsetsGeometry get dimensions => EdgeInsets.all(side.width);
+
+  @override
+  Path getInnerPath(Rect rect, {TextDirection? textDirection}) =>
+      getOuterPath(rect.deflate(side.width), textDirection: textDirection);
+
+  @override
+  Path getOuterPath(Rect rect, {TextDirection? textDirection}) {
+    final body = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(
+          rect,
+          const Radius.circular(StopBellRadius.field),
+        ),
+      );
+    final cy = tailAtTop ? rect.top + _tailTopInset : rect.center.dy;
+    final tail = Path()
+      ..moveTo(rect.left + 1, cy - _tailHalfHeight)
+      ..lineTo(rect.left - tailWidth, cy)
+      ..lineTo(rect.left + 1, cy + _tailHalfHeight)
+      ..close();
+    return Path.combine(PathOperation.union, body, tail);
+  }
+
+  @override
+  void paint(Canvas canvas, Rect rect, {TextDirection? textDirection}) {
+    canvas.drawPath(
+      getOuterPath(rect, textDirection: textDirection),
+      side.toPaint(),
+    );
+  }
+
+  @override
+  ShapeBorder scale(double t) =>
+      BusBubbleBorder(tailAtTop: tailAtTop, side: side.scale(t));
 }

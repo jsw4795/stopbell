@@ -161,6 +161,27 @@ void main() {
       expect(find.text('정류장15'), findsOneWidget);
       expect(find.textContaining('정류장 4개'), findsNothing);
 
+      // 도착·출발 카드는 같은 왼쪽 시작선·폭이고 꼬리 정렬만 다르다.
+      Finder card(String number) => find
+          .ancestor(
+            of: find.byKey(ValueKey('boarding-bus-$number')),
+            matching: find.byType(Material),
+          )
+          .first;
+      final arrived = card('서울70사1234'), departed = card('경기70아5678');
+      expect(tester.getTopLeft(arrived).dx, tester.getTopLeft(departed).dx);
+      expect(tester.getSize(arrived).width, tester.getSize(departed).width);
+      expect(tester.getSize(arrived).height, greaterThanOrEqualTo(56));
+      expect(
+        (tester.widget<Material>(arrived).shape! as BusBubbleBorder).tailAtTop,
+        isTrue,
+      );
+      expect(
+        (tester.widget<Material>(departed).shape! as BusBubbleBorder).tailAtTop,
+        isFalse,
+      );
+      expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(2));
+
       await tester.tap(find.byKey(const ValueKey('boarding-bus-서울70사1234')));
       expect(picked?.vehicleNumber, '서울70사-1234');
     });
