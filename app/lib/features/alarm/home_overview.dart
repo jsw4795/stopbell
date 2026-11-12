@@ -816,7 +816,9 @@ class _EndedSessionTile extends StatelessWidget {
                   session.routeNumber,
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: routeColor,
+                    color: (routeColor ?? colors.onSurface).withValues(
+                      alpha: .6,
+                    ),
                   ),
                 ),
                 const SizedBox(width: StopBellSpacing.sm),

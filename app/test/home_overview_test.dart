@@ -243,6 +243,32 @@ void main() {
     expect(ended, [6]);
   });
 
+  testWidgets('종료 세션 카드의 버스 번호도 흐리게 표시한다', (tester) async {
+    await tester.pumpWidget(
+      home(
+        alarms: () async => [],
+        sessions: () async => BoardingSessionOverview(
+          recent: [
+            sessionFixture(
+              id: 6,
+              status: 'COMPLETED',
+              evaluation: 'ENDED',
+              gap: null,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final texts = tester.widgetList<Text>(
+      find.descendant(
+        of: find.byKey(const ValueKey(('session', 6))),
+        matching: find.byType(Text),
+      ),
+    );
+    expect(texts.first.style!.color!.a, lessThan(1));
+  });
+
   testWidgets('종료 세션은 도착 알람 목록 아래 한 줄로 보여준다', (tester) async {
     await tester.pumpWidget(
       home(
