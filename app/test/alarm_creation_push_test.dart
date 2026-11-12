@@ -149,9 +149,13 @@ void main() {
         expect(id, requestId);
         return withStatus(AlarmStatus.followUp);
       };
+      client.list = () async => [withStatus(AlarmStatus.followUp)];
+      client.detail = (_) async => withStatus(AlarmStatus.followUp);
       await tester.tap(find.text('원래 생성 결과 조회'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('확인한 알람 보기'));
+      expect(find.text('확인한 알람 보기'), findsNothing);
+      expect(find.text('원래 생성된 알람을 확인했습니다. 현재 상태를 확인해 주세요.'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey(15)));
       await tester.pumpAndSettle();
       expect(find.text('상태: FOLLOW_UP · 한 정거장 후 추적 중'), findsOneWidget);
       expect(client.createCalls, 1);

@@ -122,6 +122,7 @@ void main() {
     expect(find.text('평내신명.대주 → 상봉역'), findsOneWidget);
     expect(find.textContaining('→'), findsOneWidget);
     expect(find.text('상봉역 도착'), findsNWidgets(2));
+    expect(find.byIcon(Icons.place_outlined), findsNWidgets(2));
   });
 
   testWidgets('Alarm 응답의 기종점은 선택 필드이며 한쪽만 있으면 표시하지 않는다', (tester) async {
@@ -153,7 +154,7 @@ void main() {
     );
   });
 
-  testWidgets('진행 중 세션과 최근 종료 세션을 상태와 함께 표시하고 각각 이동한다', (tester) async {
+  testWidgets('진행 중 세션이 있으면 그 세션 하나만 버스 번호 제목으로 표시한다', (tester) async {
     var current = 0, boarding = 0;
     final ended = <int>[];
     await tester.pumpWidget(
@@ -161,6 +162,42 @@ void main() {
         alarms: () async => [],
         sessions: () async => BoardingSessionOverview(
           current: sessionFixture(id: 7, gap: 4),
+          recent: [
+            sessionFixture(
+              id: 6,
+              status: 'COMPLETED',
+              evaluation: 'ENDED',
+              gap: null,
+            ),
+          ],
+        ),
+        onCreateBoarding: () => boarding++,
+        onOpenCurrentSession: () => current++,
+        onOpenEndedSession: ended.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('진행 중인 하차 알람'), findsOneWidget);
+    expect(find.text('최근 종료된 하차 알람'), findsNothing);
+    expect(find.byKey(const ValueKey(('session', 6))), findsNothing);
+    expect(find.text('7000'), findsOneWidget);
+    expect(find.textContaining('하차 알람', findRichText: true), findsNWidgets(2));
+    expect(find.text('추적 중'), findsOneWidget);
+    expect(find.text('4개 지점 남음'), findsOneWidget);
+    expect(find.text('서울70사1234 · 목적 정류장 하차'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey(('session', 7))));
+    await tester.tap(find.text('하차 알람'));
+    expect(current, 1);
+    expect(ended, isEmpty);
+    expect(boarding, 1);
+  });
+
+  testWidgets('진행 중 세션이 없으면 가장 최근 종료 세션 하나만 표시한다', (tester) async {
+    final ended = <int>[];
+    await tester.pumpWidget(
+      home(
+        alarms: () async => [],
+        sessions: () async => BoardingSessionOverview(
           recent: [
             sessionFixture(
               id: 6,
@@ -177,26 +214,17 @@ void main() {
             ),
           ],
         ),
-        onCreateBoarding: () => boarding++,
-        onOpenCurrentSession: () => current++,
         onOpenEndedSession: ended.add,
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('진행 중인 하차 알람'), findsOneWidget);
+    expect(find.text('진행 중인 하차 알람'), findsNothing);
     expect(find.text('최근 종료된 하차 알람'), findsOneWidget);
-    expect(find.text('추적 중'), findsOneWidget);
-    expect(find.text('4개 지점 남음'), findsOneWidget);
+    expect(find.byKey(const ValueKey(('session', 5))), findsNothing);
     expect(find.text('종료'), findsOneWidget);
-    expect(find.text('취소'), findsOneWidget);
-    expect(find.text('30분 전 종료'), findsNWidgets(2));
-    expect(find.text('서울70사1234 · 목적 정류장 하차'), findsNWidgets(3));
-    await tester.tap(find.byKey(const ValueKey(('session', 7))));
-    await tester.tap(find.byKey(const ValueKey(('session', 5))));
-    await tester.tap(find.text('하차 알람'));
-    expect(current, 1);
-    expect(ended, [5]);
-    expect(boarding, 1);
+    expect(find.text('30분 전 종료'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey(('session', 6))));
+    expect(ended, [6]);
   });
 
   testWidgets('보류 세션은 보류 색상과 재확인 필요를 표시한다', (tester) async {

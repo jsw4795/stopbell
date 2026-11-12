@@ -186,37 +186,25 @@ class _HomeOverviewState extends State<HomeOverview> {
           _InlineError(message: '하차 알람 상태를 불러오지 못했어요.', onRetry: _loadSessions),
         ];
       case _LoadState.ready:
+        // 진행 중 세션이 있으면 그것만, 없으면 가장 최근 종료 세션 하나만 보여준다.
         final current = _sessions.current;
-        final recent = _sessions.recent;
+        final ended = _sessions.recent.isEmpty ? null : _sessions.recent.first;
+        final session = current ?? ended;
+        if (session == null) return const [];
         return [
-          if (current != null) ...[
-            const SizedBox(height: StopBellSpacing.xl),
-            const _SectionTitle('진행 중인 하차 알람'),
-            const SizedBox(height: StopBellSpacing.sm),
-            _SessionCard(
-              key: ValueKey(('session', current.id)),
-              session: current,
-              now: widget.now,
-              onTap: widget.onOpenCurrentSession,
-            ),
-          ],
-          if (recent.isNotEmpty) ...[
-            const SizedBox(height: StopBellSpacing.xl),
-            const _SectionTitle('최근 종료된 하차 알람'),
-            const SizedBox(height: StopBellSpacing.sm),
-            for (final session in recent)
-              Padding(
-                padding: const EdgeInsets.only(bottom: StopBellSpacing.sm),
-                child: _SessionCard(
-                  key: ValueKey(('session', session.id)),
-                  session: session,
-                  now: widget.now,
-                  onTap: widget.onOpenEndedSession == null
-                      ? null
-                      : () => widget.onOpenEndedSession!(session.id),
-                ),
-              ),
-          ],
+          const SizedBox(height: StopBellSpacing.xl),
+          _SectionTitle(current != null ? '진행 중인 하차 알람' : '최근 종료된 하차 알람'),
+          const SizedBox(height: StopBellSpacing.sm),
+          _SessionCard(
+            key: ValueKey(('session', session.id)),
+            session: session,
+            now: widget.now,
+            onTap: current != null
+                ? widget.onOpenCurrentSession
+                : widget.onOpenEndedSession == null
+                ? null
+                : () => widget.onOpenEndedSession!(session.id),
+          ),
         ];
     }
   }
@@ -451,19 +439,34 @@ class _AlarmCard extends StatelessWidget {
         : null;
     return _ListCard(
       onTap: onTap,
-      leading: _LeadingIcon(
-        Icons.directions_bus_filled_outlined,
-        theme.colorScheme.primary,
-      ),
+      leading: _LeadingIcon(Icons.place_outlined, theme.colorScheme.primary),
       children: [
         Text(
           alarm.routeNumber,
-          style: theme.textTheme.titleMedium?.copyWith(
+          style: theme.textTheme.labelLarge?.copyWith(
+            color: theme.colorScheme.primary,
             fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 2),
-        Text('${alarm.stopName} 도착', style: theme.textTheme.bodySmall),
+        Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: alarm.stopName,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              TextSpan(
+                text: ' 도착',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
         if (endpoints != null)
           Text(
             endpoints,
@@ -523,17 +526,11 @@ class _SessionCard extends StatelessWidget {
         session.isOpen ? color : theme.colorScheme.onSurfaceVariant,
       ),
       children: [
-        Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: session.routeNumber,
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const TextSpan(text: ' 하차 알람'),
-            ],
+        Text(
+          session.routeNumber,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
           ),
-          style: theme.textTheme.titleMedium,
         ),
         const SizedBox(height: 2),
         Text(

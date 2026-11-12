@@ -53,6 +53,10 @@ class AlarmHome extends StatefulWidget {
 }
 
 class _AlarmHomeState extends State<AlarmHome> {
+  /// 생성 복구 후 '확인한 알람 보기' 바로가기. 기능은 유지하되 화면에는
+  /// 표시하지 않는다(정상 생성 후에도 남는 문제). 복구된 알람은 목록에서 연다.
+  static const _showRecoveredAlarmShortcut = false;
+
   _Page _page = _Page.list;
   BusRoute? _route;
   int? _alarmId, _boardingSessionId;
@@ -213,11 +217,9 @@ class _AlarmHomeState extends State<AlarmHome> {
         isNavigationCurrent: () => _current && epoch == _navigationEpoch,
       ),
       _Page.list => HomeOverview(
-        key: ValueKey(('home', epoch)),
-        header:
-            _creation.message != null ||
-                _creation.pending != null ||
-                _creation.result != null
+        // 복구로 원래 알람을 확인하면 목록을 다시 조회해 바로 보이게 한다.
+        key: ValueKey(('home', epoch, _creation.result?.id)),
+        header: _creation.message != null || _creation.pending != null
             ? _creationRecovery()
             : null,
         findAlarms: widget.client.findAll,
@@ -395,7 +397,7 @@ class _AlarmHomeState extends State<AlarmHome> {
               ),
             ],
           ],
-          if (_creation.result != null)
+          if (_showRecoveredAlarmShortcut && _creation.result != null)
             OutlinedButton(
               onPressed: () {
                 final alarm = _creation.result!;
