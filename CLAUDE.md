@@ -30,6 +30,7 @@
 - 확정된 설계·기능 계약(API, Domain, DB, 인증, 추적 상태 머신, ADR)을 임의로 바꾸지 않는다. 판단이 필요하면 선택지와 Trade-off를 보고한다.
 - 테스트는 직접 관련 + 인접 회귀만 선택 실행한다. 전체 Backend·Flutter 테스트는 기본 금지이며 예외는 `development-guidelines.md#테스트-실행-범위`를 따른다. 보고 시 실행/미실행 범위를 구분한다.
 - 커밋은 로컬까지만 한다. **Push는 개발자가 직접 한다.** 커밋 형식은 `AGENTS.md`를 따르고 커밋 후 `git log -1 --pretty=full`로 형식을 확인한다.
+- 커밋 메시지와 PR 본문에 `Co-Authored-By` 등 Claude 작성자 표기(attribution)를 넣지 않는다.
 - 실제 Provider API 호출, FCM 전송, 개발 DB 데이터 변경·Bootstrap·동기화 적용, Docker volume 삭제는 개발자 승인 없이 실행하지 않는다.
 - `.env`, 인증정보, API Key를 출력·커밋·로그에 남기지 않는다. `docs/devlog/`는 요청 없이 건드리지 않는다.
 
