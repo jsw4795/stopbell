@@ -153,10 +153,10 @@ void main() {
       expect(find.text('목표까지 8정거장'), findsOneWidget);
       expect(find.textContaining('12석 · 여유'), findsNWidgets(2));
       // 버스·승차·목표 주변 외 구간은 접힌다.
-      expect(find.text('· · ·  정류장 6개'), findsOneWidget);
+      expect(find.text('정류장 6개'), findsOneWidget);
       // 버스 주변·승차·목표만 보이고 나머지는 1개여도 접는다.
-      expect(find.text('· · ·  정류장 1개'), findsOneWidget);
-      expect(find.text('· · ·  정류장 3개'), findsNWidgets(2));
+      expect(find.text('정류장 1개'), findsOneWidget);
+      expect(find.text('정류장 3개'), findsNWidgets(2));
       expect(find.text('정류장12'), findsOneWidget); // 출발 버스의 출발 정류장
       expect(find.text('정류장13'), findsOneWidget); // 다음 정류장
       expect(find.text('정류장11'), findsNothing);
@@ -164,6 +164,13 @@ void main() {
       // 목표 이후 정류장은 그리지 않는다.
       expect(find.text('정류장21'), findsNothing);
 
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('boarding-bus-collapsed-13')))
+            .height,
+        greaterThanOrEqualTo(44),
+      );
+      expect(find.byType(Divider), findsWidgets);
       await tester.tap(find.byKey(const ValueKey('boarding-bus-collapsed-13')));
       await tester.pump();
       expect(find.text('정류장15'), findsOneWidget);
@@ -173,7 +180,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('boarding-bus-fold-13')));
       await tester.pump();
       expect(find.text('정류장15'), findsNothing);
-      expect(find.text('· · ·  정류장 6개'), findsOneWidget);
+      expect(find.text('정류장 6개'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('boarding-bus-collapsed-13')));
       await tester.pump();
       expect(find.text('정류장15'), findsOneWidget);

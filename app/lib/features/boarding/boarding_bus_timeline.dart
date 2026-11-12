@@ -515,11 +515,11 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
   }
 
   Widget _collapsedRow(int start, int count, int boarding, int target) =>
-      _toggleRow(start, count, boarding, target, '· · ·  정류장 $count개', true);
+      _toggleRow(start, count, boarding, target, '정류장 $count개', true);
 
   /// 펼친 구간 위의 "접기" 행. 탭하면 다시 접힌다.
   Widget _foldRow(int start, int count, int boarding, int target) =>
-      _toggleRow(start, count, boarding, target, '· · ·  접기', false);
+      _toggleRow(start, count, boarding, target, '접기', false);
 
   Widget _toggleRow(
     int start,
@@ -541,12 +541,26 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
       onTap: () => setState(
         () => expand ? _expanded.add(start) : _expanded.remove(start),
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: StopBellSpacing.md),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall
-              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          minHeight: StopBellSpacing.minimumTouchSize,
+        ),
+        child: Row(
+          children: [
+            const Expanded(child: Divider(height: 1)),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: StopBellSpacing.md,
+              ),
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const Expanded(child: Divider(height: 1)),
+          ],
         ),
       ),
     ),
