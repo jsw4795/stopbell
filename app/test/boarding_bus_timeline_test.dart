@@ -172,7 +172,6 @@ void main() {
       await tester.pump();
       expect(find.text('정류장15'), findsOneWidget);
 
-      // 도착·출발 카드는 같은 왼쪽 시작선·폭이고 꼬리 정렬만 다르다.
       Finder card(String number) => find
           .ancestor(
             of: find.byKey(ValueKey('boarding-bus-$number')),
@@ -180,26 +179,26 @@ void main() {
           )
           .first;
       final arrived = card('서울70사1234'), departed = card('경기70아5678');
+      // 카드는 레일에서 떨어진 같은 왼쪽 시작선·폭이다.
       expect(tester.getTopLeft(arrived).dx, tester.getTopLeft(departed).dx);
       expect(tester.getSize(arrived).width, tester.getSize(departed).width);
       expect(tester.getSize(arrived).height, greaterThanOrEqualTo(56));
-      // 카드 세로 중앙 = 마커 중앙, 카드 왼쪽 끝은 마커 중심선(레일 가운데).
       final markers = find.byType(BusVehicleMarker);
+      final arrivedMarker = tester.getRect(markers.at(0));
+      final departedMarker = tester.getRect(markers.at(1));
+      // 출발: 카드 세로 중앙 = 마커 중앙, 카드는 마커와 떨어져 오른쪽에 있다.
       expect(
-        tester.getCenter(markers.at(0)).dy,
-        closeTo(tester.getCenter(arrived).dy, 0.5),
-      );
-      expect(
-        tester.getCenter(markers.at(1)).dy,
+        departedMarker.center.dy,
         closeTo(tester.getCenter(departed).dy, 0.5),
       );
       expect(
-        tester.getCenter(markers.at(0)).dx,
-        closeTo(tester.getTopLeft(arrived).dx, 0.5),
+        tester.getTopLeft(departed).dx,
+        greaterThan(departedMarker.right + 8),
       );
-      // 도착 카드에는 정류장 이름 캡션이 들어간다.
-      expect(find.textContaining('정류장5', findRichText: true), findsOneWidget);
-      expect(find.textContaining(' 도착', findRichText: true), findsOneWidget);
+      // 도착: 마커는 정류장 이름 행에 있고 카드는 그 위로 비켜 있다.
+      expect(tester.getRect(arrived).bottom, lessThan(arrivedMarker.top));
+      expect(find.text('정류장5'), findsOneWidget);
+      expect(find.text('도착'), findsOneWidget);
       // 좌석·혼잡도는 두 카드 모두 번호 줄 오른쪽, 체크 원은 카드 세로 중앙이다.
       for (final number in ['서울70사1234', '경기70아5678']) {
         final c = card(number);
@@ -217,6 +216,11 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('boarding-bus-서울70사1234')));
       expect(picked?.vehicleNumber, '서울70사-1234');
+
+      // 연결선(카드와 마커 사이)을 탭해도 그 버스가 선택된다.
+      final rowLeft = tester.getTopLeft(departed).dx - 68;
+      await tester.tapAt(Offset(rowLeft + 60, tester.getCenter(departed).dy));
+      expect(picked?.vehicleNumber, '경기70아 5678');
     });
   });
 

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
@@ -241,6 +243,14 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
         ),
       );
 
+  double get _cardHeight =>
+      _minCardHeight * math.max(1.0, MediaQuery.textScalerOf(context).scale(1));
+
+  /// 카드 위치: 레일에서 떨어진 왼쪽 시작선. 마커와 카드는 연결선으로 이어진다.
+  static const _cardLeft = 68.0;
+  static const _minCardHeight = 64.0;
+  static const _cardGap = StopBellSpacing.sm;
+
   Widget _stopRow(
     int i,
     int boarding,
@@ -259,6 +269,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
         : theme.colorScheme.outline;
     final display = stopDisplayName(stop.name);
     final special = isBoarding || isTarget;
+    final arrived = buses != null && buses.isNotEmpty;
     final tint = special
         ? Color.alphaBlend(
             accent.withValues(alpha: 0.10),
@@ -268,54 +279,28 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     final key = isBoarding
         ? _boardingKey
         : ValueKey('boarding-bus-stop-${stop.id}');
-
-    if (buses != null && buses.isNotEmpty) {
-      // 도착 버스: 정류장 동그라미 자리에 마커+카드를 두고 정류장 이름은 캡션으로 쓴다.
-      final role = isTarget
-          ? '목표 · '
-          : isBoarding
-          ? '승차 · '
-          : '';
-      return Container(
-        key: key,
-        color: tint,
-        child: Column(
-          children: [
-            for (final (n, bus) in buses.indexed)
-              _busRow(
-                bus,
-                boarding,
-                target,
-                top: n == 0
-                    ? _leg(i - 1, boarding, target)
-                    : _leg(i, boarding, target),
-                bottom: _leg(i, boarding, target),
-                caption: n == 0 ? (role: role, name: display.name) : null,
-                captionColor: special ? accent : null,
-              ),
-          ],
-        ),
-      );
-    }
-
     final dotSize = special ? 24.0 : 12.0;
-    final marker = Container(
-      width: dotSize,
-      height: dotSize,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: special ? accent : theme.colorScheme.surface,
-        border: Border.all(color: accent, width: 1.5),
-      ),
-      child: special
-          ? Icon(
-              isTarget ? Icons.flag_outlined : Icons.directions_bus_outlined,
-              size: 14,
-              color: theme.colorScheme.surface,
-              semanticLabel: isTarget ? '목표 정류장' : '승차 정류장',
-            )
-          : null,
-    );
+    final marker = arrived
+        ? _busMarker(buses)
+        : Container(
+            width: dotSize,
+            height: dotSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: special ? accent : theme.colorScheme.surface,
+              border: Border.all(color: accent, width: 1.5),
+            ),
+            child: special
+                ? Icon(
+                    isTarget
+                        ? Icons.flag_outlined
+                        : Icons.directions_bus_outlined,
+                    size: 14,
+                    color: theme.colorScheme.surface,
+                    semanticLabel: isTarget ? '목표 정류장' : '승차 정류장',
+                  )
+                : null,
+          );
     final style = emphasized
         ? theme.textTheme.titleMedium!.copyWith(
             color: special ? accent : theme.colorScheme.onSurface,
@@ -324,56 +309,110 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
         : theme.textTheme.bodySmall!.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           );
-    return _row(
+    final stopRow = _row(
       _rail(
         _leg(i - 1, boarding, target),
         _leg(i, boarding, target),
         marker,
-        markerSize: dotSize,
+        markerSize: arrived ? 44 : dotSize,
       ),
       Padding(
         padding: EdgeInsets.symmetric(
           vertical: emphasized ? StopBellSpacing.sm : StopBellSpacing.xs,
         ),
-        child: Text.rich(
-          TextSpan(
-            children: [
-              if (special)
-                TextSpan(
-                  text: isTarget ? '목표 · ' : '승차 · ',
-                  style: theme.textTheme.labelSmall?.copyWith(color: accent),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text.rich(
+              TextSpan(
+                children: [
+                  if (special)
+                    TextSpan(
+                      text: isTarget ? '목표 · ' : '승차 · ',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: accent,
+                      ),
+                    ),
+                  TextSpan(text: display.name),
+                  if (display.isNonstop)
+                    TextSpan(text: '  미정차', style: theme.textTheme.labelSmall),
+                ],
+              ),
+              style: style,
+            ),
+            if (arrived)
+              Text(
+                '도착',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: widget.vehicleColor,
                 ),
-              TextSpan(text: display.name),
-              if (display.isNonstop)
-                TextSpan(text: '  미정차', style: theme.textTheme.labelSmall),
-            ],
-          ),
-          style: style,
+              ),
+          ],
         ),
       ),
-      color: tint,
+      color: arrived ? null : tint,
+      key: arrived ? null : key,
+    );
+    if (!arrived) return stopRow;
+
+    // 도착 버스: 마커는 정류장 동그라미 자리에 두고 카드는 정류장 행 위로 비켜 쌓는다.
+    // 카드 k의 위치는 위에서부터 고정 높이로 정해져 연결선 좌표를 계산할 수 있다.
+    final h = _cardHeight;
+    final cardsEnd = buses.length * (_cardGap + h) + _cardGap;
+    final markerY = cardsEnd + _centerY;
+    return Container(
       key: key,
+      color: tint,
+      child: Stack(
+        children: [
+          Column(
+            children: [
+              SizedBox(
+                height: cardsEnd,
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: _railWidth / 2 - 1,
+                      width: 2,
+                      top: 0,
+                      bottom: 0,
+                      child: ColoredBox(
+                        color:
+                            _leg(i - 1, boarding, target) ?? Colors.transparent,
+                      ),
+                    ),
+                    for (final (k, bus) in buses.indexed)
+                      Positioned(
+                        left: _cardLeft,
+                        right: StopBellSpacing.screenPadding,
+                        top: _cardGap + k * (_cardGap + h),
+                        height: h,
+                        child: _busCard(bus, boarding, target),
+                      ),
+                  ],
+                ),
+              ),
+              stopRow,
+            ],
+          ),
+          for (final (k, bus) in buses.indexed)
+            Positioned.fill(
+              child: _connector(
+                bus,
+                (_) => Offset(_railWidth / 2 + 10, markerY - 10),
+                (_) =>
+                    Offset(_cardLeft, _cardGap + k * (_cardGap + h) + h - 12),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
-  /// 출발해 다음 정류장 사이에 있는 버스: 정류장 행 아래에 카드 한 줄로 낀다.
+  /// 출발해 다음 정류장 사이에 있는 버스: 마커는 레일 위, 카드는 오른쪽에서 짧은
+  /// 수평 연결선으로 이어진다.
   Widget _betweenRow(int i, BoardingBusEntry bus, int boarding, int target) {
     final leg = _leg(i, boarding, target);
-    return _busRow(bus, boarding, target, top: leg, bottom: leg);
-  }
-
-  /// 레일 위 버스 마커와 카드가 한 덩어리다. 카드 왼쪽 끝이 마커 중심선에 있어 마커
-  /// 오른쪽 절반이 카드 테두리에 걸치고, 카드 세로 중앙이 마커 중앙이다.
-  Widget _busRow(
-    BoardingBusEntry bus,
-    int boarding,
-    int target, {
-    required Color? top,
-    required Color? bottom,
-    ({String role, String name})? caption,
-    Color? captionColor,
-  }) {
-    final enabled = widget.canSelect(bus.candidate);
     return Stack(
       children: [
         Positioned(
@@ -381,35 +420,71 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
           top: 0,
           bottom: 0,
           width: _railWidth,
-          child: _rail(top, bottom, null, centered: true),
+          child: _rail(leg, leg, null, centered: true),
         ),
         Padding(
           padding: const EdgeInsetsDirectional.fromSTEB(
-            _railWidth / 2,
-            StopBellSpacing.sm,
+            _cardLeft,
+            _cardGap,
             StopBellSpacing.screenPadding,
-            StopBellSpacing.sm,
+            _cardGap,
           ),
-          child: _busCard(bus, boarding, target, caption, captionColor),
+          child: SizedBox(
+            height: _cardHeight,
+            child: _busCard(bus, boarding, target),
+          ),
+        ),
+        Positioned.fill(
+          child: _connector(
+            bus,
+            (size) => Offset(_railWidth / 2 + 16, size.height / 2),
+            (size) => Offset(_cardLeft, size.height / 2),
+          ),
         ),
         Positioned(
           left: 0,
           top: 0,
           bottom: 0,
           width: _railWidth,
-          child: Center(child: _busMarker(bus, enabled)),
+          child: Center(child: _busMarker([bus])),
         ),
       ],
     );
   }
 
-  /// 선택 시 노선색 halo와 1.15배 확대. 마커 자체 색·모양은 그대로다.
-  Widget _busMarker(BoardingBusEntry bus, bool enabled) {
+  /// 마커와 카드를 잇는 선. 탭하면 카드와 같이 그 버스를 선택한다.
+  Widget _connector(
+    BoardingBusEntry bus,
+    Offset Function(Size) from,
+    Offset Function(Size) to,
+  ) {
     final selected = identical(bus.candidate, widget.selected);
     final color = widget.vehicleColor;
     return GestureDetector(
+      onTap: widget.canSelect(bus.candidate)
+          ? () => widget.onSelect(bus.candidate)
+          : null,
+      child: CustomPaint(
+        painter: _ConnectorPainter(
+          from: from,
+          to: to,
+          color: selected ? color : color.withValues(alpha: 0.55),
+          width: selected ? 3 : 1.5,
+        ),
+      ),
+    );
+  }
+
+  /// 선택 시 노선색 halo와 1.15배 확대. 마커 자체 색·모양은 그대로다.
+  Widget _busMarker(List<BoardingBusEntry> buses) {
+    final selected = buses.any((b) => identical(b.candidate, widget.selected));
+    final target = buses
+        .where((b) => widget.canSelect(b.candidate))
+        .firstOrNull;
+    final color = widget.vehicleColor;
+    return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: enabled ? () => widget.onSelect(bus.candidate) : null,
+      onTap: target == null ? null : () => widget.onSelect(target.candidate),
       child: SizedBox(
         width: 44,
         height: 44,
@@ -431,7 +506,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
             AnimatedScale(
               duration: const Duration(milliseconds: 150),
               scale: selected ? 1.15 : 1,
-              child: BusVehicleMarker(count: 1, color: color),
+              child: BusVehicleMarker(count: buses.length, color: color),
             ),
           ],
         ),
@@ -486,14 +561,8 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     return left == 0 ? '목표 정류장' : '목표까지 $left정거장';
   }
 
-  /// 노선 유형색으로 선택을 나타내는 카드. 마커와 겹치지 않게 왼쪽 패딩을 둔다.
-  Widget _busCard(
-    BoardingBusEntry bus,
-    int boarding,
-    int target,
-    ({String role, String name})? caption,
-    Color? captionColor,
-  ) {
+  /// 노선 유형색으로 선택을 나타내는 카드(높이는 호출부가 정한다).
+  Widget _busCard(BoardingBusEntry bus, int boarding, int target) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final route = widget.vehicleColor;
@@ -523,94 +592,58 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
           onTap: enabled ? () => widget.onSelect(bus.candidate) : null,
           child: Opacity(
             opacity: enabled ? 1 : 0.6,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 60),
-              child: Padding(
-                padding: const EdgeInsetsDirectional.fromSTEB(
-                  _railWidth / 4 + StopBellSpacing.md,
-                  StopBellSpacing.sm,
-                  StopBellSpacing.md,
-                  StopBellSpacing.sm,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (caption != null)
-                            Text.rich(
-                              TextSpan(
-                                children: [
-                                  if (caption.role.isNotEmpty)
-                                    TextSpan(
-                                      text: caption.role,
-                                      style: theme.textTheme.labelSmall,
-                                    ),
-                                  TextSpan(text: caption.name),
-                                  TextSpan(
-                                    text: ' 도착',
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                      color: colors.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: StopBellSpacing.md,
+                vertical: StopBellSpacing.sm,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.directions_bus, size: 18, color: route),
+                            const SizedBox(width: StopBellSpacing.xs),
+                            Text(
+                              vehicle.shortNumber,
                               style: theme.textTheme.titleMedium?.copyWith(
-                                color: captionColor ?? colors.onSurface,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.directions_bus,
-                                size: 18,
-                                color: route,
-                              ),
-                              const SizedBox(width: StopBellSpacing.xs),
-                              Text(
-                                vehicle.shortNumber,
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
+                            if (detail.isNotEmpty) ...[
+                              const SizedBox(width: StopBellSpacing.sm),
+                              Expanded(
+                                child: Text(
+                                  detail,
+                                  textAlign: TextAlign.end,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall,
                                 ),
                               ),
-                              if (detail.isNotEmpty) ...[
-                                const SizedBox(width: StopBellSpacing.sm),
-                                Expanded(
-                                  child: Text(
-                                    detail,
-                                    textAlign: TextAlign.end,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: theme.textTheme.bodySmall,
-                                  ),
-                                ),
-                              ],
                             ],
+                          ],
+                        ),
+                        Text(
+                          _distance(bus, boarding, target),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colors.onSurfaceVariant,
                           ),
-                          Text(
-                            _distance(bus, boarding, target),
-                            style:
-                                (caption == null
-                                        ? theme.textTheme.bodySmall
-                                        : theme.textTheme.labelSmall)
-                                    ?.copyWith(color: colors.onSurfaceVariant),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: StopBellSpacing.sm),
-                    Icon(
-                      selected
-                          ? Icons.check_circle
-                          : Icons.radio_button_unchecked,
-                      color: selected ? route : colors.outline,
-                    ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: StopBellSpacing.sm),
+                  Icon(
+                    selected
+                        ? Icons.check_circle
+                        : Icons.radio_button_unchecked,
+                    color: selected ? route : colors.outline,
+                  ),
+                ],
               ),
             ),
           ),
@@ -618,4 +651,50 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
       ),
     );
   }
+}
+
+class _ConnectorPainter extends CustomPainter {
+  _ConnectorPainter({
+    required this.from,
+    required this.to,
+    required this.color,
+    required this.width,
+  });
+
+  final Offset Function(Size) from;
+  final Offset Function(Size) to;
+  final Color color;
+  final double width;
+  Offset? _a, _b;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    _a = from(size);
+    _b = to(size);
+    canvas.drawLine(
+      _a!,
+      _b!,
+      Paint()
+        ..color = color
+        ..strokeWidth = width
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  /// 선 근처(±14)만 탭을 받아 카드·마커 위를 가리지 않는다.
+  @override
+  bool? hitTest(Offset position) {
+    final a = _a, b = _b;
+    if (a == null || b == null) return false;
+    final ab = b - a;
+    final t =
+        ((position - a).dx * ab.dx + (position - a).dy * ab.dy) /
+        (ab.dx * ab.dx + ab.dy * ab.dy);
+    final nearest = a + ab * t.clamp(0.0, 1.0);
+    return (position - nearest).distance <= 14;
+  }
+
+  @override
+  bool shouldRepaint(_ConnectorPainter old) =>
+      old.color != color || old.width != width;
 }
