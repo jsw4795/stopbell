@@ -761,7 +761,7 @@ class _AlarmCard extends StatelessWidget {
     if (!inactive) return card;
     return Semantics(
       value: alarm.status.shortLabel,
-      child: Opacity(opacity: .6, child: card),
+      child: Opacity(opacity: StopBellInactive.opacity, child: card),
     );
   }
 }
@@ -792,49 +792,50 @@ class _EndedSessionTile extends StatelessWidget {
       session.timeline?.provider,
       session.timeline?.routeType,
     );
-    return Material(
-      color: colors.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(StopBellRadius.card),
-        side: BorderSide(color: colors.outlineVariant),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            minHeight: StopBellSpacing.minimumTouchSize,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: StopBellSpacing.lg,
-              vertical: StopBellSpacing.sm,
+    return Opacity(
+      opacity: StopBellInactive.opacity,
+      child: Material(
+        color: colors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(StopBellRadius.card),
+          side: BorderSide(color: colors.outlineVariant),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minHeight: StopBellSpacing.minimumTouchSize,
             ),
-            child: Row(
-              children: [
-                Text(
-                  session.routeNumber,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: (routeColor ?? colors.onSurface).withValues(
-                      alpha: .6,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: StopBellSpacing.lg,
+                vertical: StopBellSpacing.sm,
+              ),
+              child: Row(
+                children: [
+                  Text(
+                    session.routeNumber,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: routeColor ?? colors.onSurface,
                     ),
                   ),
-                ),
-                const SizedBox(width: StopBellSpacing.sm),
-                Expanded(
-                  child: Text(
-                    ['${session.targetName} 하차', ?ago].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: colors.onSurfaceVariant,
+                  const SizedBox(width: StopBellSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      ['${session.targetName} 하차', ?ago].join(' · '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                   ),
-                ),
-                if (onTap != null)
-                  Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
-              ],
+                  if (onTap != null)
+                    Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
+                ],
+              ),
             ),
           ),
         ),

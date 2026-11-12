@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stopbell/core/theme/stopbell_spacing.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/alarm/alarm.dart';
 import 'package:stopbell/features/alarm/home_overview.dart';
@@ -90,6 +91,17 @@ void main() {
         matching: find.byType(Opacity),
       ),
       findsOneWidget,
+    );
+    expect(
+      tester
+          .widget<Opacity>(
+            find.descendant(
+              of: find.byKey(const ValueKey(1)),
+              matching: find.byType(Opacity),
+            ),
+          )
+          .opacity,
+      StopBellInactive.opacity,
     );
     final cards = [
       3,
@@ -237,13 +249,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('진행 중인 하차 알람'), findsNothing);
     expect(find.text('최근 종료된 하차 알람'), findsOneWidget);
+    expect(
+      tester
+          .widget<Opacity>(
+            find.descendant(
+              of: find.byKey(const ValueKey(('session', 6))),
+              matching: find.byType(Opacity),
+            ),
+          )
+          .opacity,
+      StopBellInactive.opacity,
+    );
     expect(find.byKey(const ValueKey(('session', 5))), findsNothing);
     expect(find.textContaining('30분 전 종료'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey(('session', 6))));
     expect(ended, [6]);
   });
 
-  testWidgets('종료 세션 카드의 버스 번호도 흐리게 표시한다', (tester) async {
+  testWidgets('종료 세션 카드는 비활성 도착 알람 카드와 같은 흐림을 카드 전체에 쓴다', (tester) async {
     await tester.pumpWidget(
       home(
         alarms: () async => [],
@@ -260,13 +283,17 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    final texts = tester.widgetList<Text>(
-      find.descendant(
-        of: find.byKey(const ValueKey(('session', 6))),
-        matching: find.byType(Text),
-      ),
+    expect(
+      tester
+          .widget<Opacity>(
+            find.descendant(
+              of: find.byKey(const ValueKey(('session', 6))),
+              matching: find.byType(Opacity),
+            ),
+          )
+          .opacity,
+      StopBellInactive.opacity,
     );
-    expect(texts.first.style!.color!.a, lessThan(1));
   });
 
   testWidgets('종료 세션은 도착 알람 목록 아래 한 줄로 보여준다', (tester) async {
