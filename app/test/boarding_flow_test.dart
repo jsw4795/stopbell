@@ -147,7 +147,7 @@ void main() {
       expect(find.text('서울70사1234'), findsOneWidget);
       expect(find.text('차량 후보 선택'), findsOneWidget);
       final next = find.byKey(const ValueKey('continue-boarding-candidate'));
-      expect(tester.widget<FilledButton>(next).onPressed, isNull);
+      expect(next, findsNothing);
       expect(find.textContaining('원하는 차량을 직접 선택'), findsOneWidget);
       expect(find.textContaining('승차 · 반복 정류장'), findsOneWidget);
       expect(find.textContaining('목표 · 반복 정류장'), findsOneWidget);
