@@ -142,7 +142,7 @@ void main() {
     await controller.initialize();
     expect(await controller.create(7, true, false, () => true), isNull);
     expect(client.createCalls, 0);
-    expect(controller.message, contains('전송하지 않았습니다'));
+    expect(controller.message, contains('전송하지 않았어요'));
     controller.dispose();
   });
 

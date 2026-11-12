@@ -85,7 +85,7 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
           ),
           const SizedBox(height: StopBellSpacing.sm),
           Text(
-            widget.reconfirm ? '동일 차량 재확인' : '하차 알림 등록 확인',
+            widget.reconfirm ? '동일 차량 재확인' : '하차 알람 등록 확인',
             style: theme.textTheme.titleLarge,
           ),
           const SizedBox(height: StopBellSpacing.md),
@@ -124,7 +124,7 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
                     ],
                   ),
                   Text(
-                    '원래 관측 시각 · ${boardingTime(widget.candidate.observedAt)}',
+                    '원래 확인 시각 · ${boardingTime(widget.candidate.observedAt)}',
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
@@ -150,7 +150,7 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
                     const Divider(height: 1),
                   ],
                   _TripStop(
-                    label: '하차 목표 정류장',
+                    label: '목표 정류장',
                     name: widget.targetName,
                     icon: Icons.flag_outlined,
                     color: colors.targetStop,
@@ -164,7 +164,7 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
             Text('알림 시점', style: theme.textTheme.titleMedium),
             const SizedBox(height: StopBellSpacing.xs),
             Text(
-              '미정차·경유를 포함한 노선 방문 지점 순서를 기준으로 하차 준비 알림을 한 번 보내요.',
+              '미정차·경유를 포함한 노선 방문 정류장 순서를 기준으로 하차 준비 알림을 한 번 보내요.',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: StopBellSpacing.sm),
@@ -182,13 +182,13 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
                   children: [
                     RadioListTile<int>(
                       value: 2,
-                      title: const Text('노선 방문 지점 2개 전 (기본)'),
+                      title: const Text('노선 방문 정류장 2개 전 (기본)'),
                       enabled: !_busy,
                     ),
                     const Divider(height: 1),
                     RadioListTile<int>(
                       value: 1,
-                      title: const Text('노선 방문 지점 1개 전'),
+                      title: const Text('노선 방문 정류장 1개 전'),
                       enabled: !_busy,
                     ),
                   ],
@@ -218,7 +218,7 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
                   ? '확인 중…'
                   : widget.reconfirm
                   ? '동일 차량 재확인 요청'
-                  : '하차 알림 등록',
+                  : '하차 알람 등록',
             ),
           ),
         ],

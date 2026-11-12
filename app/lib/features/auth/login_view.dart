@@ -125,7 +125,7 @@ class LoginView extends StatelessWidget {
                         ),
                         const SizedBox(height: StopBellSpacing.md),
                         Text(
-                          'Google과 Apple 계정은 각각 별도로 관리됩니다.',
+                          'Google과 Apple 계정은 각각 별도로 관리돼요.',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: colors.onSurfaceVariant,

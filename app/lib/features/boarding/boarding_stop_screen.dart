@@ -313,7 +313,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       },
       child: BusStopSelectionLayout(
         route: widget.route,
-        title: _compactResults ? '차량 후보' : '하차 알림',
+        title: _compactResults ? '차량 후보' : '하차 알람',
         onBack: _back,
         backLabel: _backLabel,
         iconColor: routeTypeColor(context, widget.route),
@@ -340,8 +340,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
           ] else ...[
             Text(
               _state == _StopsState.empty
-                  ? '정류장 정보가 없습니다.'
-                  : '정류장 정보를 불러오지 못했습니다.',
+                  ? '정류장 정보가 없어요.'
+                  : '정류장 정보를 불러오지 못했어요.',
             ),
             OutlinedButton(
               onPressed: _loadStops,
@@ -641,7 +641,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
                 ? () => _openConfirmation(selected)
                 : null,
             child: Text(
-              widget.creationBusy ? '등록 중…' : '이 차량으로 하차 알림 설정',
+              widget.creationBusy ? '등록 중…' : '이 차량으로 하차 알람 설정',
               textAlign: TextAlign.center,
             ),
           ),
@@ -652,7 +652,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     final target = _target;
     if (_picker == _Picker.boarding || boarding == null) {
       return const StopSelectionNotice(
-        '노선도에서 승차 정류장을 선택하세요.',
+        '노선도에서 승차 정류장을 선택해 주세요.',
         icon: Icons.directions_bus_outlined,
       );
     }

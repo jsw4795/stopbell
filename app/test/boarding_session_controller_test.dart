@@ -94,13 +94,13 @@ void main() {
     final saved = longTimelineSessionJson(position: 0, basis: 'INITIAL')
       ..['evaluationStatus'] = 'VERIFICATION_PENDING'
       ..['initialObservation'] = {
-        'stopName': '참고 지점',
+        'stopName': '참고 정류장',
         'remainingOccurrenceGap': 31,
       };
     api.currentSession = BoardingSession.fromJson(saved);
     await start();
     expect(c.initialReference?.index, 0);
-    expect(c.initialReference?.name, '참고 지점');
+    expect(c.initialReference?.name, '참고 정류장');
     expect(api.creations, isEmpty);
   });
   test(
@@ -574,7 +574,7 @@ void main() {
         created['evaluationStatus'] = 'VERIFICATION_PENDING';
         created['checkpointObservedAt'] = null;
         created['initialObservation'] = {
-          'stopName': '참고 지점',
+          'stopName': '참고 정류장',
           'remainingOccurrenceGap': 31 - index,
         };
         api.onCreate = () async => BoardingSession.fromJson(created);
@@ -584,7 +584,7 @@ void main() {
           basis: 'INITIAL',
         );
         latest['initialObservation'] = {
-          'stopName': '참고 지점',
+          'stopName': '참고 정류장',
           'remainingOccurrenceGap': 31 - index,
         };
         latest['evaluationStatus'] = 'VERIFICATION_PENDING';
@@ -615,13 +615,13 @@ void main() {
           ),
         );
         expect(marker, findsOneWidget);
-        expect(find.text('미검증 참고 관측 기준'), findsOneWidget);
+        expect(find.text('참고용 위치예요'), findsOneWidget);
         expect(api.detailCalls, 1);
         await tester.pump(const Duration(seconds: 20));
         await tester.pump();
         expect(api.detailCalls, 2);
         expect(marker, findsOneWidget);
-        expect(find.text('미검증 참고 관측 기준'), findsOneWidget);
+        expect(find.text('참고용 위치예요'), findsOneWidget);
         await tester.pumpWidget(const SizedBox());
       },
     );
@@ -638,7 +638,7 @@ void main() {
         original['evaluationStatus'] = 'VERIFICATION_PENDING';
         original['checkpointObservedAt'] = null;
         original['initialObservation'] = {
-          'stopName': '참고 지점',
+          'stopName': '참고 정류장',
           'remainingOccurrenceGap': 31 - index,
         };
         api.onCreate = () async => BoardingSession.fromJson(original);
@@ -649,7 +649,7 @@ void main() {
           basis: 'INITIAL',
         );
         latest['initialObservation'] = {
-          'stopName': '참고 지점',
+          'stopName': '참고 정류장',
           'remainingOccurrenceGap': 31 - index,
         };
         latest['evaluationStatus'] = 'VERIFICATION_PENDING';

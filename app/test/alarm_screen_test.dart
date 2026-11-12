@@ -185,7 +185,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey(12345)));
       await tester.pump();
-      await tester.tap(find.text('한 정거장 전 알림'));
+      await tester.tap(find.text('한 정류장 전 알림'));
       await tester.pump();
       await tester.tap(find.text('알람 시작'));
       await tester.pump();
@@ -263,14 +263,14 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey(12345)));
       await tester.pump();
-      await tester.tap(find.text('한 정거장 전 알림'));
+      await tester.tap(find.text('한 정류장 전 알림'));
       await tester.pump();
       await tester.tap(find.text('알람 시작'));
       await tester.pumpAndSettle();
       expect(ids, [754, 754]);
       expect(client.createCalls, 1);
       expect(client.activateCalls, 0);
-      expect(find.textContaining('정류장 정보가 변경됐습니다.'), findsOneWidget);
+      expect(find.textContaining('정류장 정보가 변경됐어요.'), findsOneWidget);
       expect(find.text('선택한 정류장:'), findsNothing);
       expect(find.text('알람 시작'), findsNothing);
       await tester.tap(find.byKey(const ValueKey(12345)));
@@ -279,7 +279,7 @@ void main() {
       expect(
         tester
             .widget<SwitchListTile>(
-              find.widgetWithText(SwitchListTile, '한 정거장 전 알림'),
+              find.widgetWithText(SwitchListTile, '한 정류장 전 알림'),
             )
             .value,
         isFalse,
@@ -375,7 +375,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('알람 시작'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('선택한 알림 조건을 생성할 수 없습니다.'), findsOneWidget);
+      expect(find.textContaining('선택한 알람을 만들 수 없어요.'), findsOneWidget);
       expect(client.createCalls, 1);
       expect(client.activateCalls, 0);
       await tester.tap(find.text('정류장 목록 새로고침'));
@@ -432,7 +432,7 @@ void main() {
         expect(created, same(sample));
         expect(unverified, isTrue);
         expect(preparations, 1);
-        expect(find.textContaining('알람 생성 요청이 서버에 반영됐을 수 있습니다.'), findsNothing);
+        expect(find.textContaining('알람 생성 요청이 서버에 반영됐을 수 있어요.'), findsNothing);
         await tester.pumpWidget(
           detailScreen(
             client,
@@ -471,7 +471,7 @@ void main() {
     };
     await tester.pumpWidget(detailScreen(client));
     await tester.pumpAndSettle();
-    expect(find.text('알람을 불러오지 못했습니다.'), findsOneWidget);
+    expect(find.text('알람을 불러오지 못했어요.'), findsOneWidget);
     await tester.tap(find.text('다시 시도'));
     await tester.pumpAndSettle();
     expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
@@ -482,7 +482,7 @@ void main() {
     await tester.pumpWidget(Container());
     await tester.pumpWidget(detailScreen(client, onBack: () => back++));
     await tester.pumpAndSettle();
-    expect(find.text('알람을 찾을 수 없습니다.'), findsOneWidget);
+    expect(find.text('알람을 찾을 수 없어요.'), findsOneWidget);
     await tester.tap(find.text('알람 목록 보기'));
     expect(back, 1);
   });
@@ -516,13 +516,13 @@ void main() {
       await tester.pumpWidget(
         detailScreen(client, created: withStatus(AlarmStatus.followUp)),
       );
-      expect(find.text('상태: FOLLOW_UP · 한 정거장 후 추적 중'), findsOneWidget);
+      expect(find.text('상태: FOLLOW_UP · 한 정류장 후 추적 중'), findsOneWidget);
       expect(find.textContaining('이전 후속 추적을 끝내고 새 감시'), findsOneWidget);
       expect(find.text('다시 활성화'), findsOneWidget);
       expect(find.text('비활성화'), findsOneWidget);
       await tester.tap(find.text('다시 활성화'));
       await tester.pumpAndSettle();
-      expect(find.text('상태: FOLLOW_UP · 한 정거장 후 추적 중'), findsOneWidget);
+      expect(find.text('상태: FOLLOW_UP · 한 정류장 후 추적 중'), findsOneWidget);
       expect(find.text('조회 시점의 서버 상태입니다.'), findsOneWidget);
       expect(client.detailIds, [sample.id]);
       await tester.tap(find.text('비활성화'));
@@ -581,7 +581,7 @@ void main() {
       expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
       await tester.tap(find.text('비활성화'));
       await tester.pumpAndSettle();
-      expect(find.text('알람을 찾을 수 없습니다.'), findsOneWidget);
+      expect(find.text('알람을 찾을 수 없어요.'), findsOneWidget);
       expect(find.text('상태: ACTIVE · 감시 중'), findsNothing);
       await tester.tap(find.text('알람 목록 보기'));
       expect(back, 1);
@@ -667,7 +667,7 @@ void main() {
           pending.complete(withStatus(AlarmStatus.followUp));
           await tester.pumpAndSettle();
 
-          expect(find.text('상태: FOLLOW_UP · 한 정거장 후 추적 중'), findsOneWidget);
+          expect(find.text('상태: FOLLOW_UP · 한 정류장 후 추적 중'), findsOneWidget);
           expect(find.text('조회 시점의 서버 상태입니다.'), findsOneWidget);
           expect(client.activateCalls + client.deactivateCalls, 1);
           expect(client.deleteCalls, 0);
@@ -796,7 +796,7 @@ void main() {
         if (found) {
           expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
         } else {
-          expect(find.text('삭제되었거나 현재 계정에서 접근할 수 없는 알람입니다.'), findsOneWidget);
+          expect(find.text('삭제되었거나 현재 계정에서 접근할 수 없는 알람이에요.'), findsOneWidget);
           expect(find.text('현재 상태 다시 조회'), findsOneWidget);
           await tester.tap(find.text('알람 목록 보기'));
           expect(back, 1);

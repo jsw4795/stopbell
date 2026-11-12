@@ -535,8 +535,8 @@ void main() {
           find.byKey(const ValueKey('tracking-bus-marker')),
           findsOneWidget,
         );
-        expect(find.text('관측 지점'), findsOneWidget);
-        expect(find.text('최근 관측 기준'), findsOneWidget);
+        expect(find.text('위치 정류장'), findsOneWidget);
+        expect(find.text('최근 위치 기준'), findsOneWidget);
         expect(requests.single.method, 'GET');
       },
     );
@@ -580,7 +580,7 @@ void main() {
           expect(find.text('추적 취소'), findsNothing);
           expect(find.text('동일 차량 다시 확인'), findsNothing);
           expect(
-            find.textContaining('개 지점 남음'),
+            find.textContaining('개 정류장 남음'),
             status == 'TRACKING' && evaluation == 'READY'
                 ? findsOneWidget
                 : findsNothing,
@@ -608,7 +608,7 @@ void main() {
         expect(
           find.text(
             error == '404'
-                ? '이 하차 알림의 세션을 열 수 없어요. 세션이 없거나 현재 계정에서 접근할 수 없어요.'
+                ? '이 하차 알람의 세션을 열 수 없어요. 세션이 없거나 현재 계정에서 접근할 수 없어요.'
                 : '세션 상태를 확인하지 못했어요. 다시 조회해 주세요.',
           ),
           findsOneWidget,
@@ -707,7 +707,7 @@ void main() {
               });
               break;
             case 'home':
-              await tester.tap(find.byTooltip('버스 도착 알림으로'));
+              await tester.tap(find.byTooltip('도착 알람으로'));
               break;
             case 'dispose':
               await tester.pumpWidget(const SizedBox());

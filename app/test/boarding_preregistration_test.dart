@@ -51,7 +51,7 @@ void main() {
       ...candidateJson(),
       'progress': {
         'occurrenceId': 11,
-        'stopName': '승차 전 관측 지점',
+        'stopName': '승차 전 위치 정류장',
         'order': 10,
         'kind': 'MOVING_REFERENCE',
       },
@@ -71,9 +71,9 @@ void main() {
     );
     expect(find.byType(TextField), findsNothing);
     expect(find.textContaining('버스 도착 전에도'), findsOneWidget);
-    await tester.ensureVisible(find.text('하차 알림 등록'));
+    await tester.ensureVisible(find.text('하차 알람 등록'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('하차 알림 등록'));
+    await tester.tap(find.text('하차 알람 등록'));
     await tester.pump();
     expect(selected, moving.vehicleNumber);
   });
@@ -87,7 +87,7 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         const number = '서울특별시차량전체번호가길어도생략하지않음1234567890';
         const boardingName = '매우 긴 승차 정류장 이름과 환승센터\n상행 방면';
-        const targetName = '매우 긴 하차 목표 정류장 이름과 환승센터\n하행 방면';
+        const targetName = '매우 긴 목표 정류장 이름과 환승센터\n하행 방면';
         final pending = Completer<void>();
         final submissions = <String>[];
         final offsets = <int>[];
@@ -128,7 +128,7 @@ void main() {
         );
         expect(find.text(number), findsOneWidget);
         expect(find.text('광역급행형시내'), findsOneWidget);
-        for (final label in [boardingName, targetName, '노선 방문 지점 1개 전']) {
+        for (final label in [boardingName, targetName, '노선 방문 정류장 1개 전']) {
           final content = find.text(label);
           await Scrollable.ensureVisible(
             tester.element(content),
@@ -139,11 +139,11 @@ void main() {
         }
         final group = find.byType(RadioGroup<int>);
         expect(tester.widget<RadioGroup<int>>(group).groupValue, 2);
-        await tester.tap(find.text('노선 방문 지점 1개 전'));
+        await tester.tap(find.text('노선 방문 정류장 1개 전'));
         await tester.pump();
         expect(tester.widget<RadioGroup<int>>(group).groupValue, 1);
         expect(offsets, [1]);
-        final register = find.widgetWithText(FilledButton, '하차 알림 등록');
+        final register = find.widgetWithText(FilledButton, '하차 알람 등록');
         await tester.ensureVisible(register);
         await tester.pumpAndSettle();
         await tester.tap(register);
@@ -185,10 +185,10 @@ void main() {
       expect(find.text('최근 확인된 버스 위치'), findsNothing);
       expect(find.text('차량 위치 확인 중'), findsOneWidget);
       expect(find.textContaining('부근 지나는 중'), findsNothing);
-      expect(find.textContaining('개 지점 남음'), findsNothing);
-      expect(find.text('최근 관측 기준'), findsNothing);
-      expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
-      expect(find.textContaining('마지막 검증 관측 시각'), findsNothing);
+      expect(find.textContaining('개 정류장 남음'), findsNothing);
+      expect(find.text('최근 위치 기준'), findsNothing);
+      expect(find.textContaining('검증된 노선 방문 정류장 간격'), findsNothing);
+      expect(find.textContaining('마지막 검증 확인 시각'), findsNothing);
     },
   );
   testWidgets(
@@ -217,9 +217,9 @@ void main() {
           ),
         ),
       );
-      expect(find.text('승차 지점 이전의 관측 기준'), findsOneWidget);
-      expect(find.textContaining('승차 지점 이후의 관측 기준'), findsOneWidget);
-      expect(find.textContaining('노선 방문 지점 배열 기준'), findsNWidgets(2));
+      expect(find.text('승차 정류장 이전의 위치 기준'), findsOneWidget);
+      expect(find.textContaining('승차 정류장 이후의 위치 기준'), findsOneWidget);
+      expect(find.textContaining('노선 방문 정류장 배열 기준'), findsNWidgets(2));
     },
   );
 }

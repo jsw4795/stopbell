@@ -151,7 +151,7 @@ class _AlarmHomeState extends State<AlarmHome> {
                 ? foreground.eventType == 'DESTINATION_REACHED'
                       ? '선택한 정류장에 도달하거나 통과했어요.'
                       : '하차 준비 알림이 도착했어요.'
-                : '버스 도착 알림이 도착했습니다.',
+                : '버스 도착 알림이 왔어요.',
           ),
           action: SnackBarAction(
             label: foreground is BoardingSessionNotification
@@ -197,7 +197,7 @@ class _AlarmHomeState extends State<AlarmHome> {
       _showList();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('알람을 열 수 없습니다. 삭제되었거나 접근할 수 없는 알람일 수 있습니다.'),
+          content: Text('알람을 열 수 없어요. 삭제되었거나 접근할 수 없는 알람일 수 있어요.'),
         ),
       );
     }
@@ -391,7 +391,7 @@ class _AlarmHomeState extends State<AlarmHome> {
               child: const Text('저장된 요청 다시 확인'),
             ),
           if (_creation.pending != null) ...[
-            const Text('알람 생성 요청이 서버에 반영됐을 수 있습니다.'),
+            const Text(alarmCreationUncertainMessage),
             OutlinedButton(
               onPressed: _creation.busy
                   ? null
@@ -420,7 +420,7 @@ class _AlarmHomeState extends State<AlarmHome> {
               )
             else ...[
               const Text(
-                '요청 시각을 신뢰할 수 없거나 보존 기간이 지났습니다. 새로 생성하면 알람이 중복될 수 있습니다.',
+                '요청 시각을 신뢰할 수 없거나 보존 기간이 지났습니다. 새로 생성하면 알람이 중복될 수 있어요.',
               ),
               OutlinedButton(
                 onPressed: _creation.busy ? null : _confirmNewCreation,
@@ -453,7 +453,7 @@ class _AlarmHomeState extends State<AlarmHome> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('새 알람 생성'),
-        content: const Text('이전 요청이 이미 생성되었을 수 있어 새 알람이 중복될 수 있습니다. 계속할까요?'),
+        content: const Text('이전 요청이 이미 생성되었을 수 있어 새 알람이 중복될 수 있어요. 계속할까요?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),

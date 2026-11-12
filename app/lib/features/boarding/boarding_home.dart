@@ -177,9 +177,9 @@ class _BoardingHomeState extends State<BoardingHome> {
           children: [
             TextButton(
               onPressed: c.busy ? null : widget.onBack,
-              child: const Text('버스 도착 알림으로'),
+              child: const Text('도착 알람으로'),
             ),
-            Text(c.needsRecovery ? '원래 생성 요청 결과 확인' : '현재 하차 알림 확인'),
+            Text(c.needsRecovery ? '원래 생성 요청 결과 확인' : '현재 하차 알람 확인'),
             if (c.message != null) Text(c.message!),
             if (c.busy) const Text('서버 응답 확인 중...'),
             if (!c.busy)
@@ -317,11 +317,11 @@ class _BoardingHomeState extends State<BoardingHome> {
               Row(
                 children: [
                   IconButton(
-                    tooltip: '버스 도착 알림으로',
+                    tooltip: '도착 알람으로',
                     onPressed: widget.onBack,
                     icon: const Icon(Icons.arrow_back),
                   ),
-                  const Text('하차 알림 · 노선 선택'),
+                  const Text('하차 알람 · 노선 선택'),
                 ],
               ),
               Expanded(

@@ -91,7 +91,7 @@ extension AlarmStatusLabel on AlarmStatus {
   String get label => switch (this) {
     AlarmStatus.inactive => 'INACTIVE · 비활성',
     AlarmStatus.active => 'ACTIVE · 감시 중',
-    AlarmStatus.followUp => 'FOLLOW_UP · 한 정거장 후 추적 중',
+    AlarmStatus.followUp => 'FOLLOW_UP · 한 정류장 후 추적 중',
   };
 }
 
@@ -100,7 +100,7 @@ extension AlarmStatusShortLabel on AlarmStatus {
   String get shortLabel => switch (this) {
     AlarmStatus.inactive => '비활성',
     AlarmStatus.active => '감시 중',
-    AlarmStatus.followUp => '한 정거장 후 추적 중',
+    AlarmStatus.followUp => '한 정류장 후 추적 중',
   };
 }
 

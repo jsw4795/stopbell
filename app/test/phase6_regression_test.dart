@@ -103,7 +103,7 @@ Future<void> startAlarm(WidgetTester tester) async {
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(const ValueKey(54321)));
   await tester.pump();
-  await tester.tap(find.text('한 정거장 후 알림'));
+  await tester.tap(find.text('한 정류장 후 알림'));
   await tester.pump();
   await tester.tap(find.text('알람 시작'));
   await tester.pump();
@@ -202,7 +202,7 @@ void main() {
       expect(
         tester
             .widget<SwitchListTile>(
-              find.widgetWithText(SwitchListTile, '한 정거장 후 알림'),
+              find.widgetWithText(SwitchListTile, '한 정류장 후 알림'),
             )
             .value,
         isTrue,
@@ -212,8 +212,8 @@ void main() {
       activation.complete(jsonResponse(alarm('ACTIVE')));
       await tester.pumpAndSettle();
       expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
-      expect(find.text('한 정거장 전 알림: 꺼짐'), findsOneWidget);
-      expect(find.text('한 정거장 후 알림: 켜짐'), findsOneWidget);
+      expect(find.text('한 정류장 전 알림: 꺼짐'), findsOneWidget);
+      expect(find.text('한 정류장 후 알림: 켜짐'), findsOneWidget);
       expect((await storage.read())?.refreshToken, 'rotated-refresh');
       await tester.tap(find.byTooltip('알람 목록으로'));
       await tester.pumpAndSettle();

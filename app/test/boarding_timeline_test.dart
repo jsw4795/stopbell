@@ -46,7 +46,7 @@ void main() {
       await show(tester, {...base, 'timeline': timeline(3, 'READY')});
       expect(find.text('반복 정류장'), findsNWidgets(2));
       expect(find.text('미정차'), findsOneWidget);
-      expect(find.text('하차 준비 알림 지점'), findsOneWidget);
+      expect(find.text('하차 준비 알림 정류장'), findsOneWidget);
       expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);
       expect(
         (tester
@@ -83,7 +83,7 @@ void main() {
     tester,
   ) async {
     await show(tester, {...sessionJson(), 'timeline': timeline(0, 'READY')});
-    expect(find.textContaining('승차까지 2개 지점'), findsOneWidget);
+    expect(find.textContaining('승차까지 2개 정류장'), findsOneWidget);
     expect(find.byKey(const ValueKey('tracking-bus-marker')), findsNothing);
     await show(tester, {
       ...sessionJson(evaluation: 'RECOVERY_PENDING'),
@@ -100,7 +100,7 @@ void main() {
         'initialObservation': {'stopName': '경유', 'remainingOccurrenceGap': 2},
         'timeline': timeline(3, 'INITIAL'),
       });
-      expect(find.text('미검증 참고 관측 기준'), findsOneWidget);
+      expect(find.text('참고용 위치예요'), findsOneWidget);
       expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);
       await show(tester, {
         ...sessionJson(evaluation: 'VERIFICATION_PENDING'),

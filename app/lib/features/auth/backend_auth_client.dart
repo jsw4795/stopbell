@@ -22,7 +22,7 @@ class BackendAuthClient {
     final response = await _post('/auth/apple/challenge', {});
     if (response.statusCode != 200) {
       throw BackendAuthException(
-        'Apple 로그인 준비에 실패했습니다. 다시 시도해 주세요.',
+        'Apple 로그인 준비에 실패했어요. 다시 시도해 주세요.',
         statusCode: response.statusCode,
       );
     }
@@ -34,7 +34,7 @@ class BackendAuthClient {
       }
       return nonce;
     } on FormatException {
-      throw const BackendAuthException('서버 인증 응답이 올바르지 않습니다.');
+      throw const BackendAuthException('서버 인증 응답이 올바르지 않아요.');
     }
   }
 
@@ -57,7 +57,7 @@ class BackendAuthClient {
     });
     if (response.statusCode != 204) {
       throw BackendAuthException(
-        '서버 로그아웃이 실패했습니다. 다시 시도해 주세요.',
+        '서버 로그아웃이 실패했어요. 다시 시도해 주세요.',
         statusCode: response.statusCode,
       );
     }
@@ -70,7 +70,7 @@ class BackendAuthClient {
     final response = await _post(path, body);
     if (response.statusCode != 200) {
       throw BackendAuthException(
-        '서버 인증 요청이 실패했습니다. 다시 시도해 주세요.',
+        '서버 인증 요청이 실패했어요. 다시 시도해 주세요.',
         statusCode: response.statusCode,
       );
     }
@@ -88,7 +88,7 @@ class BackendAuthClient {
       }
       return TokenPair(accessToken: accessToken, refreshToken: refreshToken);
     } on FormatException {
-      throw const BackendAuthException('서버 인증 응답이 올바르지 않습니다.');
+      throw const BackendAuthException('서버 인증 응답이 올바르지 않아요.');
     }
   }
 

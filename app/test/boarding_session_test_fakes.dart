@@ -67,7 +67,7 @@ Map<String, dynamic> sessionJson({
 };
 Map<String, dynamic> timelineSessionJson({int id = 123}) => {
   ...sessionJson(id: id),
-  'currentStopName': '관측 지점',
+  'currentStopName': '위치 정류장',
   'timeline': {
     'provider': 'TAGO',
     'routeType': 'CITY_LOCAL',
@@ -77,7 +77,7 @@ Map<String, dynamic> timelineSessionJson({int id = 123}) => {
     'positionBasis': 'READY',
     'stops': [
       {'id': 10, 'index': 0, 'order': 1, 'name': '승차'},
-      {'id': 11, 'index': 1, 'order': 2, 'name': '관측 지점'},
+      {'id': 11, 'index': 1, 'order': 2, 'name': '위치 정류장'},
       {'id': 12, 'index': 2, 'order': 3, 'name': '목표'},
     ],
   },

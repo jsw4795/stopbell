@@ -324,7 +324,7 @@ class AccountDeletionController extends ChangeNotifier {
             await _finish(epoch);
           } else {
             status = AccountDeletionStatus.uncertain;
-            message = '탈퇴 처리 상태를 확인해 주세요. 아직 완료 여부를 알 수 없습니다.';
+            message = '탈퇴 처리 상태를 확인해 주세요. 아직 완료 여부를 알 수 없어요.';
           }
         }
       } else {
@@ -340,7 +340,7 @@ class AccountDeletionController extends ChangeNotifier {
       if (_current(epoch)) _ready = true;
     } catch (_) {
       if (_current(epoch)) {
-        message = '저장된 정보를 안전하게 준비하지 못했습니다. 앱 저장소를 확인해 주세요.';
+        message = '저장된 정보를 안전하게 준비하지 못했어요. 앱 저장소를 확인해 주세요.';
       }
       rethrow;
     } finally {
@@ -393,13 +393,13 @@ class AccountDeletionController extends ChangeNotifier {
       _record = record;
       if (record.receipt != receipt) {
         status = AccountDeletionStatus.uncertain;
-        message = '탈퇴 처리 상태를 확인해 주세요. 아직 완료 여부를 알 수 없습니다.';
+        message = '탈퇴 처리 상태를 확인해 주세요. 아직 완료 여부를 알 수 없어요.';
         _scheduleRetry();
         return;
       }
       await _send(epoch, record);
     } catch (_) {
-      if (_current(epoch)) message = '탈퇴 요청을 준비하거나 저장하지 못했습니다. 저장 공간을 확인해 주세요.';
+      if (_current(epoch)) message = '탈퇴 요청을 준비하거나 저장하지 못했어요. 저장 공간을 확인해 주세요.';
     } finally {
       if (_current(epoch)) {
         busy = false;
@@ -418,7 +418,7 @@ class AccountDeletionController extends ChangeNotifier {
       final result = await client.status(record.receipt);
       if (_current(epoch)) await _handle(epoch, record, result);
     } catch (_) {
-      if (_current(epoch)) message = '상태를 확인하지 못했습니다. 나중에 다시 확인해 주세요.';
+      if (_current(epoch)) message = '상태를 확인하지 못했어요. 나중에 다시 확인해 주세요.';
     } finally {
       if (_current(epoch)) {
         busy = false;
@@ -436,7 +436,7 @@ class AccountDeletionController extends ChangeNotifier {
     try {
       await _send(epoch, record);
     } catch (_) {
-      if (_current(epoch)) message = '요청 결과를 확인하지 못했습니다. 상태를 다시 확인해 주세요.';
+      if (_current(epoch)) message = '요청 결과를 확인하지 못했어요. 상태를 다시 확인해 주세요.';
     } finally {
       if (_current(epoch)) {
         busy = false;
@@ -449,7 +449,7 @@ class AccountDeletionController extends ChangeNotifier {
     final token = auth.deletionAccessToken;
     if (token == null) {
       if (_current(epoch)) {
-        message = '인증이 만료되었을 수 있습니다. receipt로 처리 상태를 확인해 주세요.';
+        message = '인증이 만료되었을 수 있어요. 탈퇴 처리 상태를 확인해 주세요.';
       }
       return;
     }
@@ -515,13 +515,13 @@ class AccountDeletionController extends ChangeNotifier {
       _scheduleRetry();
     }
     message = switch (result.status) {
-      AccountDeletionStatus.pending => '탈퇴가 진행 중입니다. 완료까지 시간이 걸릴 수 있습니다.',
+      AccountDeletionStatus.pending => '탈퇴가 진행 중이에요. 완료까지 시간이 걸릴 수 있어요.',
       AccountDeletionStatus.rejected ||
       AccountDeletionStatus.configurationError =>
-        '서버에서 탈퇴를 완료하지 못했습니다. 나중에 상태를 확인하거나 다시 시도해 주세요.',
+        '서버에서 탈퇴를 완료하지 못했어요. 나중에 상태를 확인하거나 다시 시도해 주세요.',
       AccountDeletionStatus.unauthenticated =>
-        '인증이 만료되었거나 계정이 삭제되었을 수 있습니다. 상태를 확인해 주세요.',
-      _ => '요청 결과를 확인하지 못했습니다. 탈퇴 완료 여부를 확인해 주세요.',
+        '인증이 만료되었거나 계정이 삭제되었을 수 있어요. 상태를 확인해 주세요.',
+      _ => '요청 결과를 확인하지 못했어요. 탈퇴 완료 여부를 확인해 주세요.',
     };
   }
 
@@ -563,7 +563,7 @@ class AccountDeletionController extends ChangeNotifier {
       message = null;
     } catch (_) {
       if (_current(epoch)) {
-        message = '삭제는 확인되었지만 이 기기의 사용자 정보를 정리하지 못했습니다. 다시 시도해 주세요.';
+        message = '삭제는 확인되었지만 이 기기의 사용자 정보를 정리하지 못했어요. 다시 시도해 주세요.';
       }
     }
   }
@@ -602,7 +602,7 @@ class AccountDeletionController extends ChangeNotifier {
         await _finish(epoch);
       }
     } catch (_) {
-      if (_current(epoch)) message = '안내 상태를 저장하지 못했습니다. 다시 시도해 주세요.';
+      if (_current(epoch)) message = '안내 상태를 저장하지 못했어요. 다시 시도해 주세요.';
     } finally {
       if (_current(epoch)) {
         busy = false;

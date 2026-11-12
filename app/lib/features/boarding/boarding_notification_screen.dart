@@ -92,7 +92,7 @@ class _BoardingNotificationScreenState
       setState(
         () => _error =
             error is BoardingSessionException && error.statusCode == 404
-            ? '이 하차 알림의 세션을 열 수 없어요. 세션이 없거나 현재 계정에서 접근할 수 없어요.'
+            ? '이 하차 알람의 세션을 열 수 없어요. 세션이 없거나 현재 계정에서 접근할 수 없어요.'
             : '세션 상태를 확인하지 못했어요. 다시 조회해 주세요.',
       );
     } finally {
@@ -111,16 +111,14 @@ class _BoardingNotificationScreenState
             alignment: Alignment.centerLeft,
             child: IconButton(
               onPressed: widget.onBack,
-              tooltip: '버스 도착 알림으로',
+              tooltip: '도착 알람으로',
               icon: const Icon(Icons.arrow_back),
             ),
           ),
         if (_busy) const Text('서버 응답 확인 중...'),
         if (_error != null) Text(_error!),
-        if (_session != null) BoardingSessionDetails(
-            session: _session!,
-            onBack: widget.onBack,
-          ),
+        if (_session != null)
+          BoardingSessionDetails(session: _session!, onBack: widget.onBack),
         OutlinedButton(
           onPressed: _busy ? null : _load,
           child: Text(_error == null ? '상태 새로고침' : '다시 조회'),

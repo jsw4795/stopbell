@@ -94,7 +94,7 @@ void main() {
     expectNoMutation();
     expect(find.byType(BusRouteStopScreen), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
-    expect(find.textContaining('알람 생성 요청이 서버에 반영됐을 수 있습니다'), findsNothing);
+    expect(find.textContaining('알람 생성 요청이 서버에 반영됐을 수 있어요'), findsNothing);
     expect(find.text('알람 목록 보기'), findsNothing);
     expect(
       tester
@@ -154,10 +154,10 @@ void main() {
       await tester.tap(find.text('원래 생성 결과 조회'));
       await tester.pumpAndSettle();
       expect(find.text('확인한 알람 보기'), findsNothing);
-      expect(find.text('원래 생성된 알람을 확인했습니다. 현재 상태를 확인해 주세요.'), findsOneWidget);
+      expect(find.text('원래 생성된 알람을 확인했어요. 현재 상태를 확인해 주세요.'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey(15)));
       await tester.pumpAndSettle();
-      expect(find.text('상태: FOLLOW_UP · 한 정거장 후 추적 중'), findsOneWidget);
+      expect(find.text('상태: FOLLOW_UP · 한 정류장 후 추적 중'), findsOneWidget);
       expect(client.createCalls, 1);
       expect(client.activateCalls, 0);
     },
@@ -220,7 +220,7 @@ void main() {
         expectRetryable(tester);
         expect(preparations, 1);
         if (result == 'exception') {
-          expect(find.textContaining('알림 수신 준비를 확인하지 못했습니다'), findsOneWidget);
+          expect(find.textContaining('알림 수신 준비를 확인하지 못했어요'), findsOneWidget);
         }
         await start(tester);
         await tester.pumpAndSettle();
@@ -303,7 +303,7 @@ void main() {
       await start(tester);
       if (permission == PushPermission.notDetermined) {
         expectNoMutation();
-        expect(find.text('버스 도착 알림 받기'), findsOneWidget);
+        expect(find.text('도착 알림 받기'), findsOneWidget);
         expect(find.textContaining('하차'), findsNothing);
         expect(f.provider.requests, 0);
         await tester.tap(find.text('계속'));
@@ -316,7 +316,7 @@ void main() {
       expect(f.provider.registrations, 1);
       expect(client.createCalls, 1);
       expect(client.activateCalls, 1);
-      expect(find.text('이 기기의 알림 수신 준비를 완료했습니다.'), findsOneWidget);
+      expect(find.text('이 기기의 알림 수신 준비를 완료했어요.'), findsOneWidget);
       expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
     });
   }
@@ -338,7 +338,7 @@ void main() {
     expect(f.devices.requests, isEmpty);
     expect(find.byType(AlertDialog), findsNothing);
     await start(tester);
-    expect(find.text('버스 도착 알림 받기'), findsOneWidget);
+    expect(find.text('도착 알림 받기'), findsOneWidget);
     await tester.tap(find.text('계속'));
     await tester.pumpAndSettle();
     expect(f.provider.requests, 1);
@@ -362,11 +362,11 @@ void main() {
         );
         await start(tester);
         expectNoMutation();
-        expect(find.text('이 기기의 알림 수신 준비가 필요합니다'), findsOneWidget);
-        expect(find.text('이 기기의 알림 수신 준비를 완료했습니다.'), findsNothing);
+        expect(find.text('이 기기의 알림 수신 준비가 필요해요'), findsOneWidget);
+        expect(find.text('이 기기의 알림 수신 준비를 완료했어요.'), findsNothing);
         expect(find.textContaining('하차'), findsNothing);
         if (failure == 'denied') {
-          expect(find.textContaining('버스 도착 알림'), findsOneWidget);
+          expect(find.textContaining('도착 알림'), findsOneWidget);
           await tester.tap(find.text('설정 열기'));
           await tester.pump();
           expect(f.provider.settings, 1);
@@ -375,7 +375,7 @@ void main() {
           expectNoMutation();
         }
         if (failure == 'backend') {
-          expect(find.textContaining('서버에 기기 등록을 완료하지 못했습니다'), findsOneWidget);
+          expect(find.textContaining('서버에 기기 등록을 완료하지 못했어요'), findsOneWidget);
         }
         await tester.tap(find.text(proceed ? '알람 활성화' : '취소'));
         await tester.pumpAndSettle();
@@ -729,7 +729,7 @@ void main() {
           expect(find.text('상태: INACTIVE · 비활성'), findsNothing);
           if (action == 'navigation') {
             expect(find.text('other route · other stop'), findsOneWidget);
-            expect(find.text('상태: FOLLOW_UP · 한 정거장 후 추적 중'), findsOneWidget);
+            expect(find.text('상태: FOLLOW_UP · 한 정류장 후 추적 중'), findsOneWidget);
           } else {
             expect(find.byType(AlarmDetailScreen), findsNothing);
           }

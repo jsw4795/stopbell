@@ -90,7 +90,7 @@ class BoardingCandidatesView extends StatelessWidget {
                                           .length ==
                                       1,
                       )
-                      ? '전체 차량번호를 보고 원하는 차량을 직접 선택하세요.'
+                      ? '전체 차량번호를 보고 원하는 차량을 직접 선택해 주세요.'
                       : '현재 선택 가능한 차량이 없어요. 차량별 보류 사유를 확인해 주세요.',
                   style: theme.textTheme.bodySmall,
                 ),
@@ -98,7 +98,7 @@ class BoardingCandidatesView extends StatelessWidget {
           ),
         if (showIntro && compactLabel != null && result.candidates.isNotEmpty)
           Text(
-            '시각은 서버 조회 기준이에요. 최근 관측은 진행 참고 지점이며 간격에는 미정차·경유가 포함될 수 있어요.',
+            '시각은 서버 조회 기준이에요. 최근 위치은 진행 참고 정류장이며 간격에는 미정차·경유가 포함될 수 있어요.',
             style: theme.textTheme.bodySmall,
           ),
         for (final (index, candidate) in result.candidates.indexed)
@@ -136,7 +136,7 @@ class BoardingCandidatesView extends StatelessWidget {
             spacing: StopBellSpacing.xs,
             children: [
               Text(
-                '목록 서버 관측 시각 · ${boardingTime(result.observedAt)}',
+                '목록 서버 확인 시각 · ${boardingTime(result.observedAt)}',
                 style: theme.textTheme.bodySmall,
               ),
               if (providerTime != null)
@@ -259,7 +259,7 @@ class _CompactCandidateCard extends StatelessWidget {
                             message: stopName,
                             excludeFromSemantics: true,
                             child: Text(
-                              '최근 관측 · $stopName',
+                              '최근 위치 · $stopName',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall,
@@ -318,8 +318,8 @@ String _holdReason(BoardingCandidate candidate, bool canChoose) {
     ('IDENTITY_CONFLICT', '차량 식별 정보 불일치'),
     ('DETAIL_ID_MISMATCH', '차량 식별 정보 불일치'),
     ('DETAIL_NUMBER_MISMATCH', '차량번호 불일치'),
-    ('STALE_OBSERVATION', '오래된 관측'),
-    ('FUTURE_OBSERVATION', '관측 시각 오류'),
+    ('STALE_OBSERVATION', '오래된 위치'),
+    ('FUTURE_OBSERVATION', '확인 시각 오류'),
   ]) {
     if (reasons.contains(code)) return '선택 보류 · $message';
   }
@@ -445,25 +445,25 @@ class _CandidateCard extends StatelessWidget {
                       ),
                       Text(switch (progress.kind) {
                         ProgressKind.routeProgress => '노선 진행 참고 정보',
-                        ProgressKind.arrivalObserved => '제공기관의 도착 관측 기록',
+                        ProgressKind.arrivalObserved => '제공기관의 도착 기록',
                         ProgressKind.movingReference => '이동 중 제공된 진행 기준 정보',
                         ProgressKind.unknown => '진행 정보의 의미 미확인',
                       }, style: theme.textTheme.bodySmall),
                     ],
                     if (gap != null) ...[
                       Text(switch (gap) {
-                        > 0 => '승차 지점 이전의 관측 기준',
-                        < 0 => '승차 지점 이후의 관측 기준',
-                        _ => '승차 지점과 같은 관측 기준',
+                        > 0 => '승차 정류장 이전의 위치 기준',
+                        < 0 => '승차 정류장 이후의 위치 기준',
+                        _ => '승차 정류장과 같은 위치 기준',
                       }, style: theme.textTheme.bodySmall),
                       Text(
-                        '노선상 간격 ${gap.abs()} · 노선 방문 지점 배열 기준',
+                        '노선상 간격 ${gap.abs()} · 노선 방문 정류장 배열 기준',
                         style: theme.textTheme.bodySmall,
                       ),
                     ],
                     if (progress != null || gap != null)
                       Text(
-                        '관측 기준이며 실제 위치·정차 여부나 도착 예정 시간을 알 수 없어요.',
+                        '참고용 위치이며 실제 위치·정차 여부나 도착 예정 시간을 알 수 없어요.',
                         style: theme.textTheme.bodySmall,
                       ),
                   ],
@@ -475,7 +475,7 @@ class _CandidateCard extends StatelessWidget {
               spacing: StopBellSpacing.xs,
               children: [
                 Text(
-                  '서버 관측 시각 · ${boardingTime(item.observedAt)}',
+                  '서버 확인 시각 · ${boardingTime(item.observedAt)}',
                   style: theme.textTheme.bodySmall,
                 ),
                 Text(
@@ -528,7 +528,7 @@ String _reasonMessage(String code) => switch (code) {
   'PROVIDER_TIME_MISSING' => '원본 정보의 갱신 시각을 알 수 없어요.',
   'PROVIDER_TIME_INVALID' => '제공된 시각을 검증할 수 없어요.',
   'STALE_OBSERVATION' => '차량 정보가 오래되어 다시 확인해야 해요.',
-  'FUTURE_OBSERVATION' => '관측 시각이 미래여서 최신 정보로 사용할 수 없어요.',
+  'FUTURE_OBSERVATION' => '확인 시각이 미래여서 최신 정보로 사용할 수 없어요.',
   'DETAIL_NOT_REQUESTED' => '상세 진행 정보는 조회하지 않았어요.',
   'DETAIL_DEADLINE_NOT_STARTED' =>
     '조회 시간 안에 상세 조회를 시작하지 못했어요. 필요하면 다시 조회해 주세요.',
@@ -540,7 +540,7 @@ String _reasonMessage(String code) => switch (code) {
   'DETAIL_PROTOCOL_FAILURE' => '상세 정보 형식을 확인할 수 없어요.',
   'DETAIL_ID_MISMATCH' => '조회한 차량과 상세 차량 식별 정보가 일치하지 않아요.',
   'DETAIL_NUMBER_MISMATCH' => '목록과 상세 정보의 차량번호가 일치하지 않아요.',
-  'TAGO_ALIGHT_UNVERIFIED' => '이 노선의 하차 알림 추적은 아직 검증되지 않아 사용할 수 없어요.',
+  'TAGO_ALIGHT_UNVERIFIED' => '이 노선의 하차 알람 추적은 아직 검증되지 않아 사용할 수 없어요.',
   'TARGET_NOT_AHEAD' => '목적지가 현재 진행 방향의 앞쪽인지 확인되지 않았어요.',
   'REVALIDATION_REQUIRED' => '차량 확인 시 최신 정보를 다시 검증해야 해요.',
   _ => '해석할 수 없는 제한 사유가 있어요. 지원 여부를 확인할 수 없어요.',

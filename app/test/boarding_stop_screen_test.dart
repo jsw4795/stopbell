@@ -209,19 +209,19 @@ void main() {
         expect(first.hitTestable(), findsOneWidget);
         expect(second.hitTestable(), findsOneWidget);
         expect(tester.getSize(first).height, lessThan(105));
-        expect(find.text('최근 관측 · 출발 정류장'), findsOneWidget);
-        expect(find.text('최근 관측 · 중간 정류장'), findsOneWidget);
+        expect(find.text('최근 위치 · 출발 정류장'), findsOneWidget);
+        expect(find.text('최근 위치 · 중간 정류장'), findsOneWidget);
         expect(find.text('이 차량 선택'), findsNothing);
         expect(find.text('후보 1'), findsNothing);
         expect(find.text('조건부 지원'), findsNothing);
         final semantic = StopBellColors.of(tester.element(first));
         expect(Theme.of(tester.element(first)).brightness, brightness);
         expect(
-          tester.widget<Text>(find.text('승차까지 약 1개 지점')).style?.color,
+          tester.widget<Text>(find.text('승차까지 약 1개 정류장')).style?.color,
           semantic.boardingStop,
         );
         expect(
-          tester.widget<Text>(find.text('목표까지 약 1개 지점')).style?.color,
+          tester.widget<Text>(find.text('목표까지 약 1개 정류장')).style?.color,
           semantic.targetStop,
         );
         expect(next, findsNothing);
@@ -302,7 +302,7 @@ void main() {
     await setup(tester);
     await tester.pumpWidget(screen());
     await tester.pumpAndSettle();
-    expect(find.text('노선도에서 승차 정류장을 선택하세요.'), findsOneWidget);
+    expect(find.text('노선도에서 승차 정류장을 선택해 주세요.'), findsOneWidget);
     expect(find.byKey(const ValueKey('find-candidates')), findsNothing);
     expect(find.byKey(const ValueKey('pick-boarding')), findsNothing);
     expect(find.byKey(const ValueKey('pick-target')), findsNothing);
@@ -334,7 +334,7 @@ void main() {
     expect(find.byType(BoardingCandidatesView), findsNothing);
     expect(find.byKey(const ValueKey('summary-boarding')), findsNothing);
     expect(find.byKey(const ValueKey('summary-target')), findsNothing);
-    expect(find.text('노선도에서 승차 정류장을 선택하세요.'), findsOneWidget);
+    expect(find.text('노선도에서 승차 정류장을 선택해 주세요.'), findsOneWidget);
     await tap(tester, 'occurrence-11');
     await tap(tester, 'occurrence-22');
     await tap(tester, 'find-candidates');
@@ -616,10 +616,10 @@ void main() {
       expect(find.text('정류장 조회 중...'), findsOneWidget);
       pending.complete([]);
       await tester.pumpAndSettle();
-      expect(find.text('정류장 정보가 없습니다.'), findsOneWidget);
+      expect(find.text('정류장 정보가 없어요.'), findsOneWidget);
       await tester.tap(find.text('정류장 다시 조회'));
       await tester.pumpAndSettle();
-      expect(find.text('정류장 정보를 불러오지 못했습니다.'), findsOneWidget);
+      expect(find.text('정류장 정보를 불러오지 못했어요.'), findsOneWidget);
       await tester.tap(find.text('정류장 다시 조회'));
       await tester.pumpAndSettle();
       await query(tester);
@@ -801,7 +801,7 @@ void main() {
       await tester.pumpAndSettle();
       oldStops.complete(const []);
       await tester.pumpAndSettle();
-      expect(find.text('정류장 정보가 없습니다.'), findsNothing);
+      expect(find.text('정류장 정보가 없어요.'), findsNothing);
       expect(find.byKey(const ValueKey('occurrence-22')), findsOneWidget);
       final later = Completer<List<BusRouteStopOccurrence>>();
       await tester.pumpWidget(
@@ -824,7 +824,7 @@ void main() {
       final forwarded = <BoardingCandidate>[];
       var empty = true;
       const number = '경기차량번호가매우길어도생략하지않음1234567890';
-      const observedName = '화면의 한 줄에 들어가지 않는 매우 긴 환승 정류장 이름과 관측 참고 지점';
+      const observedName = '화면의 한 줄에 들어가지 않는 매우 긴 환승 정류장 이름과 위치 참고 정류장';
       await tester.pumpWidget(
         MaterialApp(
           darkTheme: StopBellTheme.dark,
@@ -873,7 +873,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('노선도에서 승차 정류장을 선택하세요.').hitTestable(), findsOneWidget);
+      expect(find.text('노선도에서 승차 정류장을 선택해 주세요.').hitTestable(), findsOneWidget);
       await tap(tester, 'occurrence-11');
       await tap(tester, 'occurrence-22');
       expect(
@@ -902,7 +902,7 @@ void main() {
       await tester.pumpAndSettle();
       await tap(tester, 'candidate-0');
       expect(find.text(number).hitTestable(), findsOneWidget);
-      final location = find.text('최근 관측 · $observedName');
+      final location = find.text('최근 위치 · $observedName');
       expect(location, findsOneWidget);
       expect(tester.widget<Text>(location).maxLines, 1);
       expect(find.byTooltip(observedName), findsOneWidget);

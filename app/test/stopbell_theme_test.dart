@@ -121,7 +121,7 @@ void main() {
         await tester.testTextInput.receiveAction(TextInputAction.search);
         await tester.pumpAndSettle();
         expect(searched, '143');
-        expect(find.text('검색 결과가 없습니다.'), findsOneWidget);
+        expect(find.text('검색 결과가 없어요.'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );

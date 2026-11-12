@@ -126,7 +126,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
           _state = _DetailState.notFound;
         } else if (_outcomeUnknown && _alarm != null) {
           _state = _DetailState.success;
-          _message = '요청이 서버에 반영됐을 수 있습니다. 현재 상태를 다시 조회해 주세요.';
+          _message = '요청이 서버에 반영됐을 수 있어요. 현재 상태를 다시 조회해 주세요.';
         } else {
           _state = _DetailState.error;
         }
@@ -143,7 +143,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
     setState(() {
       _outcomeUnknown = true;
       _loading = true;
-      _message = '요청 결과를 확인하고 있습니다.';
+      _message = '요청 결과를 확인하고 있어요.';
     });
     await _readCurrent(request, id, client);
   }
@@ -175,7 +175,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
           if (!await widget.beforeActivate!(context)) return;
         } catch (_) {
           if (_isCurrent(request, id, client)) {
-            setState(() => _message = '알림 수신 준비를 확인하지 못했습니다. 다시 시도해 주세요.');
+            setState(() => _message = '알림 수신 준비를 확인하지 못했어요. 다시 시도해 주세요.');
           }
           return;
         }
@@ -191,7 +191,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
       } catch (error) {
         if (!_isCurrent(request, id, client)) return;
         if (error is AlarmApiException && error.isMutationRejected) {
-          _rejected(error, '알람 상태를 변경하지 못했습니다.');
+          _rejected(error, '알람 상태를 바꾸지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.');
         } else {
           await _recover(request, id, client);
         }
@@ -214,7 +214,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('알람 삭제'),
-          content: const Text('이 알람을 삭제할까요?'),
+          content: const Text('도착 알람을 삭제할까요? 삭제한 알람은 복구할 수 없어요.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -241,7 +241,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
       } catch (error) {
         if (!_isCurrent(request, id, client)) return;
         if (error is AlarmApiException && error.isMutationRejected) {
-          _rejected(error, '알람을 삭제하지 못했습니다.');
+          _rejected(error, '알람을 삭제하지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.');
         } else {
           await _recover(request, id, client);
         }
@@ -283,8 +283,8 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
                 children: [
                   Text(
                     _outcomeUnknown
-                        ? '요청 결과와 현재 알람 상태를 확인할 수 없습니다.'
-                        : '알람을 불러오지 못했습니다.',
+                        ? '요청 결과와 현재 알람 상태를 확인할 수 없어요.'
+                        : '알람을 불러오지 못했어요.',
                   ),
                   OutlinedButton(
                     onPressed: _load,
@@ -297,8 +297,8 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('알람을 찾을 수 없습니다.'),
-                  const Text('삭제되었거나 현재 계정에서 접근할 수 없는 알람입니다.'),
+                  const Text('알람을 찾을 수 없어요.'),
+                  const Text('삭제되었거나 현재 계정에서 접근할 수 없는 알람이에요.'),
                   if (_outcomeUnknown)
                     OutlinedButton(
                       onPressed: _load,
@@ -328,12 +328,12 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
       const SizedBox(height: 12),
       Text('교통수단: ${alarm.transitType.code}'),
       Text(_outcomeUnknown ? '상태: 확인 필요' : '상태: ${alarm.status.label}'),
-      Text('한 정거장 전 알림: ${alarm.notifyOneStopBefore ? '켜짐' : '꺼짐'}'),
-      Text('한 정거장 후 알림: ${alarm.notifyOneStopAfter ? '켜짐' : '꺼짐'}'),
+      Text('한 정류장 전 알림: ${alarm.notifyOneStopBefore ? '켜짐' : '꺼짐'}'),
+      Text('한 정류장 후 알림: ${alarm.notifyOneStopAfter ? '켜짐' : '꺼짐'}'),
       if (!_outcomeUnknown && alarm.status == AlarmStatus.followUp) ...[
         const SizedBox(height: 12),
-        const Text('목표 정류장 도착 후 같은 차량을 한 정거장 뒤 알림까지 추적 중입니다.'),
-        const Text('다시 활성화하면 이전 후속 추적을 끝내고 새 감시를 시작합니다.'),
+        const Text('목표 정류장 도착 후 같은 차량을 한 정류장 뒤 알림까지 추적 중이에요.'),
+        const Text('다시 활성화하면 이전 후속 추적을 끝내고 새 감시를 시작해요.'),
       ],
       const SizedBox(height: 24),
       if (alarm.status == AlarmStatus.inactive)

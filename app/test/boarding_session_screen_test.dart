@@ -43,7 +43,7 @@ void main() {
           ),
         );
         expect(find.text('목적 정류장'), findsOneWidget);
-        expect(find.text('1개 지점 전'), findsOneWidget);
+        expect(find.text('1개 정류장 전'), findsOneWidget);
         expect(find.text('상세 정보'), findsNothing);
         expect(find.textContaining('목적지 알림: ON'), findsNothing);
       },
@@ -64,8 +64,8 @@ void main() {
       ),
     );
     expect(find.text('평내호평역 부근 지나는 중'), findsNothing);
-    expect(find.text('최근 관측 기준'), findsNothing);
-    expect(find.text('3개 지점 남음'), findsOneWidget);
+    expect(find.text('최근 위치 기준'), findsNothing);
+    expect(find.text('3개 정류장 남음'), findsOneWidget);
   });
 
   testWidgets('registration observation is distinct from verified progress', (
@@ -74,7 +74,7 @@ void main() {
     final session = BoardingSession.fromJson({
       ...sessionJson(evaluation: 'VERIFICATION_PENDING'),
       'checkpointObservedAt': null,
-      'initialObservation': {'stopName': '등록 지점', 'remainingOccurrenceGap': 3},
+      'initialObservation': {'stopName': '등록 정류장', 'remainingOccurrenceGap': 3},
     });
     await tester.pumpWidget(
       MaterialApp(
@@ -84,10 +84,10 @@ void main() {
       ),
     );
     expect(find.text('등록 시 확인된 차량 위치'), findsNothing);
-    expect(find.text('등록 지점 부근'), findsNothing);
-    expect(find.text('미검증 참고 관측 기준'), findsNothing);
-    expect(find.text('3개 지점 남음'), findsOneWidget);
-    expect(find.text('최근 관측 기준'), findsNothing);
+    expect(find.text('등록 정류장 부근'), findsNothing);
+    expect(find.text('참고용 위치예요'), findsNothing);
+    expect(find.text('3개 정류장 남음'), findsOneWidget);
+    expect(find.text('최근 위치 기준'), findsNothing);
   });
 
   testWidgets('initial gap remains available when its name is missing', (
@@ -106,7 +106,7 @@ void main() {
       ),
     );
     expect(find.text('차량 위치 확인 중'), findsNothing);
-    expect(find.text('3개 지점 남음'), findsOneWidget);
+    expect(find.text('3개 정류장 남음'), findsOneWidget);
   });
 
   for (final state in [
@@ -122,7 +122,7 @@ void main() {
       final session = BoardingSession.fromJson({
         ...sessionJson(status: state.$1, evaluation: state.$2),
         'initialObservation': {
-          'stopName': '이전 관측',
+          'stopName': '이전 위치',
           'remainingOccurrenceGap': 3,
         },
       });
@@ -135,8 +135,8 @@ void main() {
           ),
         ),
       );
-      expect(find.textContaining('이전 관측'), findsNothing);
-      expect(find.text('미검증 참고 관측 기준'), findsNothing);
+      expect(find.textContaining('이전 위치'), findsNothing);
+      expect(find.text('참고용 위치예요'), findsNothing);
     });
   }
 
@@ -174,7 +174,7 @@ void main() {
         await tester.drag(find.byType(ListView), const Offset(0, -1500));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(find.text('하차 알림'), findsOneWidget);
+        expect(find.text('하차 알람'), findsOneWidget);
       },
     );
   }
@@ -231,7 +231,7 @@ void main() {
       ),
     );
     expect(find.text('확인 필요'), findsOneWidget);
-    expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
+    expect(find.textContaining('검증된 노선 방문 정류장 간격'), findsNothing);
   });
   testWidgets('ready without a gap does not invent progress', (tester) async {
     await tester.pumpWidget(
@@ -245,7 +245,7 @@ void main() {
         ),
       ),
     );
-    expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
+    expect(find.textContaining('검증된 노선 방문 정류장 간격'), findsNothing);
   });
   late AuthSession auth;
   late FakeBoardingSessions api;
@@ -324,7 +324,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);
-      expect(find.text('최근 관측 기준'), findsOneWidget);
+      expect(find.text('최근 위치 기준'), findsOneWidget);
       expect(find.text('추적 취소'), findsOneWidget);
     },
   );
@@ -531,7 +531,7 @@ void main() {
   }
 
   Future<void> confirm(WidgetTester tester, {bool reconfirm = false}) async {
-    await tap(tester, reconfirm ? '동일 차량 재확인 요청' : '이 차량으로 하차 알림 설정');
+    await tap(tester, reconfirm ? '동일 차량 재확인 요청' : '이 차량으로 하차 알람 설정');
   }
 
   testWidgets(
@@ -547,7 +547,7 @@ void main() {
       expect(find.byType(BoardingConfirmationView), findsNothing);
       expect(api.creations, isEmpty);
       expect(tester.widget<FilledButton>(next).onPressed, isNotNull);
-      await tap(tester, '이 차량으로 하차 알림 설정');
+      await tap(tester, '이 차량으로 하차 알람 설정');
       expect(api.creations, hasLength(1));
       expect(find.byType(BoardingConfirmationView), findsNothing);
       expect(api.creations.single, containsPair('routeId', 754));
@@ -562,7 +562,7 @@ void main() {
       );
       expect(api.creations.single, isNot(contains('candidateRef')));
       expect(find.byType(BoardingSessionView), findsOneWidget);
-      expect(find.text('3개 지점 남음'), findsOneWidget);
+      expect(find.text('3개 정류장 남음'), findsOneWidget);
       expect(find.text('상세 정보'), findsNothing);
       expect(find.textContaining('승차 정류장 정보 없음'), findsNothing);
     },
@@ -727,7 +727,7 @@ void main() {
       await pump(tester);
       await candidates(tester);
       await select(tester);
-      await tap(tester, '이 차량으로 하차 알림 설정');
+      await tap(tester, '이 차량으로 하차 알람 설정');
       expect(api.creations, hasLength(1));
       expect(storage.records, hasLength(1));
       expect(
@@ -809,7 +809,7 @@ void main() {
       await tap(tester, '결과 다시 조회');
       expect(find.byType(BoardingSessionView), findsOneWidget);
       expect(find.textContaining('현재 차량 진행 정보를 다시 확인'), findsOneWidget);
-      expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
+      expect(find.textContaining('검증된 노선 방문 정류장 간격'), findsNothing);
     },
   );
   for (final evaluation in ['RECOVERY_PENDING', 'HELD']) {
@@ -823,7 +823,7 @@ void main() {
           gap: 999,
         );
         await pump(tester);
-        expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
+        expect(find.textContaining('검증된 노선 방문 정류장 간격'), findsNothing);
         expect(find.textContaining('999'), findsNothing);
         expect(find.text('상세 정보'), findsNothing);
         if (evaluation == 'HELD') {
@@ -905,7 +905,7 @@ void main() {
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
       expect(find.textContaining('변경 결과를 확인하지 못했어요'), findsOneWidget);
-      expect(find.textContaining('검증된 노선 방문 지점 간격'), findsNothing);
+      expect(find.textContaining('검증된 노선 방문 정류장 간격'), findsNothing);
       expect(
         tester
             .widget<TextButton>(find.widgetWithText(TextButton, '추적 취소'))

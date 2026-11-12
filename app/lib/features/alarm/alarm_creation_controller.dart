@@ -5,6 +5,10 @@ import 'alarm.dart';
 import 'alarm_api_client.dart';
 import 'alarm_creation_intent.dart';
 
+/// 알람 생성 결과가 불확실할 때 공통으로 보여 주는 안내 문구.
+const alarmCreationUncertainMessage =
+    '알람 생성 요청이 서버에 반영됐을 수 있어요. 중복 생성을 피하려면 알람 목록에서 먼저 확인해 주세요.';
+
 class AlarmCreationController extends ChangeNotifier {
   AlarmCreationController(this.auth, this.client, this.storage)
     : generation = auth.generation,
@@ -53,14 +57,14 @@ class AlarmCreationController extends ChangeNotifier {
       if (!current) return;
       if (value != null &&
           (value.userIdentity != user || value.sessionIdentity != session)) {
-        message = '저장된 요청의 계정을 확인할 수 없습니다.';
+        message = '저장된 요청의 계정을 확인할 수 없어요.';
         return;
       }
       pending = value;
       initialized = true;
-      if (pending != null) message = '이전 알람 생성 결과가 불확실합니다. 원래 요청을 확인해 주세요.';
+      if (pending != null) message = '이전 알람 생성 결과가 불확실해요. 원래 요청을 확인해 주세요.';
     } catch (_) {
-      if (current) message = '저장된 생성 요청을 읽지 못했습니다. 다시 확인해 주세요.';
+      if (current) message = '저장된 생성 요청을 읽지 못했어요. 다시 확인해 주세요.';
     } finally {
       _emit();
     }
@@ -91,7 +95,7 @@ class AlarmCreationController extends ChangeNotifier {
       try {
         saved = await storage.saveIfAbsent(intent);
       } catch (_) {
-        if (current) message = '요청을 저장하지 못해 전송하지 않았습니다.';
+        if (current) message = '요청을 저장하지 못해 전송하지 않았어요.';
         return null;
       }
       if (!current) return null;
@@ -120,22 +124,22 @@ class AlarmCreationController extends ChangeNotifier {
           gone = true;
           await _clear(intent);
           if (current && pending == null) {
-            message = '원래 생성된 알람이 삭제되었습니다. 새 알람은 별도로 생성해 주세요.';
+            message = '원래 생성된 알람이 삭제되었어요. 새 알람은 별도로 생성해 주세요.';
           }
         } else if (error.statusCode == 409 &&
             error.code == 'ALARM_CREATION_REQUEST_CONFLICT') {
-          message = '원래 요청의 내용이 일치하지 않습니다. 원래 결과를 확인해 주세요.';
+          message = '원래 요청의 내용이 일치하지 않아요. 원래 결과를 확인해 주세요.';
         } else {
-          message = '알람 생성 결과가 불확실합니다. 원래 요청을 조회하거나 재시도해 주세요.';
+          message = '알람 생성 결과가 불확실해요. 원래 요청을 조회하거나 재시도해 주세요.';
         }
       } catch (_) {
         if (current && navigationCurrent()) {
-          message = '알람 생성 결과가 불확실합니다. 원래 요청을 조회하거나 재시도해 주세요.';
+          message = '알람 생성 결과가 불확실해요. 원래 요청을 조회하거나 재시도해 주세요.';
         }
       }
       return null;
     } catch (_) {
-      if (current && !initialized) message = '요청을 저장하지 못해 전송하지 않았습니다.';
+      if (current && !initialized) message = '요청을 저장하지 못해 전송하지 않았어요.';
       rethrow;
     } finally {
       if (current) {
@@ -152,7 +156,7 @@ class AlarmCreationController extends ChangeNotifier {
     _emit();
     await _clear(intent);
     if (current) {
-      if (pending == null) message = '새 알람을 만들 수 있습니다. 이전 요청의 결과는 불확실합니다.';
+      if (pending == null) message = '새 알람을 만들 수 있어요. 이전 요청의 결과는 불확실해요.';
       busy = false;
       _emit();
     }
@@ -183,7 +187,7 @@ class AlarmCreationController extends ChangeNotifier {
       result = alarm;
       await _clear(intent);
       if (valid() && pending == null) {
-        message = '원래 생성된 알람을 확인했습니다. 현재 상태를 확인해 주세요.';
+        message = '원래 생성된 알람을 확인했어요. 현재 상태를 확인해 주세요.';
       }
     } on AlarmApiException catch (error) {
       if (!valid()) return;
@@ -192,19 +196,19 @@ class AlarmCreationController extends ChangeNotifier {
         gone = true;
         await _clear(intent);
         if (valid() && pending == null) {
-          message = '원래 생성된 알람이 삭제되었습니다. 새 알람은 별도로 생성해 주세요.';
+          message = '원래 생성된 알람이 삭제되었어요. 새 알람은 별도로 생성해 주세요.';
         }
       } else if (error.statusCode == 404 &&
           error.code == 'ALARM_CREATION_REQUEST_NOT_FOUND') {
-        message = '원래 요청을 찾지 못했습니다. 처리 중이거나 기록이 만료됐을 수 있습니다.';
+        message = '원래 요청을 찾지 못했어요. 처리 중이거나 기록이 만료됐을 수 있어요.';
       } else if (error.statusCode == 409 &&
           error.code == 'ALARM_CREATION_REQUEST_CONFLICT') {
-        message = '원래 요청의 내용이 일치하지 않습니다. 원래 결과를 확인해 주세요.';
+        message = '원래 요청의 내용이 일치하지 않아요. 원래 결과를 확인해 주세요.';
       } else {
-        message = '결과를 확정할 수 없습니다. 원래 요청을 보존합니다.';
+        message = '결과를 확정할 수 없어요. 원래 요청을 보존해요.';
       }
     } catch (_) {
-      if (valid()) message = '결과를 확정할 수 없습니다. 원래 요청을 보존합니다.';
+      if (valid()) message = '결과를 확정할 수 없어요. 원래 요청을 보존해요.';
     } finally {
       if (current) {
         busy = false;
@@ -224,9 +228,9 @@ class AlarmCreationController extends ChangeNotifier {
           pending?.clientRequestId == intent.clientRequestId) {
         pending = null;
       }
-      if (current && !deleted) message = '저장된 요청을 정리하지 못했습니다. 다시 확인해 주세요.';
+      if (current && !deleted) message = '저장된 요청을 정리하지 못했어요. 다시 확인해 주세요.';
     } catch (_) {
-      if (current) message = '저장된 요청을 정리하지 못했습니다. 다시 확인해 주세요.';
+      if (current) message = '저장된 요청을 정리하지 못했어요. 다시 확인해 주세요.';
     }
   }
 

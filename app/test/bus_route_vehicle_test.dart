@@ -207,7 +207,9 @@ void main() {
       expect(find.text('2'), findsOneWidget);
     });
 
-    testWidgets('도착 차량은 정류장 동그라미 중심에, 출발 차량은 다음 정류장과의 사이에 그리며 색을 적용한다', (tester) async {
+    testWidgets('도착 차량은 정류장 동그라미 중심에, 출발 차량은 다음 정류장과의 사이에 그리며 색을 적용한다', (
+      tester,
+    ) async {
       const color = Color(0xffe53935);
       await tester.pumpWidget(
         MaterialApp(

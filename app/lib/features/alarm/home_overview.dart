@@ -262,7 +262,7 @@ class _HomeOverviewState extends State<HomeOverview>
     final arrival = _CreateCard(
       icon: Icons.notifications_active_outlined,
       title: '도착 알람',
-      subtitle: '정류장 도착 알림',
+      subtitle: '정류장에 도착하면 알려드려요',
       accent: colors.primary,
       onTap: widget.onCreateArrival,
     );
@@ -271,7 +271,7 @@ class _HomeOverviewState extends State<HomeOverview>
     final boardingCard = _CreateCard(
       icon: Icons.directions_bus_outlined,
       title: '하차 알람',
-      subtitle: '버스 하차 알림',
+      subtitle: '내릴 정류장 전에 알려드려요',
       accent: _boardingCreateAccent(Theme.of(context).brightness),
       onTap: boarding,
     );
@@ -355,14 +355,14 @@ class _HomeOverviewState extends State<HomeOverview>
         return const [_InlineProgress('알람 목록 조회 중...')];
       case _LoadState.error:
         return [
-          _InlineError(message: '알람 목록을 불러오지 못했습니다.', onRetry: _loadAlarms),
+          _InlineError(message: '알람 목록을 불러오지 못했어요.', onRetry: _loadAlarms),
         ];
       case _LoadState.ready:
         if (_alarms.isEmpty) {
           return [
             const _EmptyNotice(
               icon: Icons.notifications_none_outlined,
-              message: '아직 만든 알람이 없습니다.',
+              message: '아직 만든 알람이 없어요.',
               detail: '도착 알람 카드에서 노선과 정류장을 선택해 만들 수 있어요.',
             ),
           ];
@@ -818,7 +818,7 @@ class _SessionCard extends StatelessWidget {
       BoardingEvaluation.ready =>
         session.remainingOccurrenceGap == null
             ? null
-            : '${session.remainingOccurrenceGap}개 지점 남음',
+            : '${session.remainingOccurrenceGap}개 정류장 남음',
       BoardingEvaluation.verificationPending => '차량 위치 확인 중',
       BoardingEvaluation.recoveryPending => '진행 정보 다시 확인 중',
       _ => null,

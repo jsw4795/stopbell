@@ -59,7 +59,7 @@ BoardingCandidateProgressLabel boardingCandidateProgressLabel(
   }
 
   final stopName = progress.stopName.trim();
-  final uncertain = (stopName: stopName, text: '남은 지점 확인 필요', endpoint: null);
+  final uncertain = (stopName: stopName, text: '남은 정류장 확인 필요', endpoint: null);
   final gap = candidate.boardingOccurrenceGap;
   final boarding = indices[boardingId];
   final target = indices[targetId];
@@ -74,7 +74,7 @@ BoardingCandidateProgressLabel boardingCandidateProgressLabel(
   }
 
   if (gap == 0) {
-    return (stopName: stopName, text: '승차 지점 부근 관측', endpoint: null);
+    return (stopName: stopName, text: '승차 정류장 부근 위치', endpoint: null);
   }
 
   final endpoint = observed < boarding
@@ -82,10 +82,10 @@ BoardingCandidateProgressLabel boardingCandidateProgressLabel(
       : BoardingGapEndpoint.target;
 
   final text = switch (endpoint) {
-    BoardingGapEndpoint.boarding => '승차까지 약 $gap개 지점',
-    BoardingGapEndpoint.target when observed > target => '목표 이후 관측',
-    BoardingGapEndpoint.target when observed == target => '목표 지점 부근 관측',
-    BoardingGapEndpoint.target => '목표까지 약 ${target - observed}개 지점',
+    BoardingGapEndpoint.boarding => '승차까지 약 $gap개 정류장',
+    BoardingGapEndpoint.target when observed > target => '목표 이후 위치',
+    BoardingGapEndpoint.target when observed == target => '목표 정류장 부근 위치',
+    BoardingGapEndpoint.target => '목표까지 약 ${target - observed}개 정류장',
   };
   return (stopName: stopName, text: text, endpoint: endpoint);
 }

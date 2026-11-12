@@ -64,32 +64,32 @@ void main() {
   test('exact IDs and signed server gap use indices across sparse orders', () {
     expect(label(), (
       stopName: '표시 이름으로 매칭하지 않음',
-      text: '목표까지 약 2개 지점',
+      text: '목표까지 약 2개 정류장',
       endpoint: BoardingGapEndpoint.target,
     ));
     expect(label(observedId: 10, observedOrder: 5, boardingGap: 1), (
       stopName: '표시 이름으로 매칭하지 않음',
-      text: '승차까지 약 1개 지점',
+      text: '승차까지 약 1개 정류장',
       endpoint: BoardingGapEndpoint.boarding,
     ));
     expect(
       label(observedId: 11, observedOrder: 19, boardingGap: 0).text,
-      '승차 지점 부근 관측',
+      '승차 정류장 부근 위치',
     );
     expect(
       label(observedId: 22, observedOrder: 90, boardingGap: -3).text,
-      '목표 지점 부근 관측',
+      '목표 정류장 부근 위치',
     );
     expect(
       label(observedId: 23, observedOrder: 110, boardingGap: -4).text,
-      '목표 이후 관측',
+      '목표 이후 위치',
     );
   });
 
   test('different occurrence IDs disambiguate identical names', () {
     expect(
       label(traversal: [...stops.take(5), _stop(23, 110, '경유(미정차)')]).text,
-      '목표까지 약 2개 지점',
+      '목표까지 약 2개 정류장',
     );
   });
 
@@ -102,7 +102,7 @@ void main() {
           stops.last,
         ],
       ).text,
-      '목표까지 약 2개 지점',
+      '목표까지 약 2개 정류장',
     );
   });
 
@@ -124,7 +124,7 @@ void main() {
       label(
         traversal: [
           ...stops.take(4),
-          _stop(14, 24, '관측 순서 중복'),
+          _stop(14, 24, '위치 순서 중복'),
           ...stops.skip(4),
         ],
       ),
@@ -152,7 +152,7 @@ void main() {
     ]) {
       expect(value, (
         stopName: '표시 이름으로 매칭하지 않음',
-        text: '남은 지점 확인 필요',
+        text: '남은 정류장 확인 필요',
         endpoint: null,
       ));
     }
@@ -164,7 +164,7 @@ void main() {
         boardingGap: -4,
         limitations: ['TARGET_NOT_AHEAD'],
       ).text,
-      '목표 이후 관측',
+      '목표 이후 위치',
     );
   });
 
@@ -183,7 +183,7 @@ void main() {
         ),
     ];
     final acrossTurn = label(traversal: traversal);
-    expect(acrossTurn.text, '목표까지 약 2개 지점');
+    expect(acrossTurn.text, '목표까지 약 2개 정류장');
     expect(acrossTurn.endpoint, BoardingGapEndpoint.target);
     expect(
       label(
@@ -193,7 +193,7 @@ void main() {
         boardingGap: -3,
         targetId: 23,
       ).text,
-      '목표까지 약 1개 지점',
+      '목표까지 약 1개 정류장',
     );
   });
 }

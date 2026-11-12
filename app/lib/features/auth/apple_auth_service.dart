@@ -23,7 +23,7 @@ class AppleAuthService implements Authenticator {
   Future<TokenPair> login() async {
     if (!(isSupported?.call() ??
         (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS))) {
-      throw const LoginException('이 기기에서는 Apple 로그인을 사용할 수 없습니다.');
+      throw const LoginException('이 기기에서는 Apple 로그인을 사용할 수 없어요.');
     }
     final nonce = await backend.appleChallenge();
     late final AuthorizationCredentialAppleID credential;
@@ -35,14 +35,14 @@ class AppleAuthService implements Authenticator {
       if (error.code == AuthorizationErrorCode.canceled) {
         throw const AppleLoginCanceledException();
       }
-      throw const LoginException('Apple 로그인이 실패했습니다. 다시 시도해 주세요.');
+      throw const LoginException('Apple 로그인이 실패했어요. 다시 시도해 주세요.');
     } on SignInWithAppleException {
-      throw const LoginException('Apple 로그인이 실패했습니다. 다시 시도해 주세요.');
+      throw const LoginException('Apple 로그인이 실패했어요. 다시 시도해 주세요.');
     }
     final token = credential.identityToken;
     final code = credential.authorizationCode;
     if (token == null || token.trim().isEmpty || code.trim().isEmpty) {
-      throw const LoginException('Apple 인증 정보를 받지 못했습니다. 다시 시도해 주세요.');
+      throw const LoginException('Apple 인증 정보를 받지 못했어요. 다시 시도해 주세요.');
     }
     return backend.loginWithApple(
       identityToken: token,

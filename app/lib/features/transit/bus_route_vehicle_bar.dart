@@ -120,7 +120,7 @@ class _BusRouteVehicleBarState extends State<BusRouteVehicleBar> {
       if (controller.failed) '차량 정보를 불러오지 못했어요',
       if (!controller.failed && _outdated) '위치가 오래됐어요. 새로고침해 주세요',
       if (data != null && data.status == BusRouteVehiclesStatus.stale)
-        '최신 위치를 받지 못해 이전 위치를 보여 드려요',
+        '최신 위치를 받지 못해 이전 위치를 보여드려요',
       if (data != null && data.status == BusRouteVehiclesStatus.partial)
         '일부 차량의 위치·좌석을 확인하지 못했어요',
       if (data != null &&

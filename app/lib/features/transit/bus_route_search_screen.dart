@@ -163,13 +163,13 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
           ),
         );
       case _SearchState.empty:
-        return const Center(child: Text('검색 결과가 없습니다.'));
+        return const Center(child: Text('검색 결과가 없어요.'));
       case _SearchState.error:
         return Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('노선 검색에 실패했습니다.'),
+              const Text('노선 검색에 실패했어요.'),
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: () => _search(_lastQuery),

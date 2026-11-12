@@ -40,7 +40,7 @@ void main() {
   testWidgets('알림 권한 상태와 시스템 설정 이동을 제공한다', (tester) async {
     final provider = FakePushProvider()..status = PushPermission.denied;
     await pump(tester, provider: provider);
-    expect(find.text('알림 꺼짐 · 하차 알림을 받을 수 없습니다'), findsOneWidget);
+    expect(find.text('알림 꺼짐 · 하차 준비 알림을 받을 수 없어요'), findsOneWidget);
     await tester.tap(find.text('시스템 알림 설정 열기'));
     await tester.pump();
     expect(provider.settings, 1);
@@ -49,7 +49,7 @@ void main() {
 
   testWidgets('정책 링크는 URL 확정 전까지 비활성 자리만 둔다', (tester) async {
     await pump(tester, theme: StopBellTheme.dark);
-    expect(find.text('이 기기에서는 알림 설정을 지원하지 않습니다'), findsOneWidget);
+    expect(find.text('이 기기에서는 알림 설정을 지원하지 않아요'), findsOneWidget);
     for (final title in ['개인정보처리방침', '서비스 이용약관']) {
       final tile = tester.widget<ListTile>(
         find.widgetWithText(ListTile, title),

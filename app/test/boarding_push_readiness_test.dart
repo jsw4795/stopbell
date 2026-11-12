@@ -85,7 +85,7 @@ void main() {
         }
         expect(api.creations, hasLength(1), reason: controller.message);
         expect(f.devices.requests, hasLength(1));
-        expect(find.text('이 기기의 알림 수신 준비를 완료했습니다.'), findsOneWidget);
+        expect(find.text('이 기기의 알림 수신 준비를 완료했어요.'), findsOneWidget);
       },
     );
   }
@@ -113,7 +113,7 @@ void main() {
       expect(api.creations, isEmpty);
       expect(storage.records, isEmpty);
       expect(find.textContaining('이미 발생한 알림은 추가 전송되지'), findsOneWidget);
-      expect(find.text('이 기기의 알림 수신 준비를 완료했습니다.'), findsNothing);
+      expect(find.text('이 기기의 알림 수신 준비를 완료했어요.'), findsNothing);
       await tester.tap(find.text('알림 없이 계속'));
       await tester.pumpAndSettle();
       expect(api.creations, hasLength(1), reason: controller.message);

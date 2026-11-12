@@ -66,7 +66,7 @@ class BoardingSessionView extends StatelessWidget {
           onPressed: c.canCreate ? onNew : null,
           child: const Text('새 차량 후보 찾기'),
         ),
-      if (c.autoRefreshFailed) const Text('자동 갱신에 실패해 이전 관측을 표시하고 있어요.'),
+      if (c.autoRefreshFailed) const Text('자동 갱신에 실패해 이전 위치을 표시하고 있어요.'),
       if (c.message != null) Text(c.message!),
       if (c.pending != null)
         OutlinedButton(
@@ -86,10 +86,10 @@ class BoardingSessionView extends StatelessWidget {
                         children: [
                           IconButton(
                             onPressed: c.busy ? null : onBack,
-                            tooltip: '버스 도착 알림으로',
+                            tooltip: '도착 알람으로',
                             icon: const Icon(Icons.arrow_back),
                           ),
-                          const Expanded(child: Text('하차 알림')),
+                          const Expanded(child: Text('하차 알람')),
                         ],
                       ),
                       const Text('세션이 없거나 접근할 수 없어요.'),
@@ -231,12 +231,12 @@ class BoardingSessionDetails extends StatelessWidget {
             if (constrained || onBack != null)
               IconButton(
                 onPressed: onBack,
-                tooltip: '버스 도착 알림으로',
+                tooltip: '도착 알람으로',
                 icon: const Icon(Icons.arrow_back),
               ),
             Expanded(
               child: Text(
-                '하차 알림',
+                '하차 알람',
                 style: theme.textTheme.titleLarge!.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -297,12 +297,12 @@ class BoardingSessionDetails extends StatelessWidget {
               children: [
                 Text('${s.targetName}까지', style: theme.textTheme.bodyMedium),
                 Text(
-                  '${initial ? (s.initialRemainingGap ?? initialReference?.gap) : s.remainingOccurrenceGap}개 지점 남음',
+                  '${initial ? (s.initialRemainingGap ?? initialReference?.gap) : s.remainingOccurrenceGap}개 정류장 남음',
                   style: theme.textTheme.titleMedium!.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                Text('노선 순서 기준 · 미정차 지점 포함', style: theme.textTheme.bodySmall),
+                Text('노선 순서 기준 · 미정차 정류장 포함', style: theme.textTheme.bodySmall),
               ],
             ),
           ),
@@ -335,7 +335,7 @@ class BoardingSessionDetails extends StatelessWidget {
             Text(s.targetName, style: theme.textTheme.titleMedium),
             const Text('알림 시점'),
             if (s.notificationOffsetStops != null)
-              Text('${s.notificationOffsetStops}개 지점 전'),
+              Text('${s.notificationOffsetStops}개 정류장 전'),
             const Text('승차 정류장 정보가 없어 전체 노선 구간을 표시할 수 없어요.'),
           ],
         ),
@@ -627,8 +627,8 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                         color: accent,
                         size: 28,
                         semanticLabel: initialPosition
-                            ? '등록 당시 관측 차량 위치'
-                            : '최근 관측 차량 위치',
+                            ? '등록 당시 차량 위치'
+                            : '최근 차량 위치',
                       ),
                       Expanded(
                         child: BusRouteRailSegment(
@@ -646,7 +646,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          initialPosition ? '승차 전 참고 관측' : '승차 정류장으로 이동 중',
+                          initialPosition ? '승차 전 참고 위치' : '승차 정류장으로 이동 중',
                           style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(color: accent),
                         ),
@@ -660,11 +660,11 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         Text(
-                          '승차까지 ${timeline.boardingIndex - position}개 지점',
+                          '승차까지 ${timeline.boardingIndex - position}개 정류장',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                         Text(
-                          initialPosition ? '미검증 참고 관측 기준' : '최근 관측 기준',
+                          initialPosition ? '참고용 위치예요' : '최근 위치 기준',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -753,7 +753,7 @@ class _TrackingRow extends StatelessWidget {
                       : Icons.circle,
                   key: bus ? const ValueKey('tracking-bus-marker') : null,
                   semanticLabel: bus
-                      ? (initial ? '등록 당시 관측 차량 위치' : '최근 관측 차량 위치')
+                      ? (initial ? '등록 당시 차량 위치' : '최근 차량 위치')
                       : null,
                   size: bus
                       ? 28
@@ -790,10 +790,10 @@ class _TrackingRow extends StatelessWidget {
                   if (first) Text('승차 정류장', style: theme.textTheme.bodySmall),
                   if (last) Text('목표 정류장', style: theme.textTheme.bodySmall),
                   if (alert)
-                    Text('하차 준비 알림 지점', style: theme.textTheme.bodySmall),
+                    Text('하차 준비 알림 정류장', style: theme.textTheme.bodySmall),
                   if (bus)
                     Text(
-                      initial ? '미검증 참고 관측 기준' : '최근 관측 기준',
+                      initial ? '참고용 위치예요' : '최근 위치 기준',
                       style: theme.textTheme.bodySmall,
                     ),
                   if (showOrder)

@@ -157,9 +157,9 @@ void main() {
           'notificationOffsetStops': 1,
         }, 201);
       };
-      await tap(tester, '이 차량으로 하차 알림 설정');
+      await tap(tester, '이 차량으로 하차 알람 설정');
       await tap(tester, '알림 없이 계속');
-      expect(find.text('1개 지점 전'), findsOneWidget);
+      expect(find.text('1개 정류장 전'), findsOneWidget);
     },
   );
 
@@ -180,13 +180,13 @@ void main() {
           'checkpointObservedAt': null,
         }, 201);
       };
-      await tap(tester, '이 차량으로 하차 알림 설정');
+      await tap(tester, '이 차량으로 하차 알람 설정');
       await tap(tester, '알림 없이 계속');
       expect(find.byType(BoardingSessionView), findsOneWidget);
       expect(find.textContaining('추적 중'), findsOneWidget);
       expect(find.text('최근 확인된 버스 위치'), findsNothing);
       expect(find.text('차량 위치 확인 중'), findsOneWidget);
-      expect(find.textContaining('개 지점 남음'), findsNothing);
+      expect(find.textContaining('개 정류장 남음'), findsNothing);
       expect(find.textContaining('VERIFYING'), findsNothing);
       expect(find.text('추적 취소'), findsOneWidget);
       expect(
@@ -222,7 +222,7 @@ void main() {
             ? boardingJson({}, 401)
             : boardingJson(sessionJson(revision: 7), 201);
       };
-      await tap(tester, '이 차량으로 하차 알림 설정');
+      await tap(tester, '이 차량으로 하차 알람 설정');
       await tap(tester, '알림 없이 계속');
       expect(find.byType(BoardingSessionView), findsOneWidget);
       final posts = requests
@@ -266,7 +266,7 @@ void main() {
       await prepare(tester);
       sessionResponse = (_) async =>
           throw http.ClientException('response lost');
-      await tap(tester, '이 차량으로 하차 알림 설정');
+      await tap(tester, '이 차량으로 하차 알람 설정');
       await tap(tester, '알림 없이 계속');
       final original = storage.records.values.single;
       sessionResponse = (request) async {
@@ -278,7 +278,7 @@ void main() {
           sessionJson(status: 'EXPIRED', evaluation: 'ENDED', gap: null),
         ]);
       };
-      await tap(tester, '버스 도착 알림으로');
+      await tap(tester, '도착 알람으로');
       await tap(tester, '하차 알람');
       expect(find.textContaining('세션 수명 만료'), findsOneWidget);
       expect(
@@ -297,7 +297,7 @@ void main() {
       await prepare(tester);
       final result = Completer<http.Response>();
       sessionResponse = (_) => result.future;
-      await tap(tester, '이 차량으로 하차 알림 설정');
+      await tap(tester, '이 차량으로 하차 알람 설정');
       await tap(tester, '알림 없이 계속');
       await tapInSettings(tester, '로그아웃');
       await tester.pumpAndSettle();

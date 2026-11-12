@@ -75,7 +75,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     final colors = Theme.of(context).colorScheme;
     final semantic = StopBellColors.of(context);
     if (_permissionFailed) {
-      return ('알림 권한을 확인하지 못했습니다', Icons.help_outline, colors.onSurfaceVariant);
+      return ('알림 권한을 확인하지 못했어요', Icons.help_outline, colors.onSurfaceVariant);
     }
     return switch (_permission) {
       PushPermission.authorized => (
@@ -84,17 +84,17 @@ class _SettingsScreenState extends State<SettingsScreen>
         semantic.success,
       ),
       PushPermission.provisional => (
-        '조용히 알림 허용됨',
+        '무음으로 알림 허용됨',
         Icons.notifications_outlined,
         semantic.warning,
       ),
       PushPermission.denied => (
-        '알림 꺼짐 · 하차 알림을 받을 수 없습니다',
+        '알림 꺼짐 · 하차 준비 알림을 받을 수 없어요',
         Icons.notifications_off_outlined,
         colors.error,
       ),
       PushPermission.notDetermined => (
-        '아직 알림 권한을 요청하지 않았습니다',
+        '아직 알림 권한을 요청하지 않았어요',
         Icons.notifications_none,
         colors.onSurfaceVariant,
       ),
@@ -144,7 +144,7 @@ class _SettingsScreenState extends State<SettingsScreen>
               if (widget.pushProvider == null)
                 const ListTile(
                   leading: Icon(Icons.notifications_none),
-                  title: Text('이 기기에서는 알림 설정을 지원하지 않습니다'),
+                  title: Text('이 기기에서는 알림 설정을 지원하지 않아요'),
                 )
               else ...[
                 ListTile(

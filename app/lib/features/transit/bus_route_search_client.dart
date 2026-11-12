@@ -13,9 +13,9 @@ class BusRouteSearchClient {
       path: '/api/v1/bus-routes',
       queryParameters: {'query': query.trim()},
     ).toString();
-    final response = await apiClient.request('GET', path).timeout(
-      const Duration(seconds: 15),
-    );
+    final response = await apiClient
+        .request('GET', path)
+        .timeout(const Duration(seconds: 15));
     if (response.statusCode != 200) {
       throw BusRouteSearchException(statusCode: response.statusCode);
     }

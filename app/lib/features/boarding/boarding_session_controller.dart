@@ -609,7 +609,7 @@ String boardingSessionError(
     '차량의 현재 진행 위치를 확인할 수 없어요. 잠시 후 다시 시도해 주세요.',
   'BOARDING_TARGET_NOT_AHEAD' => '차량이 목표 정류장에 도달했거나 이미 통과했어요.',
   'BOARDING_TRACKING_UNSUPPORTED' =>
-    '현재 이 차량의 하차 알림 추적은 아직 지원되지 않아요. 차량번호를 확인했더라도 실제 추적을 시작할 수 없어요.',
+    '현재 이 차량의 하차 알람 추적은 아직 지원되지 않아요. 차량번호를 확인했더라도 실제 추적을 시작할 수 없어요.',
   'BOARDING_RECONFIRM_REQUIRED' =>
     '현재 세션에서 재확인 조건을 충족하지 못했어요. 현재 상태와 차량 정보를 다시 확인해 주세요.',
   'BOARDING_SESSION_NOT_FOUND' => '세션이 없거나 접근할 수 없어요.',

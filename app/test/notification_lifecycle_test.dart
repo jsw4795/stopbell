@@ -159,7 +159,7 @@ void main() {
     // Activation remains busy behind the permission dialog. Advance its animation only.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('버스 도착 알림 받기'), findsOneWidget);
+    expect(find.text('도착 알림 받기'), findsOneWidget);
     expect(f.provider.requests, 0);
     await tester.tap(find.text('계속'));
     await tester.pumpAndSettle();
@@ -198,7 +198,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('알람 상세'), findsNothing);
     expect(
-      find.text('알람을 열 수 없습니다. 삭제되었거나 접근할 수 없는 알람일 수 있습니다.'),
+      find.text('알람을 열 수 없어요. 삭제되었거나 접근할 수 없는 알람일 수 있어요.'),
       findsOneWidget,
     );
     await tester.pumpWidget(const SizedBox());
@@ -257,7 +257,7 @@ void main() {
     lifecycle.receive(valid, inForeground: true);
     await tester.pumpAndSettle();
     expect(client.lookups, 0);
-    expect(find.text('버스 도착 알림이 도착했습니다.'), findsOneWidget);
+    expect(find.text('버스 도착 알림이 왔어요.'), findsOneWidget);
     await tester.tap(find.text('알람 보기'));
     await tester.pumpAndSettle();
     expect(client.lookups, 1);

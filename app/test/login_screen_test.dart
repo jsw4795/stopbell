@@ -299,7 +299,7 @@ void main() {
     expect(googleOnTap(tester), isNull);
     apple.result.completeError(const AppleLoginCanceledException());
     await tester.pumpAndSettle();
-    expect(find.text('로그인이 실패했습니다. 다시 시도해 주세요.'), findsNothing);
+    expect(find.text('로그인이 실패했어요. 다시 시도해 주세요.'), findsNothing);
     expect(find.text('Apple로 계속하기'), findsOneWidget);
     expect(google.calls, 0);
     debugDefaultTargetPlatformOverride = null;
@@ -322,7 +322,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(authSession.state, AuthState.authenticated);
     expect(storage.pair?.sessionIdentity, authSession.sessionIdentity);
-    expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
+    expect(find.text('아직 만든 알람이 없어요.'), findsOneWidget);
     debugDefaultTargetPlatformOverride = null;
   });
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
@@ -417,7 +417,7 @@ void main() {
     expect(find.text('인증 상태 확인 중...'), findsOneWidget);
     gate.complete();
     await tester.pumpAndSettle();
-    expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
+    expect(find.text('아직 만든 알람이 없어요.'), findsOneWidget);
     expect(auth.calls, 0);
   });
 
@@ -431,10 +431,10 @@ void main() {
     expect(find.text('로그인 중...'), findsOneWidget);
     expect(googleOnTap(tester), isNull);
 
-    auth.result.completeError(const BackendAuthException('서버 로그인이 실패했습니다.'));
+    auth.result.completeError(const BackendAuthException('서버 로그인이 실패했어요.'));
     await tester.pump();
     expect(find.text('노선번호를 입력해 검색하세요.'), findsNothing);
-    expect(find.text('서버 로그인이 실패했습니다.'), findsOneWidget);
+    expect(find.text('서버 로그인이 실패했어요.'), findsOneWidget);
     expect(googleOnTap(tester), isNotNull);
   });
 
@@ -451,7 +451,7 @@ void main() {
     expect(storage.pair?.accessToken, pair.accessToken);
     expect(storage.pair?.refreshToken, pair.refreshToken);
     expect(storage.pair?.sessionIdentity, isNotNull);
-    expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
+    expect(find.text('아직 만든 알람이 없어요.'), findsOneWidget);
   });
 
   testWidgets('Logout 버튼은 중복 입력을 막고 완료 뒤 Google login을 표시한다', (tester) async {
@@ -599,7 +599,7 @@ void main() {
       await tester.tap(find.text('Google로 계속하기'));
       auth.result.complete(pair);
       await tester.pumpAndSettle();
-      expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
+      expect(find.text('아직 만든 알람이 없어요.'), findsOneWidget);
       expect(calls, 2);
     },
   );
@@ -712,12 +712,11 @@ void main() {
   });
 }
 
-GestureTapCallback? googleOnTap(WidgetTester tester) =>
-    tester
-        .widget<InkWell>(
-          find.descendant(
-            of: find.byKey(const ValueKey('google-login')),
-            matching: find.byType(InkWell),
-          ),
-        )
-        .onTap;
+GestureTapCallback? googleOnTap(WidgetTester tester) => tester
+    .widget<InkWell>(
+      find.descendant(
+        of: find.byKey(const ValueKey('google-login')),
+        matching: find.byType(InkWell),
+      ),
+    )
+    .onTap;

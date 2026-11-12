@@ -165,7 +165,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
         }
       } catch (_) {
         if (current()) {
-          setState(() => _createMessage = '알림 수신 준비를 확인하지 못했습니다. 다시 시도해 주세요.');
+          setState(() => _createMessage = '알림 수신 준비를 확인하지 못했어요. 다시 시도해 주세요.');
         }
         return;
       }
@@ -176,7 +176,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
         if (current()) {
           setState(() {
             _outcomeUnknown = controller.pending != null;
-            _createMessage = controller.message ?? '요청을 저장하거나 전송하지 못했습니다.';
+            _createMessage = controller.message ?? '요청을 보내지 못했어요. 잠시 후 다시 시도해 주세요.';
           });
         }
         return;
@@ -202,30 +202,28 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
       if (error.isStaleTarget) {
         setState(() {
           _creating = false;
-          _createMessage = '정류장 정보가 변경됐습니다. 새 목록에서 정류장을 다시 선택해 주세요.';
+          _createMessage = '정류장 정보가 변경됐어요. 새 목록에서 정류장을 다시 선택해 주세요.';
         });
         _load();
       } else if (error.statusCode == 400 &&
           error.code == 'INVALID_ALARM_REQUEST') {
         setState(
           () => _createMessage =
-              '현재 정류장 정보로 선택한 알림 조건을 생성할 수 없습니다. 목록을 새로 조회해 주세요.',
+              '현재 정류장 정보로는 선택한 알람을 만들 수 없어요. 목록을 새로 불러온 뒤 다시 선택해 주세요.',
         );
       } else if (!error.isCreationRejected) {
         setState(() {
           _outcomeUnknown = true;
-          _createMessage =
-              '알람 생성 요청이 서버에 반영됐을 수 있습니다. 중복 생성을 피하려면 알람 목록에서 먼저 확인해 주세요.';
+          _createMessage = alarmCreationUncertainMessage;
         });
       } else {
-        setState(() => _createMessage = '알람을 생성하지 못했습니다.');
+        setState(() => _createMessage = '알람을 만들지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.');
       }
     } catch (_) {
       if (current()) {
         setState(() {
           _outcomeUnknown = true;
-          _createMessage =
-              '알람 생성 요청이 서버에 반영됐을 수 있습니다. 중복 생성을 피하려면 알람 목록에서 먼저 확인해 주세요.';
+          _createMessage = alarmCreationUncertainMessage;
         });
       }
     } finally {
@@ -252,7 +250,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
       summary: target == null && _createMessage == null
           ? _state == _StopState.success
                 ? const StopSelectionNotice(
-                    '알람을 받을 정류장을 선택하세요.',
+                    '알람을 받을 정류장을 선택해 주세요.',
                     icon: Icons.flag_outlined,
                   )
                 : null
@@ -280,7 +278,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                     first: SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       dense: true,
-                      title: const Text('한 정거장 전 알림'),
+                      title: const Text('한 정류장 전 알림'),
                       value: _notifyOneStopBefore,
                       onChanged: canChange && target.canNotifyOneStopBefore
                           ? (value) =>
@@ -290,7 +288,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                     second: SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       dense: true,
-                      title: const Text('한 정거장 후 알림'),
+                      title: const Text('한 정류장 후 알림'),
                       value: _notifyOneStopAfter,
                       onChanged: canChange && target.canNotifyOneStopAfter
                           ? (value) =>
@@ -338,13 +336,13 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           ),
         );
       case _StopState.empty:
-        return const Center(child: Text('정류장 정보가 없습니다.'));
+        return const Center(child: Text('정류장 정보가 없어요.'));
       case _StopState.error:
         return Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('정류장 정보를 불러오지 못했습니다.'),
+              const Text('정류장 정보를 불러오지 못했어요.'),
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: _creating ? null : _load,

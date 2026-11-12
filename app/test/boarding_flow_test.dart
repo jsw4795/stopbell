@@ -210,9 +210,9 @@ void main() {
       await pump(tester);
       await tester.tap(find.text('하차 알람'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('버스 도착 알림으로'));
+      await tester.tap(find.byTooltip('도착 알람으로'));
       await tester.pumpAndSettle();
-      expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
+      expect(find.text('아직 만든 알람이 없어요.'), findsOneWidget);
       await tester.tap(find.text('도착 알람'));
       await tester.pumpAndSettle();
       await search(tester, 754);
@@ -241,7 +241,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('서울70사1234'), findsNothing);
       expect(find.text('하차 알람'), findsOneWidget);
-      expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
+      expect(find.text('아직 만든 알람이 없어요.'), findsOneWidget);
     },
   );
 }

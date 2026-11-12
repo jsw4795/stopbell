@@ -110,14 +110,14 @@ void main() {
       expect(find.textContaining('교차로  미정차'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey(2)));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('한 정거장 전 알림'));
+      await tester.tap(find.text('한 정류장 전 알림'));
       await tester.tap(find.text('종착 방면'));
       await tester.pumpAndSettle();
       expect(find.textContaining('선택한 정류장: 교차로(미정차)'), findsOneWidget);
       expect(
         tester
             .widget<SwitchListTile>(
-              find.widgetWithText(SwitchListTile, '한 정거장 전 알림'),
+              find.widgetWithText(SwitchListTile, '한 정류장 전 알림'),
             )
             .value,
         isTrue,
@@ -164,7 +164,7 @@ void main() {
 
     expect(find.textContaining('선택한 정류장: $name'), findsOneWidget);
     expect(find.byType(BusRouteTimeline).hitTestable(), findsOneWidget);
-    final after = find.widgetWithText(SwitchListTile, '한 정거장 후 알림');
+    final after = find.widgetWithText(SwitchListTile, '한 정류장 후 알림');
     await tester.ensureVisible(after);
     await tester.pumpAndSettle();
     await tester.tap(after.hitTestable());
@@ -189,8 +189,8 @@ void main() {
     expect(find.text('정류장 조회 중...'), findsOneWidget);
     pending.complete([]);
     await tester.pumpAndSettle();
-    expect(find.text('정류장 정보가 없습니다.'), findsOneWidget);
-    expect(find.text('정류장 정보를 불러오지 못했습니다.'), findsNothing);
+    expect(find.text('정류장 정보가 없어요.'), findsOneWidget);
+    expect(find.text('정류장 정보를 불러오지 못했어요.'), findsNothing);
   });
 
   testWidgets('error retry uses same route ID', (tester) async {
@@ -203,7 +203,7 @@ void main() {
       }),
     );
     await tester.pumpAndSettle();
-    expect(find.text('정류장 정보를 불러오지 못했습니다.'), findsOneWidget);
+    expect(find.text('정류장 정보를 불러오지 못했어요.'), findsOneWidget);
     expect(find.textContaining('internal detail'), findsNothing);
     await tester.tap(find.text('다시 시도'));
     await tester.pumpAndSettle();
@@ -239,8 +239,8 @@ void main() {
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))
         .toList();
     expect(switches.map((item) => item.onChanged != null), [true, true]);
-    await tester.tap(find.text('한 정거장 전 알림'));
-    await tester.tap(find.text('한 정거장 후 알림'));
+    await tester.tap(find.text('한 정류장 전 알림'));
+    await tester.tap(find.text('한 정류장 후 알림'));
     await tester.pump();
     switches = tester
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))

@@ -76,11 +76,11 @@ void main() {
     expect(find.text('알람 목록 조회 중...'), findsOneWidget);
     first.completeError(Exception('private failure'));
     await tester.pumpAndSettle();
-    expect(find.text('알람 목록을 불러오지 못했습니다.'), findsOneWidget);
+    expect(find.text('알람 목록을 불러오지 못했어요.'), findsOneWidget);
     expect(find.textContaining('private failure'), findsNothing);
     await tester.tap(find.text('다시 시도'));
     await tester.pumpAndSettle();
-    expect(find.text('한 정거장 후 추적 중'), findsOneWidget);
+    expect(find.text('한 정류장 후 추적 중'), findsOneWidget);
     expect(find.text('감시 중'), findsOneWidget);
     expect(find.text('비활성'), findsOneWidget);
     final cards = [
@@ -107,7 +107,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('아직 만든 알람이 없습니다.'), findsOneWidget);
+    expect(find.text('아직 만든 알람이 없어요.'), findsOneWidget);
     expect(find.text('도착 알람'), findsOneWidget);
     await tester.fling(find.byType(ListView), const Offset(0, 400), 1000);
     await tester.pumpAndSettle();
@@ -189,7 +189,7 @@ void main() {
     expect(find.textContaining('하차 알람', findRichText: true), findsNWidgets(2));
     expect(find.text('추적 중'), findsOneWidget);
     expect(find.text('목적 정류장 하차'), findsOneWidget);
-    expect(find.text('서울70사1234  ·  4개 지점 남음'), findsOneWidget);
+    expect(find.text('서울70사1234  ·  4개 정류장 남음'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey(('session', 7))));
     await tester.tap(find.text('하차 알람'));
     expect(current, 1);
@@ -359,13 +359,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('서울70사1234  ·  4개 지점 남음'), findsOneWidget);
+    expect(find.text('서울70사1234  ·  4개 정류장 남음'), findsOneWidget);
     await tester.pump(const Duration(seconds: 19));
     expect(reads, isEmpty);
     await tester.pump(const Duration(seconds: 1));
     await tester.pump();
     expect(reads, [7]);
-    expect(find.text('서울70사1234  ·  2개 지점 남음'), findsOneWidget);
+    expect(find.text('서울70사1234  ·  2개 정류장 남음'), findsOneWidget);
     next = sessionFixture(
       id: 7,
       status: 'COMPLETED',

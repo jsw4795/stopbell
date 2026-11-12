@@ -252,7 +252,7 @@ void main() {
       await controller.start();
       expect(controller.confirmed, true);
       expect(auth.isDeletingAccount, true);
-      expect(controller.message, contains('정리하지 못했습니다'));
+      expect(controller.message, contains('정리하지 못했어요'));
       tokens.deleteError = null;
       await controller.finishCleanup();
       expect(controller.manualNotice, true);
@@ -332,7 +332,7 @@ void main() {
     await controller.start();
     expect(tokens.pair, isNull);
     expect(controller.confirmed, true);
-    expect(controller.message, contains('정리하지 못했습니다'));
+    expect(controller.message, contains('정리하지 못했어요'));
     final restoredAuth = auth_fake.httpSession(backend, tokens);
     await restoredAuth.initialize();
     storage.failDelete = false;

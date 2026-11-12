@@ -290,8 +290,8 @@ void main() {
     await tester.enterText(find.byType(TextField), 'ZZZ');
     await tester.tap(find.text('검색'));
     await tester.pumpAndSettle();
-    expect(find.text('검색 결과가 없습니다.'), findsOneWidget);
-    expect(find.text('노선 검색에 실패했습니다.'), findsNothing);
+    expect(find.text('검색 결과가 없어요.'), findsOneWidget);
+    expect(find.text('노선 검색에 실패했어요.'), findsNothing);
     expect(find.byType(ChoiceChip), findsNothing);
   });
 
@@ -324,7 +324,7 @@ void main() {
     await tester.enterText(find.byType(TextField), ' 7000 ');
     await tester.tap(find.text('검색'));
     await tester.pumpAndSettle();
-    expect(find.text('노선 검색에 실패했습니다.'), findsOneWidget);
+    expect(find.text('노선 검색에 실패했어요.'), findsOneWidget);
     expect(find.byType(ChoiceChip), findsNothing);
     expect(find.textContaining('internal detail'), findsNothing);
 

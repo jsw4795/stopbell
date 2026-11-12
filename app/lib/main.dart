@@ -303,7 +303,7 @@ class _StopBellApplicationState extends State<StopBellApplication>
       home: _storageFailed
           ? const Scaffold(
               body: Center(
-                child: Text('저장된 정보를 안전하게 복구하지 못했습니다. 앱 저장소를 확인해 주세요.'),
+                child: Text('저장된 정보를 안전하게 복구하지 못했어요. 앱 저장소를 확인해 주세요.'),
               ),
             )
           : !_initialized && widget.deletion != null
@@ -377,7 +377,7 @@ class _LoginScreenState extends State<LoginScreen> {
       builder: (context) => AlertDialog(
         title: const Text('회원 탈퇴'),
         content: const Text(
-          '계정과 관련 데이터가 삭제되고 기존 알람과 탑승 알림을 이용할 수 없습니다. 삭제된 데이터는 앱에서 복구할 수 없습니다. Apple 계정 연결을 직접 해제해야 할 수 있으며, 탈퇴 처리에 시간이 걸릴 수 있습니다.',
+          '계정과 관련 데이터가 삭제되고 기존 알람과 하차 알람을 이용할 수 없어요. 삭제된 데이터는 앱에서 복구할 수 없어요. Apple 계정 연결을 직접 해제해야 할 수 있으며, 탈퇴 처리에 시간이 걸릴 수 있어요.',
         ),
         actions: [
           TextButton(
@@ -420,7 +420,7 @@ class _LoginScreenState extends State<LoginScreen> {
     } on BackendAuthException catch (error) {
       if (mounted) setState(() => _message = error.message);
     } catch (_) {
-      if (mounted) setState(() => _message = '로그인이 실패했습니다. 다시 시도해 주세요.');
+      if (mounted) setState(() => _message = '로그인이 실패했어요. 다시 시도해 주세요.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -450,14 +450,14 @@ class _LoginScreenState extends State<LoginScreen> {
       await widget.authSession.logout(beforeLogout: widget.push?.beforeLogout);
     } on AuthSessionPersistenceException {
       if (mounted) {
-        setState(() => _message = '저장된 인증 정보를 삭제하지 못했습니다. 다시 시도해 주세요.');
+        setState(() => _message = '저장된 인증 정보를 삭제하지 못했어요. 다시 시도해 주세요.');
       }
     } on BackendLogoutCleanupException {
       if (mounted) {
-        setState(() => _message = '이 기기에서는 로그아웃했습니다. 서버 세션은 정리하지 못했습니다.');
+        setState(() => _message = '이 기기에서는 로그아웃했어요. 서버 세션은 정리하지 못했어요.');
       }
     } catch (_) {
-      if (mounted) setState(() => _message = '로그아웃 중 오류가 발생했습니다. 다시 시도해 주세요.');
+      if (mounted) setState(() => _message = '로그아웃 중 오류가 발생했어요. 다시 시도해 주세요.');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -481,7 +481,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
         if (widget.authSession.isDeletingAccount &&
             (deletion == null || !deletion.active)) {
-          return const Scaffold(body: Center(child: Text('회원 탈퇴를 준비하고 있습니다.')));
+          return const Scaffold(body: Center(child: Text('회원 탈퇴를 준비하고 있어요.')));
         }
         if (deletion != null && deletion.active) {
           if (deletion.manualNotice) {
@@ -490,11 +490,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('StopBell 계정의 삭제가 완료되었습니다.'),
+                    const Text('StopBell 계정의 삭제가 완료되었어요.'),
                     Text(
                       deletion.appleUncertain
-                          ? 'Apple 계정과 StopBell의 연결 해제 결과를 확인할 수 없습니다. Apple 계정 설정에서 앱 연결을 확인하고 필요하면 직접 해제해 주세요.'
-                          : 'Apple 계정과 StopBell의 연결은 자동으로 해제하지 못했습니다. Apple 계정 설정에서 앱 연결을 확인하고 필요하면 직접 해제해 주세요.',
+                          ? 'Apple 계정과 StopBell의 연결 해제 결과를 확인할 수 없어요. Apple 계정 설정에서 앱 연결을 확인하고 필요하면 직접 해제해 주세요.'
+                          : 'Apple 계정과 StopBell의 연결은 자동으로 해제하지 못했어요. Apple 계정 설정에서 앱 연결을 확인하고 필요하면 직접 해제해 주세요.',
                       textAlign: TextAlign.center,
                     ),
                     if (deletion.message != null) Text(deletion.message!),
@@ -514,7 +514,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    deletion.message ?? '탈퇴 처리 상태를 확인하고 있습니다.',
+                    deletion.message ?? '탈퇴 처리 상태를 확인하고 있어요.',
                     textAlign: TextAlign.center,
                   ),
                   if (deletion.busy) const CircularProgressIndicator(),

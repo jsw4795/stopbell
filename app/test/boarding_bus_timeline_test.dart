@@ -212,8 +212,8 @@ void main() {
       addTearDown(tester.view.resetDevicePixelRatio);
       await pumpTimeline(tester);
 
-      expect(find.text('승차까지 5정거장'), findsOneWidget);
-      expect(find.text('목표까지 8정거장'), findsOneWidget);
+      expect(find.text('승차까지 5정류장'), findsOneWidget);
+      expect(find.text('목표까지 8정류장'), findsOneWidget);
       expect(find.textContaining('12석 · 여유'), findsNWidgets(2));
       // 버스·승차·목표 주변 외 구간은 접힌다.
       expect(find.text('정류장 6개'), findsOneWidget);

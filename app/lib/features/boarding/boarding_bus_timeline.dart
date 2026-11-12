@@ -336,7 +336,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
                 children: [
                   if (special)
                     TextSpan(
-                      text: isTarget ? '목표 · ' : '승차 · ',
+                      text: isTarget ? '목표 정류장 · ' : '승차 정류장 · ',
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: accent,
                       ),
@@ -578,9 +578,9 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     final stopIndex = widget.stops.indexWhere(
       (s) => s.id == bus.vehicle.occurrenceId,
     );
-    if (stopIndex < boarding) return '승차까지 ${boarding - stopIndex}정거장';
+    if (stopIndex < boarding) return '승차까지 ${boarding - stopIndex}정류장';
     final left = target - stopIndex;
-    return left == 0 ? '목표 정류장' : '목표까지 $left정거장';
+    return left == 0 ? '목표 정류장' : '목표까지 $left정류장';
   }
 
   /// 노선 유형색으로 선택을 나타내는 카드(높이는 호출부가 정한다).
