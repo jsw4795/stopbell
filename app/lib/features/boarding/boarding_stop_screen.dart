@@ -520,7 +520,6 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         vehicles: located,
         stops: _stops,
         targetId: target.id,
-        boardingId: boarding.id,
       );
       final theme = Theme.of(context);
       // 선택한 후보가 화면에서 빠지면 선택을 해제한다.
