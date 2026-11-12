@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
@@ -189,6 +187,7 @@ class _GoogleButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final fontSize = height * 0.43;
     return Semantics(
       button: true,
       label: 'Google로 계속하기',
@@ -212,16 +211,26 @@ class _GoogleButton extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const SizedBox.square(
-                  dimension: 20,
-                  child: CustomPaint(painter: _GoogleMarkPainter()),
+                // Apple 버튼(sign_in_with_apple)과 같은 치수 규칙: 글자 height*0.43, 아이콘 칸 height*28/44
+                SizedBox(
+                  width: height * 28 / 44,
+                  child: Center(
+                    child: Image.asset(
+                      dark
+                          ? 'assets/auth/dark/google_g.png'
+                          : 'assets/auth/google_g.png',
+                      width: fontSize,
+                      height: fontSize,
+                    ),
+                  ),
                 ),
-                const SizedBox(width: StopBellSpacing.md),
                 Text(
                   'Google로 계속하기',
                   style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
+                    inherit: false,
+                    fontSize: fontSize,
+                    fontFamily: '.SF Pro Text',
+                    letterSpacing: -0.41,
                     color: dark
                         ? const Color(0xffe3e3e3)
                         : const Color(0xff1f1f1f),
@@ -234,66 +243,4 @@ class _GoogleButton extends StatelessWidget {
       ),
     );
   }
-}
-
-/// 별도 에셋 없이 그린 Google "G" 표식. 출시 전 공식 로고 에셋으로 교체를 검토한다.
-class _GoogleMarkPainter extends CustomPainter {
-  const _GoogleMarkPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final stroke = size.width * .2;
-    final rect = Rect.fromLTWH(
-      stroke / 2,
-      stroke / 2,
-      size.width - stroke,
-      size.height - stroke,
-    );
-    Paint arc(Color color) => Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = stroke;
-    const deg = math.pi / 180;
-    canvas.drawArc(
-      rect,
-      -40 * deg,
-      -100 * deg,
-      false,
-      arc(const Color(0xffea4335)),
-    );
-    canvas.drawArc(
-      rect,
-      -140 * deg,
-      -90 * deg,
-      false,
-      arc(const Color(0xfffbbc05)),
-    );
-    canvas.drawArc(
-      rect,
-      130 * deg,
-      -90 * deg,
-      false,
-      arc(const Color(0xff34a853)),
-    );
-    canvas.drawArc(
-      rect,
-      40 * deg,
-      -40 * deg,
-      false,
-      arc(const Color(0xff4285f4)),
-    );
-    final center = size.center(Offset.zero);
-    canvas.drawRect(
-      Rect.fromLTRB(
-        center.dx,
-        center.dy - stroke / 2,
-        size.width - stroke / 4,
-        center.dy + stroke / 2,
-      ),
-      Paint()..color = const Color(0xff4285f4),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

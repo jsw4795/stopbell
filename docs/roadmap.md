@@ -98,7 +98,7 @@ UI-0 → UI-1 → UI-2 → UI-3 → UI-4 → UI-4B → UI-5 → UI-6 → UI-7 �
 
 로그인·Apple 로그인, Push 권한, 계정·알림 설정, 로그아웃·탈퇴, 개인정보·약관, 오류 복구와 Light/Dark를 개선한다. 토큰 갱신·Secure Storage·세션 소유권·Apple 토큰 철회와 삭제 데이터 정리 계약은 유지한다. 실제 출시 준비는 [TASK 목록](task-list.md)과 [iOS 준비](ios-release-readiness.md)를 따른다.
 
-2026-11-12 구현: `app/lib/features/auth/login_view.dart`의 로그인 화면은 옅은 파랑·보라 그라데이션 위에 버스 아이콘, StopBell 워드마크, 슬로건과 둥근 `Google로 계속하기`(흰색 카드, 에셋 없이 그린 G 표식)·`Apple로 계속하기`(`sign_in_with_apple` 공식 검정 버튼) 버튼을 중앙에 배치하고, 진행 중 표시와 오류 안내 카드를 제공한다. Light/Dark를 모두 지원한다. 홈 상단의 로그아웃·회원 탈퇴 버튼은 설정 톱니바퀴로 대체했으며 `app/lib/features/settings/settings_screen.dart`는 알림 권한 상태(요청 없이 조회, 복귀 시 재조회)와 기존 `openSettings` 시스템 설정 이동, 개인정보처리방침·이용약관 자리, 로그아웃과 기존 확인 다이얼로그를 거치는 회원 탈퇴를 제공한다. 인증·토큰·탈퇴 흐름과 API는 변경하지 않았다. 정책 URL이 확정되지 않아 링크는 비활성 `준비 중`으로 두고, 로그인 Provider는 복원된 세션에서 알 수 없어 계정 정보에 표시하지 않는다. 출시 전 Google 공식 로고 에셋 교체를 검토한다. 실제 iPhone 확인은 남아 있다.
+2026-11-12 구현: `app/lib/features/auth/login_view.dart`의 로그인 화면은 옅은 파랑·보라 그라데이션 위에 버스 아이콘, StopBell 워드마크, 슬로건과 둥근 `Google로 계속하기`(흰색 카드, Google 공식 Sign-in iOS 에셋의 G 로고만 잘라 사용, Apple 버튼과 글자 height×0.43·SF Pro Text·아이콘 칸 동일)·`Apple로 계속하기`(`sign_in_with_apple` 공식 검정 버튼) 버튼을 중앙에 배치하고, 진행 중 표시와 오류 안내 카드를 제공한다. Light/Dark를 모두 지원한다. 홈 상단의 로그아웃·회원 탈퇴 버튼은 설정 톱니바퀴로 대체했으며 `app/lib/features/settings/settings_screen.dart`는 알림 권한 상태(요청 없이 조회, 복귀 시 재조회)와 기존 `openSettings` 시스템 설정 이동, 개인정보처리방침·이용약관 자리, 로그아웃과 기존 확인 다이얼로그를 거치는 회원 탈퇴를 제공한다. 인증·토큰·탈퇴 흐름과 API는 변경하지 않았다. 정책 URL이 확정되지 않아 링크는 비활성 `준비 중`으로 두고, 로그인 Provider는 복원된 세션에서 알 수 없어 계정 정보에 표시하지 않는다. 실제 iPhone 확인은 남아 있다.
 
 ### UI-7 — 실시간 다중 차량 위치 표시
 
