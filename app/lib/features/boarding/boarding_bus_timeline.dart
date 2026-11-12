@@ -15,8 +15,9 @@ class BoardingBusEntry {
   final BusRouteVehicle vehicle;
 }
 
-/// 첫 정류장~목표 정류장 범위에 그릴 수 있는 버스([drawn])와 나머지([others]:
-/// 위치 미연결·목표 통과)로 나눈다.
+/// 첫 정류장~목표 정류장 범위에 그릴 수 있는 버스([drawn])와 위치를 못 그린
+/// 후보([others])로 나눈다. 목표 정류장을 지난 버스는 어느 쪽에도 넣지 않는다
+/// (차량 위치가 있으면 그 occurrence, 없으면 후보의 `progress` 순번 기준).
 ({List<BoardingBusEntry> drawn, List<BoardingCandidate> others})
 splitBoardingBuses({
   required List<BoardingCandidate> candidates,
@@ -40,13 +41,12 @@ splitBoardingBuses({
         ? null
         : byNumber[normalizeVehicleNumber(number)];
     final index = vehicle == null ? null : indexOf[vehicle.occurrenceId];
-    if (vehicle == null ||
-        index == null ||
-        index > targetIndex ||
+    if (vehicle == null || index == null) {
+      final observed = indexOf[candidate.progress?.occurrenceId];
+      if (observed == null || observed <= targetIndex) others.add(candidate);
+    } else if (index < targetIndex ||
         (index == targetIndex &&
-            vehicle.position == BusVehiclePosition.departed)) {
-      others.add(candidate);
-    } else {
+            vehicle.position == BusVehiclePosition.atStop)) {
       drawn.add(BoardingBusEntry(candidate, vehicle));
     }
   }

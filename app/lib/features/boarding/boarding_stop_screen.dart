@@ -7,6 +7,7 @@ import '../transit/bus_route.dart';
 import '../transit/bus_route_presentation.dart';
 import '../transit/bus_route_stop_occurrence.dart';
 import '../transit/bus_route_timeline.dart';
+import '../transit/bus_route_vehicle.dart';
 import '../transit/bus_route_vehicle_bar.dart';
 import '../transit/bus_route_vehicle_client.dart';
 import '../transit/bus_route_vehicle_controller.dart';
@@ -493,44 +494,54 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       onSelect: widget.onSelectCandidate == null ? null : select,
     );
 
-    if (vehicles == null) return list();
+    Widget build(List<BusRouteVehicle> located) {
+      final split = splitBoardingBuses(
+        candidates: result.candidates,
+        vehicles: located,
+        stops: _stops,
+        targetId: target.id,
+      );
+      final theme = Theme.of(context);
+      // 목표를 지난 후보는 표시하지 않는다. 전부 빠지면 후보 없음 안내를 보인다.
+      final noneLeft =
+          result.candidates.isNotEmpty &&
+          split.drawn.isEmpty &&
+          split.others.isEmpty;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: StopBellSpacing.md,
+        children: [
+          list(visible: vehicles == null ? split.others : const []),
+          if (vehicles != null) BusRouteVehicleBar(controller: vehicles),
+          if (split.drawn.isNotEmpty)
+            BoardingBusTimeline(
+              stops: _stops,
+              boardingId: boarding.id,
+              targetId: target.id,
+              buses: split.drawn,
+              selected: _selectedCandidate,
+              canSelect: (candidate) =>
+                  widget.onSelectCandidate != null &&
+                  _canUseCandidate(candidate),
+              onSelect: select,
+              vehicleColor:
+                  routeTypeColor(context, widget.route) ??
+                  StopBellColors.of(context).busLocation,
+            ),
+          if (noneLeft)
+            Text('현재 확인 가능한 차량 후보가 없어요.', style: theme.textTheme.bodyMedium),
+          if (vehicles != null && split.others.isNotEmpty) ...[
+            Text('위치 확인 불가', style: theme.textTheme.titleSmall),
+            list(visible: split.others, showIntro: false),
+          ],
+        ],
+      );
+    }
+
+    if (vehicles == null) return build(const []);
     return ListenableBuilder(
       listenable: vehicles,
-      builder: (_, _) {
-        final split = splitBoardingBuses(
-          candidates: result.candidates,
-          vehicles: vehicles.data?.vehicles ?? const [],
-          stops: _stops,
-          targetId: target.id,
-        );
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          spacing: StopBellSpacing.md,
-          children: [
-            list(visible: const []),
-            BusRouteVehicleBar(controller: vehicles),
-            if (split.drawn.isNotEmpty)
-              BoardingBusTimeline(
-                stops: _stops,
-                boardingId: boarding.id,
-                targetId: target.id,
-                buses: split.drawn,
-                selected: _selectedCandidate,
-                canSelect: (candidate) =>
-                    widget.onSelectCandidate != null &&
-                    _canUseCandidate(candidate),
-                onSelect: select,
-                vehicleColor:
-                    routeTypeColor(context, widget.route) ??
-                    StopBellColors.of(context).busLocation,
-              ),
-            if (split.others.isNotEmpty) ...[
-              Text('위치 확인 불가', style: Theme.of(context).textTheme.titleSmall),
-              list(visible: split.others, showIntro: false),
-            ],
-          ],
-        );
-      },
+      builder: (_, _) => build(vehicles.data?.vehicles ?? const []),
     );
   }
 

@@ -67,10 +67,8 @@ void main() {
       '서울70사1234',
       '경기70아5678',
     ]);
-    expect(split.others.map((e) => e.vehicleNumber), [
-      '서울70사9999',
-      '인천70바0001',
-    ]);
+    // 목표 통과(서울70사9999)는 어느 쪽에도 없다.
+    expect(split.others.map((e) => e.vehicleNumber), ['인천70바0001']);
   });
 
   test('목표 정류장을 출발한 차량은 그리지 않는다', () {
@@ -85,7 +83,27 @@ void main() {
       targetId: 20,
     );
     expect(split.drawn, isEmpty);
-    expect(split.others, hasLength(1));
+    expect(split.others, isEmpty);
+  });
+
+  test('후보 progress가 목표 이후인 미연결 후보도 제외한다', () {
+    final past = BoardingCandidate.fromJson(
+      candidateJson()
+        ..['progress'] = {
+          'occurrenceId': 25,
+          'stopName': '정류장25',
+          'order': 25,
+          'kind': 'ROUTE_PROGRESS',
+        },
+    );
+    final split = splitBoardingBuses(
+      candidates: [past],
+      vehicles: const [],
+      stops: _stops,
+      targetId: 20,
+    );
+    expect(split.drawn, isEmpty);
+    expect(split.others, isEmpty);
   });
 
   group('BoardingBusTimeline', () {
@@ -206,10 +224,10 @@ void main() {
       expect(candidateCalls, 1);
       expect(vehicleCalls, greaterThanOrEqualTo(2)); // 진입 + 후보 조회
 
-      // 위치 확인 불가 목록: 목표 통과(2번)·미연결(3번) 후보만.
+      // 위치 확인 불가 목록: 미연결(3번) 후보만. 목표 통과(2번)는 표시하지 않는다.
       expect(find.text('위치 확인 불가'), findsOneWidget);
       expect(find.byKey(const ValueKey('candidate-0')), findsNothing);
-      expect(find.byKey(const ValueKey('candidate-2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('candidate-2')), findsNothing);
       expect(find.byKey(const ValueKey('candidate-3')), findsOneWidget);
 
       FilledButton confirm() => tester.widget<FilledButton>(
