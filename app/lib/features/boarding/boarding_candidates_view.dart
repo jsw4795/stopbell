@@ -97,9 +97,18 @@ class BoardingCandidatesView extends StatelessWidget {
             ],
           ),
         if (showIntro && compactLabel != null && result.candidates.isNotEmpty)
-          Text(
-            '시각은 서버 조회 기준이에요. 최근 위치은 진행 참고 정류장이며 간격에는 미정차·경유가 포함될 수 있어요.',
-            style: theme.textTheme.bodySmall,
+          ExpansionTile(
+            leading: const Icon(Icons.info_outline),
+            title: const Text('차량 선택 도움말'),
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(StopBellSpacing.md),
+                child: Text(
+                  '전체 차량번호를 확인해 주세요. 시각은 서버 조회 기준이에요. 최근 위치는 진행 참고 정류장이며 간격에는 미정차·경유가 포함될 수 있어요.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
           ),
         for (final (index, candidate) in result.candidates.indexed)
           if (visible != null && !visible!.contains(candidate))

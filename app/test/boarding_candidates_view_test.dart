@@ -86,6 +86,9 @@ void main() {
             alwaysUse24HourFormat: true,
           );
       expect(find.text('$time 조회'), findsNWidgets(2));
+      expect(find.textContaining('서버 조회 기준'), findsNothing);
+      await tester.tap(find.text('차량 선택 도움말'));
+      await tester.pumpAndSettle();
       expect(find.textContaining('서버 조회 기준'), findsOneWidget);
       expect(find.textContaining('제공기관 원본 시각'), findsNothing);
       expect(find.textContaining('일부 차량 정보'), findsNothing);

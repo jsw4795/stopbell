@@ -456,29 +456,30 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   ) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      _stopSummary(boarding, target: false, compact: true),
-      _stopSummary(target, target: true, compact: true),
-      Wrap(
-        spacing: StopBellSpacing.sm,
-        children: [
-          OutlinedButton.icon(
-            key: const ValueKey('reselect-stops'),
-            onPressed: widget.creationBusy ? null : _reselectStops,
-            icon: const Icon(Icons.edit_location_alt_outlined),
-            label: const Text('정류장 다시 선택'),
-          ),
-          // 위치 바가 없을 때(차량 API 미연결)만 후보 재조회 버튼을 둔다.
-          if (_vehicles == null)
+      _summaryCard(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _stopSummary(boarding, target: false, compact: true),
+            _stopSummary(target, target: true, compact: true),
             OutlinedButton.icon(
-              key: const ValueKey('find-candidates'),
-              onPressed: widget.creationBusy || _loadingCandidates
-                  ? null
-                  : () => _findCandidates(keepResult: true),
-              icon: const Icon(Icons.refresh),
-              label: const Text('차량 후보 다시 조회'),
+              key: const ValueKey('reselect-stops'),
+              onPressed: widget.creationBusy ? null : _reselectStops,
+              icon: const Icon(Icons.edit_location_alt_outlined),
+              label: const Text('정류장 다시 선택'),
             ),
-        ],
+          ],
+        ),
       ),
+      if (_vehicles == null)
+        OutlinedButton.icon(
+          key: const ValueKey('find-candidates'),
+          onPressed: widget.creationBusy || _loadingCandidates
+              ? null
+              : () => _findCandidates(keepResult: true),
+          icon: const Icon(Icons.refresh),
+          label: const Text('차량 후보 다시 조회'),
+        ),
       if (_error case final error?)
         Padding(
           padding: const EdgeInsets.only(top: StopBellSpacing.xs),
