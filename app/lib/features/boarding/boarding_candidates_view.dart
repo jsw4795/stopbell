@@ -57,7 +57,7 @@ class BoardingCandidatesView extends StatelessWidget {
     final statusMessage = switch (status) {
       CandidateSetStatus.available => null,
       CandidateSetStatus.empty => '현재 확인 가능한 차량 후보가 없어요.',
-      CandidateSetStatus.partial => '일부 차량 정보는 확인되지 않았어요. 전체 목록이 아닐 수 있어요.',
+      CandidateSetStatus.partial => null,
       CandidateSetStatus.unknown => '후보 목록의 상태를 확인할 수 없어요. 다시 조회해 주세요.',
     };
     final providerTime = result.providerDataTime;

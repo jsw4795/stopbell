@@ -88,7 +88,7 @@ void main() {
       expect(find.text('$time 조회'), findsNWidgets(2));
       expect(find.textContaining('서버 조회 기준'), findsOneWidget);
       expect(find.textContaining('제공기관 원본 시각'), findsNothing);
-      expect(find.textContaining('일부 차량 정보'), findsOneWidget);
+      expect(find.textContaining('일부 차량 정보'), findsNothing);
       expect(find.text('선택 보류 · 차량 식별 정보 불일치'), findsOneWidget);
       expect(find.text('최근 관측 · 검증된 참고 지점'), findsOneWidget);
       expect(find.text('남은 지점 확인 필요'), findsOneWidget);
@@ -274,7 +274,7 @@ void main() {
           ],
         ),
       );
-      expect(find.textContaining('일부 차량 정보는 확인되지 않았어요'), findsOneWidget);
+      expect(find.textContaining('일부 차량 정보는 확인되지 않았어요'), findsNothing);
       expect(find.text('차량번호 확인 불가'), findsOneWidget);
       expect(find.text('차량 식별 · 확인 보류'), findsOneWidget);
       expect(find.text('하차 추적 지원 · 보류'), findsOneWidget);
@@ -302,7 +302,7 @@ void main() {
       await show(tester, candidatesJson(status: 'EMPTY'));
       expect(find.text('현재 확인 가능한 차량 후보가 없어요.'), findsOneWidget);
       await show(tester, candidatesJson(status: 'PARTIAL', candidates: []));
-      expect(find.textContaining('전체 목록이 아닐 수 있어요'), findsOneWidget);
+      expect(find.textContaining('전체 목록이 아닐 수 있어요'), findsNothing);
       expect(find.text('현재 확인 가능한 차량 후보가 없어요.'), findsNothing);
     },
   );
