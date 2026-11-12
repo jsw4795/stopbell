@@ -13,6 +13,13 @@ import 'alarm.dart';
 
 enum _LoadState { loading, ready, error }
 
+/// 하차 알람 생성 카드 전용 보라 계열 강조색(시안 기준). 의미색 `busLocation`
+/// (차량 위치 표시용)과 섞지 않도록 홈 생성 카드에만 사용한다.
+Color _boardingCreateAccent(Brightness brightness) =>
+    brightness == Brightness.dark
+    ? const Color(0xffb4a5ff)
+    : const Color(0xff5b47c8);
+
 /// 검증된 공식 노선 유형색. 미분류면 null이며 기본 색을 유지한다.
 Color? _routeTypeColor(
   BuildContext context,
@@ -265,7 +272,7 @@ class _HomeOverviewState extends State<HomeOverview>
       icon: Icons.directions_bus_outlined,
       title: '하차 알람',
       subtitle: '버스 하차 알림',
-      accent: colors.secondary,
+      accent: _boardingCreateAccent(Theme.of(context).brightness),
       onTap: boarding,
     );
     return LayoutBuilder(
@@ -439,10 +446,10 @@ class _CreateCard extends StatelessWidget {
       label: '$title 만들기',
       excludeSemantics: true,
       child: Material(
-        color: Color.alphaBlend(accent.withValues(alpha: .08), colors.surface),
+        color: Color.alphaBlend(accent.withValues(alpha: .14), colors.surface),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(StopBellRadius.card),
-          side: BorderSide(color: accent.withValues(alpha: .24)),
+          side: BorderSide(color: accent.withValues(alpha: .30)),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -455,7 +462,7 @@ class _CreateCard extends StatelessWidget {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: accent.withValues(alpha: .16),
+                    color: accent.withValues(alpha: .26),
                     borderRadius: BorderRadius.circular(StopBellRadius.button),
                   ),
                   child: Icon(icon, color: accent, size: 20),
