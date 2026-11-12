@@ -4,7 +4,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
-import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.dto.gbis.GbisBusLocationItem;
 import com.stopbell.transit.dto.gbis.GbisBusLocationResponse;
 
@@ -18,7 +17,7 @@ import org.springframework.web.util.UriUtils;
 
 /**
  * Reads GBIS real-time bus locations of one route (seats and crowding). GBIS is the Gyeonggi source behind
- * TAGO, so errors reuse {@link TransitProvider#TAGO}; this client is read-only and not wired to Alarm/Boarding.
+ * TAGO, so errors keep provider TAGO with source label GBIS; this client is read-only and not wired to Alarm/Boarding.
  */
 public class GbisBusLocationClient {
 
@@ -57,12 +56,12 @@ public class GbisBusLocationClient {
         } catch (TransitProviderClientException exception) {
             throw exception;
         } catch (RestClientResponseException exception) {
-            throw TransitProviderClientException.http(
-                    TransitProvider.TAGO, OPERATION, exception.getStatusCode().value(), exception);
+            throw TransitProviderClientException.gbisHttp(
+                    OPERATION, exception.getStatusCode().value(), exception);
         } catch (ResourceAccessException exception) {
-            throw TransitProviderClientException.transport(TransitProvider.TAGO, OPERATION, exception);
+            throw TransitProviderClientException.gbisTransport(OPERATION, exception);
         } catch (RestClientException exception) {
-            throw TransitProviderClientException.protocol(TransitProvider.TAGO, OPERATION, exception);
+            throw TransitProviderClientException.gbisProtocol(OPERATION, exception);
         }
     }
 
@@ -74,11 +73,11 @@ public class GbisBusLocationClient {
     private void validate(GbisBusLocationResponse response) {
         if (response == null || response.response() == null || response.response().msgHeader() == null
                 || response.response().msgHeader().resultCode() == null) {
-            throw TransitProviderClientException.protocol(TransitProvider.TAGO, OPERATION, null);
+            throw TransitProviderClientException.gbisProtocol(OPERATION, null);
         }
         int code = response.response().msgHeader().resultCode();
         if (code != 0 && code != RESULT_NO_DATA) {
-            throw TransitProviderClientException.provider(TransitProvider.TAGO, OPERATION, String.valueOf(code));
+            throw TransitProviderClientException.gbisProvider(OPERATION, String.valueOf(code));
         }
     }
 }
