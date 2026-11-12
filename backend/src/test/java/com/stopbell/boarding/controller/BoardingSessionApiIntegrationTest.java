@@ -869,8 +869,30 @@ class BoardingSessionApiIntegrationTest {
             var b = pool.submit(() -> service.create(owner.getId(), request(REQUEST_ID, "ref")));
             var first = a.get(10, TimeUnit.SECONDS);
             var second = b.get(10, TimeUnit.SECONDS);
+            // 중복 응답은 런타임 검증 완료(runtime.verified) 전후 어느 시점의 현재 상태든 반환할 수 있으므로
+            // READY 여부에 종속된 필드만 비교에서 제외한다. 세션 식별·기한·checkpoint 시각은 그대로 비교한다.
             assertThat(first.response()).usingRecursiveComparison()
-                    .ignoringFields("evaluationStatus", "remainingOccurrenceGap").isEqualTo(second.response());
+                    .ignoringFields("evaluationStatus", "remainingOccurrenceGap", "currentStopName",
+                            "timeline.positionIndex", "timeline.positionBasis")
+                    .isEqualTo(second.response());
+            // 상태별 계약: READY는 검증된 gap·현재 정류장·timeline 위치가 채워지고,
+            // RECOVERY_PENDING은 이 파생 표시 필드가 모두 비어 있어야 한다.
+            for (var response : List.of(first.response(), second.response())) {
+                assertThat(response.evaluationStatus()).isIn(
+                        BoardingSessionResponse.EvaluationStatus.READY,
+                        BoardingSessionResponse.EvaluationStatus.RECOVERY_PENDING);
+                if (response.evaluationStatus() == BoardingSessionResponse.EvaluationStatus.READY) {
+                    assertThat(response.remainingOccurrenceGap()).isNotNull();
+                    assertThat(response.currentStopName()).isNotNull();
+                    assertThat(response.timeline().positionIndex()).isNotNull();
+                    assertThat(response.timeline().positionBasis()).isEqualTo("READY");
+                } else {
+                    assertThat(response.remainingOccurrenceGap()).isNull();
+                    assertThat(response.currentStopName()).isNull();
+                    assertThat(response.timeline().positionIndex()).isNull();
+                    assertThat(response.timeline().positionBasis()).isNull();
+                }
+            }
             assertThat(first.response().preparationNotificationStatus()).isEqualTo("NO_RECIPIENT");
             assertThat(jdbc.queryForObject("select count(*) from notification_events", Long.class)).isEqualTo(1);
             assertThat(first.created()).isNotEqualTo(second.created());
