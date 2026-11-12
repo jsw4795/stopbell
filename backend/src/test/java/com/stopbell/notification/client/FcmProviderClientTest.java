@@ -291,13 +291,70 @@ class FcmProviderClientTest {
     }
 
     @Test
-    @DisplayName("인증 HTTP의 DNS 실패는 개별 전송 결과와 구분하여 설정 실패로 반환한다")
+    @DisplayName("인증 서버 연결 실패는 일시 실패로 분류하고 다음 시도에서 재시작 없이 전송한다")
+    void auth_connection_failure_is_retryable_then_recovers() throws Exception {
+        var failing = new AtomicInteger(1);
+        var client = client(server(exchange -> respond(exchange, 200, "{\"name\":\"projects/stopbell/messages/1\"}")),
+                Duration.ofSeconds(1), attempt -> {
+                    if (failing.getAndDecrement() > 0) {
+                        throw new UnknownHostException("sensitive auth details");
+                    }
+                    return TOKEN;
+                });
+        var first = client.send(request());
+        assertThat(first.result()).isEqualTo(RETRYABLE);
+        assertThat(first.failureCode()).isEqualTo("AUTH_UNAVAILABLE");
+        assertThat(client.send(request()).result()).isEqualTo(ACCEPTED);
+    }
+
+    @Test
+    @DisplayName("영구 인증 오류는 CONFIGURATION으로 유지한다")
+    void permanent_auth_failure_is_configuration() {
+        var client = client(URI.create("http://localhost:1/send"), Duration.ofSeconds(1), attempt -> {
+            throw new FcmProviderClient.PermanentAuthException(new IOException("invalid_grant"));
+        });
+        var result = client.send(request());
+        assertThat(result.result()).isEqualTo(CONFIGURATION);
+        assertThat(result.failureCode()).isEqualTo("AUTH_INITIALIZATION_FAILED");
+    }
+
+    @Test
+    @DisplayName("토큰은 만료 직전까지 재사용하고 만료 후 갱신하며 캐시 토큰의 401은 다음 시도에서 갱신한다")
+    void token_cache_reuses_until_expiry() throws Exception {
+        var now = new AtomicReference<>(NOW);
+        var refreshes = new AtomicInteger();
+        Clock clock = new Clock() {
+            public ZoneOffset getZone() { return ZoneOffset.UTC; }
+            public Clock withZone(java.time.ZoneId zone) { return this; }
+            public Instant instant() { return now.get(); }
+        };
+        var cache = new FcmProviderClient.ServiceAccountTokenCache(clock, attempt -> new com.google.auth.oauth2.AccessToken(
+                "t" + refreshes.incrementAndGet(), java.util.Date.from(now.get().plus(Duration.ofHours(1)))));
+        var attempt = new FcmAttempt(new FcmClientProperties(true, "stopbell", "unused", Duration.ofSeconds(2),
+                Duration.ofSeconds(5), Duration.ofSeconds(5)), System.nanoTime());
+        try {
+            assertThat(cache.token(attempt)).isEqualTo("t1");
+            assertThat(cache.reject("t1")).isFalse(); // freshly issued: a 401 is a real error
+            now.set(NOW.plus(Duration.ofMinutes(30)));
+            assertThat(cache.token(attempt)).isEqualTo("t2");
+            assertThat(cache.token(attempt)).isEqualTo("t2");
+            assertThat(refreshes).hasValue(2);
+            assertThat(cache.reject("t2")).isTrue(); // reused token rejected: refresh next time
+            assertThat(cache.token(attempt)).isEqualTo("t3");
+            now.set(NOW.plus(Duration.ofMinutes(100)));
+            assertThat(cache.token(attempt)).isEqualTo("t4");
+        } finally {
+            attempt.close();
+        }
+    }
+
+    @Test
+    @DisplayName("인증 HTTP의 DNS 실패는 설정 실패가 아닌 일시 실패다")
     void auth_connection_failure_is_configuration() {
         var client = client(URI.create("http://localhost:1/send"), Duration.ofSeconds(1), attempt -> {
             throw new UnknownHostException("sensitive auth details");
         });
-        // Authentication failure is global configuration, even if its own HTTP request was unsent.
-        assertThat(client.send(request()).result()).isEqualTo(CONFIGURATION);
+        assertThat(client.send(request()).result()).isEqualTo(RETRYABLE);
     }
 
     @Test
@@ -382,7 +439,7 @@ class FcmProviderClientTest {
         });
         try {
             var result = client.send(request());
-            assertThat(result.result()).isEqualTo(CONFIGURATION);
+            assertThat(result.result()).isEqualTo(RETRYABLE);
             assertThat(result.failureCode()).isEqualTo("AUTH_BUDGET_EXHAUSTED");
             assertThat(result.fcmRequestStarted()).isFalse();
         } finally {
@@ -405,7 +462,7 @@ class FcmProviderClientTest {
             request.execute();
             return TOKEN;
         }).send(request());
-        assertThat(result.result()).isEqualTo(CONFIGURATION);
+        assertThat(result.result()).isEqualTo(RETRYABLE);
         assertThat(calls).hasValue(1);
     }
 
@@ -429,7 +486,7 @@ class FcmProviderClientTest {
                 request.execute();
                 return TOKEN;
             }).send(request());
-            assertThat(result.result()).isEqualTo(CONFIGURATION);
+            assertThat(result.result()).isEqualTo(RETRYABLE);
             assertThat(result.elapsedMs()).isBetween(250L, 1500L);
             assertThat(calls).hasValue(1);
         } finally {

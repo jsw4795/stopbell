@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import com.google.auth.oauth2.AccessToken;
+import com.google.auth.Retryable;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.gson.Gson;
 import com.stopbell.notification.client.FcmFailureMapper.Classification;
@@ -41,6 +42,18 @@ public final class FcmProviderClient {
     @FunctionalInterface
     interface TokenSource {
         String token(FcmAttempt attempt) throws IOException;
+
+        /** FCM rejected the token with 401. True if a cached token was dropped, so the next attempt refreshes. */
+        default boolean reject(String token) {
+            return false;
+        }
+    }
+
+    /** Credential/permission problem that retrying cannot fix. Everything else from the token source is transient. */
+    static final class PermanentAuthException extends IOException {
+        PermanentAuthException(Throwable cause) {
+            super("FCM credential invalid", cause);
+        }
     }
 
     private final FcmClientProperties properties;
@@ -51,7 +64,7 @@ public final class FcmProviderClient {
     public FcmProviderClient(FcmClientProperties properties) {
         this(properties, Clock.systemUTC(), URI.create("https://fcm.googleapis.com/v1/projects/"
                 + (properties.configured() ? properties.projectId() : "unconfigured") + "/messages:send"),
-                attempt -> serviceAccountToken(properties, attempt));
+                new ServiceAccountTokenCache(properties, Clock.systemUTC()));
     }
 
     // Package-private seam: tests use loopback HTTP and synthetic tokens, never Firebase credentials.
@@ -80,8 +93,9 @@ public final class FcmProviderClient {
         } catch (TimeoutException e) {
             close(attempt);
             task.cancel(true);
-            classification = FcmFailureMapper.classified(attempt.messagingStarted() ? AMBIGUOUS_TIMEOUT
-                    : CONFIGURATION, attempt.messagingStarted() ? "REQUEST_BUDGET_EXHAUSTED" : "AUTH_BUDGET_EXHAUSTED");
+            classification = attempt.messagingStarted()
+                    ? FcmFailureMapper.classified(AMBIGUOUS_TIMEOUT, "REQUEST_BUDGET_EXHAUSTED")
+                    : FcmFailureMapper.classified(RETRYABLE, "AUTH_BUDGET_EXHAUSTED");
         } catch (InterruptedException e) {
             close(attempt);
             task.cancel(true);
@@ -105,8 +119,11 @@ public final class FcmProviderClient {
             if (token == null || token.isBlank() || token.contains("\r") || token.contains("\n")) {
                 return FcmFailureMapper.classified(CONFIGURATION, "AUTH_INITIALIZATION_FAILED");
             }
-        } catch (IOException | RuntimeException e) {
+        } catch (PermanentAuthException e) {
             return FcmFailureMapper.classified(CONFIGURATION, "AUTH_INITIALIZATION_FAILED");
+        } catch (IOException | RuntimeException e) {
+            // Auth server connectivity, timeout, 5xx or budget exhaustion: nothing was sent, retry later.
+            return FcmFailureMapper.classified(RETRYABLE, "AUTH_UNAVAILABLE");
         }
         try {
             HttpPost post = new HttpPost(endpoint);
@@ -135,6 +152,9 @@ public final class FcmProviderClient {
                     if (delay.compareTo(retryDelay) > 0) {
                         retryDelay = delay;
                     }
+                }
+                if (response.getStatusLine().getStatusCode() == 401 && tokenSource.reject(token)) {
+                    return FcmFailureMapper.classified(RETRYABLE, "AUTH_TOKEN_EXPIRED");
                 }
                 return FcmFailureMapper.response(response.getStatusLine().getStatusCode(), body,
                         Long.toString(retryDelay.getSeconds()), receivedAt);
@@ -188,17 +208,6 @@ public final class FcmProviderClient {
         return stops == null ? base : base + "\n목표 정류장 이후 " + stops + "정거장 이동한 것으로 확인됐어요.";
     }
 
-    private static String serviceAccountToken(FcmClientProperties properties, FcmAttempt attempt) throws IOException {
-        attempt.checkOpen();
-        try (InputStream stream = Files.newInputStream(Path.of(properties.credentialPath()))) {
-            ServiceAccountCredentials credentials = (ServiceAccountCredentials) ServiceAccountCredentials
-                    .fromStream(stream, attempt::authTransport).createScoped(SCOPE).createWithCustomRetryStrategy(false);
-            AccessToken token = credentials.refreshAccessToken();
-            attempt.checkOpen();
-            return token.getTokenValue();
-        }
-    }
-
     private NotificationSendResult result(Classification value, long started, boolean fcmRequestStarted) {
         long elapsed = Duration.ofNanos(System.nanoTime() - started).toMillis();
         log.info("FCM result={} code={} elapsedMs={}", value.result(), value.code(), elapsed);
@@ -210,5 +219,79 @@ public final class FcmProviderClient {
         try {
             attempt.close();
         } catch (IOException ignored) { }
+    }
+
+    /** Reuses the access token until shortly before it expires; the credential file is read only on refresh. */
+    static final class ServiceAccountTokenCache implements TokenSource {
+        private static final Duration REFRESH_MARGIN = Duration.ofMinutes(2);
+
+        @FunctionalInterface
+        interface Refresher {
+            AccessToken refresh(FcmAttempt attempt) throws IOException;
+        }
+
+        private final Clock clock;
+        private final Refresher refresher;
+        private AccessToken cached;
+        private String refreshedThisCall;
+
+        ServiceAccountTokenCache(FcmClientProperties properties, Clock clock) {
+            this(clock, attempt -> refresh(properties, attempt));
+        }
+
+        ServiceAccountTokenCache(Clock clock, Refresher refresher) {
+            this.clock = clock;
+            this.refresher = refresher;
+        }
+
+        @Override
+        public synchronized String token(FcmAttempt attempt) throws IOException {
+            attempt.checkOpen();
+            refreshedThisCall = null;
+            if (cached != null && cached.getExpirationTime() != null
+                    && clock.instant().plus(REFRESH_MARGIN).isBefore(cached.getExpirationTime().toInstant())) {
+                return cached.getTokenValue();
+            }
+            cached = null;
+            AccessToken fresh = refresher.refresh(attempt);
+            attempt.checkOpen();
+            cached = fresh;
+            refreshedThisCall = fresh.getTokenValue();
+            return refreshedThisCall;
+        }
+
+        /** A 401 for a token reused from cache may just be expired: drop it so the next attempt refreshes. */
+        @Override
+        public synchronized boolean reject(String token) {
+            boolean reused = cached != null && cached.getTokenValue().equals(token)
+                    && !token.equals(refreshedThisCall);
+            if (cached != null && cached.getTokenValue().equals(token)) {
+                cached = null;
+            }
+            return reused;
+        }
+
+        private static AccessToken refresh(FcmClientProperties properties, FcmAttempt attempt) throws IOException {
+            try (InputStream stream = Files.newInputStream(Path.of(properties.credentialPath()))) {
+                return ServiceAccountCredentials.fromStream(stream, attempt::authTransport)
+                        .createScoped(SCOPE).createWithCustomRetryStrategy(false).refreshAccessToken();
+            } catch (java.nio.file.NoSuchFileException | java.nio.file.AccessDeniedException e) {
+                throw new PermanentAuthException(e);
+            } catch (IOException | RuntimeException e) {
+                // Token endpoint errors say whether they are retryable; credential parse failures are not.
+                boolean transientFailure = e instanceof Retryable r ? r.isRetryable()
+                        : e instanceof IOException io && isNetwork(io);
+                if (transientFailure) {
+                    throw (IOException) (e instanceof IOException ? e : new IOException(e));
+                }
+                throw new PermanentAuthException(e);
+            }
+        }
+
+        private static boolean isNetwork(IOException e) {
+            return e instanceof java.net.SocketException || e instanceof java.net.SocketTimeoutException
+                    || e instanceof java.net.UnknownHostException || e instanceof javax.net.ssl.SSLException
+                    || e.getMessage() != null && e.getMessage().startsWith("FCM ");
+        }
     }
 }

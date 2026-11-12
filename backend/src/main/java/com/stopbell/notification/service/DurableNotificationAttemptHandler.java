@@ -25,7 +25,7 @@ public class DurableNotificationAttemptHandler implements NotificationAttemptHan
             "UNKNOWN_ACCEPTANCE", "SUCCESS_RESPONSE_INVALID", "NOT_FOUND_UNCLASSIFIED", "AUTH_OR_PROJECT_ERROR",
             "QUOTA_EXCEEDED", "INTERNAL", "UNAVAILABLE", "INVALID_ARGUMENT_UNCLASSIFIED", "UNCLASSIFIED_REJECTION",
             "PROVIDER_NOT_CONFIGURED", "TRANSACTION_ACTIVE", "REQUEST_BUDGET_EXHAUSTED", "AUTH_BUDGET_EXHAUSTED",
-            "CALL_INTERRUPTED", "AUTH_INITIALIZATION_FAILED");
+            "CALL_INTERRUPTED", "AUTH_INITIALIZATION_FAILED", "AUTH_UNAVAILABLE", "AUTH_TOKEN_EXPIRED");
     private final NotificationRetryPolicy retry;
     private final DeviceRepository devices;
     private final Clock clock;
