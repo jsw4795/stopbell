@@ -127,6 +127,17 @@ public class BusAlarmTarget {
         this.successorStopOrder = successor == null ? null : successor.stopOrder();
     }
 
+    public void updateAdjacentStops(AdjacentStopSnapshot predecessor, AdjacentStopSnapshot successor) {
+        validateAdjacentStop(predecessor, "Predecessor");
+        validateAdjacentStop(successor, "Successor");
+        this.notifyOneStopBefore = predecessor != null;
+        this.predecessorExternalStopId = predecessor == null ? null : predecessor.externalStopId();
+        this.predecessorStopOrder = predecessor == null ? null : predecessor.stopOrder();
+        this.notifyOneStopAfter = successor != null;
+        this.successorExternalStopId = successor == null ? null : successor.externalStopId();
+        this.successorStopOrder = successor == null ? null : successor.stopOrder();
+    }
+
     void assignTo(Alarm alarm) {
         if (this.alarm != null && this.alarm != alarm) {
             throw new IllegalStateException("Bus alarm target is already assigned to an alarm");

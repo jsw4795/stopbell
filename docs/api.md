@@ -267,6 +267,17 @@ POST /api/v1/alarms/{alarmId}/deactivate
 
 현재 인증된 User가 소유한 Alarm을 비활성화하고 변경된 Alarm response를 반환한다. 성공은 `200 OK`이며 status는 `INACTIVE`다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다.
 
+### 알림 옵션 수정
+
+```http
+PATCH /api/v1/alarms/{alarmId}/options
+Content-Type: application/json
+
+{ "notifyOneStopBefore": true, "notifyOneStopAfter": false }
+```
+
+현재 인증된 User가 소유한 `ACTIVE` Alarm의 한 정류장 전/후 옵션을 바꾸고 변경된 Alarm response를 반환한다. 두 필드는 필수 boolean이며 누락·null은 `400`이다. 성공은 `200 OK`이며 옵션 변경은 이후 평가부터 적용되고 이미 발생한 Event는 바꾸지 않는다. 대상 Stop이 노선의 첫 occurrence인데 before를, 마지막 occurrence인데 after를 켜면 생성과 같은 기준으로 `400 INVALID_ALARM_REQUEST`다. `INACTIVE`·`FOLLOW_UP` Alarm은 `409 ALARM_NOT_ACTIVE`, 없거나 소유가 아니면 `404 ALARM_NOT_FOUND`다. 같은 값을 다시 보내면 idempotent하다.
+
 ### 알림 삭제
 
 ```http

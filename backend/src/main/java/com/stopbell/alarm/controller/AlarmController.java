@@ -4,6 +4,7 @@ import java.util.List;
 
 import com.stopbell.alarm.dto.AlarmResponse;
 import com.stopbell.alarm.dto.CreateAlarmRequest;
+import com.stopbell.alarm.dto.UpdateAlarmOptionsRequest;
 import com.stopbell.alarm.service.AlarmService;
 import com.stopbell.alarm.service.AlarmCreationService;
 import com.stopbell.user.auth.service.JwtTokenService;
@@ -14,6 +15,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -63,6 +65,12 @@ public class AlarmController {
     @PostMapping("/api/v1/alarms/{alarmId}/deactivate")
     public AlarmResponse deactivate(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Long alarmId) {
         return alarmService.deactivate(jwtTokenService.extractUserId(jwt), alarmId);
+    }
+
+    @PatchMapping("/api/v1/alarms/{alarmId}/options")
+    public AlarmResponse updateOptions(@AuthenticationPrincipal Jwt jwt, @PathVariable @Positive Long alarmId,
+            @Valid @RequestBody UpdateAlarmOptionsRequest request) {
+        return alarmService.updateOptions(jwtTokenService.extractUserId(jwt), alarmId, request);
     }
 
     @DeleteMapping("/api/v1/alarms/{alarmId}")

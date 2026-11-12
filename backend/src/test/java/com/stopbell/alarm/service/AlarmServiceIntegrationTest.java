@@ -17,6 +17,7 @@ import java.util.UUID;
 
 import com.stopbell.alarm.dto.AlarmResponse;
 import com.stopbell.alarm.dto.CreateAlarmRequest;
+import com.stopbell.alarm.dto.UpdateAlarmOptionsRequest;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.BusAlarmTarget;
@@ -961,6 +962,78 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
                 .andExpect(jsonPath("$.provider").value("TAGO"))
                 .andExpect(jsonPath("$.routeType").value("CITY_LOCAL"))
                 .andExpect(jsonPath("$.externalRouteId").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("활성 알람의 한 정류장 전/후 옵션을 바꾸면 snapshot이 함께 갱신된다")
+    void update_options_on_active_alarm() {
+        User user = user();
+        RouteFixture route = route();
+        AlarmResponse created = alarmService.create(user.getId(), new CreateAlarmRequest(route.middleId(), false, false));
+        alarmService.activate(user.getId(), created.id());
+
+        AlarmResponse on = alarmService.updateOptions(user.getId(), created.id(),
+                new UpdateAlarmOptionsRequest(true, true));
+        BusAlarmTarget target = alarmRepository.findById(created.id()).orElseThrow().getBusAlarmTarget();
+        assertThat(on.notifyOneStopBefore()).isTrue();
+        assertThat(on.notifyOneStopAfter()).isTrue();
+        assertThat(target.getPredecessorExternalStopId()).isEqualTo(route.firstExternalStopId());
+        assertThat(target.getSuccessorExternalStopId()).isEqualTo(route.lastExternalStopId());
+
+        AlarmResponse off = alarmService.updateOptions(user.getId(), created.id(),
+                new UpdateAlarmOptionsRequest(false, false));
+        assertThat(off.notifyOneStopBefore()).isFalse();
+        assertThat(off.notifyOneStopAfter()).isFalse();
+        assertThat(target.getPredecessorExternalStopId()).isNull();
+        assertThat(target.getSuccessorStopOrder()).isNull();
+    }
+
+    @Test
+    @DisplayName("비활성 알람의 옵션 수정은 409로 거부한다")
+    void reject_update_options_on_inactive_alarm() {
+        User user = user();
+        RouteFixture route = route();
+        AlarmResponse created = alarmService.create(user.getId(), new CreateAlarmRequest(route.middleId(), false, false));
+
+        assertThatThrownBy(() -> alarmService.updateOptions(user.getId(), created.id(),
+                new UpdateAlarmOptionsRequest(true, false)))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ALARM_NOT_ACTIVE));
+    }
+
+    @Test
+    @DisplayName("첫 occurrence의 before, 마지막 occurrence의 after 옵션 수정은 400으로 거부한다")
+    void reject_update_options_without_adjacent_stop() {
+        User user = user();
+        RouteFixture route = route();
+        AlarmResponse first = alarmService.create(user.getId(), new CreateAlarmRequest(route.firstId(), false, false));
+        AlarmResponse last = alarmService.create(user.getId(), new CreateAlarmRequest(route.lastId(), false, false));
+        alarmService.activate(user.getId(), first.id());
+        alarmService.activate(user.getId(), last.id());
+
+        assertThatThrownBy(() -> alarmService.updateOptions(user.getId(), first.id(),
+                new UpdateAlarmOptionsRequest(true, false)))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_ALARM_REQUEST));
+        assertThatThrownBy(() -> alarmService.updateOptions(user.getId(), last.id(),
+                new UpdateAlarmOptionsRequest(false, true)))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_ALARM_REQUEST));
+    }
+
+    @Test
+    @DisplayName("다른 사용자의 알람 옵션 수정은 404로 거부한다")
+    void reject_update_options_of_other_user() {
+        User owner = user();
+        User other = user();
+        RouteFixture route = route();
+        AlarmResponse created = alarmService.create(owner.getId(), new CreateAlarmRequest(route.middleId(), false, false));
+        alarmService.activate(owner.getId(), created.id());
+
+        assertThatThrownBy(() -> alarmService.updateOptions(other.getId(), created.id(),
+                new UpdateAlarmOptionsRequest(true, false)))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ALARM_NOT_FOUND));
     }
 
     private void rawRoute(String externalRouteId, String payload) {

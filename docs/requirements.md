@@ -85,6 +85,8 @@ Alarm 상태는 `INACTIVE`, `ACTIVE`, `FOLLOW_UP`을 그대로 표시하며 bool
 
 새 monitoring cycle을 시작하는 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서만 activation generation을 증가시킨다. 이미 `ACTIVE`인 Alarm의 중복 활성화는 idempotent하며 generation을 증가시키거나 baseline을 초기화하지 않는다.
 
+활성(`ACTIVE`) Alarm은 생성 이후에도 한 정류장 전/후 알림 옵션을 켜고 끌 수 있다. 변경은 이후 평가부터 적용되고, 비활성·후속 추적(`FOLLOW_UP`) 중 Alarm은 수정할 수 없다.
+
 ### FR-005 교통 모니터링
 
 백엔드는 외부 교통 데이터 소스를 사용해 활성 알림 조건이 충족되었는지 판단한다.

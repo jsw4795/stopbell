@@ -12,6 +12,8 @@ import java.util.stream.Collectors;
 
 import com.stopbell.alarm.dto.AlarmResponse;
 import com.stopbell.alarm.dto.CreateAlarmRequest;
+import com.stopbell.alarm.dto.UpdateAlarmOptionsRequest;
+import com.stopbell.alarm.entity.AlarmStatus;
 import com.stopbell.alarm.entity.AdjacentStopSnapshot;
 import com.stopbell.alarm.entity.Alarm;
 import com.stopbell.alarm.entity.BusAlarmTarget;
@@ -147,6 +149,52 @@ public class AlarmService {
         Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
         alarm.deactivate();
+        return toResponse(alarm);
+    }
+
+    /** 활성 알람의 한 정류장 전/후 옵션만 바꾼다. 이후 평가부터 적용되며 이미 발생한 이벤트는 건드리지 않는다. */
+    @Transactional
+    public AlarmResponse updateOptions(Long userId, Long alarmId, UpdateAlarmOptionsRequest request) {
+        if (request == null || request.notifyOneStopBefore() == null || request.notifyOneStopAfter() == null) {
+            throw new ApiException(ErrorCode.INVALID_REQUEST);
+        }
+        userRepository.findByIdForUpdate(userId)
+                .orElseThrow(() -> new ApiException(ErrorCode.UNAUTHENTICATED));
+        userRepository.requireActive(userId);
+        Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
+                .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
+        if (alarm.getStatus() != AlarmStatus.ACTIVE) {
+            throw new ApiException(ErrorCode.ALARM_NOT_ACTIVE);
+        }
+        BusAlarmTarget target = busTarget(alarm);
+        BusRoute route = routeRepository
+                .findByProviderAndExternalRouteId(target.getProvider(), target.getExternalRouteId())
+                .filter(found -> matches(found, target))
+                .orElseThrow(() -> new ApiException(ErrorCode.BUS_ROUTE_NOT_FOUND));
+        List<BusRouteStopOccurrence> traversal = occurrenceRepository.findAllByRouteOrderByStopOrderAsc(route);
+        int targetIndex = -1;
+        for (int index = 0; index < traversal.size(); index++) {
+            BusRouteStopOccurrence occurrence = traversal.get(index);
+            if (occurrence.getStopOrder() == target.getTargetStopOrder()
+                    && Objects.equals(occurrence.getStop().getExternalStopId(), target.getExternalStopId())) {
+                targetIndex = index;
+                break;
+            }
+        }
+        if (targetIndex < 0) {
+            throw new ApiException(ErrorCode.TARGET_STOP_OCCURRENCE_NOT_FOUND);
+        }
+        boolean before = request.notifyOneStopBefore();
+        boolean after = request.notifyOneStopAfter();
+        if (before && targetIndex == 0) {
+            throw new ApiException(ErrorCode.INVALID_ALARM_REQUEST, "Target stop has no predecessor stop.");
+        }
+        if (after && targetIndex == traversal.size() - 1) {
+            throw new ApiException(ErrorCode.INVALID_ALARM_REQUEST, "Target stop has no successor stop.");
+        }
+        target.updateAdjacentStops(
+                before ? adjacentSnapshot(traversal.get(targetIndex - 1)) : null,
+                after ? adjacentSnapshot(traversal.get(targetIndex + 1)) : null);
         return toResponse(alarm);
     }
 
