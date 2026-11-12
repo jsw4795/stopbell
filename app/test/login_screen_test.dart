@@ -553,13 +553,8 @@ void main() {
         await tester.pumpAndSettle();
         expect(alarms.createCalls, 1);
         expect(alarms.activateCalls, 1);
-        expect(
-          find.text(
-            activationFails ? '상태: INACTIVE · 비활성' : '상태: ACTIVE · 감시 중',
-          ),
-          findsOneWidget,
-        );
-        expect(find.text(activationFails ? '활성화' : '비활성화'), findsOneWidget);
+        expect(find.text(activationFails ? '비활성' : '감시 중'), findsOneWidget);
+        expect(find.byType(SwitchListTile), findsOneWidget);
         await tester.tap(find.byTooltip('알람 목록으로'));
         await tester.pumpAndSettle();
         expect(lists, 2);
@@ -698,7 +693,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey(15)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('활성화'));
+    await tester.tap(find.byType(SwitchListTile));
     await tester.pump();
     expect(alarms.activateCalls, 1);
     await tapInSettings(tester, '로그아웃');

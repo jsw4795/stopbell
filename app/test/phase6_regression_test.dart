@@ -211,9 +211,21 @@ void main() {
 
       activation.complete(jsonResponse(alarm('ACTIVE')));
       await tester.pumpAndSettle();
-      expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
-      expect(find.text('한 정류장 전 알림: 꺼짐'), findsOneWidget);
-      expect(find.text('한 정류장 후 알림: 켜짐'), findsOneWidget);
+      expect(find.text('감시 중'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.widgetWithText(ListTile, '한 정류장 전 알림'),
+          matching: find.text('꺼짐'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.widgetWithText(ListTile, '한 정류장 후 알림'),
+          matching: find.text('켜짐'),
+        ),
+        findsOneWidget,
+      );
       expect((await storage.read())?.refreshToken, 'rotated-refresh');
       await tester.tap(find.byTooltip('알람 목록으로'));
       await tester.pumpAndSettle();
@@ -295,12 +307,12 @@ void main() {
       await tester.tap(find.text('Google로 계속하기'));
       await tester.pumpAndSettle();
       expect(googleCalls, 1);
-      expect(find.text('비활성'), findsOneWidget);
+      expect(find.byKey(const ValueKey(15)), findsOneWidget);
       expect(find.text('알람 상세'), findsNothing);
       await tester.tap(find.byKey(const ValueKey(15)));
       await tester.pumpAndSettle();
-      expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
-      expect(find.text('활성화'), findsOneWidget);
+      expect(find.text('비활성'), findsOneWidget);
+      expect(find.byType(SwitchListTile), findsOneWidget);
       expect(requests, [
         'GET /api/v1/alarms',
         'GET /api/v1/bus-routes',

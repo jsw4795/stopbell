@@ -123,7 +123,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('활성화'));
+    await tester.tap(find.byType(SwitchListTile));
     // Activation remains busy behind the permission dialog. Advance its animation only.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
@@ -133,7 +133,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(client.activations, 1);
     expect(f.devices.requests, isEmpty);
-    expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+    expect(find.text('감시 중'), findsOneWidget);
   });
   testWidgets('첫 activation은 설명 후 permission 요청 및 Device 등록을 진행한다', (
     tester,
@@ -155,7 +155,7 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.text('활성화'));
+    await tester.tap(find.byType(SwitchListTile));
     // Activation remains busy behind the permission dialog. Advance its animation only.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));

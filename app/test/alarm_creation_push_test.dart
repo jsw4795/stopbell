@@ -119,7 +119,7 @@ void main() {
     expect(client.createCalls, 1);
     expect(client.activateCalls, 1);
     expect(calls, ['push', 'create', 'activate']);
-    expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+    expect(find.text('감시 중'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -130,7 +130,7 @@ void main() {
     await start(tester);
     await tester.pumpAndSettle();
     expect(calls, ['create', 'activate']);
-    expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+    expect(find.text('감시 중'), findsOneWidget);
   });
 
   testWidgets(
@@ -157,7 +157,7 @@ void main() {
       expect(find.text('원래 생성된 알람을 확인했어요. 현재 상태를 확인해 주세요.'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey(15)));
       await tester.pumpAndSettle();
-      expect(find.text('상태: FOLLOW_UP · 한 정류장 후 추적 중'), findsOneWidget);
+      expect(find.text('한 정류장 후 추적 중'), findsOneWidget);
       expect(client.createCalls, 1);
       expect(client.activateCalls, 0);
     },
@@ -182,7 +182,7 @@ void main() {
     expect(client.activateCalls, 1);
     expect(client.detailIds, [sample.id]);
     expect(find.text('조회 시점의 서버 상태입니다.'), findsOneWidget);
-    expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
+    expect(find.text('비활성'), findsOneWidget);
     expect(
       tester.widget<AlarmDetailScreen>(find.byType(AlarmDetailScreen)).alarmId,
       sample.id,
@@ -191,12 +191,12 @@ void main() {
       expect(id, sample.id);
       return withStatus(AlarmStatus.active);
     };
-    await tester.tap(find.text('활성화'));
+    await tester.tap(find.byType(SwitchListTile));
     await tester.pumpAndSettle();
     expect(preparations, 2);
     expect(client.createCalls, 1);
     expect(client.activateCalls, 2);
-    expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+    expect(find.text('감시 중'), findsOneWidget);
   });
 
   for (final result in ['cancel', 'exception']) {
@@ -317,7 +317,7 @@ void main() {
       expect(client.createCalls, 1);
       expect(client.activateCalls, 1);
       expect(find.text('이 기기의 알림 수신 준비를 완료했어요.'), findsOneWidget);
-      expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+      expect(find.text('감시 중'), findsOneWidget);
     });
   }
 
@@ -382,7 +382,7 @@ void main() {
         if (proceed) {
           expect(client.createCalls, 1);
           expect(client.activateCalls, 1);
-          expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+          expect(find.text('감시 중'), findsOneWidget);
         } else {
           expectRetryable(tester);
         }
@@ -434,7 +434,7 @@ void main() {
       if (action == 'navigation') {
         detail.complete(sample);
         await tester.pumpAndSettle();
-        expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
+        expect(find.text('비활성'), findsOneWidget);
       }
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
@@ -508,7 +508,7 @@ void main() {
         expect(find.text('알람 상세'), findsNothing);
         detail.complete(sample);
         await tester.pumpAndSettle();
-        expect(find.text('상태: INACTIVE · 비활성'), findsOneWidget);
+        expect(find.text('비활성'), findsOneWidget);
         await tester.pumpWidget(const SizedBox());
       },
     );
@@ -609,7 +609,9 @@ void main() {
             ),
           );
           await tester.tap(
-            find.text(status == AlarmStatus.inactive ? '활성화' : '다시 활성화'),
+            status == AlarmStatus.inactive
+                ? find.byType(SwitchListTile)
+                : find.text('다시 활성화'),
           );
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 350));
@@ -620,9 +622,7 @@ void main() {
           expect(client.createCalls, 0);
           expect(client.activateCalls, proceed ? 1 : 0);
           expect(
-            find.text(
-              '상태: ${proceed ? AlarmStatus.active.label : status.label}',
-            ),
+            find.text((proceed ? AlarmStatus.active : status).shortLabel),
             findsOneWidget,
           );
         },
@@ -675,9 +675,7 @@ void main() {
             await tester.pumpAndSettle();
             await tester.tap(find.widgetWithText(TextButton, '삭제').last);
           } else {
-            await tester.tap(
-              find.text(phase == 'preparation' ? '활성화' : '비활성화'),
-            );
+            await tester.tap(find.byType(SwitchListTile));
           }
           await tester.pump();
           final readsBeforeInvalidation = client.detailIds.length;
@@ -726,10 +724,10 @@ void main() {
             client.detailIds.length,
             readsBeforeInvalidation + (action == 'navigation' ? 1 : 0),
           );
-          expect(find.text('상태: INACTIVE · 비활성'), findsNothing);
+          expect(find.text('비활성'), findsNothing);
           if (action == 'navigation') {
-            expect(find.text('other route · other stop'), findsOneWidget);
-            expect(find.text('상태: FOLLOW_UP · 한 정류장 후 추적 중'), findsOneWidget);
+            expect(find.text('other route'), findsOneWidget);
+            expect(find.text('한 정류장 후 추적 중'), findsOneWidget);
           } else {
             expect(find.byType(AlarmDetailScreen), findsNothing);
           }
@@ -755,8 +753,8 @@ void main() {
             .alarmId,
         sample.id,
       );
-      expect(find.text('상태: 확인 필요'), findsOneWidget);
-      expect(find.text('상태: INACTIVE · 비활성'), findsNothing);
+      expect(find.text('확인 필요'), findsOneWidget);
+      expect(find.text('비활성'), findsNothing);
       expect(client.detailIds, [sample.id]);
       await tester.pump(const Duration(seconds: 30));
       expect(client.createCalls, 1);
@@ -764,7 +762,7 @@ void main() {
       client.detail = (_) async => withStatus(AlarmStatus.active);
       await tester.tap(find.text('현재 상태 다시 조회'));
       await tester.pumpAndSettle();
-      expect(find.text('상태: ACTIVE · 감시 중'), findsOneWidget);
+      expect(find.text('감시 중'), findsOneWidget);
       expect(client.detailIds, [sample.id, sample.id]);
       expect(client.createCalls, 1);
       expect(client.activateCalls, 1);
