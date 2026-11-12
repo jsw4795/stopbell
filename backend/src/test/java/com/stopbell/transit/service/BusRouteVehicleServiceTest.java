@@ -109,7 +109,7 @@ class BusRouteVehicleServiceTest {
     }
 
     @Test
-    @DisplayName("GBIS 중복 번호는 좌석을 결합하지 않는다")
+    @DisplayName("GBIS 중복 번호는 첫 항목으로 좌석을 결합한다")
     void duplicate_gbis_number_hides_seat() {
         gyeonggi(BusRouteType.CITY_SEAT, stops());
         when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "s2", 20)));
@@ -118,8 +118,8 @@ class BusRouteVehicleServiceTest {
 
         var response = service().find(1L);
 
-        assertThat(response.vehicles().getFirst().seat().status()).isEqualTo(SeatStatus.UNAVAILABLE);
-        assertThat(response.status()).isEqualTo(Status.PARTIAL);
+        assertThat(response.vehicles().getFirst().seat().remaining()).isEqualTo(5);
+        assertThat(response.status()).isEqualTo(Status.AVAILABLE);
     }
 
     @Test
@@ -165,16 +165,16 @@ class BusRouteVehicleServiceTest {
     }
 
     @Test
-    @DisplayName("반복 정류장 노선은 occurrenceId를 null로 두고 위치 미확인 PARTIAL로 응답한다")
+    @DisplayName("반복 정류장 노선도 순번이 유일하면 해당 occurrence에 표시한다")
     void repeated_stop_has_null_occurrence() {
         gyeonggi(BusRouteType.VILLAGE, List.of(new Occurrence(11L, "same", 10), new Occurrence(12L, "x", 20),
                 new Occurrence(13L, "same", 30)));
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "same", 10)));
+        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "same", 30)));
 
         var response = service().find(1L);
 
-        assertThat(response.vehicles().getFirst().occurrenceId()).isNull();
-        assertThat(response.status()).isEqualTo(Status.PARTIAL);
+        assertThat(response.vehicles().getFirst().occurrenceId()).isEqualTo(13L);
+        assertThat(response.status()).isEqualTo(Status.AVAILABLE);
     }
 
     @Test
@@ -205,11 +205,11 @@ class BusRouteVehicleServiceTest {
     }
 
     @Test
-    @DisplayName("서울 구간 순번과 다음 정류장이 맞지 않으면 위치를 연결하지 않는다")
+    @DisplayName("서울 구간 순번에 해당하는 정류장이 없으면 해당 차량만 위치를 연결하지 않는다")
     void seoul_unverified_position() {
         seoulRoute(stops());
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(
-                seoulItem("서울74사1234", 10, "not-next", "1", "3")));
+                seoulItem("서울74사1234", 99, "s2", "1", "3")));
 
         var response = service().find(1L);
 

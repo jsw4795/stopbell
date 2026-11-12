@@ -164,7 +164,7 @@ public class BusRouteVehicleService {
             if (item == null || blank(item.plainNo()) || "0".equals(item.isrunyn())) {
                 continue;
             }
-            Long occurrenceId = seoulOccurrence(route, item.sectOrd(), item.nextStId());
+            Long occurrenceId = seoulOccurrence(route, item.sectOrd());
             partial |= occurrenceId == null;
             rows.add(new Row(item.plainNo().trim(), occurrenceId, Seat.UNAVAILABLE, seoulCongestion(item.congetion())));
         }
@@ -187,8 +187,6 @@ public class BusRouteVehicleService {
             throw new PositionUnavailable();
         }
         var tago = items.stream().filter(item -> item != null && !blank(item.vehicleNo())).toList();
-        Map<String, Integer> numberCount = new HashMap<>();
-        tago.forEach(item -> numberCount.merge(normalize(item.vehicleNo()), 1, Integer::sum));
 
         boolean seatType = route.routeType() != null && SEAT_TYPES.contains(route.routeType());
         boolean crowdType = route.routeType() != null && CROWDED_TYPES.contains(route.routeType());
@@ -202,13 +200,13 @@ public class BusRouteVehicleService {
         List<Row> rows = new ArrayList<>();
         for (var item : tago) {
             String key = normalize(item.vehicleNo());
-            Long occurrenceId = tagoOccurrence(route, item.nodeOrder(), item.nodeId());
+            Long occurrenceId = tagoOccurrence(route, item.nodeOrder());
             partial |= occurrenceId == null;
             Seat seat = Seat.UNAVAILABLE;
             Integer congestion = null;
             if (gbis != null) {
                 var matches = gbis.getOrDefault(key, List.of());
-                if (matches.size() == 1 && numberCount.get(key) == 1) {
+                if (!matches.isEmpty()) {
                     var match = matches.getFirst();
                     if (seatType) {
                         seat = seat(match.remainSeats());
@@ -270,28 +268,22 @@ public class BusRouteVehicleService {
     private record Row(String number, Long occurrenceId, Seat seat, Integer congestion) {
     }
 
-    /** Order plus external stop ID must both match one occurrence; repeated-stop routes stay unverified. */
-    private static Long tagoOccurrence(RouteMeta route, Integer order, String nodeId) {
-        if (order == null || order <= 0 || blank(nodeId) || !route.hasUniqueStopIds()) {
-            return null;
-        }
-        var matches = route.traversal().stream().filter(o -> o.order() == order).toList();
-        return matches.size() == 1 && matches.getFirst().externalStopId().equals(nodeId)
-                ? matches.getFirst().id() : null;
+    /** nodeord maps to the occurrence order; repeated stops are fine because the order is unique. */
+    private static Long tagoOccurrence(RouteMeta route, Integer order) {
+        return occurrenceByOrder(route, order);
     }
 
-    /** The section after the occurrence of sectOrd must end at nextStId; otherwise the position is unverified. */
-    private static Long seoulOccurrence(RouteMeta route, Integer sectOrd, String nextStopId) {
-        if (sectOrd == null || sectOrd <= 0 || blank(nextStopId) || !route.hasUniqueStopIds()) {
+    /** sectOrd maps to the occurrence order; the vehicle is shown at the stop it last passed. */
+    private static Long seoulOccurrence(RouteMeta route, Integer sectOrd) {
+        return occurrenceByOrder(route, sectOrd);
+    }
+
+    private static Long occurrenceByOrder(RouteMeta route, Integer order) {
+        if (order == null || order <= 0) {
             return null;
         }
-        var list = route.traversal();
-        for (int i = 0; i < list.size() - 1; i++) {
-            if (list.get(i).order() == sectOrd) {
-                return list.get(i + 1).externalStopId().equals(nextStopId) ? list.get(i).id() : null;
-            }
-        }
-        return null;
+        return route.traversal().stream().filter(o -> o.order() == order).findFirst()
+                .map(BusRouteVehicleMetadataReader.Occurrence::id).orElse(null);
     }
 
     private static Seat seat(Integer remaining) {

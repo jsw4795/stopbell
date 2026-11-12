@@ -23,10 +23,6 @@ public class BusRouteVehicleMetadataReader {
         public RouteMeta {
             traversal = List.copyOf(traversal);
         }
-
-        public boolean hasUniqueStopIds() {
-            return traversal.stream().map(Occurrence::externalStopId).distinct().count() == traversal.size();
-        }
     }
 
     private final BusRouteRepository routes;

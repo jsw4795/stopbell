@@ -144,7 +144,7 @@ JWT Access Token이 필요한 읽기 전용 API다. 노선 선택 화면의 차�
 - `observedAt`: 서버 Provider 조회 시각이다. 캐시 응답은 조회 시각을 유지하고 STALE도 마지막 성공 시각이다.
 - `status`: `AVAILABLE`(모두 확인), `EMPTY`(Provider가 운행 차량 없음으로 응답), `PARTIAL`(일부 위치·좌석 미확인 또는 GBIS 조회 실패), `STALE`(Provider 실패·일일 상한으로 최근 5분 내 마지막 성공 결과 반환). Provider 실패를 `EMPTY`로 응답하지 않는다.
 - `vehicleNumber`: 전체 차량번호.
-- `occurrenceId`: 검증된 마지막 통과 occurrence이며 없으면 `null`이다. 경기는 TAGO `nodeord`·`nodeid`가 모두 한 occurrence와 일치하고, 서울은 `sectOrd` 다음 occurrence의 정류장 ID가 `nextStId`와 일치할 때만 채운다. 정류장이 반복되는 노선은 항상 `null`이다.
+- `occurrenceId`: 마지막 통과 occurrence이며 위치 순번이 노선에 없으면 해당 차량만 `null`이다. 경기는 TAGO `nodeord`, 서울은 `sectOrd`를 occurrence `order`에 대응시킨다. 정류장 ID는 비교하지 않으며 반복 정류장 노선도 순번으로 구분한다. 좌석·혼잡도는 정규화한 차량번호가 일치하는 GBIS 항목(중복이면 첫 항목)을 결합한다.
 - `seat.status`: `AVAILABLE`(`remaining` 양수), `NONE`(`remaining` 0), `UNAVAILABLE`(`remaining` `null`). 서울, 좌석 비대상 유형, 번호·노선 불일치·중복, GBIS 실패는 `UNAVAILABLE`이다.
 - `congestion`: 1 여유, 2 보통, 3 혼잡, 4 매우혼잡, 미제공·알 수 없는 값은 `null`이다. 서울 roster와 GBIS 일반형(유형 13·15·23)에서 제공한다.
 - Provider 원본 ID, GPS, 내부 `Provider`는 응답하지 않는다. 차량은 occurrence 순서(없으면 뒤)와 번호순이다.
