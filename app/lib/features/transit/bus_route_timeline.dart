@@ -649,7 +649,10 @@ class _StopRow extends StatelessWidget {
                   Expanded(
                     child: Opacity(
                       opacity: unavailable && !selected ? 0.75 : 1,
+                      // 색만 바뀌는 갱신(paint 전용 경로)에서 문단 크기가 어긋나
+                      // 단언이 나는 것을 피하려고 선택·밝기가 바뀌면 새로 만든다.
                       child: Text.rich(
+                        key: ValueKey((selected, Theme.of(context).brightness)),
                         visibleLabel,
                         style: const TextStyle(inherit: false),
                         textScaler: MediaQuery.textScalerOf(context),
