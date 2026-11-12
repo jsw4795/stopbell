@@ -4,6 +4,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'settings_test_helper.dart';
+
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:stopbell/core/authenticated_api_client.dart';
@@ -573,7 +576,7 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.tap(find.text('회원 탈퇴'));
+      await tapInSettings(tester, '회원 탈퇴');
       await tester.pumpAndSettle();
       final confirm = tester.widget<TextButton>(
         find.widgetWithText(TextButton, '탈퇴 확인'),

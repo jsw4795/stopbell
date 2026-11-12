@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'settings_test_helper.dart';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
@@ -262,10 +265,7 @@ void main() {
     await tester.tap(find.text('Apple로 계속하기'));
     await tester.pump();
     expect(apple.calls, 1);
-    expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
-      isNull,
-    );
+    expect(googleOnTap(tester), isNull);
     apple.result.completeError(const AppleLoginCanceledException());
     await tester.pumpAndSettle();
     expect(find.text('로그인이 실패했습니다. 다시 시도해 주세요.'), findsNothing);
@@ -359,7 +359,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pump();
     expect(find.text('정류장 조회 중...'), findsOneWidget);
-    await tester.tap(find.text('로그아웃'));
+    await tapInSettings(tester, '로그아웃');
     await tester.pump();
     backend.logoutGate.complete();
     await tester.pumpAndSettle();
@@ -398,19 +398,13 @@ void main() {
     await tester.pump();
     expect(auth.calls, 1);
     expect(find.text('로그인 중...'), findsOneWidget);
-    expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
-      isNull,
-    );
+    expect(googleOnTap(tester), isNull);
 
     auth.result.completeError(const BackendAuthException('서버 로그인이 실패했습니다.'));
     await tester.pump();
     expect(find.text('노선번호를 입력해 검색하세요.'), findsNothing);
     expect(find.text('서버 로그인이 실패했습니다.'), findsOneWidget);
-    expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
-      isNotNull,
-    );
+    expect(googleOnTap(tester), isNotNull);
   });
 
   testWidgets('Google과 Backend 로그인 및 저장 뒤에만 성공을 표시한다', (tester) async {
@@ -436,14 +430,11 @@ void main() {
       app(session(FakeAuthenticator(), storage, backend: backend)),
     );
     await tester.pumpAndSettle();
-    expect(find.text('로그아웃'), findsOneWidget);
-    await tester.tap(find.text('로그아웃'));
+    expect(find.byTooltip('설정'), findsOneWidget);
+    await tapInSettings(tester, '로그아웃');
     await tester.pump();
     expect(find.text('로그아웃 중...'), findsOneWidget);
-    expect(
-      tester.widget<ElevatedButton>(find.byType(ElevatedButton)).onPressed,
-      isNull,
-    );
+    expect(googleOnTap(tester), isNull);
     expect(backend.logoutCalls, 1);
     backend.logoutGate.complete();
     await tester.pumpAndSettle();
@@ -468,7 +459,7 @@ void main() {
     await tester.pump();
     expect(find.text('노선 검색 중...'), findsOneWidget);
 
-    await tester.tap(find.text('로그아웃'));
+    await tapInSettings(tester, '로그아웃');
     await tester.pump();
     backend.logoutGate.complete();
     await tester.pumpAndSettle();
@@ -566,7 +557,7 @@ void main() {
       await tester.pumpWidget(app(sessionForTest, alarmClient: alarms));
       await tester.pump();
       expect(find.text('알람 목록 조회 중...'), findsOneWidget);
-      await tester.tap(find.text('로그아웃'));
+      await tapInSettings(tester, '로그아웃');
       await tester.pump();
       backend.logoutGate.complete();
       await tester.pumpAndSettle();
@@ -600,7 +591,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey(15)));
     await tester.pump();
     expect(find.text('알람 조회 중...'), findsOneWidget);
-    await tester.tap(find.text('로그아웃'));
+    await tapInSettings(tester, '로그아웃');
     await tester.pump();
     backend.logoutGate.complete();
     await tester.pumpAndSettle();
@@ -646,7 +637,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.text('알람 시작'));
     await tester.pump();
-    await tester.tap(find.text('로그아웃'));
+    await tapInSettings(tester, '로그아웃');
     await tester.pump();
     backend.logoutGate.complete();
     await tester.pumpAndSettle();
@@ -679,7 +670,7 @@ void main() {
     await tester.tap(find.text('활성화'));
     await tester.pump();
     expect(alarms.activateCalls, 1);
-    await tester.tap(find.text('로그아웃'));
+    await tapInSettings(tester, '로그아웃');
     await tester.pump();
     backend.logoutGate.complete();
     await tester.pumpAndSettle();
@@ -689,3 +680,6 @@ void main() {
     expect(find.text('알람 상세'), findsNothing);
   });
 }
+
+GestureTapCallback? googleOnTap(WidgetTester tester) =>
+    tester.widget<InkWell>(find.byKey(const ValueKey('google-login'))).onTap;

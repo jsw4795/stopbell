@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import 'core/app_config.dart';
 import 'core/authenticated_api_client.dart';
@@ -26,6 +25,8 @@ import 'features/auth/google_auth_service.dart';
 import 'features/auth/token_pair_storage.dart';
 import 'features/auth/account_deletion_client.dart';
 import 'features/auth/account_deletion_controller.dart';
+import 'features/auth/login_view.dart';
+import 'features/settings/settings_screen.dart';
 import 'features/alarm/alarm_creation_intent.dart';
 import 'features/transit/bus_route.dart';
 import 'features/transit/bus_route_search_client.dart';
@@ -379,7 +380,9 @@ class _LoginScreenState extends State<LoginScreen> {
         ],
       ),
     );
-    if (confirmed == true && mounted) await widget.deletion?.start();
+    if (confirmed != true || !mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    await widget.deletion?.start();
   }
 
   Future<void> _login({Authenticator? authenticator}) async {
@@ -406,6 +409,18 @@ class _LoginScreenState extends State<LoginScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _openSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsScreen(
+          onLogout: _logout,
+          onDeleteAccount: widget.deletion == null ? null : _confirmDeletion,
+          pushProvider: widget.push?.provider,
+        ),
+      ),
+    );
   }
 
   Future<void> _logout() async {
@@ -514,17 +529,10 @@ class _LoginScreenState extends State<LoginScreen> {
             appBar: AppBar(
               title: const Text('StopBell'),
               actions: [
-                if (deletion != null)
-                  TextButton(
-                    style: TextButton.styleFrom(
-                      foregroundColor: Theme.of(context).colorScheme.error,
-                    ),
-                    onPressed: _isLoading ? null : _confirmDeletion,
-                    child: const Text('회원 탈퇴'),
-                  ),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _logout,
-                  child: const Text('로그아웃'),
+                IconButton(
+                  tooltip: '설정',
+                  icon: const Icon(Icons.settings_outlined),
+                  onPressed: _isLoading ? null : _openSettings,
                 ),
               ],
             ),
@@ -557,66 +565,22 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           );
         }
-        return Scaffold(
-          body: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'StopBell',
-                  style: Theme.of(context).textTheme.headlineLarge,
-                ),
-                const SizedBox(height: 24),
-                if (widget.authSession.state == AuthState.initializing)
-                  const Text('인증 상태 확인 중...')
-                else ...[
-                  ElevatedButton(
-                    onPressed: _isLoading ? null : () => _login(),
-                    child: const Text('Google로 계속하기'),
-                  ),
-                  if (widget.appleLoginEnabled &&
-                      widget.appleAuthenticator != null &&
-                      !kIsWeb &&
-                      defaultTargetPlatform == TargetPlatform.iOS) ...[
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: 240,
-                      child: SignInWithAppleButton(
-                        text: 'Apple로 계속하기',
-                        onPressed: _isLoading
-                            ? null
-                            : () => _login(
-                                authenticator: widget.appleAuthenticator,
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Google과 Apple 계정은 각각 별도로 관리됩니다.',
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                  if (_isLoading) ...[
-                    const SizedBox(height: 16),
-                    const CircularProgressIndicator(),
-                    Text(
-                      widget.authSession.isLoggingOut
-                          ? '로그아웃 중...'
-                          : '로그인 중...',
-                    ),
-                  ],
-                  if (_message != null) ...[
-                    const SizedBox(height: 16),
-                    Text(_message!, textAlign: TextAlign.center),
-                  ],
-                  if (deletion?.message != null) ...[
-                    const SizedBox(height: 16),
-                    Text(deletion!.message!, textAlign: TextAlign.center),
-                  ],
-                ],
-              ],
-            ),
-          ),
+        final appleAvailable =
+            widget.appleLoginEnabled &&
+            widget.appleAuthenticator != null &&
+            !kIsWeb &&
+            defaultTargetPlatform == TargetPlatform.iOS;
+        return LoginView(
+          initializing: widget.authSession.state == AuthState.initializing,
+          loading: _isLoading,
+          loadingMessage: widget.authSession.isLoggingOut
+              ? '로그아웃 중...'
+              : '로그인 중...',
+          onGoogle: () => _login(),
+          onApple: appleAvailable
+              ? () => _login(authenticator: widget.appleAuthenticator)
+              : null,
+          messages: [?_message, ?deletion?.message],
         );
       },
     );

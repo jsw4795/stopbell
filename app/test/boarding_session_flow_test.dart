@@ -3,6 +3,9 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'settings_test_helper.dart';
+
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:stopbell/core/authenticated_api_client.dart';
@@ -296,6 +299,7 @@ void main() {
       sessionResponse = (_) => result.future;
       await tap(tester, '이 차량으로 하차 알림 설정');
       await tap(tester, '알림 없이 계속');
+      await openSettings(tester);
       await tap(tester, '로그아웃');
       result.complete(boardingJson(sessionJson(), 201));
       await tester.pumpAndSettle();

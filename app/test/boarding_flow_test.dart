@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'settings_test_helper.dart';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -228,7 +231,7 @@ void main() {
       candidateResponse = (_) => pending.future;
       await start(tester);
       expect(find.text('차량 후보를 조회하고 있어요.'), findsOneWidget);
-      await tester.tap(find.text('로그아웃'));
+      await tapInSettings(tester, '로그아웃');
       await tester.pumpAndSettle();
       expect(find.text('Google로 계속하기'), findsOneWidget);
       await tester.tap(find.text('Google로 계속하기'));
