@@ -299,8 +299,9 @@ void main() {
       sessionResponse = (_) => result.future;
       await tap(tester, '이 차량으로 하차 알림 설정');
       await tap(tester, '알림 없이 계속');
-      await openSettings(tester);
-      await tap(tester, '로그아웃');
+      await tapInSettings(tester, '로그아웃');
+      await tester.pumpAndSettle();
+      expect(find.text('Google로 계속하기'), findsOneWidget);
       result.complete(boardingJson(sessionJson(), 201));
       await tester.pumpAndSettle();
       expect(find.text('Google로 계속하기'), findsOneWidget);
