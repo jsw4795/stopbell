@@ -152,8 +152,14 @@ void main() {
       expect(find.text('승차까지 5정거장'), findsOneWidget);
       expect(find.text('목표까지 8정거장'), findsOneWidget);
       expect(find.textContaining('12석 · 여유'), findsNWidgets(2));
-      // 버스가 없는 연속 4개 구간(정류장14~17)만 접힌다.
-      expect(find.text('· · ·  정류장 4개'), findsOneWidget);
+      // 버스·승차·목표 주변 외 구간은 접힌다.
+      expect(find.text('· · ·  정류장 6개'), findsOneWidget);
+      // 버스 주변·승차·목표만 보이고 나머지는 1개여도 접는다.
+      expect(find.text('· · ·  정류장 1개'), findsOneWidget);
+      expect(find.text('· · ·  정류장 3개'), findsNWidgets(2));
+      expect(find.text('정류장12'), findsOneWidget); // 출발 버스의 출발 정류장
+      expect(find.text('정류장13'), findsOneWidget); // 다음 정류장
+      expect(find.text('정류장11'), findsNothing);
       expect(find.text('정류장15'), findsNothing);
       // 목표 이후 정류장은 그리지 않는다.
       expect(find.text('정류장21'), findsNothing);
@@ -161,13 +167,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('boarding-bus-collapsed-13')));
       await tester.pump();
       expect(find.text('정류장15'), findsOneWidget);
-      expect(find.textContaining('정류장 4개'), findsNothing);
+      expect(find.textContaining('정류장 6개'), findsNothing);
 
       // 다시 탭하면 접힌다(왕복).
       await tester.tap(find.byKey(const ValueKey('boarding-bus-fold-13')));
       await tester.pump();
       expect(find.text('정류장15'), findsNothing);
-      expect(find.text('· · ·  정류장 4개'), findsOneWidget);
+      expect(find.text('· · ·  정류장 6개'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('boarding-bus-collapsed-13')));
       await tester.pump();
       expect(find.text('정류장15'), findsOneWidget);
@@ -198,7 +204,7 @@ void main() {
       // 도착: 마커는 정류장 이름 행에 있고 카드는 그 위로 비켜 있다.
       expect(tester.getRect(arrived).bottom, lessThan(arrivedMarker.top));
       expect(find.text('정류장5'), findsOneWidget);
-      expect(find.text('도착'), findsOneWidget);
+      expect(find.text('도착'), findsNothing);
       // 좌석·혼잡도는 두 카드 모두 번호 줄 오른쪽, 체크 원은 카드 세로 중앙이다.
       for (final number in ['서울70사1234', '경기70아5678']) {
         final c = card(number);

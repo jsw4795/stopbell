@@ -84,8 +84,6 @@ class BoardingBusTimeline extends StatefulWidget {
 }
 
 class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
-  static const _minCollapsed = 4;
-  static const _near = 2;
   static const _railWidth = 56.0;
   static const _centerY = 22.0;
   final _boardingKey = GlobalKey();
@@ -115,12 +113,13 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
           .putIfAbsent(index[bus.vehicle.occurrenceId]!, () => [])
           .add(bus);
     }
+    // 기준점(승차·목표)과 버스 주변만 보인다: 도착 버스는 앞·뒤 1개, 출발 버스는
+    // 출발한 정류장과 다음 정류장. 나머지는 개수와 무관하게 접는다.
     final big = <int>{
-      0,
-      for (var i = boarding - _near; i <= boarding + _near; i++) i,
-      for (var i = target - _near; i <= target + _near; i++) i,
-      for (final i in [...atStop.keys, ...between.keys])
-        for (var j = i - 1; j <= i + 1; j++) j,
+      boarding,
+      target,
+      for (final i in atStop.keys) ...[i - 1, i, i + 1],
+      for (final i in between.keys) ...[i, i + 1],
     }..removeWhere((i) => i < 0 || i > target);
 
     final rows = <Widget>[];
@@ -139,12 +138,10 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
         end++;
       }
       final count = end - i + 1;
-      if (count >= _minCollapsed && !_expanded.contains(i)) {
+      if (!_expanded.contains(i)) {
         rows.add(_collapsedRow(i, count, boarding, target));
       } else {
-        if (count >= _minCollapsed) {
-          rows.add(_foldRow(i, count, boarding, target));
-        }
+        rows.add(_foldRow(i, count, boarding, target));
         for (var j = i; j <= end; j++) {
           rows.add(_stopRow(j, boarding, target, false, null));
         }
@@ -248,6 +245,9 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
 
   /// 카드 위치: 레일에서 떨어진 왼쪽 시작선. 마커와 카드는 연결선으로 이어진다.
   static const _cardLeft = 68.0;
+
+  /// halo(지름 40) 바깥 반경. 선택 시 확대된 마커(약 16)보다 크다.
+  static const _markerReach = 20.0;
   static const _minCardHeight = 64.0;
   static const _cardGap = StopBellSpacing.sm;
 
@@ -340,13 +340,6 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
               ),
               style: style,
             ),
-            if (arrived)
-              Text(
-                '도착',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: widget.vehicleColor,
-                ),
-              ),
           ],
         ),
       ),
@@ -399,7 +392,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
             Positioned.fill(
               child: _connector(
                 bus,
-                (_) => Offset(_railWidth / 2 + 10, markerY - 10),
+                (_) => Offset(_railWidth / 2, markerY),
                 (_) =>
                     Offset(_cardLeft, _cardGap + k * (_cardGap + h) + h - 12),
               ),
@@ -437,7 +430,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
         Positioned.fill(
           child: _connector(
             bus,
-            (size) => Offset(_railWidth / 2 + 16, size.height / 2),
+            (size) => Offset(_railWidth / 2, size.height / 2),
             (size) => Offset(_cardLeft, size.height / 2),
           ),
         ),
@@ -453,11 +446,18 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
   }
 
   /// 마커와 카드를 잇는 선. 탭하면 카드와 같이 그 버스를 선택한다.
+  /// 선은 마커 중심이 아니라 선택 시 확대·halo까지 포함한 마커 외곽
+  /// ([_markerReach])에서 시작해 원 안으로 겹치지 않는다.
   Widget _connector(
     BoardingBusEntry bus,
-    Offset Function(Size) from,
+    Offset Function(Size) center,
     Offset Function(Size) to,
   ) {
+    Offset from(Size size) {
+      final c = center(size), t = to(size);
+      return c + (t - c) / (t - c).distance * _markerReach;
+    }
+
     final selected = identical(bus.candidate, widget.selected);
     final color = widget.vehicleColor;
     return GestureDetector(
