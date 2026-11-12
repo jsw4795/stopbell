@@ -96,6 +96,19 @@ void main() {
         }
       });
 
+      test('Seoul N route without official type is night bus (navy)', () {
+        final night = present('SEOUL_BUS', null, number: 'N61');
+        expect(night.label, '심야');
+        expect(night.color, expectedColor((0xff2b2f77, 0xffb8b8ff)));
+        final typed = present('SEOUL_BUS', 'TRUNK', number: 'N61');
+        expect(typed.label, '간선');
+        expect(typed.color, expectedColor((0xff194bb5, 0xffa6c0ff)));
+        final gyeonggi = present('TAGO', 'CITY_LOCAL', number: 'N61');
+        expect(gyeonggi.label, '일반형시내');
+        expect(gyeonggi.color, expectedColor(green));
+        expectNeutral('SEOUL_BUS', null);
+      });
+
       test('missing and unknown provider or type fall back safely', () {
         for (final provider in ['TAGO', 'SEOUL_BUS', null, 'OTHER']) {
           for (final type in [null, 'FUTURE', 'LOCAL', '50']) {

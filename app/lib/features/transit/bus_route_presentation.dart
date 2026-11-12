@@ -55,6 +55,12 @@ class BusRoutePresentation {
         'VILLAGE' => BusRoutePresentation('마을', neutral),
         'AIRPORT' => BusRoutePresentation('공항', neutral),
         'TOUR' => BusRoutePresentation('관광', neutral),
+        // 공식 유형이 없는 서울 N번 노선은 심야(올빼미)버스다. 공식 색은 미확인이라
+        // 다른 유형과 겹치지 않는 남색 계열을 쓴다.
+        null when route.routeNumber.startsWith('N') => BusRoutePresentation(
+          '심야',
+          dark ? const Color(0xffb8b8ff) : const Color(0xff2b2f77),
+        ),
         _ => BusRoutePresentation(null, neutral),
       };
     }
