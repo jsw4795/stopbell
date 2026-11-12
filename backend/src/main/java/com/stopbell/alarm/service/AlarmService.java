@@ -4,6 +4,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -22,6 +23,7 @@ import com.stopbell.notification.repository.NotificationDeliveryRepository;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
 import com.stopbell.transit.entity.BusStop;
+import com.stopbell.transit.domain.BusRouteType;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.repository.BusRouteRepository;
 import com.stopbell.transit.repository.BusRouteStopOccurrenceRepository;
@@ -167,13 +169,13 @@ public class AlarmService {
 
     private List<AlarmResponse> toResponses(List<Alarm> alarms) {
         List<BusAlarmTarget> targets = alarms.stream().map(AlarmService::busTarget).toList();
-        Map<String, BusRouteEndpointResolver.Endpoints> endpoints = endpoints(targets);
+        Map<String, RouteDisplay> displays = routeDisplays(targets);
         List<AlarmResponse> responses = new ArrayList<>(alarms.size());
         for (int index = 0; index < alarms.size(); index++) {
             Alarm alarm = alarms.get(index);
             BusAlarmTarget busTarget = targets.get(index);
-            var routeEndpoints = endpoints.getOrDefault(routeKey(busTarget.getProvider(), busTarget.getExternalRouteId()),
-                    BusRouteEndpointResolver.Endpoints.UNKNOWN);
+            RouteDisplay display = displays.getOrDefault(
+                    routeKey(busTarget.getProvider(), busTarget.getExternalRouteId()), RouteDisplay.UNKNOWN);
             responses.add(new AlarmResponse(
                     alarm.getId(),
                     alarm.getTransitType(),
@@ -182,17 +184,19 @@ public class AlarmService {
                     busTarget.getStopName(),
                     busTarget.isNotifyOneStopBefore(),
                     busTarget.isNotifyOneStopAfter(),
-                    routeEndpoints.start(),
-                    routeEndpoints.end()
+                    display.endpoints().start(),
+                    display.endpoints().end(),
+                    display.provider(),
+                    display.routeType()
             ));
         }
         return responses;
     }
 
     /**
-     * 생성 당시 snapshot과 노선번호·지역이 같은 현재 노선의 공식 기·종점만 표시용으로 제공한다.
+     * 생성 당시 snapshot과 노선번호·지역이 같은 현재 노선의 공식 기·종점과 노선 유형만 표시용으로 제공한다.
      */
-    private Map<String, BusRouteEndpointResolver.Endpoints> endpoints(List<BusAlarmTarget> targets) {
+    private Map<String, RouteDisplay> routeDisplays(List<BusAlarmTarget> targets) {
         Map<TransitProvider, List<String>> idsByProvider = targets.stream().collect(Collectors.groupingBy(
                 BusAlarmTarget::getProvider,
                 Collectors.mapping(BusAlarmTarget::getExternalRouteId, Collectors.toList())));
@@ -201,21 +205,26 @@ public class AlarmService {
                 routeRepository.findAllByProviderAndExternalRouteIdIn(provider, distinct(ids))));
         Map<String, BusRoute> routesByKey = routes.stream().collect(Collectors.toMap(
                 route -> routeKey(route.getProvider(), route.getExternalRouteId()), route -> route));
-        List<BusRoute> matched = targets.stream()
-                .filter(target -> matches(routesByKey.get(routeKey(target.getProvider(), target.getExternalRouteId())), target))
-                .map(target -> routesByKey.get(routeKey(target.getProvider(), target.getExternalRouteId())))
-                .distinct()
-                .toList();
+        Map<String, BusRoute> matched = new HashMap<>();
+        for (BusAlarmTarget target : targets) {
+            String key = routeKey(target.getProvider(), target.getExternalRouteId());
+            BusRoute route = routesByKey.get(key);
+            if (matches(route, target)) matched.putIfAbsent(key, route);
+        }
         if (matched.isEmpty()) return Map.of();
-        Map<Long, BusRouteEndpointResolver.Endpoints> byRouteId = endpointResolver.resolveForDisplay(matched);
-        return targets.stream()
-                .filter(target -> matches(routesByKey.get(routeKey(target.getProvider(), target.getExternalRouteId())), target))
-                .collect(Collectors.toMap(
-                        target -> routeKey(target.getProvider(), target.getExternalRouteId()),
-                        target -> byRouteId.getOrDefault(
-                                routesByKey.get(routeKey(target.getProvider(), target.getExternalRouteId())).getId(),
-                                BusRouteEndpointResolver.Endpoints.UNKNOWN),
-                        (first, second) -> first));
+        Map<Long, BusRouteEndpointResolver.Endpoints> endpoints =
+                endpointResolver.resolveForDisplay(List.copyOf(new java.util.LinkedHashSet<>(matched.values())));
+        Map<String, RouteDisplay> result = new HashMap<>();
+        matched.forEach((key, route) -> result.put(key, new RouteDisplay(
+                endpoints.getOrDefault(route.getId(), BusRouteEndpointResolver.Endpoints.UNKNOWN),
+                route.getProvider(), route.getRouteType())));
+        return result;
+    }
+
+    private record RouteDisplay(BusRouteEndpointResolver.Endpoints endpoints, TransitProvider provider,
+            BusRouteType routeType) {
+        private static final RouteDisplay UNKNOWN =
+                new RouteDisplay(BusRouteEndpointResolver.Endpoints.UNKNOWN, null, null);
     }
 
     private static boolean matches(BusRoute route, BusAlarmTarget target) {

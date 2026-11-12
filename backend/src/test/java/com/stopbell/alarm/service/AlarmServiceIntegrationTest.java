@@ -121,7 +121,8 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         assertThat(target.getSuccessorExternalStopId()).isEqualTo(route.lastExternalStopId());
         assertThat(target.getSuccessorStopOrder()).isEqualTo(7);
         assertThat(response).isEqualTo(new AlarmResponse(
-                alarm.getId(), TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", true, true, null, null
+                alarm.getId(), TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", true, true, null, null,
+                TransitProvider.TAGO, null
         ));
     }
 
@@ -886,7 +887,8 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         try {
             statistics.clear();
             assertThat(alarmService.findById(owner.getId(), alarmId)).isEqualTo(new AlarmResponse(
-                    alarmId, TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", false, false, null, null
+                    alarmId, TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", false, false, null, null,
+                    TransitProvider.TAGO, null
             ));
             // Alarm·BusAlarmTarget 1회 + 표시용 현재 노선 1회 + TAGO 노선 원본 1회
             assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
@@ -896,7 +898,7 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
     }
 
     @Test
-    @DisplayName("Alarm 목록은 생성 당시 노선과 일치하는 공식 기종점만 고정된 쿼리 수로 제공한다")
+    @DisplayName("Alarm 목록은 생성 당시 노선과 일치하는 공식 기종점과 노선 유형만 고정된 쿼리 수로 제공한다")
     void list_alarms_with_official_route_endpoints() throws Exception {
         User owner = user();
         RouteFixture verified = route();
@@ -915,6 +917,9 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         BusRoute changed = routeRepository.findByProviderAndExternalRouteId(TransitProvider.TAGO, renumbered.externalRouteId())
                 .orElseThrow();
         changed.updateMetadata("7000A", changed.getCityCode());
+        BusRoute typed = routeRepository.findByProviderAndExternalRouteId(TransitProvider.TAGO, verified.externalRouteId())
+                .orElseThrow();
+        typed.updateRouteType(com.stopbell.transit.domain.BusRouteType.CITY_LOCAL);
         entityManager.flush();
         entityManager.clear();
 
@@ -930,12 +935,19 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
                     .satisfies(alarm -> {
                         assertThat(alarm.startStopName()).isEqualTo("평내신명.대주");
                         assertThat(alarm.endStopName()).isEqualTo("상봉역");
+                        assertThat(alarm.provider()).isEqualTo(TransitProvider.TAGO);
+                        assertThat(alarm.routeType()).isEqualTo(com.stopbell.transit.domain.BusRouteType.CITY_LOCAL);
                     });
             assertThat(alarms).filteredOn(alarm -> alarm.id().equals(renumberedId) || alarm.id().equals(unknownId))
                     .hasSize(2)
                     .allSatisfy(alarm -> {
                         assertThat(alarm.startStopName()).isNull();
                         assertThat(alarm.endStopName()).isNull();
+                    });
+            assertThat(alarms).filteredOn(alarm -> alarm.id().equals(renumberedId)).singleElement()
+                    .satisfies(alarm -> {
+                        assertThat(alarm.provider()).isNull();
+                        assertThat(alarm.routeType()).isNull();
                     });
         } finally {
             statistics.setStatisticsEnabled(originallyEnabled);
@@ -946,6 +958,8 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.startStopName").value("평내신명.대주"))
                 .andExpect(jsonPath("$.endStopName").value("상봉역"))
+                .andExpect(jsonPath("$.provider").value("TAGO"))
+                .andExpect(jsonPath("$.routeType").value("CITY_LOCAL"))
                 .andExpect(jsonPath("$.externalRouteId").doesNotExist());
     }
 

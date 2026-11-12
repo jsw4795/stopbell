@@ -232,6 +232,16 @@ class _AlarmHomeState extends State<AlarmHome> {
                     epoch == _navigationEpoch &&
                     _page == _Page.list,
               ),
+        refreshSession: widget.boardingSessionClient == null
+            ? null
+            : (id) => widget.boardingSessionClient!.find(
+                id,
+                generation: _sessionGeneration,
+                current: () =>
+                    _current &&
+                    epoch == _navigationEpoch &&
+                    _page == _Page.list,
+              ),
         onCreateArrival: () {
           if (_current && !_creation.blocked) {
             setState(() {

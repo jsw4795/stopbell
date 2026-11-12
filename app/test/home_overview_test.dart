@@ -5,7 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/alarm/alarm.dart';
 import 'package:stopbell/features/alarm/home_overview.dart';
+import 'package:stopbell/features/boarding/boarding_session.dart';
 import 'package:stopbell/features/boarding/boarding_session_client.dart';
+import 'package:stopbell/features/transit/bus_route_presentation.dart';
+import 'package:stopbell/features/transit/bus_route.dart';
 
 import 'boarding_session_test_fakes.dart';
 
@@ -24,6 +27,7 @@ Alarm alarm(int id, AlarmStatus status, {String? start, String? end}) => Alarm(
 Widget home({
   required Future<List<Alarm>> Function() alarms,
   Future<BoardingSessionOverview> Function()? sessions,
+  Future<BoardingSession> Function(int)? refreshSession,
   VoidCallback? onCreateArrival,
   VoidCallback? onCreateBoarding,
   ValueChanged<int>? onOpenAlarm,
@@ -36,6 +40,7 @@ Widget home({
     body: HomeOverview(
       findAlarms: alarms,
       findSessions: sessions,
+      refreshSession: refreshSession,
       onCreateArrival: onCreateArrival ?? () {},
       onCreateBoarding: onCreateBoarding,
       onOpenAlarm: onOpenAlarm ?? (_) {},
@@ -267,6 +272,158 @@ void main() {
     expect(calls, 2);
     expect(find.text('진행 중인 하차 알람'), findsNothing);
     expect(find.text('하차 알람 상태를 불러오지 못했어요.'), findsNothing);
+  });
+
+  Color? textColor(WidgetTester tester, String text) =>
+      tester.widget<Text>(find.text(text)).style?.color;
+
+  testWidgets('검증된 노선 유형만 버스 번호와 아이콘에 유형색을 적용한다', (tester) async {
+    await tester.pumpWidget(
+      home(
+        alarms: () async => [
+          Alarm(
+            id: 1,
+            transitType: AlarmTransitType.bus,
+            status: AlarmStatus.active,
+            routeNumber: '165',
+            stopName: '상봉역',
+            notifyOneStopBefore: false,
+            notifyOneStopAfter: false,
+            provider: 'TAGO',
+            routeType: 'CITY_LOCAL',
+          ),
+          Alarm(
+            id: 2,
+            transitType: AlarmTransitType.bus,
+            status: AlarmStatus.active,
+            routeNumber: '7000',
+            stopName: '사색의광장',
+            notifyOneStopBefore: false,
+            notifyOneStopAfter: false,
+          ),
+        ],
+        sessions: () async => BoardingSessionOverview(
+          current: BoardingSession.fromJson(timelineSessionJson(id: 9)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final green = BusRoutePresentation.forRoute(
+      const BusRoute(
+        id: 1,
+        routeNumber: '165',
+        regionName: '-',
+        provider: 'TAGO',
+        routeType: 'CITY_LOCAL',
+      ),
+      Brightness.light,
+    ).color;
+    expect(textColor(tester, '165'), green);
+    expect(
+      tester
+          .widget<Text>(
+            find.descendant(
+              of: find.byKey(const ValueKey(2)),
+              matching: find.text('7000'),
+            ),
+          )
+          .style
+          ?.color,
+      isNot(green),
+    );
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.place_outlined).first).color,
+      green,
+    );
+    expect(find.text('일반형시내'), findsNothing);
+    final sessionNumber = find.descendant(
+      of: find.byKey(const ValueKey(('session', 9))),
+      matching: find.text('7000'),
+    );
+    expect(tester.widget<Text>(sessionNumber).style?.color, green);
+  });
+
+  testWidgets('진행 중 TRACKING 세션은 20초마다 정확한 ID로 다시 읽고 종료되면 멈춘다', (tester) async {
+    final reads = <int>[];
+    var next = sessionFixture(id: 7, gap: 2);
+    await tester.pumpWidget(
+      home(
+        alarms: () async => [],
+        sessions: () async =>
+            BoardingSessionOverview(current: sessionFixture(id: 7, gap: 4)),
+        refreshSession: (id) async {
+          reads.add(id);
+          return next;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('4개 지점 남음'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 19));
+    expect(reads, isEmpty);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(reads, [7]);
+    expect(find.text('2개 지점 남음'), findsOneWidget);
+    next = sessionFixture(
+      id: 7,
+      status: 'COMPLETED',
+      evaluation: 'ENDED',
+      gap: null,
+    );
+    await tester.pump(const Duration(seconds: 20));
+    await tester.pump();
+    expect(reads, [7, 7]);
+    expect(find.text('최근 종료된 하차 알람'), findsOneWidget);
+    expect(find.text('종료'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 60));
+    expect(reads, [7, 7]);
+  });
+
+  testWidgets('보류 세션과 background에서는 자동으로 다시 읽지 않는다', (tester) async {
+    final reads = <int>[];
+    await tester.pumpWidget(
+      home(
+        alarms: () async => [],
+        sessions: () async =>
+            BoardingSessionOverview(current: sessionFixture(id: 7)),
+        refreshSession: (id) async {
+          reads.add(id);
+          return sessionFixture(id: id);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump(const Duration(seconds: 45));
+    expect(reads, isEmpty);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(reads, [7]);
+
+    await tester.pumpWidget(const SizedBox());
+    reads.clear();
+    await tester.pumpWidget(
+      home(
+        alarms: () async => [],
+        sessions: () async => BoardingSessionOverview(
+          current: sessionFixture(
+            id: 8,
+            status: 'SUSPENDED',
+            evaluation: 'HELD',
+            reason: 'VEHICLE_MISSING',
+            gap: null,
+          ),
+        ),
+        refreshSession: (id) async {
+          reads.add(id);
+          return sessionFixture(id: id);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 45));
+    expect(reads, isEmpty);
   });
 
   for (final dark in [false, true]) {

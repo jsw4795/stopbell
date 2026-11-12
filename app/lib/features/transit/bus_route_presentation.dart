@@ -24,9 +24,16 @@ class BusRoutePresentation {
   final String? label;
   final Color color;
 
+  /// 공식 유형에 근거한 색이 배정됐는지 여부. 미분류·미검증 유형은 중립색이다.
+  bool hasTypeColor(Brightness brightness) => color != neutral(brightness);
+
+  static Color neutral(Brightness brightness) => brightness == Brightness.dark
+      ? const Color(0xffb0b0b0)
+      : const Color(0xff666666);
+
   factory BusRoutePresentation.forRoute(BusRoute route, Brightness brightness) {
     final dark = brightness == Brightness.dark;
-    final neutral = dark ? const Color(0xffb0b0b0) : const Color(0xff666666);
+    final neutral = BusRoutePresentation.neutral(brightness);
     if (route.provider == 'SEOUL_BUS') {
       return switch (route.routeType) {
         'TRUNK' => BusRoutePresentation(

@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import 'boarding_session.dart';
 import 'boarding_session_controller.dart';
 
+/// 하차 세션 화면 공통 자동 조회 주기(상세·홈).
+const boardingSessionAutoRefreshInterval = Duration(seconds: 20);
+
 /// The timer belongs to the visible detail, not the longer-lived controller.
 class BoardingSessionAutoRefresh extends StatefulWidget {
   const BoardingSessionAutoRefresh({
@@ -74,7 +77,10 @@ class _BoardingSessionAutoRefreshState extends State<BoardingSessionAutoRefresh>
   void _schedule() {
     _timer?.cancel();
     if (_visible) {
-      _timer = Timer.periodic(const Duration(seconds: 20), (_) => _poll());
+      _timer = Timer.periodic(
+        boardingSessionAutoRefreshInterval,
+        (_) => _poll(),
+      );
     }
   }
 
@@ -117,7 +123,10 @@ class _BoardingSessionAutoRefreshState extends State<BoardingSessionAutoRefresh>
       _manualToken = widget.controller.manualRefreshToken;
       _schedule();
     }
-    _timer ??= Timer.periodic(const Duration(seconds: 20), (_) => _poll());
+    _timer ??= Timer.periodic(
+      boardingSessionAutoRefreshInterval,
+      (_) => _poll(),
+    );
     if (_pending &&
         !widget.controller.autoRefreshing &&
         !widget.controller.refreshing &&

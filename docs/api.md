@@ -74,7 +74,9 @@ JWT Access Token이 필요한 Application API다. `query`는 trim한 뒤 노선�
     "routeType": null,
     "regionCategory": "경기",
     "startStopName": null,
-    "endStopName": null
+    "endStopName": null,
+    "provider": null,
+    "routeType": null
   }
 ]
 ```
@@ -151,11 +153,13 @@ Request body:
   "notifyOneStopBefore": true,
   "notifyOneStopAfter": false,
   "startStopName": "수원역",
-  "endStopName": "사색의광장"
+  "endStopName": "사색의광장",
+  "provider": "TAGO",
+  "routeType": "CITY_LOCAL"
 }
 ```
 
-`startStopName`·`endStopName`(UI-5)은 nullable 표시 전용 노선 기·종점이며 모든 Alarm response(생성·생성 결과 조회·목록·상세·활성화·비활성화)에 포함된다. Alarm snapshot의 Provider·외부 노선 ID로 현재 노선을 찾고 노선번호와 `cityCode`가 snapshot과 같을 때만 [버스 노선 검색](#버스-노선-검색)과 같은 공식 원본 기·종점 규칙(TAGO 노선 원본, 서울 TOPIS 기종점)을 적용한다. 노선이 없거나 달라졌거나 원본이 없거나 두 이름이 같으면 둘 다 null이며 추측하지 않는다. 기존 Client는 이 필드를 무시해도 되고 Alarm 판정·알림에는 사용하지 않는다.
+`startStopName`·`endStopName`(UI-5)은 nullable 표시 전용 노선 기·종점이며, `provider`·`routeType`은 같은 일치 조건에서만 제공하는 nullable 현재 노선 Provider와 공식 노선 유형(검색 응답과 같은 값)이다. 기·종점과 유형은 모든 Alarm response(생성·생성 결과 조회·목록·상세·활성화·비활성화)에 포함된다. Alarm snapshot의 Provider·외부 노선 ID로 현재 노선을 찾고 노선번호와 `cityCode`가 snapshot과 같을 때만 [버스 노선 검색](#버스-노선-검색)과 같은 공식 원본 기·종점 규칙(TAGO 노선 원본, 서울 TOPIS 기종점)을 적용한다. 노선이 없거나 달라졌거나 원본이 없거나 두 이름이 같으면 둘 다 null이며 추측하지 않는다. 기존 Client는 이 필드를 무시해도 되고 Alarm 판정·알림에는 사용하지 않는다.
 
 `targetStopOccurrenceId`가 존재하지 않으면 `404 Not Found`다. 첫 occurrence에 `notifyOneStopBefore: true` 또는 마지막 occurrence에 `notifyOneStopAfter: true`를 요청하면 `400 Bad Request`다. Backend는 해당 option을 `false`로 변경해 생성하지 않는다. first/last 판정은 `stopOrder`가 1 또는 최대값인지가 아니라 predecessor/successor occurrence의 실제 존재 여부를 사용한다.
 

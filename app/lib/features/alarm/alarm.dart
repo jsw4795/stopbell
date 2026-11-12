@@ -13,6 +13,8 @@ class Alarm {
     required this.notifyOneStopAfter,
     this.startStopName,
     this.endStopName,
+    this.provider,
+    this.routeType,
   });
 
   final int id;
@@ -26,6 +28,10 @@ class Alarm {
   /// 공식 원본에서 검증된 노선 기·종점. 확인할 수 없으면 둘 다 null이다.
   final String? startStopName;
   final String? endStopName;
+
+  /// 현재 노선과 snapshot이 일치할 때의 공식 Provider·노선 유형. 표시 색에만 사용한다.
+  final String? provider;
+  final String? routeType;
 
   factory Alarm.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) throw const FormatException();
@@ -68,6 +74,8 @@ class Alarm {
       notifyOneStopAfter: after,
       startStopName: hasEndpoints ? start : null,
       endStopName: hasEndpoints ? end : null,
+      provider: _optionalText(value['provider']),
+      routeType: _optionalText(value['routeType']),
     );
   }
 

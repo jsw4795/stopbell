@@ -418,7 +418,10 @@ void main() {
       final receiver = TestReceiver();
       receiver.initial.complete(const RemoteMessage(data: sessionHint));
       final lifecycle = NotificationLifecycle(f.auth, receiver: receiver);
-      final api = FakeBoardingSessions()..currentSession = sessionFixture();
+      // 홈 요약은 비워 두어 resume 시 홈 자동 갱신이 알림 상세 조회 횟수에 섞이지 않게 한다.
+      final api = FakeBoardingSessions()
+        ..currentSession = sessionFixture()
+        ..onOverview = () async => const BoardingSessionOverview();
       final push = PushRegistrationService(
         auth: f.auth,
         storage: f.storage,

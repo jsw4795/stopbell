@@ -1,12 +1,39 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
 import '../../core/theme/stopbell_spacing.dart';
 import '../boarding/boarding_session.dart';
+import '../boarding/boarding_session_auto_refresh.dart';
 import '../boarding/boarding_session_client.dart';
+import '../transit/bus_route.dart';
+import '../transit/bus_route_presentation.dart';
 import 'alarm.dart';
 
 enum _LoadState { loading, ready, error }
+
+/// 검증된 공식 노선 유형색. 미분류면 null이며 기본 색을 유지한다.
+Color? _routeTypeColor(
+  BuildContext context,
+  String routeNumber,
+  String? provider,
+  String? routeType,
+) {
+  if (provider == null || routeType == null) return null;
+  final brightness = Theme.of(context).brightness;
+  final presentation = BusRoutePresentation.forRoute(
+    BusRoute(
+      id: 1,
+      routeNumber: routeNumber,
+      regionName: '-',
+      provider: provider,
+      routeType: routeType,
+    ),
+    brightness,
+  );
+  return presentation.hasTypeColor(brightness) ? presentation.color : null;
+}
 
 /// UI-5 홈: 생성 진입 카드, 하차 추적 세션 요약, 도착 알람 목록.
 ///
@@ -19,6 +46,7 @@ class HomeOverview extends StatefulWidget {
     required this.onCreateArrival,
     required this.onOpenAlarm,
     this.findSessions,
+    this.refreshSession,
     this.onCreateBoarding,
     this.onOpenCurrentSession,
     this.onOpenEndedSession,
@@ -28,6 +56,9 @@ class HomeOverview extends StatefulWidget {
 
   final Future<List<Alarm>> Function() findAlarms;
   final Future<BoardingSessionOverview> Function()? findSessions;
+
+  /// 진행 중 세션의 정확한 ID 조회. 상세 화면 자동 갱신과 같은 주기로 사용한다.
+  final Future<BoardingSession> Function(int sessionId)? refreshSession;
   final VoidCallback onCreateArrival;
   final VoidCallback? onCreateBoarding;
   final ValueChanged<int> onOpenAlarm;
@@ -40,16 +71,22 @@ class HomeOverview extends StatefulWidget {
   State<HomeOverview> createState() => _HomeOverviewState();
 }
 
-class _HomeOverviewState extends State<HomeOverview> {
+class _HomeOverviewState extends State<HomeOverview>
+    with WidgetsBindingObserver {
   _LoadState _alarmState = _LoadState.loading;
   _LoadState _sessionState = _LoadState.loading;
   List<Alarm> _alarms = const [];
   BoardingSessionOverview _sessions = const BoardingSessionOverview();
   int _alarmEpoch = 0, _sessionEpoch = 0;
+  Timer? _sessionTimer;
+  bool _foreground = true, _sessionPolling = false;
 
   @override
   void initState() {
     super.initState();
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    WidgetsBinding.instance.addObserver(this);
     // 알림 탭 이동은 상위 화면의 첫 post-frame에서 처리된다. 그 뒤에 조회해
     // 이미 다른 화면으로 이동한 경우 세션 조회가 현재 문맥 검사로 생략되게 한다.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -63,7 +100,78 @@ class _HomeOverviewState extends State<HomeOverview> {
   void dispose() {
     _alarmEpoch++;
     _sessionEpoch++;
+    _sessionTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    _scheduleSessionRefresh();
+    if (_foreground) _pollSession();
+  }
+
+  BoardingSession? get _trackingSession {
+    final current = _sessions.current;
+    return _sessionState == _LoadState.ready &&
+            current?.status == BoardingSessionStatus.tracking
+        ? current
+        : null;
+  }
+
+  /// 표시 중인 foreground 홈에서 TRACKING 세션이 있을 때만 상세 화면과 같은
+  /// 주기로 서버에 저장된 세션을 다시 읽는다. Provider 호출은 하지 않는다.
+  void _scheduleSessionRefresh() {
+    final active =
+        mounted &&
+        _foreground &&
+        widget.refreshSession != null &&
+        _trackingSession != null;
+    if (!active) {
+      _sessionTimer?.cancel();
+      _sessionTimer = null;
+      return;
+    }
+    _sessionTimer ??= Timer.periodic(
+      boardingSessionAutoRefreshInterval,
+      (_) => _pollSession(),
+    );
+  }
+
+  Future<void> _pollSession() async {
+    final refresh = widget.refreshSession;
+    final tracking = _trackingSession;
+    if (refresh == null ||
+        tracking == null ||
+        !_foreground ||
+        _sessionPolling ||
+        !(ModalRoute.of(context)?.isCurrent ?? true)) {
+      return;
+    }
+    final epoch = _sessionEpoch;
+    _sessionPolling = true;
+    try {
+      final latest = await refresh(tracking.id);
+      if (!mounted || epoch != _sessionEpoch || latest.id != tracking.id) {
+        return;
+      }
+      setState(() {
+        _sessions = latest.isOpen
+            ? BoardingSessionOverview(current: latest, recent: _sessions.recent)
+            : BoardingSessionOverview(
+                recent: [
+                  latest,
+                  ..._sessions.recent.where((s) => s.id != latest.id),
+                ],
+              );
+      });
+    } catch (_) {
+      // 자동 갱신 실패는 마지막으로 확인한 상태를 유지하고 다음 주기에 다시 시도한다.
+    } finally {
+      _sessionPolling = false;
+      if (mounted) _scheduleSessionRefresh();
+    }
   }
 
   Future<void> _refresh() => Future.wait([_loadAlarms(), _loadSessions()]);
@@ -101,6 +209,8 @@ class _HomeOverviewState extends State<HomeOverview> {
       if (mounted && epoch == _sessionEpoch) {
         setState(() => _sessionState = _LoadState.error);
       }
+    } finally {
+      if (mounted) _scheduleSessionRefresh();
     }
   }
 
@@ -437,14 +547,23 @@ class _AlarmCard extends StatelessWidget {
     final endpoints = alarm.startStopName != null && alarm.endStopName != null
         ? '${alarm.startStopName} → ${alarm.endStopName}'
         : null;
+    final routeColor = _routeTypeColor(
+      context,
+      alarm.routeNumber,
+      alarm.provider,
+      alarm.routeType,
+    );
     return _ListCard(
       onTap: onTap,
-      leading: _LeadingIcon(Icons.place_outlined, theme.colorScheme.primary),
+      leading: _LeadingIcon(
+        Icons.place_outlined,
+        routeColor ?? theme.colorScheme.primary,
+      ),
       children: [
         Text(
           alarm.routeNumber,
           style: theme.textTheme.labelLarge?.copyWith(
-            color: theme.colorScheme.primary,
+            color: routeColor ?? theme.colorScheme.primary,
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -519,17 +638,24 @@ class _SessionCard extends StatelessWidget {
         : ended == null
         ? null
         : _endedAgo(now().toUtc().difference(ended.toUtc()));
+    final routeColor = _routeTypeColor(
+      context,
+      session.routeNumber,
+      session.timeline?.provider,
+      session.timeline?.routeType,
+    );
     return _ListCard(
       onTap: onTap,
       leading: _LeadingIcon(
         Icons.directions_bus_outlined,
-        session.isOpen ? color : theme.colorScheme.onSurfaceVariant,
+        routeColor ?? theme.colorScheme.onSurfaceVariant,
       ),
       children: [
         Text(
           session.routeNumber,
           style: theme.textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w700,
+            color: routeColor,
           ),
         ),
         const SizedBox(height: 2),
