@@ -134,6 +134,7 @@ JWT Access Token이 필요한 읽기 전용 API다. 노선 선택 화면의 차�
     {
       "vehicleNumber": "경기74아3491",
       "occurrenceId": 12345,
+      "positionState": "AT_STOP",
       "seat": { "status": "AVAILABLE", "remaining": 12 },
       "congestion": null
     }
@@ -142,11 +143,12 @@ JWT Access Token이 필요한 읽기 전용 API다. 노선 선택 화면의 차�
 ```
 
 - `observedAt`: 서버 Provider 조회 시각이다. 캐시 응답은 조회 시각을 유지하고 STALE도 마지막 성공 시각이다.
-- `status`: `AVAILABLE`(모두 확인), `EMPTY`(Provider가 운행 차량 없음으로 응답), `PARTIAL`(일부 위치·좌석 미확인 또는 GBIS 조회 실패), `STALE`(Provider 실패·일일 상한으로 최근 5분 내 마지막 성공 결과 반환). Provider 실패를 `EMPTY`로 응답하지 않는다.
+- `status`: `AVAILABLE`(모두 확인), `EMPTY`(Provider가 운행 차량 없음으로 응답), `PARTIAL`(일부 차량의 위치 순번을 노선에 대응시킬 수 없음), `STALE`(Provider 실패·일일 상한으로 최근 5분 내 마지막 성공 결과 반환). Provider 실패를 `EMPTY`로 응답하지 않는다.
 - `vehicleNumber`: 전체 차량번호.
-- `occurrenceId`: 마지막 통과 occurrence이며 위치 순번이 노선에 없으면 해당 차량만 `null`이다. 경기는 TAGO `nodeord`, 서울은 `sectOrd`를 occurrence `order`에 대응시킨다. 정류장 ID는 비교하지 않으며 반복 정류장 노선도 순번으로 구분한다. 좌석·혼잡도는 정규화한 차량번호가 일치하는 GBIS 항목(중복이면 첫 항목)을 결합한다.
-- `seat.status`: `AVAILABLE`(`remaining` 양수), `NONE`(`remaining` 0), `UNAVAILABLE`(`remaining` `null`). 서울, 좌석 비대상 유형, 번호·노선 불일치·중복, GBIS 실패는 `UNAVAILABLE`이다.
-- `congestion`: 1 여유, 2 보통, 3 혼잡, 4 매우혼잡, 미제공·알 수 없는 값은 `null`이다. 서울 roster와 GBIS 일반형(유형 13·15·23)에서 제공한다.
+- `occurrenceId`: 마지막 통과·도착 occurrence이며 위치 순번이 노선에 없으면 해당 차량만 `null`이다. 경기는 GBIS `stationSeq`, 서울은 `sectOrd`를 occurrence `order`에 대응시킨다. 정류장 ID는 비교하지 않으며 반복 정류장 노선도 순번으로 구분한다. 경기는 유형과 무관하게 GBIS 한 번 호출로 위치·상태·좌석·혼잡도를 모두 얻고 TAGO는 호출하지 않는다.
+- `positionState`: `AT_STOP`(occurrence 정류장에 있음) 또는 `DEPARTED`(출발해 다음 정류장 사이). 경기 GBIS `stateCd` 1은 `AT_STOP`, 0·2는 `DEPARTED`; 서울 `stopFlag` 1은 `AT_STOP`, 그 외는 `DEPARTED`다.
+- `seat.status`: `AVAILABLE`(`remaining` 양수), `NONE`(`remaining` 0), `UNAVAILABLE`(`remaining` `null`). 서울과 GBIS가 좌석을 제공하지 않는 차량(`-1`·미제공)은 `UNAVAILABLE`이다.
+- `congestion`: 1 여유, 2 보통, 3 혼잡, 4 매우혼잡, 미제공·알 수 없는 값은 `null`이다. 서울 roster와 GBIS(`crowded`)에서 제공한다.
 - Provider 원본 ID, GPS, 내부 `Provider`는 응답하지 않는다. 차량은 occurrence 순서(없으면 뒤)와 번호순이다.
 
 Route가 없으면 `404 BUS_ROUTE_NOT_FOUND`, 양수가 아닌 `{routeId}`는 `400 INVALID_REQUEST`, 위치 Provider가 실패하거나 상한에 도달했고 쓸 수 있는 마지막 성공 결과가 없으면 `503 TRANSIT_TEMPORARILY_UNAVAILABLE`이다.

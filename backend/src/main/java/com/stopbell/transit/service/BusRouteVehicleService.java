@@ -8,7 +8,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -18,13 +17,11 @@ import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.client.GbisBusLocationClient;
 import com.stopbell.transit.client.SeoulBusVehicleLocationClient;
 import com.stopbell.transit.client.SeoulBusVehicleLocationRequestContext;
-import com.stopbell.transit.client.TagoVehicleLocationClient;
-import com.stopbell.transit.client.TagoVehicleLocationRequestContext;
 import com.stopbell.transit.client.TransitProviderClientException;
 import com.stopbell.transit.client.VehicleLocationRequest;
-import com.stopbell.transit.domain.BusRouteType;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.dto.BusRouteVehiclesResponse;
+import com.stopbell.transit.dto.BusRouteVehiclesResponse.PositionState;
 import com.stopbell.transit.dto.BusRouteVehiclesResponse.Seat;
 import com.stopbell.transit.dto.BusRouteVehiclesResponse.SeatStatus;
 import com.stopbell.transit.dto.BusRouteVehiclesResponse.Status;
@@ -47,14 +44,6 @@ public class BusRouteVehicleService {
 
     private static final Logger log = LoggerFactory.getLogger(BusRouteVehicleService.class);
     private static final String GBIS_ROUTE_PREFIX = "GGB";
-    /** GBIS provides remainSeatCnt for 11, 12, 14, 16, 17, 21, 22 (17 has no StopBell type yet). */
-    private static final Set<BusRouteType> SEAT_TYPES = Set.of(BusRouteType.CITY_EXPRESS_SEAT,
-            BusRouteType.CITY_SEAT, BusRouteType.CITY_METRO_EXPRESS, BusRouteType.GYEONGGI_CIRCULAR,
-            BusRouteType.RURAL_EXPRESS_SEAT, BusRouteType.RURAL_SEAT);
-    /** GBIS provides crowded only for 13, 15, 23. */
-    private static final Set<BusRouteType> CROWDED_TYPES = Set.of(BusRouteType.CITY_LOCAL,
-            BusRouteType.CITY_DDABOK, BusRouteType.RURAL_LOCAL);
-
     private record Entry(BusRouteVehiclesResponse response, Instant validUntil) {
     }
 
@@ -66,7 +55,6 @@ public class BusRouteVehicleService {
     }
 
     private final BusRouteVehicleMetadataReader metadata;
-    private final TagoVehicleLocationClient tagoClient;
     private final SeoulBusVehicleLocationClient seoulClient;
     private final GbisBusLocationClient gbisClient;
     private final ProviderDailyCallBudget budget;
@@ -76,13 +64,12 @@ public class BusRouteVehicleService {
     private final Map<Long, Entry> cache = new ConcurrentHashMap<>();
     private final Map<Long, CompletableFuture<BusRouteVehiclesResponse>> inFlight = new ConcurrentHashMap<>();
 
-    public BusRouteVehicleService(BusRouteVehicleMetadataReader metadata, TagoVehicleLocationClient tagoClient,
+    public BusRouteVehicleService(BusRouteVehicleMetadataReader metadata,
             SeoulBusVehicleLocationClient seoulClient, GbisBusLocationClient gbisClient,
             ProviderDailyCallBudget budget, @Qualifier("transitMetadataClock") Clock clock,
             @Value("${transit.vehicle-view.cache-ttl:PT15S}") Duration ttl,
             @Value("${transit.vehicle-view.stale-max-age:PT5M}") Duration staleMaxAge) {
         this.metadata = metadata;
-        this.tagoClient = tagoClient;
         this.seoulClient = seoulClient;
         this.gbisClient = gbisClient;
         this.budget = budget;
@@ -166,88 +153,47 @@ public class BusRouteVehicleService {
             }
             Long occurrenceId = seoulOccurrence(route, item.sectOrd());
             partial |= occurrenceId == null;
-            rows.add(new Row(item.plainNo().trim(), occurrenceId, Seat.UNAVAILABLE, seoulCongestion(item.congetion())));
+            PositionState state = Integer.valueOf(1).equals(item.stopFlag()) ? PositionState.AT_STOP
+                    : PositionState.DEPARTED;
+            rows.add(new Row(item.plainNo().trim(), occurrenceId, state, Seat.UNAVAILABLE,
+                    seoulCongestion(item.congetion())));
         }
         return build(route, now, rows, partial);
     }
 
+    /** GBIS is the single source for Gyeonggi position, state, seats and crowding. */
     private BusRouteVehiclesResponse loadGyeonggi(RouteMeta route, Instant now) {
-        if (!budget.tryAcquire(Source.TAGO)) {
-            log.warn("Vehicle view skipped: provider=TAGO reason=daily-limit");
-            throw new PositionUnavailable();
-        }
-        List<com.stopbell.transit.dto.tago.TagoVehicleLocationItem> items;
-        try {
-            var response = tagoClient.fetchVehicleLocations(new VehicleLocationRequest<>(
-                    route.externalRouteId(), new TagoVehicleLocationRequestContext(route.cityCode())));
-            var wrapper = response.response().body().items();
-            items = wrapper == null || wrapper.item() == null ? List.of() : wrapper.item();
-        } catch (TransitProviderClientException exception) {
-            logFailure(exception);
-            throw new PositionUnavailable();
-        }
-        var tago = items.stream().filter(item -> item != null && !blank(item.vehicleNo())).toList();
-
-        boolean seatType = route.routeType() != null && SEAT_TYPES.contains(route.routeType());
-        boolean crowdType = route.routeType() != null && CROWDED_TYPES.contains(route.routeType());
-        Map<String, List<GbisBusLocationItem>> gbis = null;
-        boolean partial = false;
-        if ((seatType || crowdType) && !tago.isEmpty()) {
-            gbis = fetchGbis(route);
-            partial = gbis == null;
-        }
-
-        List<Row> rows = new ArrayList<>();
-        for (var item : tago) {
-            String key = normalize(item.vehicleNo());
-            Long occurrenceId = tagoOccurrence(route, item.nodeOrder());
-            partial |= occurrenceId == null;
-            Seat seat = Seat.UNAVAILABLE;
-            Integer congestion = null;
-            if (gbis != null) {
-                var matches = gbis.getOrDefault(key, List.of());
-                if (!matches.isEmpty()) {
-                    var match = matches.getFirst();
-                    if (seatType) {
-                        seat = seat(match.remainSeats());
-                    }
-                    if (crowdType) {
-                        congestion = gbisCongestion(match.crowded());
-                    }
-                } else {
-                    partial = true;
-                }
-            }
-            rows.add(new Row(item.vehicleNo().trim(), occurrenceId, seat, congestion));
-        }
-        return build(route, now, rows, partial);
-    }
-
-    /** @return GBIS vehicles of this route by normalized plate number, or null when unavailable */
-    private Map<String, List<GbisBusLocationItem>> fetchGbis(RouteMeta route) {
         String id = route.externalRouteId();
         if (id == null || !id.startsWith(GBIS_ROUTE_PREFIX) || id.length() == GBIS_ROUTE_PREFIX.length()) {
-            return null;
+            throw new PositionUnavailable();
         }
         String gbisRouteId = id.substring(GBIS_ROUTE_PREFIX.length());
         if (!budget.tryAcquire(Source.GBIS)) {
             log.warn("Vehicle view skipped: provider=GBIS reason=daily-limit");
-            return null;
+            throw new PositionUnavailable();
         }
+        List<GbisBusLocationItem> items;
         try {
-            var response = gbisClient.fetch(gbisRouteId);
-            Map<String, List<GbisBusLocationItem>> byNumber = new HashMap<>();
-            for (var item : GbisBusLocationClient.vehicles(response)) {
-                if (item != null && !blank(item.plateNo()) && item.routeId() != null
-                        && gbisRouteId.equals(String.valueOf(item.routeId()))) {
-                    byNumber.computeIfAbsent(normalize(item.plateNo()), k -> new ArrayList<>()).add(item);
-                }
-            }
-            return byNumber;
+            items = GbisBusLocationClient.vehicles(gbisClient.fetch(gbisRouteId));
         } catch (TransitProviderClientException exception) {
             logFailure(exception);
-            return null;
+            throw new PositionUnavailable();
         }
+        boolean partial = false;
+        List<Row> rows = new ArrayList<>();
+        for (var item : items) {
+            if (item == null || blank(item.plateNo()) || item.routeId() == null
+                    || !gbisRouteId.equals(String.valueOf(item.routeId()))) {
+                continue;
+            }
+            Long occurrenceId = occurrenceByOrder(route, item.stationSeq());
+            partial |= occurrenceId == null;
+            PositionState state = Integer.valueOf(1).equals(item.stateCd()) ? PositionState.AT_STOP
+                    : PositionState.DEPARTED;
+            rows.add(new Row(item.plateNo().trim(), occurrenceId, state, seat(item.remainSeats()),
+                    gbisCongestion(item.crowded())));
+        }
+        return build(route, now, rows, partial);
     }
 
     private BusRouteVehiclesResponse build(RouteMeta route, Instant now, List<Row> rows, boolean partial) {
@@ -259,21 +205,16 @@ public class BusRouteVehicleService {
                 .sorted(Comparator.comparing((Row row) -> row.occurrenceId() == null ? Integer.MAX_VALUE
                                 : index.get(row.occurrenceId()))
                         .thenComparing(Row::number))
-                .map(row -> new Vehicle(row.number(), row.occurrenceId(), row.seat(), row.congestion()))
+                .map(row -> new Vehicle(row.number(), row.occurrenceId(), row.positionState(), row.seat(), row.congestion()))
                 .toList();
         Status status = vehicles.isEmpty() ? Status.EMPTY : partial ? Status.PARTIAL : Status.AVAILABLE;
         return new BusRouteVehiclesResponse(now, status, vehicles);
     }
 
-    private record Row(String number, Long occurrenceId, Seat seat, Integer congestion) {
+    private record Row(String number, Long occurrenceId, PositionState positionState, Seat seat,
+            Integer congestion) {
     }
 
-    /** nodeord maps to the occurrence order; repeated stops are fine because the order is unique. */
-    private static Long tagoOccurrence(RouteMeta route, Integer order) {
-        return occurrenceByOrder(route, order);
-    }
-
-    /** sectOrd maps to the occurrence order; the vehicle is shown at the stop it last passed. */
     private static Long seoulOccurrence(RouteMeta route, Integer sectOrd) {
         return occurrenceByOrder(route, sectOrd);
     }
@@ -310,10 +251,6 @@ public class BusRouteVehicleService {
     /** GBIS crowded: 1 comfortable, 2 moderate, 3 crowded, 4 very crowded. */
     static Integer gbisCongestion(Integer code) {
         return code != null && code >= 1 && code <= 4 ? code : null;
-    }
-
-    static String normalize(String number) {
-        return number.replaceAll("[\\s-]", "");
     }
 
     private static boolean blank(String value) {

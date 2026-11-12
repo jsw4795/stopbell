@@ -16,11 +16,11 @@ import com.stopbell.common.error.ApiException;
 import com.stopbell.common.error.ErrorCode;
 import com.stopbell.transit.client.GbisBusLocationClient;
 import com.stopbell.transit.client.SeoulBusVehicleLocationClient;
-import com.stopbell.transit.client.TagoVehicleLocationClient;
 import com.stopbell.transit.client.TransitProviderClientException;
 import com.stopbell.transit.domain.BusRouteType;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.dto.BusRouteVehiclesResponse;
+import com.stopbell.transit.dto.BusRouteVehiclesResponse.PositionState;
 import com.stopbell.transit.dto.BusRouteVehiclesResponse.SeatStatus;
 import com.stopbell.transit.dto.BusRouteVehiclesResponse.Status;
 import com.stopbell.transit.dto.gbis.GbisBusLocationItem;
@@ -33,13 +33,12 @@ import org.junit.jupiter.api.Test;
 
 class BusRouteVehicleServiceTest {
     private final BusRouteVehicleMetadataReader metadata = mock(BusRouteVehicleMetadataReader.class);
-    private final TagoVehicleLocationClient tago = mock(TagoVehicleLocationClient.class);
     private final SeoulBusVehicleLocationClient seoul = mock(SeoulBusVehicleLocationClient.class);
     private final GbisBusLocationClient gbis = mock(GbisBusLocationClient.class);
     private final MutableClock clock = new MutableClock();
 
     private BusRouteVehicleService service(int seoulLimit, int tagoLimit, int gbisLimit) {
-        return new BusRouteVehicleService(metadata, tago, seoul, gbis,
+        return new BusRouteVehicleService(metadata, seoul, gbis,
                 new ProviderDailyCallBudget(clock, seoulLimit, tagoLimit, gbisLimit), clock,
                 Duration.ofSeconds(15), Duration.ofMinutes(5));
     }
@@ -49,8 +48,8 @@ class BusRouteVehicleServiceTest {
     }
 
     private static List<Occurrence> stops() {
-        return List.of(new Occurrence(11L, "s1", 10), new Occurrence(12L, "s2", 20),
-                new Occurrence(13L, "s3", 30));
+        return List.of(new Occurrence(11L, "s1", 1), new Occurrence(12L, "s2", 2),
+                new Occurrence(13L, "s3", 3));
     }
 
     private void gyeonggi(BusRouteType type, List<Occurrence> traversal) {
@@ -69,112 +68,68 @@ class BusRouteVehicleServiceTest {
                 new GbisBusLocationResponse.MsgBody(List.of(items))));
     }
 
-    private static GbisBusLocationItem gbisItem(String plate, int seats, Integer crowded) {
-        return new GbisBusLocationItem(plate, 1L, 200000123L, 11, 1L, 1, 1, seats, crowded, null, null);
+    private static GbisBusLocationItem gbisItem(String plate, int seq, int seats, Integer crowded, int state) {
+        return new GbisBusLocationItem(plate, 1L, 200000123L, 11, 1L, seq, state, seats, crowded, null, null);
     }
 
     @Test
-    @DisplayName("경기 좌석 노선은 정규화한 번호와 노선이 일치하는 GBIS 좌석만 결합하고 Provider ID는 노출하지 않는다")
-    void gyeonggi_merges_seats_by_normalized_number() {
-        gyeonggi(BusRouteType.CITY_EXPRESS_SEAT, stops());
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(
-                tago("경기74아3491", "s2", 20), tago("경기74아 3492", "s3", 30)));
-        when(gbis.fetch("200000123")).thenReturn(gbisResponse(gbisItem("경기74아3491", 12, null),
-                gbisItem("경기74아3492", 0, null)));
+    @DisplayName("경기는 GBIS 한 번 호출로 위치·상태·좌석·혼잡을 매핑하고 유형과 무관하게 TAGO를 호출하지 않는다")
+    void gyeonggi_uses_gbis_only() {
+        gyeonggi(BusRouteType.VILLAGE, stops());
+        when(gbis.fetch("200000123")).thenReturn(gbisResponse(gbisItem("경기74아3491", 2, 12, null, 1),
+                gbisItem("경기74아3492", 3, 0, null, 2), gbisItem("경기74아3493", 1, -1, 3, 0)));
 
         var response = service().find(1L);
 
         assertThat(response.status()).isEqualTo(Status.AVAILABLE);
         assertThat(response.observedAt()).isEqualTo(NOW);
-        var first = response.vehicles().get(0);
-        assertThat(first.vehicleNumber()).isEqualTo("경기74아3491");
-        assertThat(first.occurrenceId()).isEqualTo(12L);
-        assertThat(first.seat().status()).isEqualTo(SeatStatus.AVAILABLE);
-        assertThat(first.seat().remaining()).isEqualTo(12);
-        assertThat(response.vehicles().get(1).seat().status()).isEqualTo(SeatStatus.NONE);
+        var v = response.vehicles();
+        assertThat(v.get(0).vehicleNumber()).isEqualTo("경기74아3493");
+        assertThat(v.get(0).occurrenceId()).isEqualTo(11L);
+        assertThat(v.get(0).positionState()).isEqualTo(PositionState.DEPARTED);
+        assertThat(v.get(0).seat().status()).isEqualTo(SeatStatus.UNAVAILABLE);
+        assertThat(v.get(0).congestion()).isEqualTo(3);
+        assertThat(v.get(1).occurrenceId()).isEqualTo(12L);
+        assertThat(v.get(1).positionState()).isEqualTo(PositionState.AT_STOP);
+        assertThat(v.get(1).seat().remaining()).isEqualTo(12);
+        assertThat(v.get(2).positionState()).isEqualTo(PositionState.DEPARTED);
+        assertThat(v.get(2).seat().status()).isEqualTo(SeatStatus.NONE);
+        verify(gbis, times(1)).fetch(any());
     }
 
     @Test
-    @DisplayName("번호가 GBIS에 없거나 -1이면 좌석을 숨기고 PARTIAL로 표시한다")
-    void number_mismatch_hides_seat() {
+    @DisplayName("GBIS 실패는 TAGO fallback 없이 이전 결과가 없으면 503으로 처리한다")
+    void gbis_failure_is_unavailable() {
         gyeonggi(BusRouteType.CITY_SEAT, stops());
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "s2", 20)));
-        when(gbis.fetch(any())).thenReturn(gbisResponse(gbisItem("경기74아9999", 5, null)));
-
-        var response = service().find(1L);
-
-        assertThat(response.status()).isEqualTo(Status.PARTIAL);
-        assertThat(response.vehicles().getFirst().seat().status()).isEqualTo(SeatStatus.UNAVAILABLE);
-        assertThat(response.vehicles().getFirst().seat().remaining()).isNull();
-    }
-
-    @Test
-    @DisplayName("GBIS 중복 번호는 첫 항목으로 좌석을 결합한다")
-    void duplicate_gbis_number_hides_seat() {
-        gyeonggi(BusRouteType.CITY_SEAT, stops());
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "s2", 20)));
-        when(gbis.fetch(any())).thenReturn(gbisResponse(gbisItem("경기74아3491", 5, null),
-                gbisItem("경기74아3491", 6, null)));
-
-        var response = service().find(1L);
-
-        assertThat(response.vehicles().getFirst().seat().remaining()).isEqualTo(5);
-        assertThat(response.status()).isEqualTo(Status.AVAILABLE);
-    }
-
-    @Test
-    @DisplayName("GBIS 실패는 TAGO 위치를 유지한 채 좌석만 숨기고 PARTIAL로 응답한다")
-    void gbis_failure_is_partial() {
-        gyeonggi(BusRouteType.CITY_SEAT, stops());
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "s2", 20)));
         when(gbis.fetch(any())).thenThrow(TransitProviderClientException.gbisTransport("op", null));
 
-        var response = service().find(1L);
-
-        assertThat(response.status()).isEqualTo(Status.PARTIAL);
-        assertThat(response.vehicles()).hasSize(1);
-        assertThat(response.vehicles().getFirst().occurrenceId()).isEqualTo(12L);
+        assertThatThrownBy(() -> service().find(1L)).isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getErrorCode())
+                .isEqualTo(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE);
     }
 
     @Test
-    @DisplayName("좌석·혼잡도 비대상 유형은 GBIS를 호출하지 않고 일반형은 GBIS 혼잡도를 결합한다")
-    void gbis_called_only_for_supported_types() {
-        gyeonggi(BusRouteType.VILLAGE, stops());
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "s2", 20)));
-        assertThat(service().find(1L).status()).isEqualTo(Status.AVAILABLE);
-        verifyNoInteractions(gbis);
-
-        gyeonggi(BusRouteType.CITY_LOCAL, stops());
-        when(gbis.fetch(any())).thenReturn(gbisResponse(gbisItem("경기74아3491", -1, 3)));
-        var local = service().find(1L);
-        assertThat(local.vehicles().getFirst().congestion()).isEqualTo(3);
-        assertThat(local.vehicles().getFirst().seat().status()).isEqualTo(SeatStatus.UNAVAILABLE);
-    }
-
-    @Test
-    @DisplayName("차량이 없으면 EMPTY이고 GBIS를 호출하지 않는다")
+    @DisplayName("차량이 없으면 EMPTY이다")
     void empty_roster() {
         gyeonggi(BusRouteType.CITY_SEAT, stops());
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse());
+        when(gbis.fetch(any())).thenReturn(gbisResponse());
 
         var response = service().find(1L);
 
         assertThat(response.status()).isEqualTo(Status.EMPTY);
         assertThat(response.vehicles()).isEmpty();
-        verifyNoInteractions(gbis);
     }
 
     @Test
-    @DisplayName("반복 정류장 노선도 순번이 유일하면 해당 occurrence에 표시한다")
-    void repeated_stop_has_null_occurrence() {
-        gyeonggi(BusRouteType.VILLAGE, List.of(new Occurrence(11L, "same", 10), new Occurrence(12L, "x", 20),
-                new Occurrence(13L, "same", 30)));
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "same", 30)));
+    @DisplayName("stationSeq에 해당하는 정류장이 없으면 해당 차량만 위치를 연결하지 않고 PARTIAL로 표시한다")
+    void gyeonggi_unverified_position() {
+        gyeonggi(BusRouteType.VILLAGE, stops());
+        when(gbis.fetch(any())).thenReturn(gbisResponse(gbisItem("경기74아3491", 99, 5, null, 1)));
 
         var response = service().find(1L);
 
-        assertThat(response.vehicles().getFirst().occurrenceId()).isEqualTo(13L);
-        assertThat(response.status()).isEqualTo(Status.AVAILABLE);
+        assertThat(response.vehicles().getFirst().occurrenceId()).isNull();
+        assertThat(response.status()).isEqualTo(Status.PARTIAL);
     }
 
     @Test
@@ -182,8 +137,8 @@ class BusRouteVehicleServiceTest {
     void seoul_congestion_and_position() {
         seoulRoute(stops());
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(
-                seoulItem("서울74사1234", 10, "s2", "1", "5"), seoulItem("서울74사1235", 20, "s3", "1", "0"),
-                seoulItem("서울74사1236", 20, "s3", "1", "6"), seoulItem("서울74사9999", 20, "s3", "0", "3")));
+                seoulItem("서울74사1234", 1, "s2", "1", "5"), seoulItem("서울74사1235", 2, "s3", "1", "0"),
+                seoulItem("서울74사1236", 2, "s3", "1", "6"), seoulItem("서울74사9999", 2, "s3", "0", "3")));
 
         var response = service().find(1L);
 
@@ -195,12 +150,19 @@ class BusRouteVehicleServiceTest {
         assertThat(response.vehicles().get(1).congestion()).isNull();
         assertThat(response.vehicles().get(2).congestion()).isEqualTo(4);
         assertThat(response.vehicles().get(0).seat().status()).isEqualTo(SeatStatus.UNAVAILABLE);
-        verifyNoInteractions(gbis, tago);
+        assertThat(response.vehicles()).extracting("positionState")
+                .containsExactly(PositionState.AT_STOP, PositionState.AT_STOP, PositionState.AT_STOP);
+        verifyNoInteractions(gbis);
     }
 
     private static SeoulBusVehicleLocationItem seoulItem(String number, int sectOrd, String next, String run,
             String congestion) {
-        return new SeoulBusVehicleLocationItem("v" + number, number, sectOrd, "sec", 1, DATA_TIME,
+        return seoulItem(number, sectOrd, 1, next, run, congestion);
+    }
+
+    private static SeoulBusVehicleLocationItem seoulItem(String number, int sectOrd, int stopFlag, String next,
+            String run, String congestion) {
+        return new SeoulBusVehicleLocationItem("v" + number, number, sectOrd, "sec", stopFlag, DATA_TIME,
                 null, null, next, run, congestion);
     }
 
@@ -209,7 +171,7 @@ class BusRouteVehicleServiceTest {
     void seoul_unverified_position() {
         seoulRoute(stops());
         when(seoul.fetchVehicleLocations(any())).thenReturn(rosterResponse(
-                seoulItem("서울74사1234", 99, "s2", "1", "3")));
+                seoulItem("서울74사1234", 99, 0, "s2", "1", "3")));
 
         var response = service().find(1L);
 
@@ -221,17 +183,17 @@ class BusRouteVehicleServiceTest {
     @DisplayName("TTL 안의 재조회는 Provider를 다시 호출하지 않고 만료 후에는 호출한다")
     void cache_hit_and_expiry() {
         gyeonggi(BusRouteType.VILLAGE, stops());
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "s2", 20)));
+        when(gbis.fetch(any())).thenReturn(gbisResponse(gbisItem("경기74아3491", 2, 5, null, 1)));
         var service = service();
 
         service.find(1L);
         clock.now = clock.now.plusSeconds(10);
         service.find(1L);
-        verify(tago, times(1)).fetchVehicleLocations(any());
+        verify(gbis, times(1)).fetch(any());
 
         clock.now = clock.now.plusSeconds(10);
         service.find(1L);
-        verify(tago, times(2)).fetchVehicleLocations(any());
+        verify(gbis, times(2)).fetch(any());
     }
 
     @Test
@@ -239,9 +201,9 @@ class BusRouteVehicleServiceTest {
     void concurrent_requests_are_coalesced() throws Exception {
         gyeonggi(BusRouteType.VILLAGE, stops());
         var release = new CountDownLatch(1);
-        when(tago.fetchVehicleLocations(any())).thenAnswer(invocation -> {
+        when(gbis.fetch(any())).thenAnswer(invocation -> {
             release.await(5, TimeUnit.SECONDS);
-            return tagoResponse(tago("경기74아3491", "s2", 20));
+            return gbisResponse(gbisItem("경기74아3491", 2, 5, null, 1));
         });
         var service = service();
         var pool = Executors.newFixedThreadPool(5);
@@ -258,15 +220,15 @@ class BusRouteVehicleServiceTest {
         } finally {
             pool.shutdownNow();
         }
-        verify(tago, times(1)).fetchVehicleLocations(any());
+        verify(gbis, times(1)).fetch(any());
     }
 
     @Test
     @DisplayName("일일 상한에 도달하면 Provider를 호출하지 않고 마지막 성공 결과를 STALE로, 없으면 503으로 응답한다")
     void daily_limit_returns_stale_or_unavailable() {
         gyeonggi(BusRouteType.VILLAGE, stops());
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "s2", 20)));
-        var service = service(100, 1, 100);
+        when(gbis.fetch(any())).thenReturn(gbisResponse(gbisItem("경기74아3491", 2, 5, null, 1)));
+        var service = service(100, 100, 1);
 
         assertThat(service.find(1L).status()).isEqualTo(Status.AVAILABLE);
         clock.now = clock.now.plusSeconds(20);
@@ -274,21 +236,21 @@ class BusRouteVehicleServiceTest {
         assertThat(stale.status()).isEqualTo(Status.STALE);
         assertThat(stale.observedAt()).isEqualTo(NOW);
         assertThat(stale.vehicles()).hasSize(1);
-        verify(tago, times(1)).fetchVehicleLocations(any());
+        verify(gbis, times(1)).fetch(any());
 
-        var fresh = service(100, 0, 100);
+        var fresh = service(100, 100, 0);
         assertThatThrownBy(() -> fresh.find(1L)).isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getErrorCode())
                 .isEqualTo(ErrorCode.TRANSIT_TEMPORARILY_UNAVAILABLE);
-        verify(tago, times(1)).fetchVehicleLocations(any());
+        verify(gbis, times(1)).fetch(any());
     }
 
     @Test
     @DisplayName("Provider 실패는 마지막 성공 결과를 STALE로 돌려주고 운행 종료(EMPTY)로 해석하지 않는다")
     void provider_failure_is_stale_not_empty() {
         gyeonggi(BusRouteType.VILLAGE, stops());
-        when(tago.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "s2", 20)))
-                .thenThrow(TransitProviderClientException.transport(TransitProvider.TAGO, "op", null));
+        when(gbis.fetch(any())).thenReturn(gbisResponse(gbisItem("경기74아3491", 2, 5, null, 1)))
+                .thenThrow(TransitProviderClientException.gbisTransport("op", null));
         var service = service();
 
         service.find(1L);
@@ -304,6 +266,6 @@ class BusRouteVehicleServiceTest {
     void unknown_route() {
         when(metadata.read(9L)).thenThrow(new ApiException(ErrorCode.BUS_ROUTE_NOT_FOUND));
         assertThatThrownBy(() -> service().find(9L)).isInstanceOf(ApiException.class);
-        verifyNoInteractions(tago, seoul, gbis);
+        verifyNoInteractions(seoul, gbis);
     }
 }

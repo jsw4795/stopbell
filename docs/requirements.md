@@ -42,18 +42,19 @@ V1은 기존 버스 도착·통과 Alarm과 선택한 특정 차량의 하차 �
 
 ### UI-7 세로 노선도의 실시간 차량 위치와 잔여 좌석
 
-정류장 선택의 세로 노선도는 선택 노선의 여러 차량 위치와 선택 차량을 표시하며, 확인 가능한 경우 차량별 잔여 좌석 수도 표시한다. Provider 위치 순번(경기 `nodeord`, 서울 `sectOrd`)을 노선 방문 지점 순서에 대응시켜 표시하고, 대응할 수 없는 개별 차량만 위치 없이 표시한다. 이 표시는 하차 추적·알림 판정과 무관하다.
+정류장 선택의 세로 노선도는 선택 노선의 여러 차량 위치와 선택 차량을 표시하며, 확인 가능한 경우 차량별 잔여 좌석 수도 표시한다. Provider 위치 순번(경기 GBIS `stationSeq`, 서울 `sectOrd`)을 노선 방문 지점 순서에 대응시켜 표시하고, 대응할 수 없는 개별 차량만 위치 없이 표시한다. 이 표시는 하차 추적·알림 판정과 무관하다.
 
 - TAGO 차량 위치 응답에는 잔여 좌석 수가 없다. [TAGO 버스위치정보](https://www.data.go.kr/data/15098533/openapi.do)
 - GBIS `remainSeatCnt`는 차량별 잔여 좌석 수다. 공식 제공 대상은 노선유형 코드 11·12·14·16·17·21·22다. `-1` 또는 미제공은 `좌석 정보 없음`, `0`은 `잔여 좌석 없음`, 양수는 제공된 빈자리 수로 표시한다. `crowded`는 일반버스의 차내 혼잡도이며 좌석 수로 환산하지 않는다. [GBIS 버스 위치정보 공식 매뉴얼](https://gbis.go.kr/gbis2014/publicService.action?cmd=mBusLocation)
 - 좌석 미제공 또는 식별·신선도 검증 실패 시 좌석 수를 표시하지 않는다. 독립적으로 검증된 차량 위치는 계속 표시할 수 있다.
 - 2026-11-12 확정 정책: 차량 위치는 읽기 전용 신규 API(`GET /api/v1/bus-routes/{routeId}/vehicles`, 상세는 [API](api.md)에서 확정)로 제공하며 후보 API·하차 추적·TRACKING 계약과 분리한다.
-- 경기는 GBIS를 좌석 기준으로 쓰고 좌석 비대상 유형은 TAGO 위치만 표시한다. TAGO와 GBIS는 정규화한 차량번호와 노선이 모두 일치할 때만 동일 차량으로 보며 불확실하면 좌석을 숨긴다.
+- 2026-11-12 결정: 경기 차량 조회는 노선 유형과 무관하게 GBIS를 위치(`stationSeq`→occurrence 순번)·상태(`stateCd`)·좌석·혼잡도의 단일 소스로 1회 호출하며 TAGO 호출과 번호 결합은 UI-7에서 쓰지 않는다. GBIS 실패 시 TAGO로 대체하지 않고 기존 STALE/503으로 처리한다. 하차 추적·후보 API는 TAGO를 그대로 쓴다.
+- 위치 상태는 응답의 `positionState`로 구분한다. `AT_STOP`은 해당 정류장 동그라미에, `DEPARTED`는 그 정류장과 다음 정류장 사이 레일 중앙에 아이콘을 그린다. 경기는 GBIS `stateCd` 1을 `AT_STOP`, 0·2를 `DEPARTED`로, 서울은 roster `stopFlag` 1을 `AT_STOP`, 그 외를 `DEPARTED`로 본다. 아이콘은 하차 추적 화면의 버스 아이콘을 노선 유형 표시색으로 그리고(미분류는 기본색) 행에는 번호만 표시한다.
 - 서울은 좌석 대신 Provider 혼잡도(`congetion`)를 표시한다. 공식 값은 0 없음, 3 여유, 4 보통, 5 혼잡, 6 매우혼잡이며 0과 문서에 없는 값은 `정보 없음`으로 표시한다. [서울 버스위치정보조회 서비스](https://www.data.go.kr/data/15000332/openapi.do)
-- GBIS `crowded`는 노선유형 13·15·23에서만 제공되며 1 여유, 2 보통, 3 혼잡, 4 매우혼잡이다. `stateCd`는 0 교차로통과, 1 정류소 도착, 2 정류소 출발이며 UI-7 응답에는 사용하지 않는다. `resultCode`는 0 정상, 1 시스템 에러, 2 필수 Parameter 없음, 4 결과 없음이며 4만 운행 차량 없음으로 해석한다. 엔드포인트는 `https://apis.data.go.kr/6410000/buslocationservice/v2/getBusLocationListv2`다. ([GBIS 공식 매뉴얼](https://gbis.go.kr/gbis2014/publicService.action?cmd=mBusLocation), 2026-11-12 확인) 응답은 서울·GBIS 값을 같은 1~4 단계(1 여유 ~ 4 매우혼잡)로 정규화한다.
+- GBIS `crowded`는 노선유형 13·15·23에서만 제공되며 1 여유, 2 보통, 3 혼잡, 4 매우혼잡이다. `stateCd`는 0 교차로통과, 1 정류소 도착, 2 정류소 출발이다. `resultCode`는 0 정상, 1 시스템 에러, 2 필수 Parameter 없음, 4 결과 없음이며 4만 운행 차량 없음으로 해석한다. 엔드포인트는 `https://apis.data.go.kr/6410000/buslocationservice/v2/getBusLocationListv2`다. ([GBIS 공식 매뉴얼](https://gbis.go.kr/gbis2014/publicService.action?cmd=mBusLocation), 2026-11-12 확인) 응답은 서울·GBIS 값을 같은 1~4 단계(1 여유 ~ 4 매우혼잡)로 정규화한다.
 - 자동 polling은 하지 않는다. 화면 진입 시 1회 조회하고 새로고침 버튼으로 수동 재조회한다. 서버는 Route 단위 짧은 캐시·동시 요청 합치기와 Provider별 일일 호출 상한을 둔다.
 - 노선도에 `HH:mm 기준 위치`를 표시한다. 조회 후 2분이 지나면 차량을 숨기지 않고 `위치가 오래됐어요` 새로고침 안내만 표시한다. Provider 실패를 운행 종료로 해석하지 않는다.
-- GBIS 실시간 위치 연동과 TAGO 차량 식별 대조는 UI-7 범위다. 상세 구현은 [UI-7 로드맵](roadmap.md#ui-7--실시간-다중-차량-위치-표시)을 따른다.
+- GBIS 실시간 위치 연동은 UI-7 범위다. 상세 구현은 [UI-7 로드맵](roadmap.md#ui-7--실시간-다중-차량-위치-표시)을 따른다.
 
 ### UI-7B 하차 알람 탑승 버스 선택 노선도
 

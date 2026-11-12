@@ -1,7 +1,5 @@
 package com.stopbell.transit.service;
 
-import static com.stopbell.transit.service.BoardingCandidateTestFixtures.tago;
-import static com.stopbell.transit.service.BoardingCandidateTestFixtures.tagoResponse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -11,8 +9,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.stopbell.support.LatestSchemaIntegrationTest;
 import com.stopbell.transit.client.GbisBusLocationClient;
 import com.stopbell.transit.client.SeoulBusVehicleLocationClient;
-import com.stopbell.transit.client.TagoVehicleLocationClient;
 import com.stopbell.transit.client.TransitProviderClientException;
+import com.stopbell.transit.dto.gbis.GbisBusLocationItem;
+import com.stopbell.transit.dto.gbis.GbisBusLocationResponse;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.entity.BusRoute;
 import com.stopbell.transit.entity.BusRouteStopOccurrence;
@@ -36,17 +35,19 @@ class BusRouteVehicleApiIntegrationTest extends LatestSchemaIntegrationTest {
     @Autowired private JwtTokenService jwtTokenService;
     @Autowired private com.stopbell.user.repository.UserRepository users;
     @Autowired private MockMvc mockMvc;
-    @MockitoBean private TagoVehicleLocationClient tagoClient;
     @MockitoBean private SeoulBusVehicleLocationClient seoulClient;
     @MockitoBean private GbisBusLocationClient gbisClient;
 
     @Test
     @DisplayName("차량 위치 API는 인증을 요구하고 Provider 원본 ID 없이 위치를 반환한다")
     void returns_vehicles_for_authenticated_user() throws Exception {
-        var route = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "GGB-vehicle-api", "7000", "41110"));
+        var route = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "GGB200000999", "7000", "41110"));
         var stop = stops.saveAndFlush(new BusStop(TransitProvider.TAGO, "api-s1", "첫 정류장", null, null));
         var occurrence = occurrences.saveAndFlush(new BusRouteStopOccurrence(route, stop, 1));
-        when(tagoClient.fetchVehicleLocations(any())).thenReturn(tagoResponse(tago("경기74아3491", "api-s1", 1)));
+        when(gbisClient.fetch("200000999")).thenReturn(new GbisBusLocationResponse(new GbisBusLocationResponse.Response(
+                new GbisBusLocationResponse.MsgHeader(null, 0, null), new GbisBusLocationResponse.MsgBody(
+                java.util.List.of(new GbisBusLocationItem("경기74아3491", 1L, 200000999L, 11, 1L, 1, 1, 7, null,
+                        null, null))))));
 
         mockMvc.perform(get("/api/v1/bus-routes/{id}/vehicles", route.getId())).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/bus-routes/{id}/vehicles", route.getId()).header("Authorization", authorization()))
@@ -55,8 +56,9 @@ class BusRouteVehicleApiIntegrationTest extends LatestSchemaIntegrationTest {
                 .andExpect(jsonPath("$.observedAt").exists())
                 .andExpect(jsonPath("$.vehicles[0].vehicleNumber").value("경기74아3491"))
                 .andExpect(jsonPath("$.vehicles[0].occurrenceId").value(occurrence.getId()))
-                .andExpect(jsonPath("$.vehicles[0].seat.status").value("UNAVAILABLE"))
-                .andExpect(jsonPath("$.vehicles[0].seat.remaining").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.vehicles[0].positionState").value("AT_STOP"))
+                .andExpect(jsonPath("$.vehicles[0].seat.status").value("AVAILABLE"))
+                .andExpect(jsonPath("$.vehicles[0].seat.remaining").value(7))
                 .andExpect(jsonPath("$.vehicles[0].vehicleId").doesNotExist())
                 .andExpect(jsonPath("$.vehicles[0].gpsX").doesNotExist());
     }
@@ -69,11 +71,10 @@ class BusRouteVehicleApiIntegrationTest extends LatestSchemaIntegrationTest {
                 .andExpect(status().isNotFound());
         mockMvc.perform(get("/api/v1/bus-routes/{id}/vehicles", 0L).header("Authorization", auth))
                 .andExpect(status().isBadRequest());
-        var route = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "vehicle-api-fail", "7001", "41110"));
+        var route = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "GGB200000998", "7001", "41110"));
         var stop = stops.saveAndFlush(new BusStop(TransitProvider.TAGO, "api-s2", "정류장", null, null));
         occurrences.saveAndFlush(new BusRouteStopOccurrence(route, stop, 1));
-        when(tagoClient.fetchVehicleLocations(any()))
-                .thenThrow(TransitProviderClientException.transport(TransitProvider.TAGO, "op", null));
+        when(gbisClient.fetch(any())).thenThrow(TransitProviderClientException.gbisTransport("op", null));
         mockMvc.perform(get("/api/v1/bus-routes/{id}/vehicles", route.getId()).header("Authorization", auth))
                 .andExpect(status().isServiceUnavailable());
     }
