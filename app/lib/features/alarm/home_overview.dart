@@ -27,7 +27,7 @@ Color? alarmRouteTypeColor(
   String? provider,
   String? routeType,
 ) {
-  if (provider == null || routeType == null) return null;
+  if (provider == null) return null;
   final brightness = Theme.of(context).brightness;
   final presentation = BusRoutePresentation.forRoute(
     BusRoute(

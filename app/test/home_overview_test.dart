@@ -369,6 +369,27 @@ void main() {
   Color? textColor(WidgetTester tester, String text) =>
       tester.widget<Text>(find.text(text)).style?.color;
 
+  testWidgets('유형이 없는 서울 N번 알람 카드는 심야색을 적용한다', (tester) async {
+    await tester.pumpWidget(
+      home(
+        alarms: () async => [
+          Alarm(
+            id: 3,
+            transitType: AlarmTransitType.bus,
+            status: AlarmStatus.active,
+            routeNumber: 'N16',
+            stopName: '강남역',
+            notifyOneStopBefore: false,
+            notifyOneStopAfter: false,
+            provider: 'SEOUL_BUS',
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(textColor(tester, 'N16'), const Color(0xff2b2f77));
+  });
+
   testWidgets('검증된 노선 유형만 버스 번호와 아이콘에 유형색을 적용한다', (tester) async {
     await tester.pumpWidget(
       home(
