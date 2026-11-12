@@ -487,18 +487,22 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
                     ? (value) => _change(activating: value)
                     : null,
               ),
-              _optionRow(
-                '한 정류장 전 알림',
-                alarm.notifyOneStopBefore,
-                optionsEditable
-                    ? (value) => _changeOption(before: value)
-                    : null,
-              ),
-              _optionRow(
-                '한 정류장 후 알림',
-                alarm.notifyOneStopAfter,
-                optionsEditable ? (value) => _changeOption(after: value) : null,
-              ),
+              if (alarm.canNotifyOneStopBefore != false)
+                _optionRow(
+                  '한 정류장 전 알림',
+                  alarm.notifyOneStopBefore,
+                  optionsEditable
+                      ? (value) => _changeOption(before: value)
+                      : null,
+                ),
+              if (alarm.canNotifyOneStopAfter != false)
+                _optionRow(
+                  '한 정류장 후 알림',
+                  alarm.notifyOneStopAfter,
+                  optionsEditable
+                      ? (value) => _changeOption(after: value)
+                      : null,
+                ),
             ],
           ),
         ),

@@ -525,6 +525,39 @@ void main() {
     expect(row('한 정류장 전 알림').onChanged, isNull);
   });
 
+  testWidgets('detail hides one-stop options the server marks impossible', (
+    tester,
+  ) async {
+    Alarm limited(bool? before, bool? after) => Alarm(
+      id: sample.id,
+      transitType: sample.transitType,
+      status: AlarmStatus.active,
+      routeNumber: sample.routeNumber,
+      stopName: sample.stopName,
+      notifyOneStopBefore: false,
+      notifyOneStopAfter: false,
+      canNotifyOneStopBefore: before,
+      canNotifyOneStopAfter: after,
+    );
+    Future<void> show(Alarm alarm) async {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(detailScreen(StubAlarms(), created: alarm));
+    }
+
+    await show(limited(false, true));
+    expect(find.text('한 정류장 전 알림'), findsNothing);
+    expect(find.text('한 정류장 후 알림'), findsOneWidget);
+    await show(limited(true, false));
+    expect(find.text('한 정류장 전 알림'), findsOneWidget);
+    expect(find.text('한 정류장 후 알림'), findsNothing);
+    await show(limited(false, false));
+    expect(find.text('한 정류장 전 알림'), findsNothing);
+    expect(find.text('한 정류장 후 알림'), findsNothing);
+    await show(limited(null, null));
+    expect(find.text('한 정류장 전 알림'), findsOneWidget);
+    expect(find.text('한 정류장 후 알림'), findsOneWidget);
+  });
+
   testWidgets('detail keeps the original option value when update fails', (
     tester,
   ) async {

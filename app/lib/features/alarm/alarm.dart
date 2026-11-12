@@ -15,6 +15,8 @@ class Alarm {
     this.endStopName,
     this.provider,
     this.routeType,
+    this.canNotifyOneStopBefore,
+    this.canNotifyOneStopAfter,
   });
 
   final int id;
@@ -32,6 +34,10 @@ class Alarm {
   /// 현재 노선과 snapshot이 일치할 때의 공식 Provider·노선 유형. 표시 색에만 사용한다.
   final String? provider;
   final String? routeType;
+
+  /// 대상 정류장이 노선 첫/마지막이면 false. 구버전 응답은 null이며 표시한다.
+  final bool? canNotifyOneStopBefore;
+  final bool? canNotifyOneStopAfter;
 
   factory Alarm.fromJson(Object? value) {
     if (value is! Map<String, dynamic>) throw const FormatException();
@@ -76,8 +82,12 @@ class Alarm {
       endStopName: hasEndpoints ? end : null,
       provider: _optionalText(value['provider']),
       routeType: _optionalText(value['routeType']),
+      canNotifyOneStopBefore: _optionalBool(value['canNotifyOneStopBefore']),
+      canNotifyOneStopAfter: _optionalBool(value['canNotifyOneStopAfter']),
     );
   }
+
+  static bool? _optionalBool(Object? value) => value is bool ? value : null;
 
   static String? _optionalText(Object? value) {
     if (value == null) return null;
