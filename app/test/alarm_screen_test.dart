@@ -1073,4 +1073,28 @@ void main() {
       );
     });
   }
+
+  testWidgets('도착 알람 상세 제목은 버스 아이콘과 서울 심야색 번호를 보여준다', (tester) async {
+    final client = StubAlarms()
+      ..detail = (_) async => const Alarm(
+        id: 15,
+        transitType: AlarmTransitType.bus,
+        status: AlarmStatus.active,
+        routeNumber: 'N16',
+        stopName: '강남역',
+        notifyOneStopBefore: false,
+        notifyOneStopAfter: false,
+        provider: 'SEOUL_BUS',
+      );
+    await tester.pumpWidget(detailScreen(client));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<Text>(find.text('N16')).style?.color,
+      const Color(0xff2b2f77),
+    );
+    final icon = tester.widget<Icon>(
+      find.byIcon(Icons.directions_bus_outlined),
+    );
+    expect(icon.color, const Color(0xff2b2f77));
+  });
 }

@@ -156,4 +156,34 @@ void main() {
     expect(find.textContaining('전체 노선 구간을 표시할 수 없어요'), findsOneWidget);
     expect(find.byKey(const ValueKey('tracking-bus-marker')), findsNothing);
   });
+
+  testWidgets('하차 알람 상세 제목의 번호와 아이콘은 노선 유형색을 쓴다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: BoardingSessionDetails(
+              session: BoardingSession.fromJson({
+                ...sessionJson(),
+                'routeNumber': 'N16',
+                'timeline': {
+                  ...timeline(1, 'READY'),
+                  'provider': 'SEOUL_BUS',
+                  'routeType': null,
+                },
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    const night = Color(0xff2b2f77);
+    expect(tester.widget<Text>(find.text('N16')).style?.color, night);
+    expect(
+      tester
+          .widget<Icon>(find.byIcon(Icons.directions_bus_outlined).first)
+          .color,
+      night,
+    );
+  });
 }

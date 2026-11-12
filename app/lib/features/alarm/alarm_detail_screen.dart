@@ -406,6 +406,11 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
                   runSpacing: StopBellSpacing.xs,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
+                    Icon(
+                      Icons.directions_bus_outlined,
+                      color: routeColor ?? colors.primary,
+                      size: 24,
+                    ),
                     Text(
                       alarm.routeNumber,
                       style: theme.textTheme.headlineSmall?.copyWith(

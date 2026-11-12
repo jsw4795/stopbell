@@ -5,6 +5,7 @@ import '../transit/stop_display_name.dart';
 import '../transit/bus_route_timeline.dart' show BusRouteRailSegment;
 import '../transit/bus_route.dart';
 import '../transit/bus_route_presentation.dart';
+import '../alarm/home_overview.dart' show alarmRouteTypeColor;
 import 'boarding_session.dart';
 import 'boarding_session_controller.dart';
 
@@ -195,6 +196,12 @@ class BoardingSessionDetails extends StatelessWidget {
         : s.status == BoardingSessionStatus.tracking
         ? semantic.activeTracking
         : scheme.onSurfaceVariant;
+    final routeColor = alarmRouteTypeColor(
+      context,
+      s.routeNumber,
+      s.timeline?.provider,
+      s.timeline?.routeType,
+    );
     final progress =
         !stateUncertain &&
         s.status == BoardingSessionStatus.tracking &&
@@ -261,7 +268,7 @@ class BoardingSessionDetails extends StatelessWidget {
             children: [
               Icon(
                 Icons.directions_bus_outlined,
-                color: scheme.primary,
+                color: routeColor ?? scheme.primary,
                 size: 22,
               ),
               const SizedBox(width: 10),
@@ -273,6 +280,7 @@ class BoardingSessionDetails extends StatelessWidget {
                       s.routeNumber,
                       style: theme.textTheme.titleMedium!.copyWith(
                         fontWeight: FontWeight.bold,
+                        color: routeColor,
                       ),
                     ),
                     Text(s.vehicleNumber, style: theme.textTheme.bodySmall),
