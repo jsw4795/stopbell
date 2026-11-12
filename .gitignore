@@ -11,3 +11,7 @@ bin/
 
 # Personal development log
 /docs/devlog/
+
+# Claude Code local settings and graphify output
+.claude/settings.local.json
+graphify-out/
