@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,6 +20,7 @@ import com.stopbell.transit.client.SeoulBusVehicleLocationClient;
 import com.stopbell.transit.client.SeoulBusVehicleLocationRequestContext;
 import com.stopbell.transit.client.TransitProviderClientException;
 import com.stopbell.transit.client.VehicleLocationRequest;
+import com.stopbell.transit.domain.BusRouteType;
 import com.stopbell.transit.domain.TransitProvider;
 import com.stopbell.transit.dto.BusRouteVehiclesResponse;
 import com.stopbell.transit.dto.BusRouteVehiclesResponse.PositionState;
@@ -44,6 +46,13 @@ public class BusRouteVehicleService {
 
     private static final Logger log = LoggerFactory.getLogger(BusRouteVehicleService.class);
     private static final String GBIS_ROUTE_PREFIX = "GGB";
+    /** GBIS provides remainSeatCnt for 11, 12, 14, 16, 21, 22 and crowded for 13, 15, 23 only. */
+    private static final Set<BusRouteType> SEAT_TYPES = Set.of(BusRouteType.CITY_EXPRESS_SEAT,
+            BusRouteType.CITY_SEAT, BusRouteType.CITY_METRO_EXPRESS, BusRouteType.GYEONGGI_CIRCULAR,
+            BusRouteType.RURAL_EXPRESS_SEAT, BusRouteType.RURAL_SEAT);
+    private static final Set<BusRouteType> CROWDED_TYPES = Set.of(BusRouteType.CITY_LOCAL,
+            BusRouteType.CITY_DDABOK, BusRouteType.RURAL_LOCAL);
+
     private record Entry(BusRouteVehiclesResponse response, Instant validUntil) {
     }
 
@@ -179,6 +188,8 @@ public class BusRouteVehicleService {
             logFailure(exception);
             throw new PositionUnavailable();
         }
+        boolean seatType = SEAT_TYPES.contains(route.routeType());
+        boolean crowdType = CROWDED_TYPES.contains(route.routeType());
         boolean partial = false;
         List<Row> rows = new ArrayList<>();
         for (var item : items) {
@@ -190,8 +201,9 @@ public class BusRouteVehicleService {
             partial |= occurrenceId == null;
             PositionState state = Integer.valueOf(1).equals(item.stateCd()) ? PositionState.AT_STOP
                     : PositionState.DEPARTED;
-            rows.add(new Row(item.plateNo().trim(), occurrenceId, state, seat(item.remainSeats()),
-                    gbisCongestion(item.crowded())));
+            rows.add(new Row(item.plateNo().trim(), occurrenceId, state,
+                    seatType ? seat(item.remainSeats()) : Seat.UNAVAILABLE,
+                    crowdType ? gbisCongestion(item.crowded()) : null));
         }
         return build(route, now, rows, partial);
     }

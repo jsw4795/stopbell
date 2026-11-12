@@ -147,8 +147,8 @@ JWT Access Token이 필요한 읽기 전용 API다. 노선 선택 화면의 차�
 - `vehicleNumber`: 전체 차량번호.
 - `occurrenceId`: 마지막 통과·도착 occurrence이며 위치 순번이 노선에 없으면 해당 차량만 `null`이다. 경기는 GBIS `stationSeq`, 서울은 `sectOrd`를 occurrence `order`에 대응시킨다. 정류장 ID는 비교하지 않으며 반복 정류장 노선도 순번으로 구분한다. 경기는 유형과 무관하게 GBIS 한 번 호출로 위치·상태·좌석·혼잡도를 모두 얻고 TAGO는 호출하지 않는다.
 - `positionState`: `AT_STOP`(occurrence 정류장에 있음) 또는 `DEPARTED`(출발해 다음 정류장 사이). 경기 GBIS `stateCd` 1은 `AT_STOP`, 0·2는 `DEPARTED`; 서울 `stopFlag` 1은 `AT_STOP`, 그 외는 `DEPARTED`다.
-- `seat.status`: `AVAILABLE`(`remaining` 양수), `NONE`(`remaining` 0), `UNAVAILABLE`(`remaining` `null`). 서울과 GBIS가 좌석을 제공하지 않는 차량(`-1`·미제공)은 `UNAVAILABLE`이다.
-- `congestion`: 1 여유, 2 보통, 3 혼잡, 4 매우혼잡, 미제공·알 수 없는 값은 `null`이다. 서울 roster와 GBIS(`crowded`)에서 제공한다.
+- `seat.status`: `AVAILABLE`(`remaining` 양수), `NONE`(`remaining` 0), `UNAVAILABLE`(`remaining` `null`). 경기는 GBIS가 좌석을 공식 제공하는 유형(11·12·14·16·21·22)만 좌석을 표시하고 그 외·미분류와 서울은 `UNAVAILABLE`이다.
+- `congestion`: 1 여유, 2 보통, 3 혼잡, 4 매우혼잡, 미제공·알 수 없는 값은 `null`이다. 서울 roster와 GBIS 일반형(13·15·23)에서만 제공한다. 경기 좌석 유형에서는 `null`이다.
 - Provider 원본 ID, GPS, 내부 `Provider`는 응답하지 않는다. 차량은 occurrence 순서(없으면 뒤)와 번호순이다.
 
 Route가 없으면 `404 BUS_ROUTE_NOT_FOUND`, 양수가 아닌 `{routeId}`는 `400 INVALID_REQUEST`, 위치 Provider가 실패하거나 상한에 도달했고 쓸 수 있는 마지막 성공 결과가 없으면 `503 TRANSIT_TEMPORARILY_UNAVAILABLE`이다.

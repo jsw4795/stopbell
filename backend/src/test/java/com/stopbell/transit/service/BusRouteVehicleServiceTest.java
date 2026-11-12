@@ -75,7 +75,7 @@ class BusRouteVehicleServiceTest {
     @Test
     @DisplayName("경기는 GBIS 한 번 호출로 위치·상태·좌석·혼잡을 매핑하고 유형과 무관하게 TAGO를 호출하지 않는다")
     void gyeonggi_uses_gbis_only() {
-        gyeonggi(BusRouteType.VILLAGE, stops());
+        gyeonggi(BusRouteType.CITY_SEAT, stops());
         when(gbis.fetch("200000123")).thenReturn(gbisResponse(gbisItem("경기74아3491", 2, 12, null, 1),
                 gbisItem("경기74아3492", 3, 0, null, 2), gbisItem("경기74아3493", 1, -1, 3, 0)));
 
@@ -88,13 +88,28 @@ class BusRouteVehicleServiceTest {
         assertThat(v.get(0).occurrenceId()).isEqualTo(11L);
         assertThat(v.get(0).positionState()).isEqualTo(PositionState.DEPARTED);
         assertThat(v.get(0).seat().status()).isEqualTo(SeatStatus.UNAVAILABLE);
-        assertThat(v.get(0).congestion()).isEqualTo(3);
+        assertThat(v.get(0).congestion()).isNull();
         assertThat(v.get(1).occurrenceId()).isEqualTo(12L);
         assertThat(v.get(1).positionState()).isEqualTo(PositionState.AT_STOP);
         assertThat(v.get(1).seat().remaining()).isEqualTo(12);
         assertThat(v.get(2).positionState()).isEqualTo(PositionState.DEPARTED);
         assertThat(v.get(2).seat().status()).isEqualTo(SeatStatus.NONE);
         verify(gbis, times(1)).fetch(any());
+    }
+
+    @Test
+    @DisplayName("좌석 유형은 좌석만, 혼잡도 유형은 혼잡도만 표시한다")
+    void seat_or_crowded_by_route_type() {
+        gyeonggi(BusRouteType.CITY_SEAT, stops());
+        when(gbis.fetch(any())).thenReturn(gbisResponse(gbisItem("경기74아3491", 2, 12, 3, 1)));
+        var seat = service().find(1L).vehicles().getFirst();
+        assertThat(seat.seat().remaining()).isEqualTo(12);
+        assertThat(seat.congestion()).isNull();
+
+        gyeonggi(BusRouteType.CITY_LOCAL, stops());
+        var crowded = service().find(1L).vehicles().getFirst();
+        assertThat(crowded.seat().status()).isEqualTo(SeatStatus.UNAVAILABLE);
+        assertThat(crowded.congestion()).isEqualTo(3);
     }
 
     @Test

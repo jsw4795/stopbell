@@ -42,6 +42,7 @@ class BusRouteVehicleApiIntegrationTest extends LatestSchemaIntegrationTest {
     @DisplayName("차량 위치 API는 인증을 요구하고 Provider 원본 ID 없이 위치를 반환한다")
     void returns_vehicles_for_authenticated_user() throws Exception {
         var route = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "GGB200000999", "7000", "41110"));
+        route.updateRouteType(com.stopbell.transit.domain.BusRouteType.CITY_SEAT);
         var stop = stops.saveAndFlush(new BusStop(TransitProvider.TAGO, "api-s1", "첫 정류장", null, null));
         var occurrence = occurrences.saveAndFlush(new BusRouteStopOccurrence(route, stop, 1));
         when(gbisClient.fetch("200000999")).thenReturn(new GbisBusLocationResponse(new GbisBusLocationResponse.Response(
