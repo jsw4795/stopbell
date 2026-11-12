@@ -132,6 +132,11 @@ void main() {
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
       expect(tester.widget<ChoiceChip>(tab('전체')).selected, isTrue);
+      final colors = Theme.of(tester.element(tab('전체'))).colorScheme;
+      expect(
+        tester.widget<ChoiceChip>(tab('전체')).selectedColor,
+        colors.primary,
+      );
       expect(tab('서울'), findsOneWidget);
       expect(tab('경기'), findsOneWidget);
       expect(tab('인천'), findsNothing);

@@ -336,8 +336,8 @@ void main() {
       );
       await tester.pumpWidget(screen((_) async => [repeatedA, repeatedB]));
       await tester.pumpAndSettle();
-      expect(find.textContaining('노선 순서 8'), findsOneWidget);
-      expect(find.textContaining('노선 순서 34'), findsOneWidget);
+      expect(find.textContaining('노선 순서 8'), findsNothing);
+      expect(find.textContaining('노선 순서 34'), findsNothing);
       await tester.tap(find.byKey(const ValueKey(42)));
       await tester.pump();
       expect(
@@ -368,5 +368,16 @@ void main() {
     await tester.tap(find.byKey(const ValueKey(22)));
     await tester.pumpAndSettle();
     expect(find.byType(SwitchListTile), findsNWidgets(2));
+    expect(find.text('도착하면 알려드려요 (기본)'), findsOneWidget);
+    final before = find.widgetWithText(SwitchListTile, '한 정류장 전 알림');
+    final after = find.widgetWithText(SwitchListTile, '한 정류장 후 알림');
+    expect(tester.getSize(before).height, greaterThanOrEqualTo(44));
+    expect(
+      tester.getTopLeft(after).dy,
+      greaterThan(tester.getTopLeft(before).dy),
+    );
+    await tester.tap(find.text('한 정류장 전 알림'));
+    await tester.pump();
+    expect(tester.widget<SwitchListTile>(before).value, isTrue);
   });
 }

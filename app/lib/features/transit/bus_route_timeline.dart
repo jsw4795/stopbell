@@ -128,6 +128,10 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
   @override
   void didUpdateWidget(covariant BusRouteTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.targetId != oldWidget.targetId ||
+        widget.boardingId != oldWidget.boardingId) {
+      _layout = null;
+    }
     if (!identical(widget.vehicles, oldWidget.vehicles)) {
       _byOccurrence = _groupVehicles(widget.vehicles);
       _layout = null;
@@ -202,7 +206,8 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
     final stop = widget.stops[index];
     final details = [
       if (index == _turn?.index) '회차지점',
-      if ((_counts[stopDisplayName(stop.name).name] ?? 0) > 1)
+      if ((stop.id == widget.targetId || stop.id == widget.boardingId) &&
+          (_counts[stopDisplayName(stop.name).name] ?? 0) > 1)
         '노선 순서 ${stop.order}',
     ];
     return details.isEmpty ? null : details.join(' · ');
@@ -462,7 +467,11 @@ class _DirectionButton extends StatelessWidget {
               horizontal: StopBellSpacing.md,
               vertical: StopBellSpacing.xs,
             ),
-            shape: const StadiumBorder(),
+            shape: StadiumBorder(
+              side: BorderSide(
+                color: active ? colors.primary : colors.onSurfaceVariant,
+              ),
+            ),
             textStyle: Theme.of(context).textTheme.labelSmall,
           ),
           child: Text(

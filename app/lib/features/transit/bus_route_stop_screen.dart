@@ -278,35 +278,26 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                     ),
                     style: theme.textTheme.bodySmall,
                   ),
-                  if (target.canNotifyOneStopBefore ||
-                      target.canNotifyOneStopAfter)
-                    StopSelectionPair(
-                      first: target.canNotifyOneStopBefore
-                          ? SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                              title: const Text('한 정류장 전 알림'),
-                              value: _notifyOneStopBefore,
-                              onChanged: canChange
-                                  ? (value) => setState(
-                                      () => _notifyOneStopBefore = value,
-                                    )
-                                  : null,
-                            )
-                          : const SizedBox.shrink(),
-                      second: target.canNotifyOneStopAfter
-                          ? SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              dense: true,
-                              title: const Text('한 정류장 후 알림'),
-                              value: _notifyOneStopAfter,
-                              onChanged: canChange
-                                  ? (value) => setState(
-                                      () => _notifyOneStopAfter = value,
-                                    )
-                                  : null,
-                            )
-                          : const SizedBox.shrink(),
+                  const Text('도착하면 알려드려요 (기본)'),
+                  if (target.canNotifyOneStopBefore)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('한 정류장 전 알림'),
+                      value: _notifyOneStopBefore,
+                      onChanged: canChange
+                          ? (value) =>
+                                setState(() => _notifyOneStopBefore = value)
+                          : null,
+                    ),
+                  if (target.canNotifyOneStopAfter)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('한 정류장 후 알림'),
+                      value: _notifyOneStopAfter,
+                      onChanged: canChange
+                          ? (value) =>
+                                setState(() => _notifyOneStopAfter = value)
+                          : null,
                     ),
                   if (!_outcomeUnknown)
                     FilledButton(

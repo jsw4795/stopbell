@@ -57,6 +57,34 @@ Widget timeline(List<BusRouteStopOccurrence> stops, {double scale = 1}) =>
     );
 
 void main() {
+  for (final theme in [StopBellTheme.light, StopBellTheme.dark]) {
+    testWidgets(
+      'unselected direction has a visible border in ${theme.brightness}',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: theme,
+            home: Scaffold(
+              body: BusRouteTimeline(stops: shortRoute, onSelect: (_) {}),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final button = tester.widget<TextButton>(
+          find.ancestor(of: returning, matching: find.byType(TextButton)).first,
+        );
+        final shape = button.style!.shape!.resolve({})! as StadiumBorder;
+        final surface = theme.colorScheme.surface;
+        final a = shape.side.color.computeLuminance();
+        final b = surface.computeLuminance();
+        expect(
+          (a > b ? (a + .05) / (b + .05) : (b + .05) / (a + .05)),
+          greaterThanOrEqualTo(3),
+        );
+      },
+    );
+  }
+
   test('only the exact trimmed suffix is interpreted for display', () {
     for (final (source, name, nonstop) in [
       ('강남역', '강남역', false),
@@ -104,7 +132,7 @@ void main() {
         find.descendant(of: row(2), matching: find.textContaining('미정차')),
         findsNothing,
       );
-      expect(firstLabel.textSpan!.toPlainText(), contains('노선 순서 2'));
+      expect(firstLabel.textSpan!.toPlainText(), isNot(contains('노선 순서 2')));
       final badge =
           (firstLabel.textSpan! as TextSpan).children!.first as TextSpan;
       expect(badge.text, '  미정차 ');
@@ -141,6 +169,10 @@ void main() {
       await tester.tap(row(1));
       await tester.pumpAndSettle();
       expect(selected?.name, '강남역 (미정차)');
+      final selectedText = tester.widget<Text>(
+        find.descendant(of: row(1), matching: find.byType(Text)).first,
+      );
+      expect(selectedText.textSpan!.toPlainText(), contains('노선 순서 2'));
       final semantics = tester.widgetList<Semantics>(
         find.descendant(of: row(1), matching: find.byType(Semantics)),
       );

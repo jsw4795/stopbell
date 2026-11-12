@@ -127,9 +127,12 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
                         key: ValueKey(category),
                         label: Text(category ?? '전체'),
                         selected: category == _selectedCategory,
-                        selectedColor: Theme.of(context)
-                            .colorScheme
-                            .primaryContainer,
+                        selectedColor: Theme.of(context).colorScheme.primary,
+                        labelStyle: TextStyle(
+                          color: category == _selectedCategory
+                              ? Theme.of(context).colorScheme.onPrimary
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
                         showCheckmark: false,
                         onSelected: (_) => setState(() {
                           _selectedCategory = category;
@@ -150,27 +153,47 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
   Widget _buildResults() {
     switch (_state) {
       case _SearchState.idle:
-        return const Center(child: Text('노선번호를 입력해 검색하세요.'));
+        return const SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: StopBellSpacing.lg),
+              Icon(Icons.search),
+              SizedBox(height: StopBellSpacing.sm),
+              Text('노선번호를 입력해 검색하세요.'),
+            ],
+          ),
+        );
       case _SearchState.loading:
         return const Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               CircularProgressIndicator(),
-              SizedBox(height: 12),
+              SizedBox(height: StopBellSpacing.md),
               Text('노선 검색 중...'),
             ],
           ),
         );
       case _SearchState.empty:
-        return const Center(child: Text('검색 결과가 없어요.'));
+        return const SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(height: StopBellSpacing.lg),
+              Icon(Icons.search_off),
+              SizedBox(height: StopBellSpacing.sm),
+              Text('검색 결과가 없어요.'),
+            ],
+          ),
+        );
       case _SearchState.error:
         return Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text('노선 검색에 실패했어요.'),
-              const SizedBox(height: 12),
+              const SizedBox(height: StopBellSpacing.md),
               OutlinedButton(
                 onPressed: () => _search(_lastQuery),
                 child: const Text('다시 시도'),
