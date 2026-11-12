@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_colors.dart';
+import '../../core/theme/stopbell_spacing.dart';
 import 'alarm.dart';
 import 'alarm_api_client.dart';
+import 'home_overview.dart' show alarmRouteTypeColor;
 
 enum _DetailState { loading, success, error, notFound }
 
@@ -318,55 +321,165 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
     );
   }
 
-  Widget _details(Alarm alarm) => ListView(
-    padding: const EdgeInsets.all(16),
-    children: [
-      Text(
-        '${alarm.routeNumber} · ${alarm.stopName}',
-        style: Theme.of(context).textTheme.titleLarge,
-      ),
-      const SizedBox(height: 12),
-      Text('교통수단: ${alarm.transitType.code}'),
-      Text(_outcomeUnknown ? '상태: 확인 필요' : '상태: ${alarm.status.label}'),
-      Text('한 정류장 전 알림: ${alarm.notifyOneStopBefore ? '켜짐' : '꺼짐'}'),
-      Text('한 정류장 후 알림: ${alarm.notifyOneStopAfter ? '켜짐' : '꺼짐'}'),
-      if (!_outcomeUnknown && alarm.status == AlarmStatus.followUp) ...[
-        const SizedBox(height: 12),
-        const Text('목표 정류장 도착 후 같은 차량을 한 정류장 뒤 알림까지 추적 중이에요.'),
-        const Text('다시 활성화하면 이전 후속 추적을 끝내고 새 감시를 시작해요.'),
-      ],
-      const SizedBox(height: 24),
-      if (alarm.status == AlarmStatus.inactive)
-        FilledButton(
-          onPressed: _canMutate ? () => _change(activating: true) : null,
-          child: const Text('활성화'),
-        )
-      else ...[
-        if (alarm.status == AlarmStatus.followUp)
+  Widget _details(Alarm alarm) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final semantic = StopBellColors.of(context);
+    final muted = colors.onSurfaceVariant;
+    final routeColor = alarmRouteTypeColor(
+      context,
+      alarm.routeNumber,
+      alarm.provider,
+      alarm.routeType,
+    );
+    final statusColor = alarm.status == AlarmStatus.inactive
+        ? muted
+        : semantic.activeTracking;
+    final statusLabel = _outcomeUnknown ? '확인 필요' : alarm.status.shortLabel;
+    final endpoints = alarm.startStopName != null && alarm.endStopName != null
+        ? '${alarm.startStopName} → ${alarm.endStopName}'
+        : null;
+    final active = alarm.status != AlarmStatus.inactive;
+    return ListView(
+      padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
+      children: [
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(StopBellSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: StopBellSpacing.sm,
+                  runSpacing: StopBellSpacing.xs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      alarm.routeNumber,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: routeColor,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: StopBellSpacing.sm,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: .14),
+                        borderRadius: BorderRadius.circular(
+                          StopBellRadius.button,
+                        ),
+                      ),
+                      child: Text(
+                        statusLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: StopBellSpacing.xs),
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: alarm.stopName,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' 도착',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (endpoints != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: StopBellSpacing.xs),
+                    child: Row(
+                      children: [
+                        Icon(Icons.swap_horiz, size: 16, color: muted),
+                        const SizedBox(width: StopBellSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            endpoints,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: muted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: StopBellSpacing.md),
+        Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              SwitchListTile(
+                title: const Text('알람 사용'),
+                value: active,
+                onChanged: _canMutate
+                    ? (value) => _change(activating: value)
+                    : null,
+              ),
+              ListTile(
+                title: const Text('한 정류장 전 알림'),
+                trailing: Text(alarm.notifyOneStopBefore ? '켜짐' : '꺼짐'),
+              ),
+              ListTile(
+                title: const Text('한 정류장 후 알림'),
+                trailing: Text(alarm.notifyOneStopAfter ? '켜짐' : '꺼짐'),
+              ),
+            ],
+          ),
+        ),
+        if (!_outcomeUnknown && alarm.status == AlarmStatus.followUp) ...[
+          const SizedBox(height: StopBellSpacing.md),
+          const Text('목표 정류장 도착 후 같은 차량을 한 정류장 뒤 알림까지 추적 중이에요.'),
+          const Text('다시 활성화하면 이전 후속 추적을 끝내고 새 감시를 시작해요.'),
+          const SizedBox(height: StopBellSpacing.sm),
           FilledButton(
             onPressed: _canMutate ? () => _change(activating: true) : null,
             child: const Text('다시 활성화'),
           ),
-        OutlinedButton(
-          onPressed: _canMutate ? () => _change(activating: false) : null,
-          child: const Text('비활성화'),
+        ],
+        if (_mutating || _loading)
+          const Center(child: CircularProgressIndicator()),
+        if (_outcomeUnknown)
+          OutlinedButton(
+            onPressed: _mutating || _loading ? null : _load,
+            child: const Text('현재 상태 다시 조회'),
+          ),
+        if (_message != null) ...[
+          const SizedBox(height: StopBellSpacing.md),
+          Text(_message!),
+        ],
+        const SizedBox(height: StopBellSpacing.xl),
+        TextButton(
+          style: TextButton.styleFrom(
+            foregroundColor: colors.error,
+            minimumSize: const Size.fromHeight(
+              StopBellSpacing.minimumTouchSize,
+            ),
+          ),
+          onPressed: _canMutate ? _confirmDelete : null,
+          child: const Text('삭제'),
         ),
       ],
-      TextButton(
-        style: TextButton.styleFrom(
-          foregroundColor: Theme.of(context).colorScheme.error,
-        ),
-        onPressed: _canMutate ? _confirmDelete : null,
-        child: const Text('삭제'),
-      ),
-      if (_mutating || _loading)
-        const Center(child: CircularProgressIndicator()),
-      if (_outcomeUnknown)
-        OutlinedButton(
-          onPressed: _mutating || _loading ? null : _load,
-          child: const Text('현재 상태 다시 조회'),
-        ),
-      if (_message != null) Text(_message!),
-    ],
-  );
+    );
+  }
 }

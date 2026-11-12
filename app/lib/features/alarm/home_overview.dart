@@ -21,7 +21,7 @@ Color _boardingCreateAccent(Brightness brightness) =>
     : const Color(0xff5b47c8);
 
 /// 검증된 공식 노선 유형색. 미분류면 null이며 기본 색을 유지한다.
-Color? _routeTypeColor(
+Color? alarmRouteTypeColor(
   BuildContext context,
   String routeNumber,
   String? provider,
@@ -708,7 +708,7 @@ class _AlarmCard extends StatelessWidget {
     final endpoints = alarm.startStopName != null && alarm.endStopName != null
         ? '${alarm.startStopName} → ${alarm.endStopName}'
         : null;
-    final routeColor = _routeTypeColor(
+    final routeColor = alarmRouteTypeColor(
       context,
       alarm.routeNumber,
       alarm.provider,
@@ -786,7 +786,7 @@ class _EndedSessionTile extends StatelessWidget {
     final ago = ended == null
         ? null
         : _SessionCard._endedAgo(now().toUtc().difference(ended.toUtc()));
-    final routeColor = _routeTypeColor(
+    final routeColor = alarmRouteTypeColor(
       context,
       session.routeNumber,
       session.timeline?.provider,
@@ -871,7 +871,7 @@ class _SessionCard extends StatelessWidget {
         : ended == null
         ? null
         : _endedAgo(now().toUtc().difference(ended.toUtc()));
-    final routeColor = _routeTypeColor(
+    final routeColor = alarmRouteTypeColor(
       context,
       session.routeNumber,
       session.timeline?.provider,
