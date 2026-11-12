@@ -86,20 +86,29 @@ class LoginView extends StatelessWidget {
                     if (initializing)
                       _status(context, '인증 상태 확인 중...')
                     else ...[
-                      _GoogleButton(
-                        onPressed: loading ? null : onGoogle,
-                        height: _buttonHeight,
-                        radius: _buttonRadius,
+                      _buttonShadow(
+                        dark: dark,
+                        child: _GoogleButton(
+                          onPressed: loading ? null : onGoogle,
+                          height: _buttonHeight,
+                          radius: _buttonRadius,
+                        ),
                       ),
                       if (onApple != null) ...[
                         const SizedBox(height: StopBellSpacing.md),
-                        SignInWithAppleButton(
-                          text: 'Apple로 계속하기',
-                          height: _buttonHeight,
-                          borderRadius: const BorderRadius.all(
-                            Radius.circular(_buttonRadius),
+                        _buttonShadow(
+                          dark: dark,
+                          child: SignInWithAppleButton(
+                            text: 'Apple로 계속하기',
+                            style: dark
+                                ? SignInWithAppleButtonStyle.white
+                                : SignInWithAppleButtonStyle.black,
+                            height: _buttonHeight,
+                            borderRadius: const BorderRadius.all(
+                              Radius.circular(_buttonRadius),
+                            ),
+                            onPressed: loading ? null : onApple!,
                           ),
-                          onPressed: loading ? null : onApple!,
                         ),
                         const SizedBox(height: StopBellSpacing.md),
                         Text(
@@ -128,6 +137,24 @@ class LoginView extends StatelessWidget {
       ),
     );
   }
+
+  /// 라이트 배경에서 흰 버튼이 구분되도록 두 버튼에 같은 약한 그림자를 준다.
+  Widget _buttonShadow({required bool dark, required Widget child}) =>
+      DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(_buttonRadius),
+          boxShadow: dark
+              ? null
+              : const [
+                  BoxShadow(
+                    color: Color(0x1f000000),
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+        ),
+        child: child,
+      );
 
   Widget _status(BuildContext context, String text) => Column(
     mainAxisSize: MainAxisSize.min,
@@ -186,21 +213,15 @@ class _GoogleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
     final fontSize = height * 0.43;
     return Semantics(
       button: true,
       label: 'Google로 계속하기',
       excludeSemantics: true,
       child: Material(
-        color: dark ? const Color(0xff131314) : Colors.white,
-        elevation: dark ? 0 : 2,
-        shadowColor: Colors.black26,
+        color: Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radius),
-          side: BorderSide(
-            color: dark ? const Color(0xff8e918f) : const Color(0xffe3e3e3),
-          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -216,9 +237,7 @@ class _GoogleButton extends StatelessWidget {
                   width: height * 28 / 44,
                   child: Center(
                     child: Image.asset(
-                      dark
-                          ? 'assets/auth/dark/google_g.png'
-                          : 'assets/auth/google_g.png',
+                      'assets/auth/google_g.png',
                       width: fontSize,
                       height: fontSize,
                     ),
@@ -231,9 +250,7 @@ class _GoogleButton extends StatelessWidget {
                     fontSize: fontSize,
                     fontFamily: '.SF Pro Text',
                     letterSpacing: -0.41,
-                    color: dark
-                        ? const Color(0xffe3e3e3)
-                        : const Color(0xff1f1f1f),
+                    color: const Color(0xff1f1f1f),
                   ),
                 ),
               ],

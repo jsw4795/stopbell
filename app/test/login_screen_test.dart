@@ -187,11 +187,32 @@ void main() {
         .value;
     expect(overlay.statusBarBrightness, Brightness.dark);
     expect(overlay.statusBarIconBrightness, Brightness.light);
-    expect(tester.widget<SignInWithAppleButton>(apple).style, brandStyle);
+    // 라이트는 검정, 다크는 Google과 같은 흰색 버튼
+    expect(brandStyle, SignInWithAppleButtonStyle.black);
+    expect(
+      tester.widget<SignInWithAppleButton>(apple).style,
+      SignInWithAppleButtonStyle.white,
+    );
     expect(tester.getSize(apple), brandSize);
     expect(find.text('Google로 계속하기'), findsOneWidget);
     expect(tester.takeException(), isNull);
     debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('헤더 StopBell 탭은 루트(홈)로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      app(session(FakeAuthenticator(), FakeStorage(pair: pair))),
+    );
+    await tester.pumpAndSettle();
+    await openSettings(tester);
+    expect(settingsTitle, findsOneWidget);
+    Navigator.of(tester.element(settingsTitle)).popUntil((r) => r.isFirst);
+    await tester.pumpAndSettle();
+    final header = find.byKey(const ValueKey('header-home'));
+    await tester.tap(header);
+    await tester.pumpAndSettle();
+    expect(header, findsOneWidget);
+    expect(settingsTitle, findsNothing);
   });
 
   testWidgets('기본 설정에서 iOS Apple 버튼을 표시한다', (tester) async {

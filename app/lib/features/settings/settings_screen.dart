@@ -106,6 +106,28 @@ class _SettingsScreenState extends State<SettingsScreen>
     };
   }
 
+  Future<void> _confirmLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('로그아웃할까요?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('로그아웃'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    Navigator.of(context).pop();
+    widget.onLogout();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -161,22 +183,24 @@ class _SettingsScreenState extends State<SettingsScreen>
               ListTile(
                 leading: const Icon(Icons.logout),
                 title: const Text('로그아웃'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  widget.onLogout();
-                },
+                onTap: _confirmLogout,
               ),
-              if (widget.onDeleteAccount != null)
-                ListTile(
-                  leading: Icon(
-                    Icons.person_remove_outlined,
-                    color: colors.error,
-                  ),
-                  title: Text('회원 탈퇴', style: TextStyle(color: colors.error)),
-                  onTap: widget.onDeleteAccount,
-                ),
             ],
           ),
+          if (widget.onDeleteAccount != null) ...[
+            const SizedBox(height: StopBellSpacing.xl * 2),
+            Center(
+              child: TextButton(
+                key: const ValueKey('delete-account'),
+                style: TextButton.styleFrom(
+                  foregroundColor: colors.onSurfaceVariant,
+                  textStyle: theme.textTheme.bodySmall,
+                ),
+                onPressed: widget.onDeleteAccount,
+                child: const Text('회원 탈퇴'),
+              ),
+            ),
+          ],
         ],
       ),
     );

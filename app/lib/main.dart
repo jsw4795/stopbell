@@ -527,7 +527,13 @@ class _LoginScreenState extends State<LoginScreen> {
             !widget.authSession.isLoggingOut) {
           return Scaffold(
             appBar: AppBar(
-              title: const Text('StopBell'),
+              title: GestureDetector(
+                key: const ValueKey('header-home'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () =>
+                    Navigator.of(context).popUntil((route) => route.isFirst),
+                child: const Text('StopBell'),
+              ),
               actions: [
                 IconButton(
                   tooltip: '설정',

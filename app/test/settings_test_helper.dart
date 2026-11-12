@@ -4,7 +4,20 @@ import 'package:flutter_test/flutter_test.dart';
 /// 홈의 설정 톱니바퀴로 설정 화면을 연 뒤 [label] 항목을 누른다.
 Future<void> tapInSettings(WidgetTester tester, String label) async {
   await openSettings(tester);
-  await tester.tap(find.text(label));
+  final target = find.text(label);
+  await tester.ensureVisible(target);
+  await tester.tap(target);
+  if (label == '로그아웃') {
+    // 로그아웃은 확인 다이얼로그를 거친다.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('로그아웃'),
+      ),
+    );
+  }
 }
 
 Future<void> openSettings(WidgetTester tester) async {

@@ -68,10 +68,20 @@ void main() {
       onLogout: () => logout++,
       onDelete: () async => deletion++,
     );
+    await tester.ensureVisible(find.text('회원 탈퇴'));
     await tester.tap(find.text('회원 탈퇴'));
     await tester.pump();
     expect(deletion, 1);
     await tester.tap(find.text('로그아웃'));
+    await tester.pumpAndSettle();
+    expect(find.text('로그아웃할까요?'), findsOneWidget);
+    expect(logout, 0);
+    await tester.tap(find.widgetWithText(TextButton, '취소'));
+    await tester.pumpAndSettle();
+    expect(logout, 0);
+    await tester.tap(find.text('로그아웃'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, '로그아웃'));
     await tester.pumpAndSettle();
     expect(logout, 1);
     expect(find.text('open'), findsOneWidget);
