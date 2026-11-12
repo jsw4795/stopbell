@@ -26,6 +26,7 @@ splitBoardingBuses({
   required List<BusRouteVehicle> vehicles,
   required List<BusRouteStopOccurrence> stops,
   required int targetId,
+  int? boardingId,
 }) {
   final byNumber = <String, BusRouteVehicle>{};
   for (final vehicle in vehicles) {
@@ -37,7 +38,23 @@ splitBoardingBuses({
   final targetIndex = indexOf[targetId] ?? -1;
   final drawn = <BoardingBusEntry>[];
   final others = <BoardingCandidate>[];
+  final targetOrder = targetIndex < 0 ? null : stops[targetIndex].order;
+  final boardingIndex = indexOf[boardingId];
+  // 후보 자체 신호(progress 순번, 승차 기준 gap)가 목표 이후를 가리키면 제외한다.
+  // progress의 occurrenceId가 노선 목록에 없어도 순번으로 판단한다.
+  bool passedByCandidate(BoardingCandidate candidate) {
+    final order = candidate.progress?.order;
+    if (targetOrder != null && order != null && order > targetOrder) {
+      return true;
+    }
+    final gap = candidate.boardingOccurrenceGap;
+    return boardingIndex != null &&
+        gap != null &&
+        boardingIndex - gap > targetIndex;
+  }
+
   for (final candidate in candidates) {
+    if (passedByCandidate(candidate)) continue;
     final number = candidate.vehicleNumber;
     final vehicle = number == null
         ? null

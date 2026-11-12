@@ -88,6 +88,26 @@ void main() {
     expect(split.others, isEmpty);
   });
 
+  test('progress occurrenceId가 목록에 없어도 순번이 목표 이후면 제외한다', () {
+    final past = BoardingCandidate.fromJson(
+      candidateJson()
+        ..['progress'] = {
+          'occurrenceId': 9999,
+          'stopName': '정류장25',
+          'order': 25,
+          'kind': 'ROUTE_PROGRESS',
+        },
+    );
+    final split = splitBoardingBuses(
+      candidates: [past],
+      vehicles: const [],
+      stops: _stops,
+      targetId: 20,
+    );
+    expect(split.drawn, isEmpty);
+    expect(split.others, isEmpty);
+  });
+
   test('후보 progress가 목표 이후인 미연결 후보도 제외한다', () {
     final past = BoardingCandidate.fromJson(
       candidateJson()
