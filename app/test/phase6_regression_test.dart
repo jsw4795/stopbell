@@ -95,6 +95,7 @@ Future<AuthSession> pumpApplication(
 Future<void> startAlarm(WidgetTester tester) async {
   await tester.tap(find.text('도착 알람'));
   await tester.pumpAndSettle();
+  expect(find.text('도착 알람 · 노선 선택'), findsOneWidget);
   await tester.enterText(find.byType(TextField), '7000');
   await tester.tap(find.text('검색'));
   await tester.pumpAndSettle();

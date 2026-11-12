@@ -301,13 +301,15 @@ class _AlarmHomeState extends State<AlarmHome> {
       ),
       _Page.search => Column(
         children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
-              tooltip: '알람 목록으로',
-              onPressed: _showList,
-              icon: const Icon(Icons.arrow_back),
-            ),
+          Row(
+            children: [
+              IconButton(
+                tooltip: '알람 목록으로',
+                onPressed: _showList,
+                icon: const Icon(Icons.arrow_back),
+              ),
+              const Text('도착 알람 · 노선 선택'),
+            ],
           ),
           Expanded(
             child: BusRouteSearchScreen(
