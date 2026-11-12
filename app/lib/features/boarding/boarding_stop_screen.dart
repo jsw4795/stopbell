@@ -6,6 +6,9 @@ import '../auth/auth_session.dart';
 import '../transit/bus_route.dart';
 import '../transit/bus_route_stop_occurrence.dart';
 import '../transit/bus_route_timeline.dart';
+import '../transit/bus_route_vehicle_bar.dart';
+import '../transit/bus_route_vehicle_client.dart';
+import '../transit/bus_route_vehicle_controller.dart';
 import '../transit/bus_stop_selection_layout.dart';
 import '../transit/stop_display_name.dart';
 import 'boarding_candidate_client.dart';
@@ -31,6 +34,7 @@ class BoardingStopScreen extends StatefulWidget {
     this.creationBusy = false,
     this.notificationOffsetStops = 2,
     this.onNotificationOffsetChanged,
+    this.findVehicles,
   });
   final BusRoute route;
   final AuthSession authSession;
@@ -40,6 +44,9 @@ class BoardingStopScreen extends StatefulWidget {
   final bool reconfirm, creationBusy;
   final int notificationOffsetStops;
   final ValueChanged<int>? onNotificationOffsetChanged;
+
+  /// 없으면 앱 루트의 [BusRouteVehiclesScope]를 쓰고, 그것도 없으면 차량 표시를 끈다.
+  final FindBusRouteVehicles? findVehicles;
   final void Function(
     BoardingCandidate,
     BoardingSelectionContext, {
@@ -67,6 +74,15 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   bool _loadingCandidates = false;
   String? _error;
   bool _staleStops = false;
+  BusRouteVehicleController? _vehicles;
+
+  BusRouteVehicleController? _newVehicles() {
+    final find =
+        widget.findVehicles ?? BusRouteVehiclesScope.maybeFind(context);
+    return find == null
+        ? null
+        : BusRouteVehicleController(routeId: widget.route.id, find: find);
+  }
 
   bool get _current =>
       mounted &&
@@ -78,13 +94,18 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     super.initState();
     _generation = widget.authSession.generation;
     widget.authSession.addListener(_authChanged);
+    _vehicles = _newVehicles();
     _loadStops();
   }
 
   @override
   void didUpdateWidget(covariant BoardingStopScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.route.id != widget.route.id) _loadStops();
+    if (oldWidget.route.id != widget.route.id) {
+      _vehicles?.dispose();
+      _vehicles = _newVehicles();
+      _loadStops();
+    }
   }
 
   void _invalidateCandidates() {
@@ -112,6 +133,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   void dispose() {
     _stopsEpoch++;
     _candidateEpoch++;
+    _vehicles?.dispose();
     widget.authSession.removeListener(_authChanged);
     super.dispose();
   }
@@ -120,6 +142,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     if (!_current) return;
     final epoch = ++_stopsEpoch;
     final routeId = widget.route.id;
+    _vehicles?.refresh();
     setState(() {
       _invalidateCandidates();
       _target = null;
@@ -349,21 +372,40 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     );
   }
 
+  Widget _timelineWithVehicles() {
+    final vehicles = _vehicles;
+    BusRouteTimeline timeline() => BusRouteTimeline(
+      stops: _stops,
+      targetId: _target?.id,
+      boardingId: _boarding?.id,
+      isSelectable: _picker == _Picker.target ? _validTarget : null,
+      selectionLocked: _picker == _Picker.review,
+      rowKey: (id) => ValueKey('occurrence-$id'),
+      vehicles: vehicles?.data?.vehicles,
+      onSelect: _staleStops || _result != null || _picker == _Picker.review
+          ? null
+          : _select,
+    );
+    if (vehicles == null) return timeline();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        BusRouteVehicleBar(controller: vehicles),
+        Expanded(
+          child: ListenableBuilder(
+            listenable: vehicles,
+            builder: (_, _) => timeline(),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _routeAndCandidates() => IndexedStack(
     index: _result == null ? 0 : 1,
     sizing: StackFit.expand,
     children: [
-      BusRouteTimeline(
-        stops: _stops,
-        targetId: _target?.id,
-        boardingId: _boarding?.id,
-        isSelectable: _picker == _Picker.target ? _validTarget : null,
-        selectionLocked: _picker == _Picker.review,
-        rowKey: (id) => ValueKey('occurrence-$id'),
-        onSelect: _staleStops || _result != null || _picker == _Picker.review
-            ? null
-            : _select,
-      ),
+      _timelineWithVehicles(),
       if (_result case final result?)
         SingleChildScrollView(
           key: const ValueKey('boarding-candidate-results'),

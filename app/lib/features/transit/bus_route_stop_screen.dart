@@ -8,6 +8,9 @@ import '../alarm/alarm_creation_controller.dart';
 import 'bus_route.dart';
 import 'bus_route_stop_occurrence.dart';
 import 'bus_route_timeline.dart';
+import 'bus_route_vehicle_bar.dart';
+import 'bus_route_vehicle_client.dart';
+import 'bus_route_vehicle_controller.dart';
 import 'bus_stop_selection_layout.dart';
 
 enum _StopState { loading, success, empty, error }
@@ -24,6 +27,7 @@ class BusRouteStopScreen extends StatefulWidget {
     required this.creationController,
     this.beforeActivate,
     this.isRequestCurrent,
+    this.findVehicles,
   });
 
   final BusRoute route;
@@ -34,6 +38,9 @@ class BusRouteStopScreen extends StatefulWidget {
   final VoidCallback onShowAlarms;
   final Future<bool> Function(BuildContext context)? beforeActivate;
   final bool Function()? isRequestCurrent;
+
+  /// 없으면 앱 루트의 [BusRouteVehiclesScope]를 쓰고, 그것도 없으면 차량 표시를 끈다.
+  final FindBusRouteVehicles? findVehicles;
   final AlarmCreationController creationController;
 
   @override
@@ -50,10 +57,20 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
   bool _creating = false;
   bool _outcomeUnknown = false;
   String? _createMessage;
+  BusRouteVehicleController? _vehicles;
+
+  BusRouteVehicleController? _newVehicles() {
+    final find =
+        widget.findVehicles ?? BusRouteVehiclesScope.maybeFind(context);
+    return find == null
+        ? null
+        : BusRouteVehicleController(routeId: widget.route.id, find: find);
+  }
 
   @override
   void initState() {
     super.initState();
+    _vehicles = _newVehicles();
     _load();
   }
 
@@ -64,12 +81,15 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
       _creating = false;
       _outcomeUnknown = false;
       _createMessage = null;
+      _vehicles?.dispose();
+      _vehicles = _newVehicles();
       _load();
     }
   }
 
   @override
   void dispose() {
+    _vehicles?.dispose();
     _requestGeneration++;
     super.dispose();
   }
@@ -78,6 +98,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
     if (_creating || _outcomeUnknown) return;
     final request = ++_requestGeneration;
     final routeId = widget.route.id;
+    _vehicles?.refresh();
     setState(() {
       _state = _StopState.loading;
       _stops = const [];
@@ -329,10 +350,25 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           ),
         );
       case _StopState.success:
-        return BusRouteTimeline(
+        final vehicles = _vehicles;
+        BusRouteTimeline timeline() => BusRouteTimeline(
           stops: _stops,
           targetId: _selectedOccurrenceId,
           onSelect: _creating || _outcomeUnknown ? null : _select,
+          vehicles: vehicles?.data?.vehicles,
+        );
+        if (vehicles == null) return timeline();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            BusRouteVehicleBar(controller: vehicles),
+            Expanded(
+              child: ListenableBuilder(
+                listenable: vehicles,
+                builder: (_, _) => timeline(),
+              ),
+            ),
+          ],
         );
     }
   }

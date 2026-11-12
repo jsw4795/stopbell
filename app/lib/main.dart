@@ -32,6 +32,8 @@ import 'features/transit/bus_route.dart';
 import 'features/transit/bus_route_search_client.dart';
 import 'features/transit/bus_route_stop_client.dart';
 import 'features/transit/bus_route_stop_occurrence.dart';
+import 'features/transit/bus_route_vehicle_bar.dart';
+import 'features/transit/bus_route_vehicle_client.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -86,6 +88,7 @@ void main() {
       notifications: notifications,
       searchRoutes: routeSearch.search,
       findStops: routeStops.findStops,
+      findVehicles: BusRouteVehicleClient(apiClient).findVehicles,
       alarmClient: alarms,
       findBoardingCandidates: BoardingCandidateClient(apiClient).find,
       boardingSessionClient: BoardingSessionApiClient(apiClient),
@@ -120,8 +123,10 @@ class StopBellApplication extends StatefulWidget {
     this.boardingSessionClient,
     this.boardingIntentStorage,
     this.deletion,
+    this.findVehicles,
   });
 
+  final FindBusRouteVehicles? findVehicles;
   final AuthSession authSession;
   final Authenticator? appleAuthenticator;
   final bool appleLoginEnabled;
@@ -289,7 +294,10 @@ class _StopBellApplicationState extends State<StopBellApplication>
       theme: StopBellTheme.light,
       darkTheme: StopBellTheme.dark,
       themeMode: ThemeMode.system,
-      builder: StopBellTheme.withSystemOverlay,
+      builder: (context, child) => BusRouteVehiclesScope(
+        find: widget.findVehicles,
+        child: StopBellTheme.withSystemOverlay(context, child),
+      ),
       scaffoldMessengerKey: _messengerKey,
       navigatorKey: _navigatorKey,
       home: _storageFailed

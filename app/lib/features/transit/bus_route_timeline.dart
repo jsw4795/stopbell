@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/stopbell_colors.dart';
 import '../../core/theme/stopbell_spacing.dart';
 import 'bus_route_stop_occurrence.dart';
+import 'bus_route_vehicle.dart';
 import 'stop_display_name.dart';
 
 /// The stops API only supplies destinations for a verified GBIS traversal:
@@ -92,6 +93,7 @@ class BusRouteTimeline extends StatefulWidget {
     this.rowKey,
     this.isSelectable,
     this.selectionLocked = false,
+    this.vehicles,
   });
 
   final List<BusRouteStopOccurrence> stops;
@@ -102,6 +104,10 @@ class BusRouteTimeline extends StatefulWidget {
   final bool Function(BusRouteStopOccurrence)? isSelectable;
   final bool selectionLocked;
 
+  /// 선택 입력. null이면 기존과 동일하게 그린다. occurrenceId가 없는 차량은
+  /// 노선도에 찍지 않는다.
+  final List<BusRouteVehicle>? vehicles;
+
   @override
   State<BusRouteTimeline> createState() => _BusRouteTimelineState();
 }
@@ -111,12 +117,17 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
     ..addListener(_updateDirection);
   late var _turn = _verifiedTurn(widget.stops);
   late var _counts = _nameCounts(widget.stops);
+  late var _byOccurrence = _groupVehicles(widget.vehicles);
   _TimelineLayout? _layout;
   bool _inbound = false;
 
   @override
   void didUpdateWidget(covariant BusRouteTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(widget.vehicles, oldWidget.vehicles)) {
+      _byOccurrence = _groupVehicles(widget.vehicles);
+      _layout = null;
+    }
     if (!identical(widget.stops, oldWidget.stops)) {
       _turn = _verifiedTurn(widget.stops);
       _counts = _nameCounts(widget.stops);
@@ -155,6 +166,17 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
         curve: Curves.easeInOutCubic,
       );
     }
+  }
+
+  static Map<int, List<BusRouteVehicle>> _groupVehicles(
+    List<BusRouteVehicle>? vehicles,
+  ) {
+    final map = <int, List<BusRouteVehicle>>{};
+    for (final vehicle in vehicles ?? const <BusRouteVehicle>[]) {
+      final id = vehicle.occurrenceId;
+      if (id != null) map.putIfAbsent(id, () => []).add(vehicle);
+    }
+    return map;
   }
 
   String? _rowDetails(int index) {
@@ -232,6 +254,13 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                   color: stopColors.nonstopStop,
                   fontWeight: FontWeight.w600,
                 ),
+                vehicle: theme.textTheme.bodySmall!.copyWith(
+                  color: stopColors.busLocation,
+                  fontWeight: FontWeight.w600,
+                ),
+                good: stopColors.success,
+                caution: stopColors.warning,
+                danger: theme.colorScheme.error,
                 badge: theme.textTheme.labelSmall!.copyWith(
                   color: stopColors.nonstopStop,
                   fontWeight: FontWeight.w600,
@@ -248,6 +277,7 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                     (
                       stopDisplayName(widget.stops[index].name),
                       _rowDetails(index),
+                      _byOccurrence[widget.stops[index].id] ?? const [],
                     ),
                 ]);
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -291,6 +321,7 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
                         hasSelectedLeg &&
                         index >= boardingIndex &&
                         index < targetIndex,
+                    vehicleCount: _byOccurrence[stop.id]?.length ?? 0,
                     unavailable: !selectable,
                     onTap: widget.onSelect == null || !selectable
                         ? null
@@ -315,6 +346,10 @@ typedef _TextMetrics = ({
   TextStyle mutedTitle,
   TextStyle badge,
   TextStyle detail,
+  TextStyle vehicle,
+  Color good,
+  Color caution,
+  Color danger,
   TextHeightBehavior? heightBehavior,
   bool bold,
 });
@@ -324,7 +359,8 @@ typedef _TextMetrics = ({
 class _TimelineLayout {
   _TimelineLayout(
     this.metrics,
-    List<(({String name, bool isNonstop}), String?)> rows,
+    List<(({String name, bool isNonstop}), String?, List<BusRouteVehicle>)>
+    rows,
   ) {
     final painter = TextPainter(
       textScaler: metrics.scaler,
@@ -332,7 +368,7 @@ class _TimelineLayout {
       locale: metrics.locale,
       textHeightBehavior: metrics.heightBehavior,
     );
-    for (final (display, detail) in rows) {
+    for (final (display, detail, vehicles) in rows) {
       final baseTitle = display.isNonstop ? metrics.mutedTitle : metrics.title;
       final title = metrics.bold
           ? baseTitle.copyWith(fontWeight: FontWeight.bold)
@@ -349,6 +385,7 @@ class _TimelineLayout {
                   ? metrics.detail.copyWith(fontWeight: FontWeight.bold)
                   : metrics.detail,
             ),
+          for (final vehicle in vehicles) ..._vehicleSpans(vehicle, metrics),
         ],
       );
       painter.text = span;
@@ -434,6 +471,7 @@ class _StopRow extends StatelessWidget {
     required this.outgoingSelected,
     required this.onTap,
     required this.unavailable,
+    this.vehicleCount = 0,
   });
 
   static const railWidth = 56.0;
@@ -449,6 +487,7 @@ class _StopRow extends StatelessWidget {
   final bool outgoingSelected;
   final VoidCallback? onTap;
   final bool unavailable;
+  final int vehicleCount;
 
   @override
   Widget build(BuildContext context) {
@@ -526,6 +565,12 @@ class _StopRow extends StatelessWidget {
                             ),
                           ],
                         ),
+                        if (vehicleCount > 0)
+                          PositionedDirectional(
+                            start: 6,
+                            bottom: 3,
+                            child: _VehicleMarker(count: vehicleCount),
+                          ),
                         Center(
                           child: Container(
                             width: selected || turn ? 24 : 12,
@@ -598,4 +643,72 @@ class BusRouteRailSegment extends StatelessWidget {
             child: ColoredBox(color: color!),
           ),
         );
+}
+
+const _congestionLabels = ['여유', '보통', '혼잡', '매우혼잡'];
+
+List<InlineSpan> _vehicleSpans(BusRouteVehicle vehicle, _TextMetrics metrics) {
+  final style = metrics.bold
+      ? metrics.vehicle.copyWith(fontWeight: FontWeight.bold)
+      : metrics.vehicle;
+  final seat = switch (vehicle.seatStatus) {
+    BusVehicleSeatStatus.available => '${vehicle.seatRemaining}석',
+    BusVehicleSeatStatus.none => '만석',
+    BusVehicleSeatStatus.unavailable => null,
+  };
+  final congestion = vehicle.congestion;
+  final congestionColor = switch (congestion) {
+    1 => metrics.good,
+    3 => metrics.caution,
+    4 => metrics.danger,
+    _ => metrics.detail.color,
+  };
+  return [
+    TextSpan(text: '\n버스 ${vehicle.shortNumber}', style: style),
+    if (seat != null) TextSpan(text: ' · $seat', style: style),
+    if (congestion != null)
+      TextSpan(
+        text: ' · ${_congestionLabels[congestion - 1]}',
+        style: style.copyWith(color: congestionColor),
+      ),
+  ];
+}
+
+class _VehicleMarker extends StatelessWidget {
+  const _VehicleMarker({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = StopBellColors.of(context).busLocation;
+    final surface = Theme.of(context).colorScheme.surface;
+    return Semantics(
+      label: count > 1 ? '버스 $count대' : '버스',
+      excludeSemantics: true,
+      child: Container(
+        constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.directions_bus, size: 13, color: surface),
+            if (count > 1)
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: surface,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
