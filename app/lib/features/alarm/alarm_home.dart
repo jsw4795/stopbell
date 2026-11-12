@@ -301,7 +301,14 @@ class _AlarmHomeState extends State<AlarmHome> {
       ),
       _Page.search => Column(
         children: [
-          TextButton(onPressed: _showList, child: const Text('알람 목록으로')),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              tooltip: '알람 목록으로',
+              onPressed: _showList,
+              icon: const Icon(Icons.arrow_back),
+            ),
+          ),
           Expanded(
             child: BusRouteSearchScreen(
               search: widget.searchRoutes,

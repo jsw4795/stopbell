@@ -12,6 +12,7 @@ class BusStopSelectionLayout extends StatelessWidget {
     required this.body,
     this.summary,
     this.backLabel = '노선 다시 선택',
+    this.iconColor,
   });
 
   final BusRoute route;
@@ -20,6 +21,9 @@ class BusStopSelectionLayout extends StatelessWidget {
   final Widget body;
   final Widget? summary;
   final String backLabel;
+
+  /// 노선 유형색. 없으면 기본색을 쓴다.
+  final Color? iconColor;
 
   @override
   Widget build(BuildContext context) {
@@ -88,7 +92,7 @@ class BusStopSelectionLayout extends StatelessWidget {
                         padding: const EdgeInsets.all(StopBellSpacing.sm),
                         child: Icon(
                           Icons.directions_bus_outlined,
-                          color: colors.onPrimaryContainer,
+                          color: iconColor ?? colors.onPrimaryContainer,
                         ),
                       ),
                     ),

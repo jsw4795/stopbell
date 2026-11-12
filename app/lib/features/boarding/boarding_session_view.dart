@@ -228,7 +228,7 @@ class BoardingSessionDetails extends StatelessWidget {
         Row(
           key: const ValueKey('boarding-header'),
           children: [
-            if (constrained)
+            if (constrained || onBack != null)
               IconButton(
                 onPressed: onBack,
                 tooltip: '버스 도착 알림으로',

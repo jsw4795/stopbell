@@ -106,17 +106,21 @@ class _BoardingNotificationScreenState
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: IconButton(
-            onPressed: widget.onBack,
-            tooltip: '버스 도착 알림으로',
-            icon: const Icon(Icons.arrow_back),
+        if (_session == null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: IconButton(
+              onPressed: widget.onBack,
+              tooltip: '버스 도착 알림으로',
+              icon: const Icon(Icons.arrow_back),
+            ),
           ),
-        ),
         if (_busy) const Text('서버 응답 확인 중...'),
         if (_error != null) Text(_error!),
-        if (_session != null) BoardingSessionDetails(session: _session!),
+        if (_session != null) BoardingSessionDetails(
+            session: _session!,
+            onBack: widget.onBack,
+          ),
         OutlinedButton(
           onPressed: _busy ? null : _load,
           child: Text(_error == null ? '상태 새로고침' : '다시 조회'),
