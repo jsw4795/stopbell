@@ -32,6 +32,7 @@
 - 커밋은 로컬까지만 한다. **Push는 개발자가 직접 한다.** 커밋 형식은 `AGENTS.md`를 따르고 커밋 후 `git log -1 --pretty=full`로 형식을 확인한다.
 - 커밋 메시지와 PR 본문에 `Co-Authored-By` 등 Claude 작성자 표기(attribution)를 넣지 않는다.
 - 실제 Provider API 호출, FCM 전송, 개발 DB 데이터 변경·Bootstrap·동기화 적용, Docker volume 삭제는 개발자 승인 없이 실행하지 않는다.
+- iOS 시뮬레이터는 사용하지 않는다(빌드·실행이 느림). 화면은 위젯 테스트로 검증하고 최종 확인은 개발자의 실제 iPhone 확인에 맡긴다. 실데이터 확인이 필요하면 Backend API를 직접 호출한다.
 - `.env`, 인증정보, API Key를 출력·커밋·로그에 남기지 않는다. `docs/devlog/`는 요청 없이 건드리지 않는다.
 
 ## 자주 쓰는 명령
