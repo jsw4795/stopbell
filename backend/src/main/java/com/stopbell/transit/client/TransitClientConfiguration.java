@@ -48,6 +48,12 @@ public class TransitClientConfiguration {
     }
 
     @Bean
+    GbisBusLocationClient gbisBusLocationClient(TransitClientProperties properties,
+            @org.springframework.beans.factory.annotation.Value("${transit.client.gbis-location-base-url:https://apis.data.go.kr/6410000/buslocationservice/v2/getBusLocationListv2}") String baseUrl) {
+        return new GbisBusLocationClient(restClient(properties), baseUrl, properties.tago().serviceKey());
+    }
+
+    @Bean
     BusMetadataSource tagoMetadataSource(TagoMetadataClient client, GbisMetadataClient gbisClient) {
         return new TagoMetadataSource(client, gbisClient, 100);
     }
