@@ -123,7 +123,7 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         assertThat(target.getSuccessorStopOrder()).isEqualTo(7);
         assertThat(response).isEqualTo(new AlarmResponse(
                 alarm.getId(), TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", true, true, null, null,
-                TransitProvider.TAGO, null
+                TransitProvider.TAGO, null, true, true
         ));
     }
 
@@ -827,7 +827,7 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
             statistics.clear();
             assertThat(alarmService.findAll(owner.getId())).hasSize(3);
             // Alarm·BusAlarmTarget 1회 + 표시용 현재 노선 1회 + TAGO 노선 원본 1회
-            assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
         } finally {
             statistics.setStatisticsEnabled(originallyEnabled);
         }
@@ -889,10 +889,10 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
             statistics.clear();
             assertThat(alarmService.findById(owner.getId(), alarmId)).isEqualTo(new AlarmResponse(
                     alarmId, TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", false, false, null, null,
-                    TransitProvider.TAGO, null
+                    TransitProvider.TAGO, null, true, true
             ));
             // Alarm·BusAlarmTarget 1회 + 표시용 현재 노선 1회 + TAGO 노선 원본 1회
-            assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
         } finally {
             statistics.setStatisticsEnabled(originallyEnabled);
         }
@@ -930,7 +930,7 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         try {
             statistics.clear();
             List<AlarmResponse> alarms = alarmService.findAll(owner.getId());
-            assertThat(statistics.getPrepareStatementCount()).isEqualTo(3);
+            assertThat(statistics.getPrepareStatementCount()).isEqualTo(5);
             assertThat(alarms).hasSize(4);
             assertThat(alarms).filteredOn(alarm -> alarm.id().equals(verifiedId)).singleElement()
                     .satisfies(alarm -> {
@@ -1019,6 +1019,20 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
                 new UpdateAlarmOptionsRequest(false, true)))
                 .isInstanceOfSatisfying(ApiException.class, exception ->
                         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_ALARM_REQUEST));
+    }
+
+    @Test
+    @DisplayName("알람 응답은 첫·마지막 occurrence에서 불가능한 전/후 옵션을 표시한다")
+    void response_reports_possible_adjacent_options() {
+        User user = user();
+        RouteFixture route = route();
+        AlarmResponse first = alarmService.create(user.getId(), new CreateAlarmRequest(route.firstId(), false, false));
+        AlarmResponse last = alarmService.create(user.getId(), new CreateAlarmRequest(route.lastId(), false, false));
+
+        assertThat(first.canNotifyOneStopBefore()).isFalse();
+        assertThat(first.canNotifyOneStopAfter()).isTrue();
+        assertThat(last.canNotifyOneStopBefore()).isTrue();
+        assertThat(last.canNotifyOneStopAfter()).isFalse();
     }
 
     @Test

@@ -219,6 +219,7 @@ public class AlarmService {
         List<BusAlarmTarget> targets = alarms.stream().map(AlarmService::busTarget).toList();
         Map<String, RouteDisplay> displays = routeDisplays(targets);
         List<AlarmResponse> responses = new ArrayList<>(alarms.size());
+        Map<Long, List<BusRouteStopOccurrence>> traversals = new HashMap<>();
         for (int index = 0; index < alarms.size(); index++) {
             Alarm alarm = alarms.get(index);
             BusAlarmTarget busTarget = targets.get(index);
@@ -235,10 +236,30 @@ public class AlarmService {
                     display.endpoints().start(),
                     display.endpoints().end(),
                     display.provider(),
-                    display.routeType()
+                    display.routeType(),
+                    canNotify(busTarget, display.route(), true, traversals),
+                    canNotify(busTarget, display.route(), false, traversals)
             ));
         }
         return responses;
+    }
+
+    /** 생성·옵션 수정 검증과 같은 기준: 대상 정류장이 노선 첫(전)/마지막(후) occurrence가 아니면 가능. 노선을 못 찾으면 저장된 옵션 상태로 대체한다. */
+    private boolean canNotify(BusAlarmTarget target, BusRoute route, boolean before,
+                              Map<Long, List<BusRouteStopOccurrence>> traversals) {
+        if (route == null) {
+            return before ? target.getPredecessorStopOrder() != null : target.getSuccessorStopOrder() != null;
+        }
+        List<BusRouteStopOccurrence> traversal = traversals.computeIfAbsent(
+                route.getId(), id -> occurrenceRepository.findAllByRouteOrderByStopOrderAsc(route));
+        for (int index = 0; index < traversal.size(); index++) {
+            BusRouteStopOccurrence occurrence = traversal.get(index);
+            if (occurrence.getStopOrder() == target.getTargetStopOrder()
+                    && Objects.equals(occurrence.getStop().getExternalStopId(), target.getExternalStopId())) {
+                return before ? index > 0 : index < traversal.size() - 1;
+            }
+        }
+        return before ? target.getPredecessorStopOrder() != null : target.getSuccessorStopOrder() != null;
     }
 
     /**
@@ -265,14 +286,14 @@ public class AlarmService {
         Map<String, RouteDisplay> result = new HashMap<>();
         matched.forEach((key, route) -> result.put(key, new RouteDisplay(
                 endpoints.getOrDefault(route.getId(), BusRouteEndpointResolver.Endpoints.UNKNOWN),
-                route.getProvider(), route.getRouteType())));
+                route.getProvider(), route.getRouteType(), route)));
         return result;
     }
 
     private record RouteDisplay(BusRouteEndpointResolver.Endpoints endpoints, TransitProvider provider,
-            BusRouteType routeType) {
+            BusRouteType routeType, BusRoute route) {
         private static final RouteDisplay UNKNOWN =
-                new RouteDisplay(BusRouteEndpointResolver.Endpoints.UNKNOWN, null, null);
+                new RouteDisplay(BusRouteEndpointResolver.Endpoints.UNKNOWN, null, null, null);
     }
 
     private static boolean matches(BusRoute route, BusAlarmTarget target) {

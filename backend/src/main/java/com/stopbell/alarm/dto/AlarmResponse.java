@@ -16,6 +16,8 @@ public record AlarmResponse(
         String startStopName,
         String endStopName,
         TransitProvider provider,
-        BusRouteType routeType
+        BusRouteType routeType,
+        boolean canNotifyOneStopBefore,
+        boolean canNotifyOneStopAfter
 ) {
 }
