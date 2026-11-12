@@ -136,9 +136,13 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
       while (end + 1 <= target && !big.contains(end + 1)) {
         end++;
       }
-      if (end - i + 1 >= _minCollapsed && !_expanded.contains(i)) {
-        rows.add(_collapsedRow(i, end - i + 1, boarding, target));
+      final count = end - i + 1;
+      if (count >= _minCollapsed && !_expanded.contains(i)) {
+        rows.add(_collapsedRow(i, count, boarding, target));
       } else {
+        if (count >= _minCollapsed) {
+          rows.add(_foldRow(i, count, boarding, target));
+        }
         for (var j = i; j <= end; j++) {
           rows.add(_stopRow(j, boarding, target, false, null));
         }
@@ -286,7 +290,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
                     ? _leg(i - 1, boarding, target)
                     : _leg(i, boarding, target),
                 bottom: _leg(i, boarding, target),
-                caption: n == 0 ? '$role${display.name} 도착' : null,
+                caption: n == 0 ? (role: role, name: display.name) : null,
                 captionColor: special ? accent : null,
               ),
           ],
@@ -366,7 +370,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     int target, {
     required Color? top,
     required Color? bottom,
-    String? caption,
+    ({String role, String name})? caption,
     Color? captionColor,
   }) {
     final enabled = widget.canSelect(bus.candidate);
@@ -435,19 +439,37 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     );
   }
 
-  Widget _collapsedRow(int start, int count, int boarding, int target) => _row(
+  Widget _collapsedRow(int start, int count, int boarding, int target) =>
+      _toggleRow(start, count, boarding, target, '· · ·  정류장 $count개', true);
+
+  /// 펼친 구간 위의 "접기" 행. 탭하면 다시 접힌다.
+  Widget _foldRow(int start, int count, int boarding, int target) =>
+      _toggleRow(start, count, boarding, target, '· · ·  접기', false);
+
+  Widget _toggleRow(
+    int start,
+    int count,
+    int boarding,
+    int target,
+    String label,
+    bool expand,
+  ) => _row(
     _rail(
       _leg(start - 1, boarding, target),
       _leg(start + count - 1, boarding, target),
       null,
     ),
     InkWell(
-      key: ValueKey('boarding-bus-collapsed-$start'),
-      onTap: () => setState(() => _expanded.add(start)),
+      key: ValueKey(
+        expand ? 'boarding-bus-collapsed-$start' : 'boarding-bus-fold-$start',
+      ),
+      onTap: () => setState(
+        () => expand ? _expanded.add(start) : _expanded.remove(start),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: StopBellSpacing.md),
         child: Text(
-          '· · ·  정류장 $count개',
+          label,
           style: Theme.of(context).textTheme.bodySmall
               ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
         ),
@@ -469,7 +491,7 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
     BoardingBusEntry bus,
     int boarding,
     int target,
-    String? caption,
+    ({String role, String name})? caption,
     Color? captionColor,
   ) {
     final theme = Theme.of(context);
@@ -518,12 +540,28 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (caption != null)
-                            Text(
-                              caption,
+                            Text.rich(
+                              TextSpan(
+                                children: [
+                                  if (caption.role.isNotEmpty)
+                                    TextSpan(
+                                      text: caption.role,
+                                      style: theme.textTheme.labelSmall,
+                                    ),
+                                  TextSpan(text: caption.name),
+                                  TextSpan(
+                                    text: ' 도착',
+                                    style: theme.textTheme.labelSmall?.copyWith(
+                                      color: colors.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: captionColor ?? colors.onSurfaceVariant,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: captionColor ?? colors.onSurface,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           Row(
@@ -555,9 +593,11 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
                           ),
                           Text(
                             _distance(bus, boarding, target),
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: colors.onSurfaceVariant,
-                            ),
+                            style:
+                                (caption == null
+                                        ? theme.textTheme.bodySmall
+                                        : theme.textTheme.labelSmall)
+                                    ?.copyWith(color: colors.onSurfaceVariant),
                           ),
                         ],
                       ),

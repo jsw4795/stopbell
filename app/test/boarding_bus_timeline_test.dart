@@ -163,6 +163,15 @@ void main() {
       expect(find.text('정류장15'), findsOneWidget);
       expect(find.textContaining('정류장 4개'), findsNothing);
 
+      // 다시 탭하면 접힌다(왕복).
+      await tester.tap(find.byKey(const ValueKey('boarding-bus-fold-13')));
+      await tester.pump();
+      expect(find.text('정류장15'), findsNothing);
+      expect(find.text('· · ·  정류장 4개'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('boarding-bus-collapsed-13')));
+      await tester.pump();
+      expect(find.text('정류장15'), findsOneWidget);
+
       // 도착·출발 카드는 같은 왼쪽 시작선·폭이고 꼬리 정렬만 다르다.
       Finder card(String number) => find
           .ancestor(
@@ -189,7 +198,20 @@ void main() {
         closeTo(tester.getTopLeft(arrived).dx, 0.5),
       );
       // 도착 카드에는 정류장 이름 캡션이 들어간다.
-      expect(find.text('정류장5 도착'), findsOneWidget);
+      expect(find.textContaining('정류장5', findRichText: true), findsOneWidget);
+      expect(find.textContaining(' 도착', findRichText: true), findsOneWidget);
+      // 좌석·혼잡도는 두 카드 모두 번호 줄 오른쪽, 체크 원은 카드 세로 중앙이다.
+      for (final number in ['서울70사1234', '경기70아5678']) {
+        final c = card(number);
+        final check = find.descendant(
+          of: c,
+          matching: find.byIcon(Icons.radio_button_unchecked),
+        );
+        expect(
+          tester.getCenter(check).dy,
+          closeTo(tester.getCenter(c).dy, 0.5),
+        );
+      }
       expect(find.byKey(const ValueKey('boarding-bus-halo')), findsNothing);
       expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(2));
 
