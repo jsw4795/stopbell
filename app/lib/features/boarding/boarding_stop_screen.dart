@@ -470,6 +470,16 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     BusRouteStopOccurrence target,
   ) {
     final vehicles = _vehicles;
+    String? holdReason(BoardingCandidate candidate) => compactHoldReason(
+      candidate,
+      canChoose: result.candidateSetStatus != CandidateSetStatus.unknown,
+      duplicate:
+          candidate.vehicleNumber != null &&
+          result.candidates
+                  .where((o) => o.vehicleNumber == candidate.vehicleNumber)
+                  .length >
+              1,
+    );
     void select(BoardingCandidate candidate) {
       if (_canUseCandidate(candidate)) {
         setState(() => _selectedCandidate = candidate);
@@ -502,6 +512,17 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         targetId: target.id,
       );
       final theme = Theme.of(context);
+      // 선택한 후보가 화면에서 빠지면 선택을 해제한다.
+      final sel = _selectedCandidate;
+      if (sel != null &&
+          !split.drawn.any((b) => identical(b.candidate, sel)) &&
+          !split.others.contains(sel)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && identical(_selectedCandidate, sel)) {
+            setState(() => _selectedCandidate = null);
+          }
+        });
+      }
       // 목표를 지난 후보는 표시하지 않는다. 전부 빠지면 후보 없음 안내를 보인다.
       final noneLeft =
           result.candidates.isNotEmpty &&
@@ -512,7 +533,10 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         spacing: StopBellSpacing.md,
         children: [
           list(visible: vehicles == null ? split.others : const []),
-          if (vehicles != null) BusRouteVehicleBar(controller: vehicles),
+          if (vehicles != null) BusRouteVehicleBar(
+              controller: vehicles,
+              onRefresh: _findCandidates,
+            ),
           if (split.drawn.isNotEmpty)
             BoardingBusTimeline(
               stops: _stops,
@@ -523,6 +547,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
               canSelect: (candidate) =>
                   widget.onSelectCandidate != null &&
                   _canUseCandidate(candidate),
+              holdReason: holdReason,
               onSelect: select,
               vehicleColor:
                   routeTypeColor(context, widget.route) ??

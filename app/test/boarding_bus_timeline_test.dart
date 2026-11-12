@@ -113,6 +113,7 @@ void main() {
 
     Future<void> pumpTimeline(
       WidgetTester tester, {
+      String? Function(BoardingCandidate)? holdReason,
       bool Function(BoardingBusEntry)? where,
     }) async {
       picked = null;
@@ -134,7 +135,8 @@ void main() {
                 targetId: 20,
                 buses: split.drawn.where(where ?? (_) => true).toList(),
                 selected: picked,
-                canSelect: (_) => true,
+                canSelect: (_) => holdReason == null,
+                holdReason: holdReason,
                 onSelect: (c) => picked = c,
                 vehicleColor: Colors.blue,
               ),
@@ -248,6 +250,11 @@ void main() {
   });
 
   group('BoardingBusTimeline start range', () {
+    testWidgets('선택 불가 버스 카드에 사유를 보여 준다', (tester) async {
+      await pumpTimeline(tester, holdReason: (_) => '선택 보류 · 차량번호 중복');
+      expect(find.text('선택 보류 · 차량번호 중복'), findsWidgets);
+    });
+
     testWidgets('승차 전 버스가 없으면 승차 정류장부터 그린다', (tester) async {
       tester.view.physicalSize = const Size(600, 3000);
       tester.view.devicePixelRatio = 1;
@@ -300,6 +307,84 @@ void main() {
   });
 
   group('BoardingStopScreen', () {
+    testWidgets('후보 화면의 새로고침은 후보와 차량을 함께 다시 조회하고 선택을 해제한다', (tester) async {
+      tester.view.physicalSize = const Size(1000, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final transport = MockClient((_) async => http.Response('', 204));
+      final auth = await boardingAuth(transport);
+      addTearDown(auth.dispose);
+      addTearDown(transport.close);
+      var vehicleCalls = 0, candidateCalls = 0;
+      BoardingCandidate? opened;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StopBellTheme.light,
+          home: Scaffold(
+            body: BoardingStopScreen(
+              route: boardingRoute,
+              authSession: auth,
+              findStops: (_) async => _stops,
+              findVehicles: (_) async {
+                vehicleCalls++;
+                return _vehicles();
+              },
+              findCandidates:
+                  ({
+                    required routeId,
+                    required targetStopOccurrenceId,
+                    boardingStopOccurrenceId,
+                    expectedGeneration,
+                    isRequestCurrent,
+                  }) async {
+                    candidateCalls++;
+                    return _candidates();
+                  },
+              onSelectCandidate: (c, _, {required boarding, required target}) =>
+                  opened = c,
+              onBack: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      Future<void> tap(Finder finder) async {
+        await tester.ensureVisible(finder);
+        await tester.pump();
+        await tester.tap(finder);
+        await tester.pumpAndSettle();
+      }
+
+      await tap(find.byKey(const ValueKey('occurrence-10')));
+      await tap(find.byKey(const ValueKey('occurrence-20')));
+      await tap(find.byKey(const ValueKey('find-candidates')));
+      expect(candidateCalls, 1);
+      expect(vehicleCalls, greaterThanOrEqualTo(2)); // 진입 + 후보 조회
+
+      // 위치 확인 불가 목록: 미연결(3번) 후보만. 목표 통과(2번)는 표시하지 않는다.
+      expect(find.text('위치 확인 불가'), findsOneWidget);
+      expect(find.byKey(const ValueKey('candidate-0')), findsNothing);
+      expect(find.byKey(const ValueKey('candidate-2')), findsNothing);
+      expect(find.byKey(const ValueKey('candidate-3')), findsOneWidget);
+
+      await tap(find.byKey(const ValueKey('boarding-bus-경기70아5678')));
+      expect(
+        find.byKey(const ValueKey('continue-boarding-candidate')),
+        findsOneWidget,
+      );
+      final candidatesBefore = candidateCalls, vehiclesBefore = vehicleCalls;
+      await tap(find.byTooltip('차량 위치 새로고침'));
+      expect(candidateCalls, candidatesBefore + 1);
+      expect(vehicleCalls, greaterThan(vehiclesBefore));
+      expect(
+        find.byKey(const ValueKey('continue-boarding-candidate')),
+        findsNothing,
+      );
+    });
+
     testWidgets('후보와 차량을 함께 조회해 버스 선택 후 확정 버튼을 활성화한다', (tester) async {
       tester.view.physicalSize = const Size(1000, 3000);
       tester.view.devicePixelRatio = 1;

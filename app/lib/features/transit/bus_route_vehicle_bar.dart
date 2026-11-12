@@ -27,10 +27,18 @@ class BusRouteVehiclesScope extends InheritedWidget {
 
 /// 노선도 위 "HH:mm 기준 위치" · 새로고침 · 상태 안내.
 class BusRouteVehicleBar extends StatefulWidget {
-  const BusRouteVehicleBar({super.key, required this.controller, this.now});
+  const BusRouteVehicleBar({
+    super.key,
+    required this.controller,
+    this.now,
+    this.onRefresh,
+  });
 
   final BusRouteVehicleController controller;
   final DateTime Function()? now;
+
+  /// 지정하면 새로고침·다시 시도가 controller.refresh 대신 이 콜백을 호출한다.
+  final VoidCallback? onRefresh;
 
   @override
   State<BusRouteVehicleBar> createState() => _BusRouteVehicleBarState();
@@ -46,6 +54,7 @@ class _BusRouteVehicleBarState extends State<BusRouteVehicleBar> {
   void initState() {
     super.initState();
     widget.controller.addListener(_changed);
+    _syncTimer();
   }
 
   @override
@@ -67,6 +76,11 @@ class _BusRouteVehicleBarState extends State<BusRouteVehicleBar> {
 
   // 서버 조회가 아니라 안내 문구 전환용 타이머다.
   void _changed() {
+    _syncTimer();
+    if (mounted) setState(() {});
+  }
+
+  void _syncTimer() {
     _timer?.cancel();
     final fetched = widget.controller.fetchedAt;
     _outdated = widget.controller.isOutdated(_now());
@@ -77,7 +91,6 @@ class _BusRouteVehicleBarState extends State<BusRouteVehicleBar> {
         if (mounted) setState(() => _outdated = true);
       });
     }
-    if (mounted) setState(() {});
   }
 
   static String _time(DateTime value) {
@@ -152,13 +165,13 @@ class _BusRouteVehicleBarState extends State<BusRouteVehicleBar> {
             )
           else if (controller.failed)
             TextButton(
-              onPressed: controller.refresh,
+              onPressed: widget.onRefresh ?? controller.refresh,
               child: const Text('다시 시도'),
             )
           else
             IconButton(
               tooltip: '차량 위치 새로고침',
-              onPressed: controller.refresh,
+              onPressed: widget.onRefresh ?? controller.refresh,
               icon: const Icon(Icons.refresh),
             ),
         ],

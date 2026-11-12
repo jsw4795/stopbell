@@ -324,6 +324,28 @@ void main() {
       expect(find.text('위치가 오래됐어요. 새로고침해 주세요'), findsOneWidget);
     });
 
+    testWidgets('이미 조회가 끝난 controller로 바를 만들어도 2분 뒤 안내한다', (tester) async {
+      var now = DateTime(2026, 11, 12, 9);
+      final controller = BusRouteVehicleController(
+        routeId: 1,
+        find: (_) async => vehicles([bus('1', at: 1)]),
+        now: () => now,
+      );
+      addTearDown(controller.dispose);
+      await controller.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: BusRouteVehicleBar(controller: controller, now: () => now),
+          ),
+        ),
+      );
+      expect(find.textContaining('오래됐어요'), findsNothing);
+      now = now.add(const Duration(minutes: 2));
+      await tester.pump(const Duration(minutes: 2));
+      expect(find.text('위치가 오래됐어요. 새로고침해 주세요'), findsOneWidget);
+    });
+
     testWidgets('실패하면 안내와 재시도를 보여 주고 운행 종료로 표시하지 않는다', (tester) async {
       var fail = true;
       final controller = await pumpBar(
