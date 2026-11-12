@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
 import '../transit/bus_route.dart';
@@ -34,6 +35,7 @@ class AlarmHome extends StatefulWidget {
     this.boardingSessionClient,
     this.boardingIntentStorage,
     this.alarmIntentStorage,
+    this.homeRequests,
   });
 
   final AlarmClient client;
@@ -45,6 +47,10 @@ class AlarmHome extends StatefulWidget {
   final BoardingSessionClient? boardingSessionClient;
   final BoardingIntentStorage? boardingIntentStorage;
   final AlarmIntentStorage? alarmIntentStorage;
+
+  /// 값이 바뀌면 목록(홈)으로 돌아간다. 이 화면은 Navigator route가 아니라
+  /// 내부 페이지 상태로 전환하므로 헤더 탭은 이 신호로 전달한다.
+  final ValueListenable<int>? homeRequests;
   final Future<List<BusRoute>> Function(String query) searchRoutes;
   final Future<List<BusRouteStopOccurrence>> Function(int routeId) findStops;
 
@@ -81,8 +87,13 @@ class _AlarmHomeState extends State<AlarmHome> {
     _creation.addListener(_creationChanged);
     _creation.initialize();
     widget.authSession.addListener(_authChanged);
+    widget.homeRequests?.addListener(_homeRequested);
     widget.notifications?.addListener(_notificationChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _notificationChanged());
+  }
+
+  void _homeRequested() {
+    if (_page != _Page.list) _showList();
   }
 
   void _creationChanged() {
@@ -119,6 +130,7 @@ class _AlarmHomeState extends State<AlarmHome> {
   @override
   void dispose() {
     widget.authSession.removeListener(_authChanged);
+    widget.homeRequests?.removeListener(_homeRequested);
     widget.notifications?.removeListener(_notificationChanged);
     _creation.removeListener(_creationChanged);
     _creation.dispose();

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import '../../core/theme/stopbell_spacing.dart';
 
@@ -88,7 +87,17 @@ class LoginView extends StatelessWidget {
                     else ...[
                       _buttonShadow(
                         dark: dark,
-                        child: _GoogleButton(
+                        child: _AuthButton(
+                          key: const ValueKey('google-login'),
+                          label: 'Google로 계속하기',
+                          semanticsLabel: 'Google로 계속하기',
+                          icon: Image.asset(
+                            'assets/auth/google_g.png',
+                            width: 24,
+                            height: 24,
+                          ),
+                          background: Colors.white,
+                          foreground: const Color(0xff1f1f1f),
                           onPressed: loading ? null : onGoogle,
                           height: _buttonHeight,
                           radius: _buttonRadius,
@@ -98,16 +107,20 @@ class LoginView extends StatelessWidget {
                         const SizedBox(height: StopBellSpacing.md),
                         _buttonShadow(
                           dark: dark,
-                          child: SignInWithAppleButton(
-                            text: 'Apple로 계속하기',
-                            style: dark
-                                ? SignInWithAppleButtonStyle.white
-                                : SignInWithAppleButtonStyle.black,
-                            height: _buttonHeight,
-                            borderRadius: const BorderRadius.all(
-                              Radius.circular(_buttonRadius),
+                          child: _AuthButton(
+                            key: const ValueKey('apple-login'),
+                            label: 'Apple로 계속하기',
+                            semanticsLabel: 'Apple로 계속하기',
+                            icon: Icon(
+                              Icons.apple,
+                              size: 24,
+                              color: dark ? Colors.black : Colors.white,
                             ),
+                            background: dark ? Colors.white : Colors.black,
+                            foreground: dark ? Colors.black : Colors.white,
                             onPressed: loading ? null : onApple!,
+                            height: _buttonHeight,
+                            radius: _buttonRadius,
                           ),
                         ),
                         const SizedBox(height: StopBellSpacing.md),
@@ -200,57 +213,59 @@ class _ErrorNotice extends StatelessWidget {
   }
 }
 
-class _GoogleButton extends StatelessWidget {
-  const _GoogleButton({
+/// Google·Apple 공용 로그인 버튼. 같은 모양·글자 규칙을 써서 두 버튼을 통일한다.
+class _AuthButton extends StatelessWidget {
+  const _AuthButton({
+    super.key,
+    required this.label,
+    required this.semanticsLabel,
+    required this.icon,
+    required this.background,
+    required this.foreground,
     required this.onPressed,
     required this.height,
     required this.radius,
   });
 
+  final String label, semanticsLabel;
+  final Widget icon;
+  final Color background, foreground;
   final VoidCallback? onPressed;
-  final double height;
-  final double radius;
+  final double height, radius;
 
   @override
   Widget build(BuildContext context) {
-    final fontSize = height * 0.43;
     return Semantics(
       button: true,
-      label: 'Google로 계속하기',
+      label: semanticsLabel,
       excludeSemantics: true,
       child: Material(
-        color: Colors.white,
+        color: background,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radius),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
-          key: const ValueKey('google-login'),
           onTap: onPressed,
           child: SizedBox(
             height: height,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Apple 버튼(sign_in_with_apple)과 같은 치수 규칙: 글자 height*0.43, 아이콘 칸 height*28/44
                 SizedBox(
                   width: height * 28 / 44,
-                  child: Center(
-                    child: Image.asset(
-                      'assets/auth/google_g.png',
-                      width: fontSize,
-                      height: fontSize,
-                    ),
-                  ),
+                  child: Center(child: icon),
                 ),
                 Text(
-                  'Google로 계속하기',
+                  label,
                   style: TextStyle(
                     inherit: false,
-                    fontSize: fontSize,
+                    // iOS 기본 버튼 글자 크기. 한글은 시스템 폰트(Apple SD Gothic Neo)로 대체된다.
+                    fontSize: 17,
+                    fontWeight: FontWeight.w500,
                     fontFamily: '.SF Pro Text',
                     letterSpacing: -0.41,
-                    color: const Color(0xff1f1f1f),
+                    color: foreground,
                   ),
                 ),
               ],

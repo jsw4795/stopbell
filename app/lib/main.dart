@@ -353,8 +353,15 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final _homeRequests = ValueNotifier<int>(0);
   bool _isLoading = false;
   String? _message;
+
+  @override
+  void dispose() {
+    _homeRequests.dispose();
+    super.dispose();
+  }
 
   Future<void> _confirmDeletion() async {
     final confirmed = await showDialog<bool>(
@@ -530,8 +537,10 @@ class _LoginScreenState extends State<LoginScreen> {
               title: GestureDetector(
                 key: const ValueKey('header-home'),
                 behavior: HitTestBehavior.opaque,
-                onTap: () =>
-                    Navigator.of(context).popUntil((route) => route.isFirst),
+                onTap: () {
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                  _homeRequests.value++;
+                },
                 child: const Text('StopBell'),
               ),
               actions: [
@@ -547,6 +556,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 Expanded(
                   child: AlarmHome(
                     key: ValueKey(widget.authSession.generation),
+                    homeRequests: _homeRequests,
                     client: widget.alarmClient,
                     notifications: widget.notifications,
                     beforeBoardingCreate: (context) =>

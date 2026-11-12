@@ -8,7 +8,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'settings_test_helper.dart';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
 import 'package:stopbell/features/auth/apple_auth_service.dart';
@@ -166,8 +165,14 @@ void main() {
     await tester.pumpAndSettle();
 
     final login = find.byType(LoginScreen);
-    final apple = find.byType(SignInWithAppleButton);
-    final brandStyle = tester.widget<SignInWithAppleButton>(apple).style;
+    final apple = find.byKey(const ValueKey('apple-login'));
+    Color? fill(Finder f) => tester
+        .widget<Material>(
+          find.descendant(of: f, matching: find.byType(Material)).first,
+        )
+        .color;
+    final google = find.byKey(const ValueKey('google-login'));
+    final brandFill = fill(apple);
     final brandSize = tester.getSize(apple);
     expect(Theme.of(tester.element(login)).brightness, Brightness.light);
 
@@ -188,31 +193,36 @@ void main() {
     expect(overlay.statusBarBrightness, Brightness.dark);
     expect(overlay.statusBarIconBrightness, Brightness.light);
     // 라이트는 검정, 다크는 Google과 같은 흰색 버튼
-    expect(brandStyle, SignInWithAppleButtonStyle.black);
-    expect(
-      tester.widget<SignInWithAppleButton>(apple).style,
-      SignInWithAppleButtonStyle.white,
-    );
+    expect(brandFill, Colors.black);
+    expect(fill(apple), Colors.white);
+    expect(fill(google), Colors.white);
     expect(tester.getSize(apple), brandSize);
+    expect(tester.getSize(google), brandSize);
     expect(find.text('Google로 계속하기'), findsOneWidget);
     expect(tester.takeException(), isNull);
     debugDefaultTargetPlatformOverride = null;
   });
 
-  testWidgets('헤더 StopBell 탭은 루트(홈)로 이동한다', (tester) async {
+  testWidgets('하위 화면에서 헤더 StopBell을 탭하면 홈으로 돌아간다', (tester) async {
     await tester.pumpWidget(
       app(session(FakeAuthenticator(), FakeStorage(pair: pair))),
     );
     await tester.pumpAndSettle();
-    await openSettings(tester);
-    expect(settingsTitle, findsOneWidget);
-    Navigator.of(tester.element(settingsTitle)).popUntil((r) => r.isFirst);
-    await tester.pumpAndSettle();
     final header = find.byKey(const ValueKey('header-home'));
+    // 홈에서는 아무 일도 일어나지 않는다.
     await tester.tap(header);
     await tester.pumpAndSettle();
+    expect(find.text('도착 알람'), findsOneWidget);
+
+    await tester.tap(find.text('도착 알람'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
     expect(header, findsOneWidget);
-    expect(settingsTitle, findsNothing);
+
+    await tester.tap(header);
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('도착 알람'), findsOneWidget);
   });
 
   testWidgets('기본 설정에서 iOS Apple 버튼을 표시한다', (tester) async {
@@ -703,4 +713,11 @@ void main() {
 }
 
 GestureTapCallback? googleOnTap(WidgetTester tester) =>
-    tester.widget<InkWell>(find.byKey(const ValueKey('google-login'))).onTap;
+    tester
+        .widget<InkWell>(
+          find.descendant(
+            of: find.byKey(const ValueKey('google-login')),
+            matching: find.byType(InkWell),
+          ),
+        )
+        .onTap;
