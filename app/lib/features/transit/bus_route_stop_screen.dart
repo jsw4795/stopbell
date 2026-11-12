@@ -124,7 +124,9 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
   void _select(BusRouteStopOccurrence occurrence) {
     if (_creating || _outcomeUnknown) return;
     setState(() {
-      _selectedOccurrenceId = occurrence.id;
+      _selectedOccurrenceId = _selectedOccurrenceId == occurrence.id
+          ? null
+          : occurrence.id;
       _notifyOneStopBefore = false;
       _notifyOneStopAfter = false;
       _createMessage = null;
@@ -244,6 +246,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
     return BusStopSelectionLayout(
       route: widget.route,
       title: '도착 알람',
+      iconColor: routeTypeColor(context, widget.route),
       onBack: _creating ? null : widget.onBack,
       body: _buildStops(),
       summary: target == null && _createMessage == null

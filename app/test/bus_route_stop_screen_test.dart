@@ -211,6 +211,19 @@ void main() {
     expect(find.byKey(const ValueKey(11)), findsOneWidget);
   });
 
+  testWidgets('tapping the selected stop again clears the selection', (
+    tester,
+  ) async {
+    await tester.pumpWidget(screen((_) async => [first, middle, last]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey(22)));
+    await tester.pump();
+    expect(find.text('알람 시작'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey(22)));
+    await tester.pump();
+    expect(find.text('알람 시작'), findsNothing);
+  });
+
   testWidgets('repeated occurrences select by ID and options reset on change', (
     tester,
   ) async {

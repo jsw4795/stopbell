@@ -178,9 +178,13 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         _picker == _Picker.review) {
       return;
     }
-    if (_picker == _Picker.target && !_validTarget(stop)) return;
+    final earlier =
+        _picker == _Picker.target &&
+        _boarding != null &&
+        stop.order < _boarding!.order;
+    if (_picker == _Picker.target && !earlier && !_validTarget(stop)) return;
     setState(() {
-      if (_picker == _Picker.boarding) {
+      if (_picker == _Picker.boarding || earlier) {
         _boarding = stop;
         _target = null;
         _picker = _Picker.target;
@@ -303,6 +307,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         title: _compactResults ? '차량 후보' : '하차 알림',
         onBack: _back,
         backLabel: _backLabel,
+        iconColor: routeTypeColor(context, widget.route),
         body: _state == _StopsState.success ? _routeAndCandidates() : _status(),
         summary:
             _state == _StopsState.success &&
@@ -382,7 +387,9 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       stops: _stops,
       targetId: _target?.id,
       boardingId: _boarding?.id,
-      isSelectable: _picker == _Picker.target ? _validTarget : null,
+      isSelectable: _picker == _Picker.target
+          ? (stop) => _validTarget(stop) || stop.order < _boarding!.order
+          : null,
       selectionLocked: _picker == _Picker.review,
       rowKey: (id) => ValueKey('occurrence-$id'),
       vehicles: vehicles?.data?.vehicles,
@@ -442,20 +449,19 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     children: [
       _stopSummary(boarding, target: false, compact: true),
       _stopSummary(target, target: true, compact: true),
-      Wrap(
-        spacing: StopBellSpacing.xs,
-        children: [
-          TextButton(
-            key: const ValueKey('reselect-stops'),
-            onPressed: widget.creationBusy ? null : _reselectStops,
-            child: const Text('정류장 다시 선택'),
-          ),
-          TextButton(
-            key: const ValueKey('find-candidates'),
-            onPressed: widget.creationBusy ? null : _findCandidates,
-            child: const Text('차량 후보 다시 조회'),
-          ),
-        ],
+      StopSelectionPair(
+        first: OutlinedButton.icon(
+          key: const ValueKey('reselect-stops'),
+          onPressed: widget.creationBusy ? null : _reselectStops,
+          icon: const Icon(Icons.edit_location_alt_outlined),
+          label: const Text('정류장 다시 선택'),
+        ),
+        second: OutlinedButton.icon(
+          key: const ValueKey('find-candidates'),
+          onPressed: widget.creationBusy ? null : _findCandidates,
+          icon: const Icon(Icons.refresh),
+          label: const Text('차량 후보 다시 조회'),
+        ),
       ),
       const Divider(height: StopBellSpacing.lg),
       _candidateBuses(result, boarding, target),
@@ -482,7 +488,11 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     );
     void select(BoardingCandidate candidate) {
       if (_canUseCandidate(candidate)) {
-        setState(() => _selectedCandidate = candidate);
+        setState(
+          () => _selectedCandidate = identical(_selectedCandidate, candidate)
+              ? null
+              : candidate,
+        );
       }
     }
 
@@ -510,6 +520,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         vehicles: located,
         stops: _stops,
         targetId: target.id,
+        boardingId: boarding.id,
       );
       final theme = Theme.of(context);
       // 선택한 후보가 화면에서 빠지면 선택을 해제한다.

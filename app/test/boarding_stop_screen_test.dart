@@ -282,6 +282,20 @@ void main() {
     );
   }
 
+  testWidgets('earlier stop while picking target replaces boarding', (
+    tester,
+  ) async {
+    await setup(tester);
+    await tester.pumpWidget(screen());
+    await tester.pumpAndSettle();
+    await tap(tester, 'occurrence-22');
+    await tap(tester, 'occurrence-11');
+    expect(find.byKey(const ValueKey('find-candidates')), findsNothing);
+    expect(find.textContaining('승차 정류장 이후'), findsOneWidget);
+    await tap(tester, 'occurrence-22');
+    expect(find.byKey(const ValueKey('find-candidates')), findsOneWidget);
+  });
+
   testWidgets('selection locks and reselect starts from boarding', (
     tester,
   ) async {
@@ -402,7 +416,6 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tap(tester, 'occurrence-2');
-      await tap(tester, 'occurrence-1');
       await tap(tester, 'occurrence-2');
       expect(find.byKey(const ValueKey('find-candidates')), findsNothing);
       await tap(tester, 'occurrence-3');
