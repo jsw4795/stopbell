@@ -82,7 +82,15 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('한 정류장 후 추적 중'), findsOneWidget);
     expect(find.text('감시 중'), findsOneWidget);
-    expect(find.text('비활성'), findsOneWidget);
+    // 비활성 카드는 칩 없이 흐린 톤으로만 구분한다.
+    expect(find.text('비활성'), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey(1)),
+        matching: find.byType(Opacity),
+      ),
+      findsOneWidget,
+    );
     final cards = [
       3,
       2,
@@ -98,8 +106,10 @@ void main() {
 
   testWidgets('빈 알람 목록은 안내를 보여주고 당겨서 새로고침하면 다시 조회한다', (tester) async {
     var calls = 0;
+    var create = 0;
     await tester.pumpWidget(
       home(
+        onCreateArrival: () => create++,
         alarms: () async {
           calls++;
           return [];
@@ -109,6 +119,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('아직 만든 알람이 없어요.'), findsOneWidget);
     expect(find.text('도착 알람'), findsOneWidget);
+    await tester.tap(find.text('도착 알람 만들기'));
+    expect(create, 1);
     await tester.fling(find.byType(ListView), const Offset(0, 400), 1000);
     await tester.pumpAndSettle();
     expect(calls, 2);
@@ -226,10 +238,37 @@ void main() {
     expect(find.text('진행 중인 하차 알람'), findsNothing);
     expect(find.text('최근 종료된 하차 알람'), findsOneWidget);
     expect(find.byKey(const ValueKey(('session', 5))), findsNothing);
-    expect(find.text('종료'), findsOneWidget);
-    expect(find.text('서울70사1234  ·  30분 전 종료'), findsOneWidget);
+    expect(find.textContaining('30분 전 종료'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey(('session', 6))));
     expect(ended, [6]);
+  });
+
+  testWidgets('종료 세션은 도착 알람 목록 아래 한 줄로 보여준다', (tester) async {
+    await tester.pumpWidget(
+      home(
+        alarms: () async => [alarm(1, AlarmStatus.active)],
+        sessions: () async => BoardingSessionOverview(
+          recent: [
+            sessionFixture(
+              id: 6,
+              status: 'COMPLETED',
+              evaluation: 'ENDED',
+              gap: null,
+            ),
+          ],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final alarmY = tester.getTopLeft(find.byKey(const ValueKey(1))).dy;
+    final endedY = tester
+        .getTopLeft(find.byKey(const ValueKey(('session', 6))))
+        .dy;
+    expect(endedY, greaterThan(alarmY));
+    expect(
+      tester.getSize(find.byKey(const ValueKey(('session', 6)))).height,
+      lessThan(70),
+    );
   });
 
   testWidgets('보류 세션은 보류 색상과 재확인 필요를 표시한다', (tester) async {
@@ -376,7 +415,7 @@ void main() {
     await tester.pump();
     expect(reads, [7, 7]);
     expect(find.text('최근 종료된 하차 알람'), findsOneWidget);
-    expect(find.text('종료'), findsOneWidget);
+    expect(find.textContaining('종료'), findsWidgets);
     await tester.pump(const Duration(seconds: 60));
     expect(reads, [7, 7]);
   });

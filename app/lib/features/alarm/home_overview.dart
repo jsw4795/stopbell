@@ -248,6 +248,7 @@ class _HomeOverviewState extends State<HomeOverview>
           ),
           const SizedBox(height: StopBellSpacing.sm),
           ..._alarmSection(context),
+          ..._endedSessionSection(context),
         ],
       ),
     );
@@ -323,15 +324,13 @@ class _HomeOverviewState extends State<HomeOverview>
           _InlineError(message: '하차 알람 상태를 불러오지 못했어요.', onRetry: _loadSessions),
         ];
       case _LoadState.ready:
-        // 진행 중 세션이 있으면 그것만, 없으면 가장 최근 종료 세션 하나만 보여준다.
-        final current = _sessions.current;
-        final ended = _sessions.recent.isEmpty ? null : _sessions.recent.first;
-        final session = current ?? ended;
+        // 진행 중 세션만 위쪽에 둔다. 종료 세션은 도착 알람 목록 아래에 컴팩트하게 보여준다.
+        final session = _sessions.current;
         if (session == null) return const [];
         return [
           const SizedBox(height: StopBellSpacing.xl),
-          _SectionTitle(
-            current != null ? '진행 중인 하차 알람' : '최근 종료된 하차 알람',
+          const _SectionTitle(
+            '진행 중인 하차 알람',
             icon: Icons.directions_bus_outlined,
           ),
           const SizedBox(height: StopBellSpacing.sm),
@@ -339,14 +338,32 @@ class _HomeOverviewState extends State<HomeOverview>
             key: ValueKey(('session', session.id)),
             session: session,
             now: widget.now,
-            onTap: current != null
-                ? widget.onOpenCurrentSession
-                : widget.onOpenEndedSession == null
-                ? null
-                : () => widget.onOpenEndedSession!(session.id),
+            onTap: widget.onOpenCurrentSession,
           ),
         ];
     }
+  }
+
+  List<Widget> _endedSessionSection(BuildContext context) {
+    if (widget.findSessions == null ||
+        _sessionState != _LoadState.ready ||
+        _sessions.current != null ||
+        _sessions.recent.isEmpty) {
+      return const [];
+    }
+    final ended = _sessions.recent.first;
+    final open = widget.onOpenEndedSession;
+    return [
+      const SizedBox(height: StopBellSpacing.xl),
+      const _SectionTitle('최근 종료된 하차 알람', icon: Icons.directions_bus_outlined),
+      const SizedBox(height: StopBellSpacing.sm),
+      _EndedSessionTile(
+        key: ValueKey(('session', ended.id)),
+        session: ended,
+        now: widget.now,
+        onTap: open == null ? null : () => open(ended.id),
+      ),
+    ];
   }
 
   List<Widget> _alarmSection(BuildContext context) {
@@ -360,10 +377,12 @@ class _HomeOverviewState extends State<HomeOverview>
       case _LoadState.ready:
         if (_alarms.isEmpty) {
           return [
-            const _EmptyNotice(
+            _EmptyNotice(
               icon: Icons.notifications_none_outlined,
               message: '아직 만든 알람이 없어요.',
-              detail: '도착 알람 카드에서 노선과 정류장을 선택해 만들 수 있어요.',
+              detail: '노선과 정류장을 선택해 도착 알람을 만들 수 있어요.',
+              actionLabel: '도착 알람 만들기',
+              onAction: widget.onCreateArrival,
             ),
           ];
         }
@@ -576,7 +595,7 @@ class _CardHeader extends StatelessWidget {
   });
   final String routeNumber;
   final Color? routeColor;
-  final Widget status;
+  final Widget? status;
 
   @override
   Widget build(BuildContext context) {
@@ -597,7 +616,7 @@ class _CardHeader extends StatelessWidget {
               color: routeColor,
             ),
           ),
-          status,
+          ?status,
         ],
       ),
     );
@@ -695,18 +714,22 @@ class _AlarmCard extends StatelessWidget {
       alarm.provider,
       alarm.routeType,
     );
-    return _ListCard(
+    final inactive = alarm.status == AlarmStatus.inactive;
+    final card = _ListCard(
       onTap: onTap,
       accent: routeColor ?? theme.colorScheme.outlineVariant,
       children: [
         _CardHeader(
           routeNumber: alarm.routeNumber,
           routeColor: routeColor,
-          status: _StatusChip(
-            alarm.status.shortLabel,
-            statusColor,
-            icon: statusIcon,
-          ),
+          // 비활성은 칩 대신 카드 전체를 흐리게 구분한다.
+          status: inactive
+              ? null
+              : _StatusChip(
+                  alarm.status.shortLabel,
+                  statusColor,
+                  icon: statusIcon,
+                ),
         ),
         const SizedBox(height: StopBellSpacing.xs),
         Text.rich(
@@ -734,6 +757,86 @@ class _AlarmCard extends StatelessWidget {
             ),
           ),
       ],
+    );
+    if (!inactive) return card;
+    return Semantics(
+      value: alarm.status.shortLabel,
+      child: Opacity(opacity: .6, child: card),
+    );
+  }
+}
+
+/// 종료된 하차 세션 한 줄 요약.
+class _EndedSessionTile extends StatelessWidget {
+  const _EndedSessionTile({
+    super.key,
+    required this.session,
+    required this.now,
+    required this.onTap,
+  });
+  final BoardingSession session;
+  final DateTime Function() now;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final ended = session.endedAt;
+    final ago = ended == null
+        ? null
+        : _SessionCard._endedAgo(now().toUtc().difference(ended.toUtc()));
+    final routeColor = _routeTypeColor(
+      context,
+      session.routeNumber,
+      session.timeline?.provider,
+      session.timeline?.routeType,
+    );
+    return Material(
+      color: colors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(StopBellRadius.card),
+        side: BorderSide(color: colors.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(
+            minHeight: StopBellSpacing.minimumTouchSize,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: StopBellSpacing.lg,
+              vertical: StopBellSpacing.sm,
+            ),
+            child: Row(
+              children: [
+                Text(
+                  session.routeNumber,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: routeColor,
+                  ),
+                ),
+                const SizedBox(width: StopBellSpacing.sm),
+                Expanded(
+                  child: Text(
+                    ['${session.targetName} 하차', ?ago].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                if (onTap != null)
+                  Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -884,9 +987,13 @@ class _EmptyNotice extends StatelessWidget {
     required this.icon,
     required this.message,
     required this.detail,
+    this.actionLabel,
+    this.onAction,
   });
   final IconData icon;
   final String message, detail;
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -913,6 +1020,10 @@ class _EmptyNotice extends StatelessWidget {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: StopBellSpacing.lg),
+            FilledButton(onPressed: onAction, child: Text(actionLabel!)),
+          ],
         ],
       ),
     );
