@@ -196,7 +196,9 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     });
   }
 
-  Future<void> _findCandidates() async {
+  /// [keepResult]가 true면 기존 후보 화면을 그대로 두고 응답이 오면 내용만 바꾼다.
+  /// 실패하면 기존 내용을 유지한 채 오류만 안내한다.
+  Future<void> _findCandidates({bool keepResult = false}) async {
     final target = _target;
     if (!_current ||
         widget.creationBusy ||
@@ -207,7 +209,12 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         _staleStops) {
       return;
     }
-    _invalidateCandidates();
+    if (keepResult && _result != null) {
+      _candidateEpoch++;
+      _error = null;
+    } else {
+      _invalidateCandidates();
+    }
     _vehicles?.refresh();
     final epoch = _candidateEpoch;
     final routeId = widget.route.id;
@@ -234,6 +241,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       setState(() {
         _result = result;
         _receivedAt = DateTime.now().toUtc();
+        // 새 응답이 오면 선택은 해제한다.
+        _selectedCandidate = null;
       });
     } on BoardingCandidateException catch (error) {
       if (!current()) return;
@@ -449,20 +458,32 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     children: [
       _stopSummary(boarding, target: false, compact: true),
       _stopSummary(target, target: true, compact: true),
-      StopSelectionPair(
-        first: OutlinedButton.icon(
-          key: const ValueKey('reselect-stops'),
-          onPressed: widget.creationBusy ? null : _reselectStops,
-          icon: const Icon(Icons.edit_location_alt_outlined),
-          label: const Text('정류장 다시 선택'),
-        ),
-        second: OutlinedButton.icon(
-          key: const ValueKey('find-candidates'),
-          onPressed: widget.creationBusy ? null : _findCandidates,
-          icon: const Icon(Icons.refresh),
-          label: const Text('차량 후보 다시 조회'),
-        ),
+      Wrap(
+        spacing: StopBellSpacing.sm,
+        children: [
+          OutlinedButton.icon(
+            key: const ValueKey('reselect-stops'),
+            onPressed: widget.creationBusy ? null : _reselectStops,
+            icon: const Icon(Icons.edit_location_alt_outlined),
+            label: const Text('정류장 다시 선택'),
+          ),
+          // 위치 바가 없을 때(차량 API 미연결)만 후보 재조회 버튼을 둔다.
+          if (_vehicles == null)
+            OutlinedButton.icon(
+              key: const ValueKey('find-candidates'),
+              onPressed: widget.creationBusy || _loadingCandidates
+                  ? null
+                  : () => _findCandidates(keepResult: true),
+              icon: const Icon(Icons.refresh),
+              label: const Text('차량 후보 다시 조회'),
+            ),
+        ],
       ),
+      if (_error case final error?)
+        Padding(
+          padding: const EdgeInsets.only(top: StopBellSpacing.xs),
+          child: StopSelectionNotice(error, icon: Icons.error_outline),
+        ),
       const Divider(height: StopBellSpacing.lg),
       _candidateBuses(result, boarding, target),
     ],
@@ -543,9 +564,11 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         spacing: StopBellSpacing.md,
         children: [
           list(visible: vehicles == null ? split.others : const []),
-          if (vehicles != null) BusRouteVehicleBar(
+          if (vehicles != null)
+            BusRouteVehicleBar(
               controller: vehicles,
-              onRefresh: _findCandidates,
+              onRefresh: () => _findCandidates(keepResult: true),
+              refreshing: _loadingCandidates,
             ),
           if (split.drawn.isNotEmpty)
             BoardingBusTimeline(

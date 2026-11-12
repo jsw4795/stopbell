@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/boarding/boarding_bus_timeline.dart';
+import 'package:stopbell/features/boarding/boarding_candidate_client.dart';
 import 'package:stopbell/features/boarding/boarding_candidates.dart';
 import 'package:stopbell/features/boarding/boarding_stop_screen.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
@@ -386,6 +389,81 @@ void main() {
         find.byKey(const ValueKey('continue-boarding-candidate')),
         findsNothing,
       );
+      // 새로고침 후에도 후보 화면에 머물고 '차량 후보 다시 조회' 버튼은 없다.
+      expect(find.byKey(const ValueKey('candidate-3')), findsOneWidget);
+      expect(find.text('정류장 다시 선택'), findsOneWidget);
+      expect(find.text('차량 후보 다시 조회'), findsNothing);
+    });
+
+    testWidgets('새로고침 중에는 기존 내용을 유지하고 실패하면 오류만 안내한다', (tester) async {
+      tester.view.physicalSize = const Size(1000, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final transport = MockClient((_) async => http.Response('', 204));
+      final auth = await boardingAuth(transport);
+      addTearDown(auth.dispose);
+      addTearDown(transport.close);
+      var calls = 0;
+      Completer<BoardingCandidates>? pending;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: StopBellTheme.light,
+          home: Scaffold(
+            body: BoardingStopScreen(
+              route: boardingRoute,
+              authSession: auth,
+              findStops: (_) async => _stops,
+              findVehicles: (_) async => _vehicles(),
+              findCandidates:
+                  ({
+                    required routeId,
+                    required targetStopOccurrenceId,
+                    boardingStopOccurrenceId,
+                    expectedGeneration,
+                    isRequestCurrent,
+                  }) {
+                    calls++;
+                    if (calls == 1) return Future.value(_candidates());
+                    return (pending = Completer<BoardingCandidates>()).future;
+                  },
+              onSelectCandidate: (
+                c,
+                _, {
+                required boarding,
+                required target,
+              }) {},
+              onBack: () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Future<void> tap(Finder finder) async {
+        await tester.ensureVisible(finder);
+        await tester.pump();
+        await tester.tap(finder);
+        await tester.pump();
+      }
+
+      await tap(find.byKey(const ValueKey('occurrence-10')));
+      await tap(find.byKey(const ValueKey('occurrence-20')));
+      await tap(find.byKey(const ValueKey('find-candidates')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('candidate-3')), findsOneWidget);
+
+      await tap(find.byTooltip('차량 위치 새로고침'));
+      // 로딩 중: 화면 전환 없이 기존 내용을 유지하고 위치 바에 진행 표시를 둔다.
+      expect(find.byKey(const ValueKey('candidate-3')), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      pending!.completeError(
+        const BoardingCandidateException(CandidateFailure.network),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('candidate-3')), findsOneWidget);
+      expect(find.textContaining('통신 오류'), findsOneWidget);
+      expect(find.byTooltip('차량 위치 새로고침'), findsOneWidget);
     });
 
     testWidgets('후보와 차량을 함께 조회해 버스 선택 후 확정 버튼을 활성화한다', (tester) async {

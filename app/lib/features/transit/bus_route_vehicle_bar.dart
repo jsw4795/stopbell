@@ -32,6 +32,7 @@ class BusRouteVehicleBar extends StatefulWidget {
     required this.controller,
     this.now,
     this.onRefresh,
+    this.refreshing = false,
   });
 
   final BusRouteVehicleController controller;
@@ -39,6 +40,9 @@ class BusRouteVehicleBar extends StatefulWidget {
 
   /// 지정하면 새로고침·다시 시도가 controller.refresh 대신 이 콜백을 호출한다.
   final VoidCallback? onRefresh;
+
+  /// 차량 외 데이터(하차 후보 등)를 함께 새로고침하는 중이면 true.
+  final bool refreshing;
 
   @override
   State<BusRouteVehicleBar> createState() => _BusRouteVehicleBarState();
@@ -151,7 +155,7 @@ class _BusRouteVehicleBarState extends State<BusRouteVehicleBar> {
               ],
             ),
           ),
-          if (controller.loading)
+          if (controller.loading || widget.refreshing)
             const SizedBox(
               width: StopBellSpacing.minimumTouchSize,
               height: StopBellSpacing.minimumTouchSize,
