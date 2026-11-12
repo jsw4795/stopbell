@@ -201,8 +201,11 @@ void main() {
       expect(find.textContaining('선택한 정류장: 재방문 정류장\n수원역 방면'), findsOneWidget);
       expect(
         tester
-            .widget<SwitchListTile>(
-              find.widgetWithText(SwitchListTile, '한 정류장 후 알림'),
+            .widget<Switch>(
+              find.descendant(
+                of: find.widgetWithText(ListTile, '한 정류장 후 알림'),
+                matching: find.byType(Switch),
+              ),
             )
             .value,
         isTrue,
@@ -213,18 +216,26 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('감시 중'), findsOneWidget);
       expect(
-        find.descendant(
-          of: find.widgetWithText(ListTile, '한 정류장 전 알림'),
-          matching: find.text('꺼짐'),
-        ),
-        findsOneWidget,
+        tester
+            .widget<Switch>(
+              find.descendant(
+                of: find.widgetWithText(ListTile, '한 정류장 전 알림'),
+                matching: find.byType(Switch),
+              ),
+            )
+            .value,
+        isFalse,
       );
       expect(
-        find.descendant(
-          of: find.widgetWithText(ListTile, '한 정류장 후 알림'),
-          matching: find.text('켜짐'),
-        ),
-        findsOneWidget,
+        tester
+            .widget<Switch>(
+              find.descendant(
+                of: find.widgetWithText(ListTile, '한 정류장 후 알림'),
+                matching: find.byType(Switch),
+              ),
+            )
+            .value,
+        isTrue,
       );
       expect((await storage.read())?.refreshToken, 'rotated-refresh');
       await tester.tap(find.byTooltip('알람 목록으로'));

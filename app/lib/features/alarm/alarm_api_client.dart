@@ -18,6 +18,11 @@ abstract class AlarmClient {
   Future<Alarm> findById(int alarmId);
   Future<Alarm> activate(int alarmId);
   Future<Alarm> deactivate(int alarmId);
+  Future<Alarm> updateOptions(
+    int alarmId, {
+    required bool notifyOneStopBefore,
+    required bool notifyOneStopAfter,
+  });
   Future<void> delete(int alarmId);
 }
 
@@ -81,6 +86,24 @@ class AlarmApiClient implements AlarmClient {
   @override
   Future<Alarm> deactivate(int alarmId) =>
       _getAlarm('POST', '${_path(alarmId)}/deactivate', 200);
+
+  @override
+  Future<Alarm> updateOptions(
+    int alarmId, {
+    required bool notifyOneStopBefore,
+    required bool notifyOneStopAfter,
+  }) async {
+    final response = await _request(
+      'PATCH',
+      '${_path(alarmId)}/options',
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'notifyOneStopBefore': notifyOneStopBefore,
+        'notifyOneStopAfter': notifyOneStopAfter,
+      }),
+    );
+    return _alarm(response.statusCode, response.bodyBytes, 200);
+  }
 
   @override
   Future<void> delete(int alarmId) async {
@@ -176,6 +199,7 @@ class AlarmApiException implements Exception {
           (code == 'INVALID_REQUEST' || code == 'INVALID_ALARM_REQUEST')) ||
       (statusCode == 401 && code == 'UNAUTHENTICATED') ||
       (statusCode == 403 && code == 'ACCESS_DENIED') ||
+      (statusCode == 409 && code == 'ALARM_NOT_ACTIVE') ||
       isAlarmNotFound ||
       isStaleTarget;
 

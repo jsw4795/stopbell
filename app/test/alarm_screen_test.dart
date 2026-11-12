@@ -39,6 +39,7 @@ class StubAlarms extends Fake implements AlarmClient {
   String? creationRequestId;
   Future<Alarm> Function(int)? activateAlarm;
   Future<Alarm> Function(int)? deactivateAlarm;
+  Future<Alarm> Function(int, bool, bool)? optionsAlarm;
   Future<void> Function(int)? deleteAlarm;
   int createCalls = 0;
   int activateCalls = 0;
@@ -84,6 +85,13 @@ class StubAlarms extends Fake implements AlarmClient {
     deactivateCalls++;
     return deactivateAlarm!(id);
   }
+
+  @override
+  Future<Alarm> updateOptions(
+    int id, {
+    required bool notifyOneStopBefore,
+    required bool notifyOneStopAfter,
+  }) => optionsAlarm!(id, notifyOneStopBefore, notifyOneStopAfter);
 
   @override
   Future<void> delete(int id) {
@@ -278,8 +286,11 @@ void main() {
       await tester.pump();
       expect(
         tester
-            .widget<SwitchListTile>(
-              find.widgetWithText(SwitchListTile, '한 정류장 전 알림'),
+            .widget<Switch>(
+              find.descendant(
+                of: find.widgetWithText(ListTile, '한 정류장 전 알림'),
+                matching: find.byType(Switch),
+              ),
             )
             .value,
         isFalse,
@@ -473,6 +484,72 @@ void main() {
       tester.getSize(find.widgetWithText(TextButton, '삭제')).height,
       greaterThanOrEqualTo(44),
     );
+  });
+
+  testWidgets('detail toggles one-stop options only while active', (
+    tester,
+  ) async {
+    final client = StubAlarms();
+    final calls = <(bool, bool)>[];
+    client.optionsAlarm = (id, before, after) async {
+      calls.add((before, after));
+      return Alarm(
+        id: sample.id,
+        transitType: sample.transitType,
+        status: AlarmStatus.active,
+        routeNumber: sample.routeNumber,
+        stopName: sample.stopName,
+        notifyOneStopBefore: before,
+        notifyOneStopAfter: after,
+      );
+    };
+    await tester.pumpWidget(
+      detailScreen(client, created: withStatus(AlarmStatus.active)),
+    );
+    Switch row(String title) => tester.widget(
+      find.descendant(
+        of: find.widgetWithText(ListTile, title),
+        matching: find.byType(Switch),
+      ),
+    );
+    expect(row('한 정류장 후 알림').value, isFalse);
+    await tester.tap(find.text('한 정류장 후 알림'));
+    await tester.pumpAndSettle();
+    expect(calls, [(true, true)]);
+    expect(row('한 정류장 후 알림').value, isTrue);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(
+      detailScreen(client, created: withStatus(AlarmStatus.inactive)),
+    );
+    expect(row('한 정류장 전 알림').onChanged, isNull);
+  });
+
+  testWidgets('detail keeps the original option value when update fails', (
+    tester,
+  ) async {
+    final client = StubAlarms();
+    client.optionsAlarm = (_, _, _) async => throw const AlarmApiException(
+      statusCode: 400,
+      code: 'INVALID_ALARM_REQUEST',
+    );
+    await tester.pumpWidget(
+      detailScreen(client, created: withStatus(AlarmStatus.active)),
+    );
+    await tester.tap(find.text('한 정류장 후 알림'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<Switch>(
+            find.descendant(
+              of: find.widgetWithText(ListTile, '한 정류장 후 알림'),
+              matching: find.byType(Switch),
+            ),
+          )
+          .value,
+      isFalse,
+    );
+    expect(find.text('이 정류장에서는 사용할 수 없는 알림이에요.'), findsOneWidget);
   });
 
   testWidgets('detail fetch retry and not found recovery', (tester) async {

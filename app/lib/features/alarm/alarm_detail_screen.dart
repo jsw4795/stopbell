@@ -206,6 +206,56 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
     }
   }
 
+  Future<void> _changeOption({bool? before, bool? after}) async {
+    final current = _alarm;
+    if (!_canMutate || current == null) return;
+    final request = ++_requestGeneration;
+    final id = widget.alarmId;
+    final client = widget.client;
+    setState(() {
+      _mutating = true;
+      _message = null;
+    });
+    try {
+      final alarm = await client.updateOptions(
+        id,
+        notifyOneStopBefore: before ?? current.notifyOneStopBefore,
+        notifyOneStopAfter: after ?? current.notifyOneStopAfter,
+      );
+      if (!_isCurrent(request, id, client)) return;
+      if (alarm.id != id) throw const AlarmApiException();
+      setState(() => _alarm = alarm);
+    } catch (error) {
+      if (!_isCurrent(request, id, client)) return;
+      if (error is AlarmApiException && error.isMutationRejected) {
+        _rejected(
+          error,
+          error.statusCode == 400
+              ? '이 정류장에서는 사용할 수 없는 알림이에요.'
+              : error.statusCode == 409
+              ? '알람이 켜져 있을 때만 바꿀 수 있어요.'
+              : '알림 설정을 바꾸지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.',
+        );
+      } else {
+        await _recover(request, id, client);
+      }
+    } finally {
+      if (_isCurrent(request, id, client)) {
+        setState(() => _mutating = false);
+      }
+    }
+  }
+
+  Widget _optionRow(String title, bool value, ValueChanged<bool>? onChanged) {
+    return ListTile(
+      minTileHeight: StopBellSpacing.minimumTouchSize,
+      enabled: onChanged != null,
+      title: Text(title),
+      trailing: Switch(value: value, onChanged: onChanged),
+      onTap: onChanged == null ? null : () => onChanged(!value),
+    );
+  }
+
   Future<void> _confirmDelete() async {
     if (!_canMutate) return;
     final request = ++_requestGeneration;
@@ -340,6 +390,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
         ? '${alarm.startStopName} → ${alarm.endStopName}'
         : null;
     final active = alarm.status != AlarmStatus.inactive;
+    final optionsEditable = _canMutate && alarm.status == AlarmStatus.active;
     return ListView(
       padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
       children: [
@@ -436,13 +487,17 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
                     ? (value) => _change(activating: value)
                     : null,
               ),
-              ListTile(
-                title: const Text('한 정류장 전 알림'),
-                trailing: Text(alarm.notifyOneStopBefore ? '켜짐' : '꺼짐'),
+              _optionRow(
+                '한 정류장 전 알림',
+                alarm.notifyOneStopBefore,
+                optionsEditable
+                    ? (value) => _changeOption(before: value)
+                    : null,
               ),
-              ListTile(
-                title: const Text('한 정류장 후 알림'),
-                trailing: Text(alarm.notifyOneStopAfter ? '켜짐' : '꺼짐'),
+              _optionRow(
+                '한 정류장 후 알림',
+                alarm.notifyOneStopAfter,
+                optionsEditable ? (value) => _changeOption(after: value) : null,
               ),
             ],
           ),
