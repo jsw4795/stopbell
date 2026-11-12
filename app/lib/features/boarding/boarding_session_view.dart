@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
+import '../../core/theme/stopbell_spacing.dart';
 import '../transit/stop_display_name.dart';
 import '../transit/bus_route_timeline.dart' show BusRouteRailSegment;
 import '../transit/bus_route.dart';
@@ -133,7 +134,17 @@ class BoardingSessionView extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: SizedBox(
                 width: double.infinity,
-                child: TextButton(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                    side: BorderSide(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    minimumSize: const Size(
+                      0,
+                      StopBellSpacing.minimumTouchSize,
+                    ),
+                  ),
                   onPressed: c.busy || c.stateUncertain
                       ? null
                       : () => _cancel(context),
@@ -232,23 +243,19 @@ class BoardingSessionDetails extends StatelessWidget {
     final summary = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
+        AppBar(
           key: const ValueKey('boarding-header'),
-          children: [
-            if (constrained || onBack != null)
-              IconButton(
-                onPressed: onBack,
-                tooltip: '도착 알람으로',
-                icon: const Icon(Icons.arrow_back),
-              ),
-            Expanded(
-              child: Text(
-                '하차 알람',
-                style: theme.textTheme.titleLarge!.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
+          primary: false,
+          automaticallyImplyLeading: false,
+          leading: constrained || onBack != null
+              ? IconButton(
+                  onPressed: onBack,
+                  tooltip: '도착 알람으로',
+                  icon: const Icon(Icons.arrow_back),
+                )
+              : null,
+          title: const Text('하차 알람'),
+          actions: [
             if (showRefresh)
               IconButton(
                 onPressed: onRefresh,
@@ -362,10 +369,10 @@ class BoardingSessionDetails extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
-          mainAxisSize: bounded ? MainAxisSize.max : MainAxisSize.min,
+          mainAxisSize: MainAxisSize.min,
           children: [
             routeHeader,
-            if (bounded) Expanded(child: body) else body,
+            if (bounded) Flexible(child: body) else body,
           ],
         ),
       );
@@ -375,6 +382,21 @@ class BoardingSessionDetails extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [summary, const SizedBox(height: 8), panel(bounded: false)],
+      );
+    }
+    if (s.isTerminal) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(
+          horizontal: StopBellSpacing.screenPadding,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            summary,
+            const SizedBox(height: StopBellSpacing.sm),
+            panel(bounded: false),
+          ],
+        ),
       );
     }
     return LayoutBuilder(
@@ -388,7 +410,7 @@ class BoardingSessionDetails extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          Expanded(
+          Flexible(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: panel(bounded: true),
@@ -696,6 +718,8 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                 stop.index ==
                     timeline.targetIndex - session.notificationOffsetStops!,
             showOrder:
+                (stop.index == timeline.boardingIndex ||
+                    stop.index == timeline.targetIndex) &&
                 stop.name != null &&
                 (counts[stopDisplayName(stop.name!).name] ?? 0) > 1,
             accent: accent,
@@ -743,77 +767,83 @@ class _TrackingRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final display = stop.name == null ? null : stopDisplayName(stop.name!);
     final theme = Theme.of(context);
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 36,
-            child: Column(
-              children: [
-                Icon(
-                  bus
-                      ? Icons.directions_bus
-                      : last
-                      ? Icons.flag_outlined
-                      : alert
-                      ? Icons.notifications_outlined
-                      : Icons.circle,
-                  key: bus ? const ValueKey('tracking-bus-marker') : null,
-                  semanticLabel: bus
-                      ? (initial ? '등록 당시 차량 위치' : '최근 차량 위치')
-                      : null,
-                  size: bus
-                      ? 28
-                      : first || last || alert
-                      ? 20
-                      : 10,
-                  color: passed || first || last ? accent : scheme.outline,
-                ),
-                if (!last)
-                  Expanded(
-                    child: BusRouteRailSegment(
-                      color: passed && !bus ? accent : scheme.outlineVariant,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 12),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: bus ? scheme.primaryContainer : Colors.transparent,
+        borderRadius: BorderRadius.circular(StopBellRadius.field),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(
+              width: 36,
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    display?.name ?? '정류장 정보 없음',
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: first || last || bus
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
+                  Icon(
+                    bus
+                        ? Icons.directions_bus
+                        : last
+                        ? Icons.flag_outlined
+                        : alert
+                        ? Icons.notifications_outlined
+                        : Icons.circle,
+                    key: bus ? const ValueKey('tracking-bus-marker') : null,
+                    semanticLabel: bus
+                        ? (initial ? '등록 당시 차량 위치' : '최근 차량 위치')
+                        : null,
+                    size: bus
+                        ? 28
+                        : first || last || alert
+                        ? 20
+                        : 10,
+                    color: passed || first || last ? accent : scheme.outline,
                   ),
-                  if (display?.isNonstop == true)
-                    Text('미정차', style: theme.textTheme.bodySmall),
-                  if (first) Text('승차 정류장', style: theme.textTheme.bodySmall),
-                  if (last) Text('목표 정류장', style: theme.textTheme.bodySmall),
-                  if (alert)
-                    Text('하차 준비 알림 정류장', style: theme.textTheme.bodySmall),
-                  if (bus)
-                    Text(
-                      initial ? '참고용 위치예요' : '최근 위치 기준',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  if (showOrder)
-                    Text(
-                      '노선 순서 ${stop.order}',
-                      style: theme.textTheme.bodySmall,
+                  if (!last)
+                    Expanded(
+                      child: BusRouteRailSegment(
+                        color: passed && !bus ? accent : scheme.outlineVariant,
+                      ),
                     ),
                 ],
               ),
             ),
-          ),
-        ],
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      display?.name ?? '정류장 정보 없음',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        fontWeight: first || last || bus
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    if (display?.isNonstop == true)
+                      Text('미정차', style: theme.textTheme.bodySmall),
+                    if (first) Text('승차 정류장', style: theme.textTheme.bodySmall),
+                    if (last) Text('목표 정류장', style: theme.textTheme.bodySmall),
+                    if (alert)
+                      Text('하차 준비 알림 정류장', style: theme.textTheme.bodySmall),
+                    if (bus)
+                      Text(
+                        initial ? '참고용 위치예요' : '최근 위치 기준',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    if (showOrder)
+                      Text(
+                        '노선 순서 ${stop.order}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -454,7 +454,7 @@ void main() {
     final panel = tester.getRect(
       find.byKey(const ValueKey('tracking-route-panel')),
     );
-    final cancel = tester.getRect(find.widgetWithText(TextButton, '추적 취소'));
+    final cancel = tester.getRect(find.widgetWithText(OutlinedButton, '추적 취소'));
     expect(cancel.top - panel.bottom, inInclusiveRange(0, 12));
     expect(panel.height, greaterThan(300));
   });
@@ -471,7 +471,7 @@ void main() {
     final panel = tester.getRect(
       find.byKey(const ValueKey('tracking-route-panel')),
     );
-    final cancel = tester.getRect(find.widgetWithText(TextButton, '추적 취소'));
+    final cancel = tester.getRect(find.widgetWithText(OutlinedButton, '추적 취소'));
     expect(tester.takeException(), isNull);
     expect(panel.height, greaterThan(80));
     expect(cancel.top - panel.bottom, inInclusiveRange(0, 12));
@@ -493,7 +493,7 @@ void main() {
       await pump(tester);
       tester.view.physicalSize = const Size(320, 568);
       await tester.pumpAndSettle();
-      final cancel = find.widgetWithText(TextButton, '추적 취소');
+      final cancel = find.widgetWithText(OutlinedButton, '추적 취소');
       final before = tester.getBottomLeft(cancel).dy;
       expect(before, greaterThan(500));
       await tester.drag(
@@ -908,7 +908,9 @@ void main() {
       expect(find.textContaining('검증된 노선 방문 정류장 간격'), findsNothing);
       expect(
         tester
-            .widget<TextButton>(find.widgetWithText(TextButton, '추적 취소'))
+            .widget<OutlinedButton>(
+              find.widgetWithText(OutlinedButton, '추적 취소'),
+            )
             .onPressed,
         isNull,
       );

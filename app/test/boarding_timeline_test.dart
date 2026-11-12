@@ -69,7 +69,7 @@ void main() {
         'timeline': timeline(4, 'READY'),
       }, brightness: Brightness.dark);
       expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);
-      expect(find.text('노선 순서 5'), findsOneWidget);
+      expect(find.text('노선 순서 5'), findsNothing);
       final markerY = tester
           .getTopLeft(find.byKey(const ValueKey('tracking-bus-marker')))
           .dy;

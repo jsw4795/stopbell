@@ -62,6 +62,8 @@ TASK-701/705 초기 기기 smoke 및 TASK-710의 일부 PASS는 최종 전체 �
 
 UI-0 → UI-1 → UI-2 → UI-3 → UI-4 → UI-4B → UI-5 → UI-6 → UI-7 → UI-7B → UI-8 순서로 진행한다. 이는 기존 Phase를 대체하지 않는 독립 하위 로드맵이다. UI-0/1의 기존 구현을 재사용하고 처음부터 재구현하지 않는다. 기능 계약의 최종 기준은 [요구사항](requirements.md), 구조는 [Architecture](architecture.md), HTTP 계약은 [API](api.md), 결정은 관련 ADR이다.
 
+디자인 개선 C: 하위 화면 헤더, 검색·정류장 선택, 차량 선택 및 하차 추적 표시를 개선했다. 위젯 검증 후 실제 iPhone 최종 확인은 개발자가 진행한다.
+
 ### UI-0 — 공통 디자인 시스템
 
 주요 기반 구현: `app/lib/core/theme/stopbell_theme.dart`, `stopbell_colors.dart`, `stopbell_spacing.dart`. Light/Dark, 색상·간격·타이포그래피, 버튼·카드·입력, 로딩·오류·빈 화면 및 접근성을 기존 자산 위에서 점검·보완한다. 공식 노선유형 색상과 승차·목표·추적 상태 의미색을 구분한다. 전체 항목의 완료는 별도 확인한다.
@@ -82,7 +84,7 @@ UI-0 → UI-1 → UI-2 → UI-3 → UI-4 → UI-4B → UI-5 → UI-6 → UI-7 �
 
 ### UI-4 — 하차 추적 화면
 
-검증된 최근 관측 지점과 목적지까지 남은 occurrence 간격을 함께 표시하고, 위치를 확인할 수 없으면 추측하지 않는다. 새로고침은 상태 영역 아이콘, 취소는 확인 대화상자를 유지한 텍스트 버튼으로 제공한다. 등록 당시 TAGO 초기 참고 관측과 READY를 구분하며, 사용자 보고에 따라 취소 버튼과 화면 동작의 iPhone 확인을 완료했다. 선택 차량번호·노선, 승차·목표, 추적과 알림 상태, 마지막 관측, 근거 있는 진행, 종료·취소와 오류·보류·복구를 명확히 보여준다. TRACKING 자체를 검증된 위치로 표현하지 않고 근거 없는 남은 occurrence·실제 정차 수·ETA·실제 탑승을 추측하지 않는다. checkpoint 복구와 Notification 중복 방지는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
+검증된 최근 관측 지점과 목적지까지 남은 occurrence 간격을 함께 표시하고, 위치를 확인할 수 없으면 추측하지 않는다. 새로고침은 상태 영역 아이콘, 취소는 확인 대화상자를 유지한 위험 동작 아웃라인 버튼으로 제공한다. 등록 당시 TAGO 초기 참고 관측과 READY를 구분하며, 사용자 보고에 따라 취소 버튼과 화면 동작의 iPhone 확인을 완료했다. 선택 차량번호·노선, 승차·목표, 추적과 알림 상태, 마지막 관측, 근거 있는 진행, 종료·취소와 오류·보류·복구를 명확히 보여준다. TRACKING 자체를 검증된 위치로 표현하지 않고 근거 없는 남은 occurrence·실제 정차 수·ETA·실제 탑승을 추측하지 않는다. checkpoint 복구와 Notification 중복 방지는 [ADR-012](adr/ADR-012-boarding-session-and-alight-notification-contract.md)를 따른다.
 
 ### UI-4B — 단일 차량 전체 구간 타임라인
 

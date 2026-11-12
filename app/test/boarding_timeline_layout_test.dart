@@ -128,7 +128,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.getTopLeft(row).dy, headerY);
     expect(find.text('미정차'), findsOneWidget);
-    expect(find.text('노선 순서 9'), findsOneWidget);
+    expect(find.text('노선 순서 9'), findsNothing);
     expect(find.text('노선 순서 21'), findsNothing);
   });
 
