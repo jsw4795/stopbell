@@ -7,6 +7,8 @@ import 'package:stopbell/features/boarding/boarding_bus_timeline.dart';
 import 'package:stopbell/features/boarding/boarding_candidates.dart';
 import 'package:stopbell/features/boarding/boarding_stop_screen.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
+import 'package:stopbell/features/transit/bus_route_timeline.dart'
+    show BusVehicleMarker;
 import 'package:stopbell/features/transit/bus_route_vehicle.dart';
 
 import 'boarding_test_fakes.dart';
@@ -172,14 +174,23 @@ void main() {
       expect(tester.getTopLeft(arrived).dx, tester.getTopLeft(departed).dx);
       expect(tester.getSize(arrived).width, tester.getSize(departed).width);
       expect(tester.getSize(arrived).height, greaterThanOrEqualTo(56));
+      // 카드 세로 중앙 = 마커 중앙, 카드 왼쪽 끝은 마커 중심선(레일 가운데).
+      final markers = find.byType(BusVehicleMarker);
       expect(
-        (tester.widget<Material>(arrived).shape! as BusBubbleBorder).tailAtTop,
-        isTrue,
+        tester.getCenter(markers.at(0)).dy,
+        closeTo(tester.getCenter(arrived).dy, 0.5),
       );
       expect(
-        (tester.widget<Material>(departed).shape! as BusBubbleBorder).tailAtTop,
-        isFalse,
+        tester.getCenter(markers.at(1)).dy,
+        closeTo(tester.getCenter(departed).dy, 0.5),
       );
+      expect(
+        tester.getCenter(markers.at(0)).dx,
+        closeTo(tester.getTopLeft(arrived).dx, 0.5),
+      );
+      // 도착 카드에는 정류장 이름 캡션이 들어간다.
+      expect(find.text('정류장5 도착'), findsOneWidget);
+      expect(find.byKey(const ValueKey('boarding-bus-halo')), findsNothing);
       expect(find.byIcon(Icons.radio_button_unchecked), findsNWidgets(2));
 
       await tester.tap(find.byKey(const ValueKey('boarding-bus-서울70사1234')));
@@ -262,6 +273,9 @@ void main() {
 
       await tap(find.byKey(const ValueKey('boarding-bus-경기70아5678')));
       expect(confirm().onPressed, isNotNull);
+      // 선택하면 체크 원과 마커 halo가 나타난다.
+      expect(find.byIcon(Icons.check_circle), findsOneWidget);
+      expect(find.byKey(const ValueKey('boarding-bus-halo')), findsOneWidget);
       confirm().onPressed!();
       expect(opened?.vehicleNumber, '경기70아 5678');
     });
