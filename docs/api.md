@@ -118,6 +118,39 @@ Route가 current metadata에 없으면 `404 Not Found`와 `BUS_ROUTE_NOT_FOUND` 
 
 Stop selection response에는 `provider`, `externalRouteId`, `externalStopId`, `cityCode`, GPS, `BusStop.id`, predecessor/successor external ID를 노출하지 않는다. 이 값들은 Provider 또는 Backend metadata implementation detail이며, GPS는 현재 Flutter 기능에 필요하지 않다.
 
+### 버스 노선의 실시간 차량 위치 조회 (UI-7)
+
+```http
+GET /api/v1/bus-routes/{routeId}/vehicles
+```
+
+JWT Access Token이 필요한 읽기 전용 API다. 노선 선택 화면의 차량 위치·잔여 좌석·혼잡도 표시용이며 후보 API, 하차 추적, TRACKING 계약과 분리된다. `{routeId}`는 stops API와 같은 `BusRoute.id`다. 자동 polling 없이 화면 진입 시 1회와 수동 새로고침으로 호출한다.
+
+```json
+{
+  "observedAt": "2026-11-12T08:30:00Z",
+  "status": "AVAILABLE",
+  "vehicles": [
+    {
+      "vehicleNumber": "경기74아3491",
+      "occurrenceId": 12345,
+      "seat": { "status": "AVAILABLE", "remaining": 12 },
+      "congestion": null
+    }
+  ]
+}
+```
+
+- `observedAt`: 서버 Provider 조회 시각이다. 캐시 응답은 조회 시각을 유지하고 STALE도 마지막 성공 시각이다.
+- `status`: `AVAILABLE`(모두 확인), `EMPTY`(Provider가 운행 차량 없음으로 응답), `PARTIAL`(일부 위치·좌석 미확인 또는 GBIS 조회 실패), `STALE`(Provider 실패·일일 상한으로 최근 5분 내 마지막 성공 결과 반환). Provider 실패를 `EMPTY`로 응답하지 않는다.
+- `vehicleNumber`: 전체 차량번호.
+- `occurrenceId`: 검증된 마지막 통과 occurrence이며 없으면 `null`이다. 경기는 TAGO `nodeord`·`nodeid`가 모두 한 occurrence와 일치하고, 서울은 `sectOrd` 다음 occurrence의 정류장 ID가 `nextStId`와 일치할 때만 채운다. 정류장이 반복되는 노선은 항상 `null`이다.
+- `seat.status`: `AVAILABLE`(`remaining` 양수), `NONE`(`remaining` 0), `UNAVAILABLE`(`remaining` `null`). 서울, 좌석 비대상 유형, 번호·노선 불일치·중복, GBIS 실패는 `UNAVAILABLE`이다.
+- `congestion`: 1 여유, 2 보통, 3 혼잡, 4 매우혼잡, 미제공·알 수 없는 값은 `null`이다. 서울 roster와 GBIS 일반형(유형 13·15·23)에서 제공한다.
+- Provider 원본 ID, GPS, 내부 `Provider`는 응답하지 않는다. 차량은 occurrence 순서(없으면 뒤)와 번호순이다.
+
+Route가 없으면 `404 BUS_ROUTE_NOT_FOUND`, 양수가 아닌 `{routeId}`는 `400 INVALID_REQUEST`, 위치 Provider가 실패하거나 상한에 도달했고 쓸 수 있는 마지막 성공 결과가 없으면 `503 TRANSIT_TEMPORARILY_UNAVAILABLE`이다.
+
 ### 알림 생성
 
 ```http

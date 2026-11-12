@@ -230,6 +230,12 @@ Foreground는 source에 맞는 작은 안내와 상세 보기 선택만 제공�
 
 Fake 수신 callback과 Mock/Fake API로 자동 검증한다. 실제 OS terminated 실행·Firebase/iPhone 표시·실제 버스 E2E는 이 검증의 보장 범위가 아니며 TASK-908과 기존 TASK-710에 남는다. Provider별 조건부 지원 범위는 API 계약을 따르며 OS 표시 중복/지연·접수 후 회수 불가 한계를 유지한다.
 
+### 노선 차량 위치 조회 캐시와 호출 상한 (UI-7)
+
+`BusRouteVehicleService`는 읽기 전용이며 Boarding·Alarm·Scheduler와 코드·상태를 공유하지 않는다. 결과는 Route ID별 메모리 캐시(`transit.vehicle-view.cache-ttl`, 기본 15초)에 두고, 같은 Route의 동시 요청은 하나의 Provider 호출로 합친다. Provider 실패나 일일 상한 시 `transit.vehicle-view.stale-max-age`(기본 5분) 안의 마지막 성공 결과를 `STALE`로 반환한다. 경기는 TAGO 위치를 기준으로, 좌석 유형(11·12·14·16·17·21·22)과 일반형 혼잡도 유형(13·15·23)만 GBIS를 호출해 정규화(공백·하이픈 제거) 번호와 노선이 모두 하나씩 일치할 때 결합한다.
+
+`ProviderDailyCallBudget`은 KST 일 단위, Provider별 호출 수를 메모리로 센다. 기본값은 서울 800, TAGO 8,000, GBIS 500이며 `transit.vehicle-view.daily-limit.{seoul,tago,gbis}`로 바꾼다. 값은 Alarm 모니터링 등 다른 호출을 위한 여유를 남기려는 보수적 추정이며 계정별 공식 한도를 확인한 값이 아니다. 운영 전에 실제 한도에 맞춰 조정한다. 이 카운터는 UI-7 호출만 세고 재시작 시 초기화된다. GBIS 오류는 `TransitProvider` enum에 값을 추가하지 않고(DB CHECK 제약·`values()` 순회 영향 방지) provider `TAGO`와 source 라벨 `GBIS`로 구분한다.
+
 ## 6. 초기 백엔드 경계
 
 권장하는 논리적 모듈/패키지:

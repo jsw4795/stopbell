@@ -40,6 +40,13 @@ notification:
 transit:
   boarding:
     tago-experiment-enabled: ${TAGO_BOARDING_EXPERIMENT_ENABLED:true}
+  vehicle-view:
+    cache-ttl: PT15S
+    stale-max-age: PT5M
+    daily-limit:
+      seoul: 800
+      tago: 8000
+      gbis: 500
   monitoring:
     enabled: ${TRANSIT_MONITORING_ENABLED:true}
     fixed-delay: PT20S
