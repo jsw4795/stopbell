@@ -43,6 +43,10 @@ Task 완료 전에는 이번 구현으로 관련 문서가 오래되지 않았�
 
 Task 완료 전에는 변경에 필요한 Test와 검증을 수행한다. 전체 Test Suite, compile, Application Context, Integration Test 등은 Task 위험도와 관련 문서에 맞게 선택한다. 검증 실패 상태에서 완료 처리하거나, Test skip·검증 약화·의미 없는 mock으로 통과시키지 않는다.
 
+## Secret 취급
+
+`.env`, 인증정보, API Key 값을 출력·커밋·로그에 남기지 않는다. 셸에서 `.env`를 `source`, `.`, `set -a` 등으로 통째로 로드하지 않는다. `.env`에는 셸 변수명으로 유효하지 않은 점 포함 키가 있어, 로드 시 셸 오류가 해당 줄의 값을 그대로 출력한다. 셸에서 값이 필요하면 `KEY=$(grep '^KEY_NAME=' .env | cut -d= -f2-)`처럼 필요한 줄만 변수에 담고 그 값을 echo·출력하지 않는다. Backend local 실행은 `application-local.yml`이 `.env`를 import하므로 별도 로드가 필요 없다.
+
 ## Task와 Git workflow
 
 Task 완료 절차는 `docs/task-list.md`를 따른다. 구현과 필요한 검증이 성공한 경우에만 해당 Task를 `[ ]`에서 `[x]`로 변경하고, 그 변경은 해당 Task의 동일 Commit에 포함한다. 미완료·부분 완료 Task를 완료 처리하지 않으며, maintenance 작업을 위해 새 Task를 임의로 추가하지 않는다.
