@@ -2,9 +2,56 @@ import 'package:flutter/material.dart';
 
 import '../core/theme/stopbell_spacing.dart';
 
-/// 로딩 중 자리표시 블록. 디자인 토큰(surfaceContainerHighest)을 쓰므로 라이트·다크에 모두 맞는다.
-/// '동작 줄이기'(MediaQuery.disableAnimations)가 켜져 있으면 반짝임 없이 정적 블록만 그린다.
-class StopBellSkeleton extends StatefulWidget {
+/// 화면의 스켈레톤 블록이 하나의 애니메이션을 공유한다.
+class StopBellShimmer extends StatefulWidget {
+  const StopBellShimmer({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<StopBellShimmer> createState() => _StopBellShimmerState();
+}
+
+class _StopBellShimmerState extends State<StopBellShimmer>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      _ShimmerScope(animation: _controller, child: widget.child);
+}
+
+class _ShimmerScope extends InheritedWidget {
+  const _ShimmerScope({required this.animation, required super.child});
+
+  final Animation<double> animation;
+
+  @override
+  bool updateShouldNotify(_ShimmerScope oldWidget) =>
+      animation != oldWidget.animation;
+}
+
+/// 디자인 토큰을 사용하는 로딩 자리표시 블록.
+class StopBellSkeleton extends StatelessWidget {
   const StopBellSkeleton({
     super.key,
     this.width,
@@ -17,48 +64,49 @@ class StopBellSkeleton extends StatefulWidget {
   final double radius;
 
   @override
-  State<StopBellSkeleton> createState() => _StopBellSkeletonState();
-}
-
-class _StopBellSkeletonState extends State<StopBellSkeleton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1100),
-  );
-  late final Animation<double> _opacity = Tween<double>(
-    begin: .45,
-    end: 1,
-  ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _controller.stop();
-    } else if (!_controller.isAnimating) {
-      _controller.repeat(reverse: true);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final block = Container(
-      width: widget.width,
-      height: widget.height,
+      width: width,
+      height: height,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(widget.radius),
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(radius),
       ),
     );
-    if (MediaQuery.disableAnimationsOf(context)) return block;
-    return FadeTransition(opacity: _opacity, child: block);
+    final animation = context
+        .dependOnInheritedWidgetOfExactType<_ShimmerScope>()
+        ?.animation;
+    if (MediaQuery.disableAnimationsOf(context) || animation == null) {
+      return block;
+    }
+    return AnimatedBuilder(
+      animation: animation,
+      child: block,
+      builder: (context, child) => ShaderMask(
+        blendMode: BlendMode.srcIn,
+        shaderCallback: (bounds) {
+          final position = animation.value * 3 - 1;
+          return LinearGradient(
+            begin: Alignment(position - 1, 0),
+            end: Alignment(position + 1, 0),
+            colors: [
+              colors.surfaceContainerHighest,
+              Color.alphaBlend(
+                (colors.brightness == Brightness.light
+                        ? colors.surface
+                        : colors.onSurface)
+                    .withValues(alpha: .65),
+                colors.surfaceContainerHighest,
+              ),
+              colors.surfaceContainerHighest,
+            ],
+            stops: const [0.25, 0.5, 0.75],
+          ).createShader(bounds);
+        },
+        child: child,
+      ),
+    );
   }
 }
 

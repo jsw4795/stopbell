@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/theme/stopbell_spacing.dart';
+import 'stopbell_skeleton.dart';
 
 /// 로딩 중에만 [skeleton]을 보여 주는 지연 표시 래퍼. 규칙은 다음과 같다.
 /// - [delay](0.3초) 안에 끝나면 아무것도 깜빡이지 않는다.
@@ -118,8 +119,20 @@ class _StopBellDelayedLoadingState extends State<StopBellDelayedLoading> {
 
   @override
   Widget build(BuildContext context) {
-    if (_shown) return _buildLoading(context);
-    return widget.loading ? const SizedBox.shrink() : widget.child;
+    final Widget current = _shown
+        ? KeyedSubtree(
+            key: const ValueKey('loading'),
+            child: _buildLoading(context),
+          )
+        : widget.loading
+        ? const SizedBox.shrink(key: ValueKey('waiting'))
+        : KeyedSubtree(key: const ValueKey('content'), child: widget.child);
+    if (MediaQuery.disableAnimationsOf(context)) return current;
+    return AnimatedSwitcher(
+      duration: Duration(milliseconds: _shown ? 150 : 220),
+      reverseDuration: const Duration(milliseconds: 220),
+      child: current,
+    );
   }
 
   Widget _buildLoading(BuildContext context) {
@@ -131,7 +144,7 @@ class _StopBellDelayedLoadingState extends State<StopBellDelayedLoading> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          ExcludeSemantics(child: widget.skeleton),
+          ExcludeSemantics(child: StopBellShimmer(child: widget.skeleton)),
           if (_slow && widget.loading) ...[
             const SizedBox(height: StopBellSpacing.md),
             Text(
