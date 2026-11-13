@@ -22,7 +22,7 @@
 - 2026-11-11 후행 하차 추적 정책은 정확한 차량·노선·occurrence와 간격으로 판단하고 준비와 목적지 Event를 각각 최대 한 번 생성한다. Provider 시각·stopFlag·이전 index·관측 공백만으로 차단하지 않는다. 최초 미검증 checkpoint 이후에도 정확한 목적지 occurrence를 확인하면 이전 방문 기록 없이 완료한다. 다른 운행 회차를 구분하지 못할 가능성은 사용자가 수용했으며 TASK-908 실제 기기 검증은 미완료다. [현행 계약](domain-model.md#snapshot-and-progress)
 - 공식 노선 유형 Backend는 `d9300c2`에서 구현됐으며 기존 개발 DB 유형 보강도 완료됐다. HEAD와 작업 트리는 매번 다시 확인한다.
 - 아래 TAGO·GBIS 수집과 최초 DB 적용 결과는 개발자가 전달한 기록이며, 당시 인수인계에서는 DB와 원본·백업 복원을 재검증하지 않았다. 이후 공식 유형 보강의 백업·DB 검증은 아래에 별도로 기록한다. [로드맵](roadmap.md)과 [Task List](task-list.md)의 이전 진행 기록은 당시 상태로 읽는다.
-- TASK-710 및 TASK-908은 미완료다. 서울·TAGO의 일부 실제 iPhone 결과가 있으나 전체 현장 검증은 남아 있다. TAGO는 기본 OFF 실험이며 원본 최신성·동일 운행 보장과 운영 적용은 별개다.
+- TASK-710 및 TASK-908은 미완료다. 서울·TAGO의 일부 실제 iPhone 결과가 있으나 전체 현장 검증은 남아 있다. TAGO 하차 추적은 세션 생성 후 기본 ON이며 원본 최신성·동일 운행 보장과 운영 적용은 별개다.
 
 ### 완료된 TAGO·GBIS 수집과 개발 DB 적용
 
@@ -79,7 +79,7 @@
 3. UI-3·UI-4·UI-4B는 현재 범위 완료다. 사용자 보고에 따르면 M2352 후보와 하차 추적 화면, 전체 타임라인 및 20초 자동 갱신을 iPhone에서 최종 확인했다.
 4. UI-5 홈 및 알람 관리를 2026-11-12 구현했다. 생성 카드 2개, 진행 중·최근 종료 하차 세션, 도착 알람 카드 목록을 제공하며 Alarm 공식 기·종점 필드와 최근 종료 세션 조회(`scope=recent`)를 Backend에 추가했다. 2026-11-12 사용자가 실제 iPhone 확인을 완료했다. UI-6 로그인·설정·계정, UI-7 실시간 차량 위치, UI-7B 탑승 버스 선택 노선도를 같은 날 구현하고 사용자가 실제 iPhone 확인을 완료했다. 다음은 UI-8 전체 통합 검증이며 Phase 3-B의 운영 적용과 별도 검증 책임도 유지한다.
 
-기준 main은 `1eda4507f7c4af5ceeeb2f2979904ab4ce977764`다. 해당 [GitHub CI 실행](https://github.com/jsw4795/stopbell/actions/runs/42988270809)은 완료·성공이며, Flutter 전체 845개와 정적 분석은 이전 Codex 보고에 따른다. 기기 결과는 사용자의 보고이며 TASK-710 Notification 전체 E2E와 TASK-908 실제 탑승~하차 E2E의 완료를 뜻하지 않는다. Provider 전 노선 정확성·운영 DB 및 안정성·UI-8도 미완료다.
+기준 main은 `48d180c`다. CI 결과와 Flutter 전체 테스트 수는 HEAD에서 다시 확인하지 않았으며 매번 직접 확인한다. 기기 결과는 사용자의 보고이며 TASK-710 Notification 전체 E2E와 TASK-908 실제 탑승~하차 E2E의 완료를 뜻하지 않는다. Provider 전 노선 정확성·운영 DB 및 안정성·UI-8도 미완료다.
 
 자동 갱신은 `app/lib/features/boarding/boarding_session_auto_refresh.dart`의 화면 생명주기 Timer가 `BoardingSessionController.refresh()`를 통해 기존 세션 GET을 호출한다. foreground의 표시 중 TRACKING 상세에서 20초마다 조회하고 복귀 시 즉시 조회하며, 화면 이탈·백그라운드·종료 시 중단한다. 수동 조회와 중복을 막고 자동 조회에서는 스크롤을 유지한다. Backend 추적 판정과 Provider 호출·수집 주기는 변경하지 않는다. UI-5 홈 및 알람 관리의 구현 범위는 [로드맵](roadmap.md#ui-5--홈-및-알람-관리-구현-완료)을 따른다.
 
