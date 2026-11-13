@@ -190,7 +190,8 @@ public final class FcmProviderClient {
                 "notification", alert,
                 "apns", Map.of("headers", Map.of("apns-push-type", "alert", "apns-priority", "10",
                                 "apns-expiration", Long.toString(request.expiresAt().getEpochSecond())),
-                        "payload", Map.of("aps", Map.of("alert", alert, "sound", "default")))
+                        "payload", Map.of("aps", Map.of("alert", alert, "sound", "default",
+                                "interruption-level", "time-sensitive")))
         )));
     }
 

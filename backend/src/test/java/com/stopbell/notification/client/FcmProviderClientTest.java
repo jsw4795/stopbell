@@ -81,6 +81,10 @@ class FcmProviderClientTest {
         assertThat(apns.getAsJsonObject("headers").get("apns-push-type").getAsString()).isEqualTo("alert");
         assertThat(apns.getAsJsonObject("payload").getAsJsonObject("aps").getAsJsonObject("alert"))
                 .isEqualTo(message.getAsJsonObject("notification"));
+        assertThat(apns.getAsJsonObject("payload").getAsJsonObject("aps").get("sound").getAsString())
+                .isEqualTo("default");
+        assertThat(apns.getAsJsonObject("payload").getAsJsonObject("aps").get("interruption-level").getAsString())
+                .isEqualTo("time-sensitive");
     }
 
     @ParameterizedTest
@@ -106,6 +110,7 @@ class FcmProviderClientTest {
         var aps = apns.getAsJsonObject("payload").getAsJsonObject("aps");
         assertThat(aps.getAsJsonObject("alert")).isEqualTo(message.getAsJsonObject("notification"));
         assertThat(aps.get("sound").getAsString()).isEqualTo("default");
+        assertThat(aps.get("interruption-level").getAsString()).isEqualTo("time-sensitive");
         assertThat(message.getAsJsonObject("notification").get("body").getAsString())
                 .contains(type == BoardingNotificationEventType.PREPARE_ALIGHT ? "하차를 준비" : "도달하거나 통과")
                 .doesNotContain("정차했", "하차했");
@@ -208,6 +213,10 @@ class FcmProviderClientTest {
         var apns = message.getAsJsonObject("apns");
         assertThat(apns.getAsJsonObject("payload").getAsJsonObject("aps").getAsJsonObject("alert"))
                 .isEqualTo(message.getAsJsonObject("notification"));
+        assertThat(apns.getAsJsonObject("payload").getAsJsonObject("aps").get("sound").getAsString())
+                .isEqualTo("default");
+        assertThat(apns.getAsJsonObject("payload").getAsJsonObject("aps").get("interruption-level").getAsString())
+                .isEqualTo("time-sensitive");
         assertThat(apns.getAsJsonObject("headers").get("apns-expiration").getAsString())
                 .isEqualTo(Long.toString(request.expiresAt().getEpochSecond()));
         assertThat(message.getAsJsonObject("data")).isEqualTo(JsonParser.parseString(

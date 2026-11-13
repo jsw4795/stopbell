@@ -84,7 +84,7 @@
 #### 개발자 확정 예정 작업 (2026-11-13, 2번 외 미구현)
 
 1. **하차 알림 인지 강화**
-   - Time Sensitive 알림을 켠다(`interruption-level: time-sensitive`, entitlement 추가).
+   - ✅ 완료(2026-11-13): Time Sensitive 알림을 켰다(`interruption-level: time-sensitive`, entitlement 추가). Apple Developer 포털 capability·provisioning profile 갱신은 개발자 확인 필요.
    - 반복 알림으로 진동 알람을 흉내 낸다. 사용자 동의(설정 opt-in)를 받는다. 앱 열기·알림 탭·추적 종료로 확인하면 멈추고, 목표 정류장을 지나도 멈춘다.
    - Live Activity로 남은 정류장 수를 표시하고, 준비 시점에 alert 갱신을 보낸다.
    - 이어폰을 연결한 사용자를 위해 알림음을 하차 안내 방송 녹음(30초 미만)으로 만든다. 모든 알림은 기본 진동을 전제로 한다.
