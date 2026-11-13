@@ -140,7 +140,10 @@ class AlarmMigrationIntegrationTest {
         assertThat(jdbcTemplate.queryForObject(
                 "select initial_baseline_pending from alarms where transit_type='BUS' and status='ACTIVE'", Boolean.class))
                 .isFalse();
-        assertThat(jdbcTemplate.queryForMap("select * from notification_events")).isEqualTo(oldEvent);
+        // V41이 추가한 reissue_sequence는 기존 행에서 0이다.
+        var expectedEvent = new java.util.HashMap<>(oldEvent);
+        expectedEvent.put("reissue_sequence", 0);
+        assertThat(jdbcTemplate.queryForMap("select * from notification_events")).isEqualTo(expectedEvent);
         assertThat(jdbcTemplate.queryForMap("select * from notification_deliveries")).isEqualTo(oldDelivery);
 
         jdbcTemplate.update(
