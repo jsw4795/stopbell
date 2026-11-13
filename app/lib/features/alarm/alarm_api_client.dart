@@ -201,6 +201,8 @@ class AlarmApiClient implements AlarmClient {
   }
 }
 
+const alarmActiveLimitMessage = '이미 활성화된 도착 알람이 있어요. 기존 알람을 끈 뒤 다시 시도해 주세요.';
+
 class AlarmApiException implements Exception {
   const AlarmApiException({this.statusCode, this.code, this.message});
 
@@ -218,9 +220,12 @@ class AlarmApiException implements Exception {
       (statusCode == 401 && code == 'UNAUTHENTICATED') ||
       (statusCode == 403 && code == 'ACCESS_DENIED') ||
       (statusCode == 409 && code == 'ALARM_NOT_ACTIVE') ||
+      isActiveLimitExceeded ||
       isAlarmNotFound ||
       isStaleTarget;
 
+  bool get isActiveLimitExceeded =>
+      statusCode == 409 && code == 'ALARM_ACTIVE_LIMIT_EXCEEDED';
   bool get isAlarmNotFound => statusCode == 404 && code == 'ALARM_NOT_FOUND';
   bool get isStaleTarget =>
       statusCode == 404 && code == 'TARGET_STOP_OCCURRENCE_NOT_FOUND';

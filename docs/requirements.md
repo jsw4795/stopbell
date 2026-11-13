@@ -85,6 +85,8 @@ Alarm 상태는 `INACTIVE`, `ACTIVE`, `FOLLOW_UP`을 그대로 표시하며 bool
 
 새 monitoring cycle을 시작하는 `INACTIVE → ACTIVE`, `FOLLOW_UP → ACTIVE`에서만 activation generation을 증가시킨다. 이미 `ACTIVE`인 Alarm의 중복 활성화는 idempotent하며 generation을 증가시키거나 baseline을 초기화하지 않는다.
 
+사용자당 동시에 활성인 도착 Alarm(`ACTIVE`·`FOLLOW_UP`)은 1개, 진행 중인 하차 알람(Boarding Session)도 1개로 제한하며 Alarm 생성 개수는 제한하지 않는다. 이미 활성인 상태에서 다른 Alarm을 활성화하면 `ALARM_ACTIVE_LIMIT_EXCEEDED`(409)로 거절하고 기존 Alarm을 자동으로 끄지 않는다. 앱은 “이미 활성화된 도착 알람이 있어요. 기존 알람을 끈 뒤 다시 시도해 주세요.”로 안내하며, 하차 알람은 `BOARDING_SESSION_CONFLICT`에 대해 하차 알람용 문구로 안내한다.
+
 활성(`ACTIVE`) Alarm은 생성 이후에도 한 정류장 전/후 알림 옵션을 켜고 끌 수 있다. 변경은 이후 평가부터 적용되고, 비활성·후속 추적(`FOLLOW_UP`) 중 Alarm은 수정할 수 없다.
 
 활성(`ACTIVE`) 도착 알람은 홈과 상세에서 대상 정류장에 가장 가까이 접근 중인 직전 버스의 남은 occurrence 간격을 `직전 버스 N정류장 전`으로 표시한다. 접근 차량이 없으면 `다가오는 버스 없음`으로 표시하며, 일부 위치 미확인·오래된 정보·조회 실패는 없음과 구분한다. 화면 진입과 명시적 새로고침에만 기존 차량 위치 API를 조회하고 자동 polling은 하지 않는다. 조회 reference·계산 및 불확실성 처리의 상세는 [Alarm API](api.md#알림-생성)를 따른다.

@@ -304,6 +304,9 @@ public class BoardingCandidateService {
             var response = tagoClient.fetchVehicleLocations(new VehicleLocationRequest<>(route.externalRouteId(),
                     new TagoVehicleLocationRequestContext(route.cityCode())));
             Instant receivedAt = clock.instant();
+            if (response == null || response.response() == null || response.response().body() == null) {
+                throw TransitProviderClientException.protocol(TransitProvider.TAGO, "vehicle-location", null);
+            }
             var items = response.response().body().items();
             List<Vehicle> vehicles = items == null || items.item() == null ? List.of()
                     : items.item().stream().map(item -> BoardingCandidateMapper.tago(item, receivedAt)).toList();
@@ -312,6 +315,11 @@ public class BoardingCandidateService {
         var response = seoulClient.fetchVehicleLocations(new VehicleLocationRequest<>(route.externalRouteId(),
                 new SeoulBusVehicleLocationRequestContext()));
         Instant receivedAt = clock.instant();
+        if (response == null || response.header() == null
+                || (!"4".equals(response.header().headerCd())
+                        && (response.body() == null || response.body().itemList() == null))) {
+            throw TransitProviderClientException.protocol(TransitProvider.SEOUL_BUS, "vehicle-location", null);
+        }
         List<Vehicle> vehicles = "4".equals(response.header().headerCd()) ? List.of()
                 : response.body().itemList().stream()
                         .map(item -> BoardingCandidateMapper.roster(item, receivedAt)).toList();
@@ -323,7 +331,7 @@ public class BoardingCandidateService {
             var response = detailClient.fetchVehicleDetail(roster.id());
             Instant receivedAt = clock.instant();
             var items = response.body() == null ? null : response.body().itemList();
-            if ("4".equals(response.header().headerCd()) || items == null || items.isEmpty()) {
+            if (response.header() == null || "4".equals(response.header().headerCd()) || items == null || items.isEmpty()) {
                 return new Detail(null, ReasonCode.DETAIL_EMPTY);
             }
             if (items.size() != 1 || items.getFirst() == null) {

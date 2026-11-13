@@ -25,7 +25,8 @@ public class TagoTransitObservationMapper {
             TagoVehicleLocationResponse response
     ) {
         Instant observedAt = clock.instant();
-        if (response.response().body().items() == null || response.response().body().items().item() == null) {
+        if (response == null || response.response() == null || response.response().body() == null
+                || response.response().body().items() == null || response.response().body().items().item() == null) {
             return List.of();
         }
         List<TagoVehicleLocationItem> items = response.response().body().items().item();

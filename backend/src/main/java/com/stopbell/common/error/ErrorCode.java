@@ -10,6 +10,7 @@ public enum ErrorCode {
     RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "Too many requests. Try again later."),
     ALARM_NOT_FOUND(HttpStatus.NOT_FOUND, "Alarm was not found."),
     ALARM_NOT_ACTIVE(HttpStatus.CONFLICT, "Alarm options can only be changed while the alarm is active."),
+    ALARM_ACTIVE_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "An active arrival alarm already exists."),
     ALARM_CREATION_REQUEST_CONFLICT(HttpStatus.CONFLICT, "Alarm creation request conflicts with the original request."),
     ALARM_CREATION_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "Alarm creation request was not found."),
     ALARM_CREATION_RESULT_GONE(HttpStatus.GONE, "Alarm created by this request is no longer available."),

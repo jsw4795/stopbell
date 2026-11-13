@@ -137,6 +137,11 @@ public class AlarmService {
         userRepository.requireActive(userId);
         Alarm alarm = alarmRepository.findByIdAndUserIdForUpdate(alarmId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.ALARM_NOT_FOUND));
+        // 이미 ACTIVE인 Alarm의 중복 활성화는 idempotent다. 사용자 row lock이 동시 활성화를 직렬화한다.
+        if (alarm.getStatus() != AlarmStatus.ACTIVE && alarmRepository.existsByUserIdAndIdNotAndStatusIn(
+                userId, alarmId, List.of(AlarmStatus.ACTIVE, AlarmStatus.FOLLOW_UP))) {
+            throw new ApiException(ErrorCode.ALARM_ACTIVE_LIMIT_EXCEEDED);
+        }
         alarm.activate();
         return toResponse(alarm);
     }

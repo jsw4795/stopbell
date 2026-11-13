@@ -298,8 +298,9 @@ class BoardingTrackingIntegrationTest {
         polling.poll(cycle());
         var current = api.find(session.getUser().getId(), session.getId());
         assertThat(current.notificationOffsetStops()).isEqualTo(offset);
-        assertThat(current.preparationNotificationStatus()).isEqualTo(prepare ? "PENDING" : "NOT_CREATED");
-        assertThat(events.count()).isEqualTo(index >= 3 ? 1 : prepare ? 1 : 0);
+        // 준비 구간을 건너뛴 도착도 준비 알림을 먼저 발행하므로 도착 관측이면 준비·목적지 2건이다.
+        assertThat(current.preparationNotificationStatus()).isEqualTo(prepare || index >= 3 ? "PENDING" : "NOT_CREATED");
+        assertThat(events.count()).isEqualTo(index >= 3 ? 2 : prepare ? 1 : 0);
         assertThat(deliveries.count()).isEqualTo(events.count());
         assertThat(current.status()).isEqualTo(index >= 3 ? BoardingSessionStatus.COMPLETED : BoardingSessionStatus.TRACKING);
         if (index < 3) {
@@ -314,9 +315,9 @@ class BoardingTrackingIntegrationTest {
         assertThat(api.find(session.getUser().getId(), session.getId()).status()).isEqualTo(BoardingSessionStatus.COMPLETED);
         assertThat(events.findAll()).filteredOn(event -> event.getBoardingEventType()
                 == BoardingNotificationEventType.DESTINATION_REACHED).hasSize(1);
-        assertThat(events.count()).isEqualTo(index < 3 || prepare ? 2 : 1);
+        assertThat(events.count()).isEqualTo(2);
         assertThat(deliveries.findAll()).filteredOn(delivery -> delivery.getStatus()
-                == NotificationDeliveryStatus.PENDING).hasSize(1);
+                == NotificationDeliveryStatus.PENDING).hasSize(index >= 3 ? 2 : 1);
     }
 
     @ParameterizedTest
@@ -676,6 +677,49 @@ class BoardingTrackingIntegrationTest {
         assertThat(held.getStateReason()).isEqualTo(BoardingStateReason.METADATA_CHANGED);
         assertThat(held.getTraversal()).isEqualTo(expected.traversal());
         assertThat(held.getCheckpoint()).isEqualTo(expected.checkpoint());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {3, 4})
+    @DisplayName("준비 구간을 건너뛴 도착·통과는 준비 알림을 먼저, 목적지 알림을 이어서 한 번씩 발행한다")
+    void skipped_preparation_issues_prepare_before_destination(int index) {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        var observation = BoardingProgressEvaluatorTest.observation(expected, index, Meaning.DIRECT_ARRIVAL, 20);
+        store.apply(expected, evaluator.evaluate(expected, observation, utc()));
+        var all = events.findAll().stream().sorted(java.util.Comparator.comparing(NotificationEvent::getId)).toList();
+        assertThat(all).extracting(NotificationEvent::getBoardingEventType).containsExactly(
+                BoardingNotificationEventType.PREPARE_ALIGHT, BoardingNotificationEventType.DESTINATION_REACHED);
+        assertThat(all).extracting(NotificationEvent::getReissueSequence).containsExactly(0, 0);
+        assertThat(all.get(0).getObservedAt()).isEqualTo(all.get(1).getObservedAt());
+        assertThat(deliveries.findAll()).hasSize(2).allSatisfy(value ->
+                assertThat(value.getStatus()).isEqualTo(NotificationDeliveryStatus.PENDING));
+    }
+
+    @Test
+    @DisplayName("이미 준비 알림이 발행된 세션은 도착 시 준비 알림을 중복 발행하지 않는다")
+    void arrival_after_prepare_does_not_duplicate_prepare() {
+        device(session.getUser());
+        var first = store.findOpen().getFirst();
+        store.apply(first, decision(first, 1));
+        time.set(NOW.plusSeconds(40));
+        var latest = store.findOpen().getFirst();
+        store.apply(latest, evaluator.evaluate(latest,
+                BoardingProgressEvaluatorTest.observation(latest, 3, Meaning.DIRECT_ARRIVAL, 40), utc()));
+        assertThat(events.findAll()).extracting(NotificationEvent::getBoardingEventType)
+                .containsExactlyInAnyOrder(BoardingNotificationEventType.PREPARE_ALIGHT,
+                        BoardingNotificationEventType.DESTINATION_REACHED);
+    }
+
+    @Test
+    @DisplayName("사전 알림을 끈 세션은 준비 구간을 건너뛴 도착에서도 준비 알림을 만들지 않는다")
+    void skipped_preparation_respects_disabled_prepare() {
+        jdbc.update("update boarding_sessions set prepare_notification_enabled=false where id=?", session.getId());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, evaluator.evaluate(expected,
+                BoardingProgressEvaluatorTest.observation(expected, 3, Meaning.DIRECT_ARRIVAL, 20), utc()));
+        assertThat(events.findAll()).extracting(NotificationEvent::getBoardingEventType)
+                .containsExactly(BoardingNotificationEventType.DESTINATION_REACHED);
     }
 
     @ParameterizedTest
@@ -1732,9 +1776,9 @@ class BoardingTrackingIntegrationTest {
         when(detail.fetchVehicleDetail(anyString())).thenAnswer(invocation -> detail(3));
         polling.poll(cycle());
         assertThat(api.find(session.getUser().getId(), session.getId()).reasonCode()).isEqualTo(BoardingStateReason.ARRIVAL_OBSERVED);
-        assertThat(events.count()).isEqualTo(1);
+        assertThat(events.count()).isEqualTo(2); // 준비 구간을 건너뛴 도착이므로 준비 Event가 먼저 생성된다.
         polling.poll(cycle());
-        assertThat(events.count()).isEqualTo(1);
+        assertThat(events.count()).isEqualTo(2);
         assertThat(deliveries.count()).isZero();
     }
 

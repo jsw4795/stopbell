@@ -126,6 +126,7 @@ Widget stopScreen(
   StubAlarms client,
   Future<List<BusRouteStopOccurrence>> Function(int) findStops, {
   void Function(Alarm, {bool activationUnverified})? onCreated,
+  void Function(Alarm)? onActivationLimited,
   VoidCallback? onShowAlarms,
   Future<bool> Function(BuildContext)? beforeActivate,
 }) => MaterialApp(
@@ -138,6 +139,7 @@ Widget stopScreen(
       beforeActivate: beforeActivate,
       onBack: () {},
       onCreated: onCreated ?? (_, {bool activationUnverified = false}) {},
+      onActivationLimited: onActivationLimited,
       onShowAlarms: onShowAlarms ?? () {},
     ),
   ),
@@ -654,6 +656,51 @@ void main() {
     await tester.ensureVisible(find.text('알람 목록 보기'));
     await tester.tap(find.text('알람 목록 보기'));
     expect(back, 1);
+  });
+
+  testWidgets('활성 알람 제한으로 켜지 못하면 안내하고 알람은 꺼진 채 유지한다', (tester) async {
+    final client = StubAlarms();
+    client.activateAlarm = (_) async => throw const AlarmApiException(
+      statusCode: 409,
+      code: 'ALARM_ACTIVE_LIMIT_EXCEEDED',
+    );
+    await tester.pumpWidget(detailScreen(client, created: sample));
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('이미 활성화된 도착 알람이 있어요. 기존 알람을 끈 뒤 다시 시도해 주세요.'),
+      findsOneWidget,
+    );
+    expect(find.text('비활성'), findsOneWidget);
+    expect(client.detailIds, isEmpty);
+  });
+
+  testWidgets('알람 생성 직후 활성 제한이면 꺼진 알람을 안내 콜백으로 연다', (tester) async {
+    final client = StubAlarms();
+    client.createAlarm = (_, _, _) async => sample;
+    client.activateAlarm = (_) async => throw const AlarmApiException(
+      statusCode: 409,
+      code: 'ALARM_ACTIVE_LIMIT_EXCEEDED',
+    );
+    Alarm? limited;
+    Alarm? created;
+    await tester.pumpWidget(
+      stopScreen(
+        client,
+        (_) async => [stop],
+        onCreated: (alarm, {bool activationUnverified = false}) =>
+            created = alarm,
+        onActivationLimited: (alarm) => limited = alarm,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey(12345)));
+    await tester.pump();
+    await tester.ensureVisible(find.text('알람 시작'));
+    await tester.tap(find.text('알람 시작'));
+    await tester.pumpAndSettle();
+    expect(limited, same(sample));
+    expect(created, isNull);
   });
 
   testWidgets(

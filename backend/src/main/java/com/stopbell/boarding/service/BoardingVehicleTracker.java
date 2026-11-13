@@ -16,6 +16,7 @@ import com.stopbell.transit.service.VehiclePollingCycle;
 
 @Component
 public class BoardingVehicleTracker {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(BoardingVehicleTracker.class);
 	
 	public BoardingVehicleTracker(
 	        @Qualifier("transitMetadataClock") Clock clock) {
@@ -30,14 +31,27 @@ public class BoardingVehicleTracker {
         List<Vehicle> roster;
         if (session.provider() == TransitProvider.TAGO) {
             var received = cycle.tago(session.routeId(), session.cityCode());
-            var items = received.response().response().body().items();
+            var tago = received == null || received.response() == null ? null : received.response().response();
+            if (tago == null || tago.body() == null) {
+                return unavailable(session, "tago roster body missing");
+            }
+            var items = tago.body().items();
             roster = items == null || items.item() == null ? List.of() : items.item().stream()
                     .map(item -> BoardingCandidateMapper.tago(item, received.observedAt())).toList();
         } else {
             var received = cycle.roster(session.routeId());
-            var response = received.response();
-            roster = "4".equals(response.header().headerCd()) ? List.of() : response.body().itemList().stream()
-                    .map(item -> BoardingCandidateMapper.roster(item, received.observedAt())).toList();
+            var response = received == null ? null : received.response();
+            if (response == null || response.header() == null) {
+                return unavailable(session, "seoul roster header missing");
+            }
+            if ("4".equals(response.header().headerCd())) {
+                roster = List.of();
+            } else if (response.body() == null || response.body().itemList() == null) {
+                return unavailable(session, "seoul roster body missing");
+            } else {
+                roster = response.body().itemList().stream()
+                        .map(item -> BoardingCandidateMapper.roster(item, received.observedAt())).toList();
+            }
         }
         List<Vehicle> matches = roster.stream().filter(vehicle -> session.vehicleId().equals(vehicle.id())).toList();
         if (matches.size() > 1 || roster.stream().anyMatch(vehicle -> session.vehicleNumber().equals(vehicle.number())
@@ -61,7 +75,10 @@ public class BoardingVehicleTracker {
         }
         if (session.provider() == TransitProvider.SEOUL_BUS) {
             var received = cycle.detail(session.vehicleId());
-            var response = received.response();
+            var response = received == null ? null : received.response();
+            if (response == null || response.header() == null) {
+                return unavailable(session, "seoul detail header missing");
+            }
             var items = response.body() == null ? null : response.body().itemList();
             // Roster presence with empty detail is unavailable progress, never vehicle disappearance.
             if ("4".equals(response.header().headerCd()) || items == null || items.isEmpty()) {
@@ -93,6 +110,12 @@ public class BoardingVehicleTracker {
                     vehicle, BoardingProgressObservation.Meaning.VERIFIED_REACHED, orderOnly, null, false), null);
         }
         return Input.held(BoardingStateReason.TRAVERSAL_AMBIGUOUS);
+    }
+
+    /** Provider가 형식상 성공했지만 필수 구조가 빠진 응답은 빈 차량 목록이 아니라 일시 장애로 취급한다. */
+    private static Input unavailable(BoardingTrackingSnapshot session, String detail) {
+        log.warn("Boarding provider response unusable: provider={}, reason={}", session.provider(), detail);
+        return Input.held(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
     }
 
 	private Input moving(BoardingTrackingSnapshot session, Vehicle vehicle) {

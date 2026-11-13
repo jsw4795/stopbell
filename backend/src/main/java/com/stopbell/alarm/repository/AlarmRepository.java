@@ -18,6 +18,8 @@ public interface AlarmRepository extends JpaRepository<Alarm, Long> {
 
     long countByStatus(AlarmStatus status);
 
+    boolean existsByUserIdAndIdNotAndStatusIn(Long userId, Long alarmId, List<AlarmStatus> statuses);
+
     @EntityGraph(attributePaths = "busAlarmTarget")
     List<Alarm> findAllByUserIdOrderByCreatedAtDesc(Long userId);
 

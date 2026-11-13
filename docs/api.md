@@ -265,6 +265,8 @@ POST /api/v1/alarms/{alarmId}/activate
 
 현재 인증된 User가 소유한 Alarm을 활성화하고 변경된 Alarm response를 반환한다. 성공은 `200 OK`이며 status는 `ACTIVE`다. `FOLLOW_UP` Alarm 활성화는 persisted follow-up runtime을 지워 이전 ARRIVED short follow-up을 취소하고 새 monitoring cycle을 시작한다. Alarm이 없거나 현재 User의 소유가 아니면 `404 Not Found`다.
 
+사용자당 동시에 활성인 도착 Alarm(`ACTIVE` 또는 `FOLLOW_UP`)은 1개다. 이미 `ACTIVE`가 아닌 Alarm을 활성화하려는데 같은 User의 다른 Alarm이 `ACTIVE`·`FOLLOW_UP`이면 `409 ALARM_ACTIVE_LIMIT_EXCEEDED`로 거절하며 기존 Alarm을 자동으로 끄지 않는다. 이미 `ACTIVE`인 Alarm의 중복 활성화는 idempotent다. 동시 요청은 User row lock으로 직렬화한다. Alarm 생성 개수는 제한하지 않는다. 하차 알람(Boarding Session)은 기존 `BOARDING_SESSION_CONFLICT`(409)가 같은 제한을 맡는다.
+
 ### 알림 비활성화
 
 ```http

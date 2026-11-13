@@ -25,6 +25,7 @@ class BusRouteStopScreen extends StatefulWidget {
     required this.onBack,
     required this.alarmClient,
     required this.onCreated,
+    this.onActivationLimited,
     required this.onShowAlarms,
     required this.creationController,
     this.beforeActivate,
@@ -37,6 +38,8 @@ class BusRouteStopScreen extends StatefulWidget {
   final VoidCallback onBack;
   final AlarmClient alarmClient;
   final void Function(Alarm alarm, {bool activationUnverified}) onCreated;
+  /// 활성 알람 제한으로 켜지 못한 새 알람(꺼진 상태)을 안내와 함께 연다. 없으면 onCreated를 쓴다.
+  final void Function(Alarm alarm)? onActivationLimited;
   final VoidCallback onShowAlarms;
   final Future<bool> Function(BuildContext context)? beforeActivate;
   final bool Function()? isRequestCurrent;
@@ -197,6 +200,15 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
       try {
         alarm = await client.activate(createdAlarm.id);
         if (alarm.id != createdAlarm.id) throw const AlarmApiException();
+      } on AlarmApiException catch (error) {
+        if (!current()) return;
+        if (error.isActiveLimitExceeded) {
+          // 알람은 꺼진 상태로 생성됐다. 기존 알람을 끈 뒤 상세에서 켜도록 안내한다.
+          (widget.onActivationLimited ?? widget.onCreated)(createdAlarm);
+        } else {
+          widget.onCreated(createdAlarm, activationUnverified: true);
+        }
+        return;
       } catch (_) {
         if (current()) {
           widget.onCreated(createdAlarm, activationUnverified: true);
