@@ -329,11 +329,17 @@ void main() {
     },
   );
 
-  testWidgets('pulling the timeline refreshes the session', (tester) async {
+  testWidgets('only pulling the summary refreshes the session', (tester) async {
     api.currentSession = BoardingSession.fromJson(timelineSessionJson());
     await pump(tester);
     await tester.drag(
       find.byKey(const ValueKey('tracking-timeline-scroll')),
+      const Offset(0, 400),
+    );
+    await tester.pumpAndSettle();
+    expect(api.detailCalls, 1);
+    await tester.drag(
+      find.byType(SingleChildScrollView).first,
       const Offset(0, 400),
     );
     await tester.pumpAndSettle();

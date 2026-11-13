@@ -395,9 +395,7 @@ void main() {
     expect(find.byKey(const ValueKey('find-candidates')), findsOneWidget);
   });
 
-  testWidgets('selection locks and reselect starts from boarding', (
-    tester,
-  ) async {
+  testWidgets('selection can restart from a tapped stop', (tester) async {
     await setup(tester);
     await tester.pumpWidget(screen());
     await tester.pumpAndSettle();
@@ -412,9 +410,6 @@ void main() {
     expect(find.byKey(const ValueKey('find-candidates')), findsNothing);
     await tap(tester, 'occurrence-22');
     expect(find.byKey(const ValueKey('reselect-stops')), findsNothing);
-    for (final id in [11, 22]) {
-      await tap(tester, 'occurrence-$id');
-    }
     expect(find.textContaining('승차 정류장 · 반복 정류장'), findsOneWidget);
     expect(find.textContaining('목표 정류장 · 반복 정류장'), findsOneWidget);
     for (final (role, order) in [('boarding', 3), ('target', 9)]) {
@@ -426,6 +421,18 @@ void main() {
         findsOneWidget,
       );
     }
+    await tap(tester, 'occurrence-22');
+    expect(find.byKey(const ValueKey('summary-target')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('summary-boarding')),
+        matching: find.textContaining('노선 순서 9'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('승차 정류장 이후'), findsOneWidget);
+    await tap(tester, 'occurrence-11');
+    await tap(tester, 'occurrence-22');
     await tap(tester, 'find-candidates');
     await tester.pumpAndSettle();
     expect(queries.single, (754, 22, 11));
@@ -536,7 +543,7 @@ void main() {
   }
 
   testWidgets(
-    'locked route keeps selections while direction and scrolling remain usable',
+    'selected route keeps selections while direction and scrolling remain usable',
     (tester) async {
       await setup(tester);
       tester.view.physicalSize = const Size(390, 800);
@@ -569,22 +576,6 @@ void main() {
       expect(find.byKey(const ValueKey('reselect-stops')), findsNothing);
       await tester.tap(find.text('회차 방면'));
       await tester.pumpAndSettle();
-      final locked = tester.widgetList<Semantics>(
-        find.descendant(
-          of: find.byKey(const ValueKey('occurrence-1')),
-          matching: find.byType(Semantics),
-        ),
-      );
-      expect(
-        locked.any((s) => s.properties.hint?.contains('선택 완료') ?? false),
-        isTrue,
-      );
-      expect(locked.any((s) => s.properties.enabled == false), isFalse);
-      for (final id in [1, 2, 3]) {
-        await tap(tester, 'occurrence-$id');
-      }
-      expect(find.textContaining('승차 정류장 · 정류장 1'), findsOneWidget);
-      expect(find.textContaining('목표 정류장 · 정류장 2'), findsOneWidget);
       await tester.tap(find.text('종점 방면'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('occurrence-11')), findsOneWidget);
@@ -686,7 +677,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('occurrence-6')));
       await tester.pump();
       expect(find.text('승차 정류장 · 정류장 6'), findsOneWidget);
-      expect(find.text('목표 정류장 · 정류장 7'), findsOneWidget);
+      expect(find.byKey(const ValueKey('summary-target')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('occurrence-7')));
+      await tester.pump();
 
       final pending = Completer<BoardingCandidates>();
       respond = () => pending.future;

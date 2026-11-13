@@ -174,10 +174,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       _boarding != null && stop.order > _boarding!.order;
 
   void _select(BusRouteStopOccurrence stop) {
-    if (!_current ||
-        _staleStops ||
-        _result != null ||
-        _picker == _Picker.review) {
+    if (!_current || _staleStops || _result != null) {
       return;
     }
     final earlier =
@@ -186,7 +183,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         stop.order < _boarding!.order;
     if (_picker == _Picker.target && !earlier && !_validTarget(stop)) return;
     setState(() {
-      if (_picker == _Picker.boarding || earlier) {
+      if (_picker == _Picker.boarding || _picker == _Picker.review || earlier) {
         _boarding = stop;
         _target = null;
         _picker = _Picker.target;
@@ -440,15 +437,12 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       isSelectable: _picker == _Picker.target
           ? (stop) => _validTarget(stop) || stop.order < _boarding!.order
           : null,
-      selectionLocked: _picker == _Picker.review,
       rowKey: (id) => ValueKey('occurrence-$id'),
       vehicles: vehicles?.data?.vehicles,
       vehicleColor:
           routeTypeColor(context, widget.route) ??
           StopBellColors.of(context).busLocation,
-      onSelect: _staleStops || _result != null || _picker == _Picker.review
-          ? null
-          : _select,
+      onSelect: _staleStops || _result != null ? null : _select,
     );
     if (vehicles == null) return timeline();
     return Column(

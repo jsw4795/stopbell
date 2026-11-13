@@ -364,7 +364,7 @@ class BoardingSessionDetails extends StatelessWidget {
           refreshToken: refreshToken,
           initialReference: initialReference,
         );
-        return scrollable ? refreshable(timeline) : timeline;
+        return timeline;
       }
       final fallback = Padding(
         padding: const EdgeInsets.symmetric(horizontal: StopBellSpacing.lg),
@@ -380,11 +380,9 @@ class BoardingSessionDetails extends StatelessWidget {
         ),
       );
       return scrollable
-          ? refreshable(
-              SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: fallback,
-              ),
+          ? SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: fallback,
             )
           : fallback;
     }
