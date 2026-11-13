@@ -1,3 +1,7 @@
+import '../../shared/stopbell_button_label.dart';
+import '../../shared/stopbell_skeleton.dart';
+import '../../shared/stopbell_delayed_loading.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -375,9 +379,18 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         children: [
           if (widget.creationMessage != null) Text(widget.creationMessage!),
           Expanded(
-            child: _state == _StopsState.success
-                ? (candidate ? _candidateBody() : _timelineWithVehicles())
-                : _status(),
+            child: StopBellDelayedLoading(
+              loading: _state == _StopsState.loading,
+              skeleton: const SingleChildScrollView(
+                physics: NeverScrollableScrollPhysics(),
+                padding: EdgeInsets.all(StopBellSpacing.screenPadding),
+                child: StopBellSkeletonList(count: 5),
+              ),
+              onRetry: _loadStops,
+              child: _state == _StopsState.success
+                  ? (candidate ? _candidateBody() : _timelineWithVehicles())
+                  : _status(),
+            ),
           ),
         ],
       ),
@@ -391,7 +404,17 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
 
   Widget _candidateBody() {
     final result = _result;
-    if (result == null) return const Center(child: CircularProgressIndicator());
+    if (result == null) {
+      return const StopBellDelayedLoading(
+        loading: true,
+        skeleton: SingleChildScrollView(
+          physics: NeverScrollableScrollPhysics(),
+          padding: EdgeInsets.all(StopBellSpacing.screenPadding),
+          child: StopBellSkeletonList(count: 3),
+        ),
+        child: SizedBox.shrink(),
+      );
+    }
     return SingleChildScrollView(
       key: const ValueKey('boarding-candidate-results'),
       primary: false,
@@ -438,11 +461,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (_state == _StopsState.loading) ...[
-            const CircularProgressIndicator(),
-            const SizedBox(height: 12),
-            const Text('정류장 조회 중...'),
-          ] else ...[
+          if (_state != _StopsState.loading) ...[
             Text(
               _state == _StopsState.empty
                   ? '정류장 정보가 없어요.'
@@ -735,15 +754,12 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
               onPressed: !_validTarget(target) || _loadingCandidates
                   ? null
                   : _findCandidates,
-              child: Text(
+              child: StopBellButtonLabel(
                 _result == null && _error == null ? '차량 후보 조회' : '차량 후보 다시 조회',
-                textAlign: TextAlign.center,
+                busy: _loadingCandidates,
               ),
             ),
-          if (_loadingCandidates) ...[
-            const LinearProgressIndicator(),
-            const Text('차량 후보를 조회하고 있어요.'),
-          ],
+          if (_loadingCandidates) const Text('차량 후보를 조회하고 있어요.'),
           if (_error case final error?)
             StopSelectionNotice(error, icon: Icons.error_outline),
           if (_staleStops)

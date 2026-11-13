@@ -1,3 +1,6 @@
+import '../../shared/stopbell_button_label.dart';
+import '../../shared/stopbell_skeleton.dart';
+import '../../shared/stopbell_delayed_loading.dart';
 import '../../shared/stopbell_home_button.dart';
 
 import 'package:flutter/material.dart';
@@ -107,8 +110,9 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
-    if (!_current || _mutating || _loading) return;
+  /// [force]는 응답이 오지 않는 조회를 버리고 다시 조회하는 15초 재시도 경로다.
+  Future<void> _load({bool force = false}) async {
+    if (!_current || _mutating || (_loading && !force)) return;
     final request = ++_requestGeneration;
     final id = widget.alarmId;
     final client = widget.client;
@@ -350,49 +354,53 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
           ],
         ),
         Expanded(
-          child: switch (_state) {
-            _DetailState.loading => const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [CircularProgressIndicator(), Text('알람 조회 중...')],
-              ),
+          child: StopBellDelayedLoading(
+            loading: _state == _DetailState.loading,
+            skeleton: const SingleChildScrollView(
+              physics: NeverScrollableScrollPhysics(),
+              padding: EdgeInsets.all(StopBellSpacing.screenPadding),
+              child: StopBellSkeletonList(count: 2),
             ),
-            _DetailState.error => Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _outcomeUnknown
-                        ? '요청 결과와 현재 알람 상태를 확인할 수 없어요.'
-                        : '알람을 불러오지 못했어요.',
-                  ),
-                  OutlinedButton(
-                    onPressed: _load,
-                    child: Text(_outcomeUnknown ? '현재 상태 다시 조회' : '다시 시도'),
-                  ),
-                ],
-              ),
-            ),
-            _DetailState.notFound => Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('알람을 찾을 수 없어요.'),
-                  const Text('삭제되었거나 현재 계정에서 접근할 수 없는 알람이에요.'),
-                  if (_outcomeUnknown)
+            onRetry: () => _load(force: true),
+            child: switch (_state) {
+              _DetailState.loading => const SizedBox.shrink(),
+              _DetailState.error => Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _outcomeUnknown
+                          ? '요청 결과와 현재 알람 상태를 확인할 수 없어요.'
+                          : '알람을 불러오지 못했어요.',
+                    ),
                     OutlinedButton(
                       onPressed: _load,
-                      child: const Text('현재 상태 다시 조회'),
+                      child: Text(_outcomeUnknown ? '현재 상태 다시 조회' : '다시 시도'),
                     ),
-                  OutlinedButton(
-                    onPressed: widget.onBack,
-                    child: const Text('알람 목록 보기'),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            _DetailState.success => _details(_alarm!),
-          },
+              _DetailState.notFound => Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('알람을 찾을 수 없어요.'),
+                    const Text('삭제되었거나 현재 계정에서 접근할 수 없는 알람이에요.'),
+                    if (_outcomeUnknown)
+                      OutlinedButton(
+                        onPressed: _load,
+                        child: const Text('현재 상태 다시 조회'),
+                      ),
+                    OutlinedButton(
+                      onPressed: widget.onBack,
+                      child: const Text('알람 목록 보기'),
+                    ),
+                  ],
+                ),
+              ),
+              _DetailState.success => _details(_alarm!),
+            },
+          ),
         ),
       ],
     );
@@ -563,7 +571,12 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
           ),
         ],
         if (_mutating || _loading)
-          const Center(child: CircularProgressIndicator()),
+          const Center(
+            child: SizedBox.square(
+              dimension: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
         if (_outcomeUnknown)
           OutlinedButton(
             onPressed: _mutating || _loading ? null : _load,
@@ -582,7 +595,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
             ),
           ),
           onPressed: _canMutate ? _confirmDelete : null,
-          child: const Text('삭제'),
+          child: StopBellButtonLabel('삭제', busy: _mutating),
         ),
       ],
     );

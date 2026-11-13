@@ -173,7 +173,10 @@ class LoginView extends StatelessWidget {
   Widget _status(BuildContext context, String text) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
-      const CircularProgressIndicator(),
+      const SizedBox.square(
+        dimension: 24,
+        child: CircularProgressIndicator(strokeWidth: 2.5),
+      ),
       const SizedBox(height: StopBellSpacing.md),
       Text(text, textAlign: TextAlign.center),
     ],

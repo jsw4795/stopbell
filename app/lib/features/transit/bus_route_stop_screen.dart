@@ -1,3 +1,7 @@
+import '../../shared/stopbell_button_label.dart';
+import '../../shared/stopbell_skeleton.dart';
+import '../../shared/stopbell_delayed_loading.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
@@ -38,6 +42,7 @@ class BusRouteStopScreen extends StatefulWidget {
   final VoidCallback onBack;
   final AlarmClient alarmClient;
   final void Function(Alarm alarm, {bool activationUnverified}) onCreated;
+
   /// 활성 알람 제한으로 켜지 못한 새 알람(꺼진 상태)을 안내와 함께 연다. 없으면 onCreated를 쓴다.
   final void Function(Alarm alarm)? onActivationLimited;
   final VoidCallback onShowAlarms;
@@ -383,10 +388,9 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                   if (!_outcomeUnknown)
                     FilledButton(
                       onPressed: _creating ? null : _create,
-                      child: const Text('알람 시작'),
+                      child: StopBellButtonLabel('알람 시작', busy: _creating),
                     ),
                 ],
-                if (_creating) const Center(child: CircularProgressIndicator()),
                 if (_createMessage != null)
                   Text(_createMessage!, textAlign: TextAlign.center),
                 if (_outcomeUnknown)
@@ -419,19 +423,21 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
     return direction == null ? null : '$direction 방면';
   }
 
-  Widget _buildStops() {
+  Widget _buildStops() => StopBellDelayedLoading(
+    loading: _state == _StopState.loading,
+    skeleton: const SingleChildScrollView(
+      physics: NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.all(StopBellSpacing.screenPadding),
+      child: StopBellSkeletonList(count: 5),
+    ),
+    onRetry: _load,
+    child: _stopsBody(),
+  );
+
+  Widget _stopsBody() {
     switch (_state) {
       case _StopState.loading:
-        return const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 12),
-              Text('정류장 조회 중...'),
-            ],
-          ),
-        );
+        return const SizedBox.shrink();
       case _StopState.empty:
         return const Center(child: Text('정류장 정보가 없어요.'));
       case _StopState.error:
