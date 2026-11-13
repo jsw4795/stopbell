@@ -7,6 +7,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -29,7 +30,7 @@ public class DataCleanupService {
     private final Duration boardingSessionRetention;
 
     public DataCleanupService(
-            NamedParameterJdbcTemplate jdbc,
+            JdbcTemplate jdbcTemplate,
             PlatformTransactionManager transactionManager,
             Clock jwtClock,
             @Value("${cleanup.batch-size:500}") int batchSize,
@@ -40,7 +41,7 @@ public class DataCleanupService {
         if (batchSize <= 0) {
             throw new IllegalArgumentException("cleanup batch size must be positive");
         }
-        this.jdbc = jdbc;
+        this.jdbc = new NamedParameterJdbcTemplate(jdbcTemplate);
         this.transactions = new TransactionTemplate(transactionManager);
         this.clock = jwtClock;
         this.batchSize = batchSize;
