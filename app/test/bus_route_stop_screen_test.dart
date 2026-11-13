@@ -384,4 +384,23 @@ void main() {
     await tester.pump();
     expect(tester.widget<SwitchListTile>(before).value, isTrue);
   });
+  testWidgets('도착 알림 안내를 열고 배경 탭으로 즉시 닫는다', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(screen((_) async => [first, middle, last]));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey(22)));
+    await tester.pumpAndSettle();
+    final button = find.bySemanticsLabel('도착 알림 안내');
+    expect(button, findsOneWidget);
+    expect(tester.getSize(button).width, greaterThanOrEqualTo(44));
+    expect(tester.getSize(button).height, greaterThanOrEqualTo(44));
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(find.text('이 정류장에 버스가 도착하면 알림을 보내드려요'), findsOneWidget);
+    await tester.tapAt(const Offset(5, 100));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('이 정류장에 버스가 도착하면 알림을 보내드려요'), findsNothing);
+    semantics.dispose();
+  });
 }

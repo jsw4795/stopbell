@@ -50,11 +50,11 @@ void main() {
       expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);
       expect(
         (tester
-                    .getTopLeft(
+                    .getCenter(
                       find.byKey(const ValueKey('tracking-bus-marker')),
                     )
                     .dy -
-                tester.getTopLeft(find.text('경유')).dy)
+                tester.getCenter(find.text('경유')).dy)
             .abs(),
         lessThan(2),
       );
@@ -71,10 +71,10 @@ void main() {
       expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);
       expect(find.text('노선 순서 5'), findsNothing);
       final markerY = tester
-          .getTopLeft(find.byKey(const ValueKey('tracking-bus-marker')))
+          .getCenter(find.byKey(const ValueKey('tracking-bus-marker')))
           .dy;
       expect(
-        (markerY - tester.getTopLeft(find.text('반복 정류장').last).dy).abs(),
+        (markerY - tester.getCenter(find.text('반복 정류장').last).dy).abs(),
         lessThan(2),
       );
     },

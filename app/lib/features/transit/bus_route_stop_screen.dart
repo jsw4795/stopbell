@@ -49,6 +49,7 @@ class BusRouteStopScreen extends StatefulWidget {
 }
 
 class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
+  final _arrivalTooltipKey = GlobalKey<TooltipState>();
   _StopState _state = _StopState.loading;
   List<BusRouteStopOccurrence> _stops = const [];
   int? _selectedOccurrenceId;
@@ -263,20 +264,50 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
               spacing: StopBellSpacing.xs,
               children: [
                 if (target != null) ...[
-                  Text.rich(
-                    TextSpan(
-                      text: '선택한 정류장: ',
-                      children: [
-                        TextSpan(
-                          text: target.name,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: StopBellColors.of(context).targetStop,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text.rich(
+                          TextSpan(
+                            text: '선택한 정류장: ',
+                            children: [
+                              TextSpan(
+                                text: target.name,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  color: StopBellColors.of(context).targetStop,
+                                ),
+                              ),
+                              if (details != null) TextSpan(text: '\n$details'),
+                            ],
+                          ),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                      Tooltip(
+                        key: _arrivalTooltipKey,
+                        message: '이 정류장에 버스가 도착하면 알림을 보내드려요',
+                        triggerMode: TooltipTriggerMode.manual,
+                        exitDuration: Duration.zero,
+                        child: Semantics(
+                          label: '도착 알림 안내',
+                          button: true,
+                          child: ExcludeSemantics(
+                            child: IconButton(
+                              onPressed: () => _arrivalTooltipKey.currentState
+                                  ?.ensureTooltipVisible(),
+                              icon: const Icon(Icons.info_outline),
+                              constraints: const BoxConstraints(
+                                minWidth: 44,
+                                minHeight: 44,
+                              ),
+                              padding: EdgeInsets.zero,
+                              iconSize: 20,
+                            ),
                           ),
                         ),
-                        if (details != null) TextSpan(text: '\n$details'),
-                      ],
-                    ),
-                    style: theme.textTheme.bodySmall,
+                      ),
+                    ],
                   ),
                   const Text('도착하면 알려드려요'),
                   if (target.canNotifyOneStopBefore)

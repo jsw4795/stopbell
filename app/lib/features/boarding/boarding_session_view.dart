@@ -766,6 +766,87 @@ class _TrackingRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final display = stop.name == null ? null : stopDisplayName(stop.name!);
     final theme = Theme.of(context);
+    if (bus) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.primaryContainer,
+          borderRadius: BorderRadius.circular(StopBellRadius.field),
+        ),
+        child: IntrinsicHeight(
+          child: Stack(
+            children: [
+              if (!last)
+                Positioned.fill(
+                  left: 0,
+                  right: null,
+                  child: SizedBox(
+                    width: 36,
+                    child: BusRouteRailSegment(color: scheme.outlineVariant),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        SizedBox(
+                          width: 36,
+                          child: Icon(
+                            Icons.directions_bus,
+                            key: const ValueKey('tracking-bus-marker'),
+                            semanticLabel: initial ? '등록 당시 차량 위치' : '최근 차량 위치',
+                            size: 28,
+                            color: accent,
+                          ),
+                        ),
+                        Expanded(
+                          child: Text(
+                            display?.name ?? '정류장 정보 없음',
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 36),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (display?.isNonstop == true)
+                            Text('미정차', style: theme.textTheme.bodySmall),
+                          if (first)
+                            Text('승차 정류장', style: theme.textTheme.bodySmall),
+                          if (last)
+                            Text('목표 정류장', style: theme.textTheme.bodySmall),
+                          if (alert)
+                            Text(
+                              '하차 준비 알림 정류장',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          Text(
+                            initial ? '참고용 위치예요' : '최근 위치 기준',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                          if (showOrder)
+                            Text(
+                              '노선 순서 ${stop.order}',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return DecoratedBox(
       decoration: BoxDecoration(
         color: bus ? scheme.primaryContainer : Colors.transparent,
