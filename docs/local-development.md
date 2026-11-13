@@ -648,7 +648,7 @@ docker buildx rm stopbell-repro
 
 ### TASK-809 CI 검증
 
-GitHub Actions의 `.github/workflows/ci.yml`은 push, pull request 및 수동 `workflow_dispatch`에서 독립된 Backend와 Flutter job을 실행한다. Backend는 Ubuntu runner의 Docker와 Java 21, Gradle Wrapper 및 격리 Testcontainers를 사용한다. 일반 변경은 `./gradlew --no-daemon assemble ciTest`, DB 관련 변경과 수동 실행은 `./gradlew --no-daemon build`로 전체를 검증한다. Flutter는 3.47.1 stable에서 lockfile을 강제한 dependency resolution 뒤 `flutter analyze --no-pub`와 `flutter test --no-pub`를 실행한다. Action은 commit SHA로 고정하고 읽기 전용 repository permission을 사용한다.
+GitHub Actions의 `.github/workflows/ci.yml`은 push, pull request 및 수동 `workflow_dispatch`에서 독립된 Backend와 Flutter job을 실행한다. Backend는 Ubuntu runner의 Docker와 Java 21, Gradle Wrapper 및 격리 Testcontainers를 사용한다. `backend/` 변경이 없으면 `./gradlew --no-daemon assemble fastTest`, DB와 무관한 Backend 변경은 `./gradlew --no-daemon assemble ciTest`, DB 관련 변경과 수동 실행은 `./gradlew --no-daemon build`로 전체를 검증한다. Flutter는 SDK와 pub cache를 재사용하는 3.47.1 stable에서 lockfile을 강제한 dependency resolution 뒤 `flutter analyze --no-pub`를 한 번 실행하고 `flutter test --no-pub`를 2개 shard job으로 나눠 병렬 실행한다. Action은 commit SHA로 고정하고 읽기 전용 repository permission을 사용한다.
 
 Backend 변경 범위는 checkout의 전체 이력과 PR base/push before SHA로 `tools/backend_test_ci.py select`가 판단한다. Flyway SQL과 전체 Backend resource/config, Entity·Repository·Mapper·DB/upgrade 관련 경로, 기존 경로 밖의 Mapping·SQL·Flyway 코드 변경, Backend 테스트·Gradle 인프라 및 CI 선택 도구 변경은 전체 검증한다. Docker Compose와 알려지지 않은 Backend 인프라 변경도 보수적으로 전체를 실행한다. 초기 Push, base 부재, diff 실패와 지원하지 않는 Migration 사례 집계는 전체로 전환한다. 일반 CI의 의도적 Migration 제외와 실제 실패·Skip은 구분해 보고한다.
 

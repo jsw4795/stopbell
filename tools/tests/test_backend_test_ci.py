@@ -60,6 +60,14 @@ class BackendCiTests(unittest.TestCase):
             base = git('rev-parse', 'HEAD')
             mapping.write_text('class Algorithm {}'); git('add', '.'); git('commit', '-m', 'algorithm')
             self.assertEqual(ci.choose_suite(base, root=root)[0], 'regular')
+            base = git('rev-parse', 'HEAD')
+            screen = root / 'app/lib/main.dart'; screen.parent.mkdir(parents=True)
+            screen.write_text('void main() {}'); git('add', '.'); git('commit', '-m', 'flutter only')
+            self.assertEqual(ci.choose_suite(base, root=root)[0], 'fast')
+            base = git('rev-parse', 'HEAD')
+            screen.write_text('void main() { }'); mapping.write_text('class Algorithm { }')
+            git('add', '.'); git('commit', '-m', 'flutter and backend')
+            self.assertEqual(ci.choose_suite(base, root=root)[0], 'regular')
 
     def test_historical_inventory_counts_cases_and_rejects_unknown_argument_sources(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -84,6 +92,9 @@ class BackendCiTests(unittest.TestCase):
             result.write_text('<testsuite tests="10" failures="0" errors="0" skipped="0"/>')
             ci.report(root, 'regular', root=root)
             self.assertIn('intentionally excluded migration cases=1', output.getvalue())
+            self.assertNotIn('db-tagged', output.getvalue())
+            ci.report(root, 'fast', root=root)
+            self.assertIn('db-tagged tests intentionally excluded', output.getvalue())
             result.write_text('<testsuite tests="10" failures="0" errors="0" skipped="1"/>')
             with self.assertRaises(ValueError): ci.report(root, 'full')
             result.write_text('<testsuite tests="0" failures="0" errors="0" skipped="0"/>')

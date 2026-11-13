@@ -72,6 +72,7 @@ def choose_suite(base, manual=False, root=ROOT):
         subprocess.run(['git', 'cat-file', '-e', base + '^{commit}'], cwd=root, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         paths = subprocess.check_output(['git', 'diff', '--no-renames', '--name-only', '-z', base, 'HEAD'], cwd=root)
+        backend_changed = False
         for raw in paths.split(b'\0'):
             if not raw:
                 continue
@@ -79,7 +80,11 @@ def choose_suite(base, manual=False, root=ROOT):
             diff = subprocess.check_output(['git', 'diff', '--no-renames', '--unified=0', base, 'HEAD', '--', path], cwd=root).decode(errors='replace')
             if database_related(path, diff):
                 return 'full', 'database or test infrastructure change'
-        return 'regular', 'no database-related changes'
+            backend_changed = backend_changed or path.startswith('backend/')
+        if backend_changed:
+            return 'regular', 'no database-related changes'
+        # Nothing under backend/ changed: the DB regression would only repeat the previous result.
+        return 'fast', 'no Backend changes'
     except (OSError, subprocess.CalledProcessError, ValueError) as error:
         return 'full', f'change detection/inventory unavailable ({type(error).__name__})'
 
@@ -93,11 +98,12 @@ def report(result_dir, suite, root=ROOT):
               for key in ('tests', 'failures', 'errors', 'skipped')}
     if totals['tests'] == 0:
         raise ValueError('No tests were executed')
-    excluded = migration_cases(root) if suite == 'regular' else 0
+    excluded = migration_cases(root) if suite != 'full' else 0
     message = (f"Backend {suite}: executed={totals['tests']}, "
                f"passed={totals['tests'] - totals['failures'] - totals['errors'] - totals['skipped']}, "
                f"failures={totals['failures']}, errors={totals['errors']}, skipped={totals['skipped']}, "
-               f"intentionally excluded migration cases={excluded}\n")
+               f"intentionally excluded migration cases={excluded}"
+               + (', db-tagged tests intentionally excluded (no Backend changes)' if suite == 'fast' else '') + '\n')
     print(message, end='')
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:
@@ -114,7 +120,7 @@ if __name__ == '__main__':
     selection.add_argument('--base', default='')
     selection.add_argument('--manual', action='store_true')
     summary = sub.add_parser('report')
-    summary.add_argument('--suite', choices=['regular', 'full'], required=True)
+    summary.add_argument('--suite', choices=['fast', 'regular', 'full'], required=True)
     summary.add_argument('--results', required=True)
     args = parser.parse_args()
     if args.command == 'select':

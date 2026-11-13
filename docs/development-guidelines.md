@@ -286,7 +286,7 @@ DB 테스트는 `db`, 독립 DB가 필요한 일반 테스트는 `isolated-db`, 
 
 DDL·실패 주입·비동기 경쟁·프로세스 재시작, 다른 설정/Mock 조합을 사용하는 테스트는 격리 필요성을 먼저 검토한다. 공유를 위해 이 검증을 약화하거나 전역 rollback으로 바꾸지 않는다. 공유 DB 실행은 하나의 worker에서 순차 수행하며 Cached Context의 pool을 닫은 뒤 공유 MySQL을 종료한다. 공유 대상을 늘리면 해당 클래스들의 반복·무작위 클래스/메서드 순서를 검증한다.
 
-일반 Push/PR CI는 안전한 변경 감지 후 `assemble ciTest`를 사용한다. DB·설정·매핑·테스트 인프라 변경, 판단 불가 또는 수동 실행은 `build`로 전체 검증한다. 실행 및 의도적 Migration 제외 개수와 실패·Skip은 GitHub Step Summary에 보고한다. 배포 전에는 전체 `build`를 실행한다. 구체적인 변경 감지 범위와 실행 명령은 [Local Development](local-development.md#task-809-ci-검증), 전후 측정은 [분석 보고서](research/backend-test-performance-analysis.md)를 따른다.
+일반 Push/PR CI는 안전한 변경 감지 후 범위를 고른다. `backend/` 변경이 없으면 `assemble fastTest`만 실행하고 DB 회귀(`db` 태그)는 생략한다. DB와 무관한 Backend 변경은 `assemble ciTest`를 사용한다. DB·설정·매핑·테스트 인프라 변경, 판단 불가 또는 수동 실행은 `build`로 전체 검증한다. 실행 및 의도적 Migration·DB 제외와 실패·Skip은 GitHub Step Summary에 보고한다. 배포 전에는 전체 `build`를 실행한다. 구체적인 변경 감지 범위와 실행 명령은 [Local Development](local-development.md#task-809-ci-검증), 전후 측정은 [분석 보고서](research/backend-test-performance-analysis.md)를 따른다.
 
 ### Flyway Migration 추가 시 필수 회귀 검증
 
