@@ -533,11 +533,17 @@ class _LoginScreenState extends State<LoginScreen> {
         }
         if (widget.authSession.state == AuthState.authenticated &&
             !widget.authSession.isLoggingOut) {
+          final footerMessages = [
+            if (_isLoading) '로그아웃 중...',
+            ?_message,
+            ?deletion?.message,
+          ];
           return Scaffold(
             body: Column(
               children: [
                 Expanded(
                   child: SafeArea(
+                    bottom: footerMessages.isEmpty,
                     child: AlarmHome(
                       onOpenSettings: _isLoading ? null : _openSettings,
                       key: ValueKey(widget.authSession.generation),
@@ -558,11 +564,16 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
-                if (_isLoading) const Text('로그아웃 중...'),
-                if (_message != null)
-                  Text(_message!, textAlign: TextAlign.center),
-                if (deletion?.message != null)
-                  Text(deletion!.message!, textAlign: TextAlign.center),
+                if (footerMessages.isNotEmpty)
+                  SafeArea(
+                    top: false,
+                    child: Column(
+                      children: [
+                        for (final message in footerMessages)
+                          Text(message, textAlign: TextAlign.center),
+                      ],
+                    ),
+                  ),
               ],
             ),
           );
