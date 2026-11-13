@@ -257,11 +257,10 @@ void main() {
     lifecycle.receive(valid, inForeground: true);
     await tester.pumpAndSettle();
     expect(client.lookups, 0);
-    expect(find.text('버스 도착 알림이 왔어요.'), findsOneWidget);
-    await tester.tap(find.text('알람 보기'));
-    await tester.pumpAndSettle();
-    expect(client.lookups, 1);
-    expect(find.text('알람 상세'), findsOneWidget);
+    // foreground는 iOS 시스템 배너로 알리므로 인앱 SnackBar 없이 조회·이동하지 않는다.
+    expect(find.text('버스 도착 알림이 왔어요.'), findsNothing);
+    expect(find.byType(SnackBar), findsNothing);
+    expect(find.text('알람 상세'), findsNothing);
     await tester.pumpWidget(const SizedBox());
     lifecycle.dispose();
   });

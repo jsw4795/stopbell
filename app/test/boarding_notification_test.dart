@@ -669,28 +669,18 @@ void main() {
         expect(find.text('알람 상세'), findsOneWidget);
       });
     }
-    testWidgets(
-      'foreground requires user action, logical duplicate never queues another banner',
-      (tester) async {
-        await pump(tester, deliver: false);
-        notifications.receive(sessionHint, inForeground: true, messageId: 'a');
-        await tester.pumpAndSettle();
-        notifications.receive(sessionHint, inForeground: true, messageId: 'b');
-        await tester.pumpAndSettle();
-        expect(requests, isEmpty);
-        expect(find.text('하차 준비 알림이 도착했어요.'), findsOneWidget);
-        await tester.tap(find.text('세션 보기'));
-        await tester.pumpAndSettle();
-        expect(requests, hasLength(1));
-        expect(find.byType(BoardingNotificationScreen), findsOneWidget);
-        notifications.receive(sessionHint);
-        await tester.pumpAndSettle();
-        expect(requests, hasLength(1));
-        await tester.pump(const Duration(seconds: 5));
-        await tester.pumpAndSettle();
-        expect(find.text('하차 준비 알림이 도착했어요.'), findsNothing);
-      },
-    );
+    testWidgets('foreground receipt shows no in-app banner and never navigates', (
+      tester,
+    ) async {
+      await pump(tester, deliver: false);
+      notifications.receive(sessionHint, inForeground: true, messageId: 'a');
+      await tester.pumpAndSettle();
+      notifications.receive(sessionHint, inForeground: true, messageId: 'b');
+      await tester.pumpAndSettle();
+      expect(requests, isEmpty);
+      expect(find.byType(SnackBar), findsNothing);
+      expect(find.byType(BoardingNotificationScreen), findsNothing);
+    });
     for (final order in [
       'alarm-session',
       'session-alarm',
@@ -766,17 +756,6 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
-    testWidgets('old foreground banner and action disappear on logout', (
-      tester,
-    ) async {
-      await pump(tester, deliver: false);
-      notifications.receive(sessionHint, inForeground: true);
-      await tester.pumpAndSettle();
-      await f.auth.logout();
-      await tester.pumpAndSettle();
-      expect(find.text('세션 보기'), findsNothing);
-      expect(requests, isEmpty);
-    });
     testWidgets('detail refresh remains within same login JWT rotation', (
       tester,
     ) async {

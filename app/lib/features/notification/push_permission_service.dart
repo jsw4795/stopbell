@@ -32,6 +32,13 @@ class FirebasePushProvider implements PushProvider {
 
   Future<void> _initialize() async {
     await Firebase.initializeApp();
+    // foreground에서도 iOS 시스템 배너·소리·배지를 표시한다(인앱 SnackBar 대체).
+    await FirebaseMessaging.instance
+        .setForegroundNotificationPresentationOptions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
   }
 
   @override

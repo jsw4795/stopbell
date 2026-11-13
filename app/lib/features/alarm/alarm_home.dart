@@ -147,31 +147,8 @@ class _AlarmHomeState extends State<AlarmHome> {
     if (!_current) return;
     final notifications = widget.notifications;
     if (notifications == null) return;
-    final foreground = notifications.foreground;
+    // foreground 수신은 iOS 시스템 배너·소리로 알리므로 인앱 SnackBar는 띄우지 않고 힌트만 비운다.
     notifications.foreground = null;
-    if (foreground != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            foreground is BoardingSessionNotification
-                ? foreground.eventType == 'DESTINATION_REACHED'
-                      ? '선택한 정류장에 도달하거나 통과했어요.'
-                      : '하차 준비 알림이 도착했어요.'
-                : '버스 도착 알림이 왔어요.',
-          ),
-          action: SnackBarAction(
-            label: foreground is BoardingSessionNotification
-                ? '세션 보기'
-                : '알람 보기',
-            onPressed: () {
-              if (_current) {
-                notifications.openForeground(foreground, _sessionGeneration);
-              }
-            },
-          ),
-        ),
-      );
-    }
     final tap = notifications.takeTap();
     if (tap != null) _openNotification(tap);
   }
