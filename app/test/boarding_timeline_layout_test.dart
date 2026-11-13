@@ -95,7 +95,7 @@ void main() {
     expect(viewport.overlaps(marker), isTrue);
   }
 
-  testWidgets('긴 정류장 이름과 큰 글씨에서도 양쪽 이름을 한 줄로 표시한다', (tester) async {
+  testWidgets('긴 정류장 이름과 큰 글씨에서도 양쪽 이름을 두 줄로 표시한다', (tester) async {
     final json = timelineSession();
     json['targetName'] = '아주 긴 목적 정류장 이름과 환승센터';
     final timeline = json['timeline'] as Map<String, dynamic>;
@@ -111,9 +111,28 @@ void main() {
         .toList();
     expect(names, hasLength(2));
     for (final name in names) {
-      expect(name.maxLines, 1);
+      expect(name.maxLines, 2);
       expect(name.overflow, TextOverflow.ellipsis);
     }
+    expect(
+      find.descendant(of: summary, matching: find.text('승차')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: summary, matching: find.text('하차')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: summary,
+        matching: find.byIcon(Icons.directions_bus_outlined),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: summary, matching: find.byIcon(Icons.flag_outlined)),
+      findsOneWidget,
+    );
     expect(find.text('노선 순서 기준 · 미정차 정류장 포함'), findsNothing);
     expect(tester.takeException(), isNull);
   });

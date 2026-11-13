@@ -323,46 +323,43 @@ class BoardingSessionDetails extends StatelessWidget {
             key: const ValueKey('boarding-journey-summary'),
             children: [
               Expanded(
-                child: Text(
-                  s.timeline?.stops.first.name ?? '승차 정류장 정보 없음',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium,
+                child: _JourneyStop(
+                  name: s.timeline?.stops.first.name ?? '승차 정류장 정보 없음',
+                  label: '승차',
+                  icon: Icons.directions_bus_outlined,
+                  color: routeColor ?? scheme.primary,
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: StopBellSpacing.sm,
                 ),
-                child: SizedBox(
-                  width: 110,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (progress || initial)
-                        FittedBox(
-                          child: Text(
-                            '${initial ? (s.initialRemainingGap ?? initialReference?.gap) : s.remainingOccurrenceGap}개 정류장 남음',
-                            style: theme.textTheme.labelSmall!.copyWith(
-                              color: routeColor ?? scheme.primary,
-                            ),
-                          ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (progress || initial)
+                      Text(
+                        '${initial ? (s.initialRemainingGap ?? initialReference?.gap) : s.remainingOccurrenceGap}개 정류장 남음',
+                        style: theme.textTheme.labelSmall!.copyWith(
+                          color: routeColor ?? scheme.primary,
                         ),
-                      Icon(
-                        Icons.arrow_forward,
-                        color: routeColor ?? scheme.primary,
+                        textScaler: MediaQuery.textScalerOf(context)
+                            .clamp(maxScaleFactor: 1.3),
                       ),
-                    ],
-                  ),
+                    Icon(
+                      Icons.arrow_forward,
+                      color: routeColor ?? scheme.primary,
+                    ),
+                  ],
                 ),
               ),
               Expanded(
-                child: Text(
-                  s.targetName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.end,
-                  style: theme.textTheme.bodyMedium,
+                child: _JourneyStop(
+                  name: s.targetName,
+                  label: '하차',
+                  icon: Icons.flag_outlined,
+                  color: routeColor ?? scheme.primary,
+                  end: true,
                 ),
               ),
             ],
@@ -989,4 +986,46 @@ class _TrackingRow extends StatelessWidget {
       ),
     );
   }
+}
+
+class _JourneyStop extends StatelessWidget {
+  const _JourneyStop({
+    required this.name,
+    required this.label,
+    required this.icon,
+    required this.color,
+    this.end = false,
+  });
+  final String name;
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool end;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: end ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+    children: [
+      Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: StopBellSpacing.xs),
+          Flexible(
+            child: Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall
+                  ?.copyWith(color: color),
+            ),
+          ),
+        ],
+      ),
+      Text(
+        name,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        textAlign: end ? TextAlign.end : TextAlign.start,
+        style: Theme.of(context).textTheme.bodyMedium,
+      ),
+    ],
+  );
 }
