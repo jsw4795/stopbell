@@ -349,11 +349,6 @@ class BoardingSessionDetails extends StatelessWidget {
         child: Text('이동 경로', style: theme.textTheme.titleSmall),
       ),
     );
-    Widget refreshable(Widget child) => RefreshIndicator(
-      onRefresh: () async => onRefresh?.call(),
-      child: child,
-    );
-
     Widget route({required bool scrollable}) {
       if (s.timeline != null) {
         final timeline = _TrackingTimeline(
@@ -379,12 +374,7 @@ class BoardingSessionDetails extends StatelessWidget {
           ],
         ),
       );
-      return scrollable
-          ? SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              child: fallback,
-            )
-          : fallback;
+      return scrollable ? SingleChildScrollView(child: fallback) : fallback;
     }
 
     Widget panel({required bool bounded}) {
@@ -418,20 +408,17 @@ class BoardingSessionDetails extends StatelessWidget {
       );
     }
     if (s.isTerminal) {
-      return refreshable(
-        SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.symmetric(
-            horizontal: StopBellSpacing.screenPadding,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              summary,
-              const SizedBox(height: StopBellSpacing.sm),
-              panel(bounded: false),
-            ],
-          ),
+      return SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(
+          horizontal: StopBellSpacing.screenPadding,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            summary,
+            const SizedBox(height: StopBellSpacing.sm),
+            panel(bounded: false),
+          ],
         ),
       );
     }
@@ -440,14 +427,11 @@ class BoardingSessionDetails extends StatelessWidget {
         children: [
           ConstrainedBox(
             constraints: BoxConstraints(maxHeight: constraints.maxHeight * .6),
-            child: refreshable(
-              SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: StopBellSpacing.lg,
-                ),
-                child: summary,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(
+                horizontal: StopBellSpacing.lg,
               ),
+              child: summary,
             ),
           ),
           const SizedBox(height: StopBellSpacing.sm),
@@ -783,7 +767,6 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
       },
       child: SingleChildScrollView(
         key: const ValueKey('tracking-timeline-scroll'),
-        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: StopBellSpacing.lg),
         child: content,
       ),

@@ -329,7 +329,7 @@ void main() {
     },
   );
 
-  testWidgets('only pulling the summary refreshes the session', (tester) async {
+  testWidgets('pulling does not refresh the session', (tester) async {
     api.currentSession = BoardingSession.fromJson(timelineSessionJson());
     await pump(tester);
     await tester.drag(
@@ -338,10 +338,8 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(api.detailCalls, 1);
-    await tester.drag(
-      find.byType(SingleChildScrollView).first,
-      const Offset(0, 400),
-    );
+    expect(find.byType(RefreshIndicator), findsNothing);
+    await tester.tap(find.byTooltip('상태 새로고침'));
     await tester.pumpAndSettle();
     expect(api.detailCalls, 2);
   });
