@@ -101,6 +101,16 @@
    - 2026-11-14 실측 결과, 서울시가 N61에 8번 정류장 '철산리버빌아파트'(213000118)를 추가해 정류장이 188개가 됐다. 개발 DB는 187개라 차량 후보가 `METADATA_MISMATCH`로 막힌다(회귀 테스트 `d0cdee9`).
    - 공식 절차는 T-Data CSV 3종 → preview → Bootstrap이며, 최신 CSV는 개발자가 확보해야 한다.
    - 서울 API 기반 정기 동기화(노선 변경 감지 포함)는 별도 설계가 필요하다.
+   - 2026-11-14 확인: T-Data 공개본(수정일 2026-11-13)은 11-10과 SHA-256이 같아 N61 변경이 아직 반영되지 않았다.
+   - 서울 API 노선 단위 갱신 설계 초안(Codex, 보류). 흐름은 지정 노선 API 수집 → Bundle → preview → 검토·명시 승인 → 대상 노선만 apply다. 권고안(미확정)은 다음과 같다.
+     - D1: 별도 API override 출처로 표시
+     - D2: 모든 변경을 명시 승인
+     - D3: 기존 공유 Stop 보존, 신규 Stop만 생성
+     - D4: 표시 필드는 보존하고 direction은 Raw에만 저장
+     - D5: 진행 중 Alarm·Session이 있으면 구조 변경 차단
+     - D6: 이후 T-Data full Bootstrap에서 API override를 보호하고 명시적으로 해제
+     - D7: 노선당 1건, retry 0
+   - 구현은 4단계(수집·정규화 → 범위 preview → 승인·부분 apply·보호 → 운영 절차)이고, ADR 신규 작성과 architecture·domain·database·local-development 동기화가 필요하다.
 6. **서버 로그 운영**: 현재는 Spring Boot 기본 Logback의 콘솔 출력만 있다. 일 단위 파일 순환과 14~30일 보관, 요청 ID(MDC), ERROR 알림(Sentry 등 외부 서비스 도입은 결정 필요), 토큰·이메일·좌표 같은 민감정보 미기록 점검을 운영 서버 구조와 함께 정한다.
 7. **UI-8 통합 검증**: 실기기 E2E(TASK-908/710)와 모니터링 지연 개선을 진행한다.
 
