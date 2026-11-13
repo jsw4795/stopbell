@@ -99,6 +99,9 @@ class AuthControllerIntegrationTest {
     @Autowired
     private JwtTokenService jwtTokenService;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     @Test
     void appleEndpointsAreUnavailableWhenDisabled() throws Exception {
         mockMvc.perform(post("/auth/apple/challenge")).andExpect(status().isNotFound());
@@ -163,7 +166,7 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("Login Session을 Rotation하면 기존 Token 재사용을 막고 다른 Session은 유지한다")
+    @DisplayName("Login Session을 Rotation하면 기존 Token은 유예 안에서 한 번만 재사용되고 다른 Session은 유지한다")
     void rotate_login_session_prevents_reuse_and_keeps_other_session() throws Exception {
         TokenPair firstLogin = loginWithGoogle("rotation-flow-google-id-token", "rotation-flow-user");
         TokenPair secondLogin = loginWithGoogle("rotation-flow-google-id-token", "rotation-flow-user");
@@ -171,13 +174,18 @@ class AuthControllerIntegrationTest {
         TokenPair rotatedTokenPair = refresh(firstLogin.refreshToken());
 
         assertThat(rotatedTokenPair.refreshToken()).isNotEqualTo(firstLogin.refreshToken());
-        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstLogin.refreshToken()))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstLogin.refreshToken())).orElseThrow()
+                .getRotatedAt()).isNotNull();
         assertThat(refreshTokenRepository.findByTokenHash(sha256(rotatedTokenPair.refreshToken()))).isPresent();
         assertThat(refreshTokenRepository.findByTokenHash(sha256(secondLogin.refreshToken()))).isPresent();
 
         mockMvc.perform(get("/test/authentication")
                         .header("Authorization", "Bearer " + rotatedTokenPair.accessToken()))
                 .andExpect(status().isOk());
+
+        TokenPair graceRetry = refresh(firstLogin.refreshToken());
+        assertThat(graceRetry.refreshToken()).isNotEqualTo(rotatedTokenPair.refreshToken());
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstLogin.refreshToken()))).isEmpty();
 
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
@@ -187,9 +195,29 @@ class AuthControllerIntegrationTest {
 
         TokenPair refreshedAgainTokenPair = refresh(rotatedTokenPair.refreshToken());
         assertThat(refreshedAgainTokenPair.refreshToken()).isNotEqualTo(rotatedTokenPair.refreshToken());
-        assertThat(refreshTokenRepository.findByTokenHash(sha256(rotatedTokenPair.refreshToken()))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(rotatedTokenPair.refreshToken())).orElseThrow()
+                .getRotatedAt()).isNotNull();
         assertThat(refreshTokenRepository.findByTokenHash(sha256(refreshedAgainTokenPair.refreshToken()))).isPresent();
         assertThat(refreshTokenRepository.findByTokenHash(sha256(secondLogin.refreshToken()))).isPresent();
+    }
+
+    @Test
+    @DisplayName("유예가 지난 회전 Token 재사용은 401이고 해당 row만 삭제된다")
+    void reject_rotated_token_after_grace_window() throws Exception {
+        TokenPair login = loginWithGoogle("grace-expired-google-id-token", "grace-expired-user");
+        TokenPair rotated = refresh(login.refreshToken());
+
+        jdbcTemplate.update("update refresh_tokens set rotated_at = rotated_at - interval 31 second "
+                + "where token_hash = ?", sha256(login.refreshToken()));
+
+        mockMvc.perform(post("/auth/refresh")
+                        .contentType("application/json")
+                        .content("{\"refreshToken\":\"" + login.refreshToken() + "\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(this::assertUnauthenticated);
+
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(login.refreshToken()))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(rotated.refreshToken()))).isPresent();
     }
 
     @Test
@@ -276,7 +304,8 @@ class AuthControllerIntegrationTest {
 
         assertThat(secondRefreshToken).isNotEqualTo(firstRefreshToken);
         assertThat(jwtTokenService.extractUserId(responseValue(responseBody, "accessToken"))).isEqualTo(user.getId());
-        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstRefreshToken))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstRefreshToken)).orElseThrow().getRotatedAt())
+                .isNotNull();
         RefreshToken rotatedRefreshToken = refreshTokenRepository.findByTokenHash(sha256(secondRefreshToken)).orElseThrow();
         assertThat(rotatedRefreshToken.getUser().getId()).isEqualTo(user.getId());
         assertThat(rotatedRefreshToken.getExpiresAt()).isAfter(now().plusDays(29));
@@ -284,15 +313,17 @@ class AuthControllerIntegrationTest {
     }
 
     @Test
-    @DisplayName("Rotation된 기존 Refresh Token을 다시 사용하면 401 Unauthorized를 반환한다")
+    @DisplayName("Rotation된 기존 Refresh Token은 유예 안에서 한 번만 재사용되고 이후 401 Unauthorized를 반환한다")
     void reject_reused_refresh_token() throws Exception {
         User user = userRepository.saveAndFlush(new User(AuthProvider.GOOGLE, "reused-refresh-token-user"));
         String refreshToken = refreshTokenService.issue(user);
 
-        mockMvc.perform(post("/auth/refresh")
-                        .contentType("application/json")
-                        .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
-                .andExpect(status().isOk());
+        for (int i = 0; i < 2; i++) {
+            mockMvc.perform(post("/auth/refresh")
+                            .contentType("application/json")
+                            .content("{\"refreshToken\":\"" + refreshToken + "\"}"))
+                    .andExpect(status().isOk());
+        }
 
         mockMvc.perform(post("/auth/refresh")
                         .contentType("application/json")
@@ -358,7 +389,8 @@ class AuthControllerIntegrationTest {
                 .andReturn();
 
         String rotatedRefreshToken = responseValue(result.getResponse().getContentAsString(), "refreshToken");
-        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstRefreshToken))).isEmpty();
+        assertThat(refreshTokenRepository.findByTokenHash(sha256(firstRefreshToken)).orElseThrow().getRotatedAt())
+                .isNotNull();
         assertThat(refreshTokenRepository.findByTokenHash(sha256(rotatedRefreshToken))).isPresent();
         assertThat(refreshTokenRepository.findByTokenHash(sha256(secondRefreshToken))).isPresent();
     }

@@ -80,6 +80,7 @@ class LoginMigrationIntegrationTest {
 
         var rotated = refreshTokenService.refresh(first.refreshToken());
         assertThat(jwtTokenService.extractUserId(rotated.accessToken())).isEqualTo(ownerId);
+        refreshTokenService.refresh(first.refreshToken());
         assertThatThrownBy(() -> refreshTokenService.refresh(first.refreshToken())).isInstanceOf(InvalidRefreshTokenException.class);
         refreshTokenService.invalidate(second.refreshToken());
         assertThatThrownBy(() -> refreshTokenService.refresh(second.refreshToken())).isInstanceOf(InvalidRefreshTokenException.class);

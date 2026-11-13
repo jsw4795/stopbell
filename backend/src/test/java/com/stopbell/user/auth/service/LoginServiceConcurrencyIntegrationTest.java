@@ -200,9 +200,11 @@ class LoginServiceConcurrencyIntegrationTest {
         assertSession(second, userId);
 
         TokenResponse rotatedFirst = tokenService.refresh(first.refreshToken());
+        tokenService.refresh(first.refreshToken());
         assertThatThrownBy(() -> tokenService.refresh(first.refreshToken())).isInstanceOf(InvalidRefreshTokenException.class);
         assertSession(second, userId);
         TokenResponse rotatedSecond = tokenService.refresh(second.refreshToken());
+        tokenService.refresh(second.refreshToken());
         assertThatThrownBy(() -> tokenService.refresh(second.refreshToken())).isInstanceOf(InvalidRefreshTokenException.class);
         tokenService.invalidate(rotatedFirst.refreshToken());
         assertThat(refreshTokens.findByTokenHash(hash(rotatedFirst.refreshToken()))).isEmpty();

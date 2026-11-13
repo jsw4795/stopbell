@@ -35,6 +35,9 @@ public class RefreshToken {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "rotated_at", insertable = false, updatable = false)
+    private LocalDateTime rotatedAt;
+
     protected RefreshToken() {
     }
 
@@ -67,5 +70,9 @@ public class RefreshToken {
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
+    }
+
+    public LocalDateTime getRotatedAt() {
+        return rotatedAt;
     }
 }

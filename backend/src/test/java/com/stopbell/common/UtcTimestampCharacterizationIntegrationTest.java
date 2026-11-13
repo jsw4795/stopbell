@@ -233,6 +233,12 @@ class UtcTimestampCharacterizationIntegrationTest {
         atFixedTime(beforeExpiry, () -> {
             var rotated = refreshService(beforeExpiry).refresh(issued[0]);
             assertThat(rotated.refreshToken()).isNotBlank().isNotEqualTo(issued[0]);
+            // The first reuse of a rotated token inside the grace window succeeds once; the next one is rejected.
+            em.flush();
+            em.clear();
+            assertThat(issuing.refresh(issued[0]).refreshToken()).isNotBlank();
+            em.flush();
+            em.clear();
             assertThatThrownBy(() -> issuing.refresh(issued[0])).isInstanceOf(InvalidRefreshTokenException.class);
             em.flush();
         });
@@ -243,7 +249,7 @@ class UtcTimestampCharacterizationIntegrationTest {
         // Logout of a token already expired by the service clock still deletes by hash only.
         String expiredForLogout = issuing.issue(user);
         refreshService(NOW.plusSeconds(31L * 86400)).invalidate(expiredForLogout);
-        assertThat(tokens.count()).isEqualTo(1);
+        assertThat(tokens.count()).isEqualTo(2);
     }
 
     @Test

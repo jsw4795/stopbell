@@ -117,12 +117,13 @@ user_id BIGINT NOT NULL REFERENCES users(id)
 token_hash CHAR(64) NOT NULL
 expires_at DATETIME(6) NOT NULL
 created_at DATETIME(6) NOT NULL
+rotated_at DATETIME(6) NULL
 UNIQUE(token_hash)
 ```
 
 `token_hash`에는 서버가 SecureRandom으로 생성한 256-bit URL-safe Base64 opaque Refresh Token 원문의 SHA-256 Hash를 64-char lowercase hex로 저장한다. Refresh Token 원문은 저장하지 않으며, Password용 BCryptPasswordEncoder를 Refresh Token Hash에 사용하지 않는다. 서로 다른 RefreshToken row가 같은 `token_hash`를 가지는 것은 정상 상태가 아니므로 Database Unique Constraint로 강제한다.
 
-한 User가 여러 Refresh Token을 가질 수 있어 여러 Login Session을 허용한다. Rotation 또는 Logout으로 Token을 무효화할 때는 `token_hash`로 해당 행 하나만 삭제한다. Logout은 만료 여부를 검증하거나 User를 먼저 조회하지 않으며, 삭제 대상이 없어도 성공으로 처리한다. `updated_at`, `revoked_at`, `device_id`, `last_used_at`, `token_family`는 현재 추가하지 않는다.
+한 User가 여러 Refresh Token을 가질 수 있어 여러 Login Session을 허용한다. V43의 `rotated_at`은 Rotation 시각이며 NULL이면 아직 회전되지 않은 Token이다. Rotation은 행을 바로 삭제하지 않고 `rotated_at`만 기록하며, 유예(`auth.refresh-token.rotation-grace`, 기본 30초) 안의 첫 재사용은 새 Pair를 발급하면서 행을 삭제하고 그 외 재사용은 거절하며 행을 삭제한다. Logout으로 Token을 무효화할 때는 `token_hash`로 해당 행 하나만 삭제한다. Logout은 만료 여부를 검증하거나 User를 먼저 조회하지 않으며, 삭제 대상이 없어도 성공으로 처리한다. `updated_at`, `revoked_at`, `device_id`, `last_used_at`, `token_family`는 현재 추가하지 않는다.
 
 ### apple_credentials
 
@@ -632,6 +633,18 @@ Session due JPQL은 Event·Session·Delivery를 join하고 위 두 Event 분기�
 - pending NotificationEvent/Delivery worker 조회
 
 지원하는 쿼리를 특정하지 않은 추측성 인덱스는 추가하지 않는다.
+
+## 8-1. 데이터 정리 (보존 기간)
+
+`DataCleanupService.cleanup()`은 쌓이기만 하는 데이터를 삭제하는 실행 진입점이다. `@Scheduled`는 붙이지 않았으며 호출 주기와 실행 주체는 개발자와 별도로 정한다. 보존 기간은 임시 기본값이며 최종 운영 정책이 아니다. 모든 삭제는 `cleanup.batch-size`(기본 500) 단위로 반복한다.
+
+| 대상 | 삭제 조건 | 설정 키 (기본값) |
+| --- | --- | --- |
+| `refresh_tokens` | `expires_at` 경과, 또는 `rotated_at`이 보존 기간 초과 | `cleanup.rotated-refresh-token-retention` (`PT24H`) |
+| `notification_events` + `notification_deliveries` | `created_at`이 보존 기간 초과, PENDING Delivery 없음, 연결된 Alarm이 INACTIVE(또는 없음)이거나 Boarding Session이 종료됨 | `cleanup.notification-retention` (`P30D`) |
+| `boarding_sessions` | `ended_at`이 보존 기간 초과이고 연결된 Notification Event가 모두 삭제된 뒤 | `cleanup.boarding-session-retention` (`P30D`) |
+
+삭제 순서는 Delivery → Event → Boarding Session이다. ACTIVE·FOLLOW_UP Alarm과 진행 중(`ended_at IS NULL`) Boarding Session의 Event, PENDING Delivery가 남은 Event, 종료되지 않은 Session은 보존한다. `alarms`, `devices`, `users`와 교통 metadata는 정리 대상이 아니다.
 
 ## 9. 트랜잭션 고려 사항
 

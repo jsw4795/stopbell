@@ -150,6 +150,12 @@ class FlowAlarms extends Fake implements AlarmClient {
   }
 }
 
+class FailingDeleteStorage extends FakeStorage {
+  FailingDeleteStorage({super.pair});
+  @override
+  Future<void> delete() async => throw StateError('delete failed');
+}
+
 void main() {
   testWidgets('로그인 화면은 시스템 밝기를 따르고 Apple 버튼 스타일을 유지한다', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
@@ -560,6 +566,25 @@ void main() {
     expect(storage.pair?.refreshToken, pair.refreshToken);
     expect(storage.pair?.sessionIdentity, isNotNull);
     expect(find.text('아직 만든 알람이 없어요.'), findsOneWidget);
+  });
+
+  testWidgets('로그아웃 오류 메시지는 홈 인디케이터 영역 위에 표시한다', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.padding = const FakeViewPadding(bottom: 34);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+    addTearDown(tester.view.reset);
+    final storage = FailingDeleteStorage(pair: pair);
+    await tester.pumpWidget(
+      app(session(FakeAuthenticator(), storage, backend: FakeBackend())),
+    );
+    await tester.pumpAndSettle();
+    await tapInSettings(tester, '로그아웃');
+    await tester.pumpAndSettle();
+
+    final message = find.text('저장된 인증 정보를 삭제하지 못했어요. 다시 시도해 주세요.');
+    expect(message, findsOneWidget);
+    expect(tester.getBottomLeft(message).dy, lessThanOrEqualTo(800 - 34));
   });
 
   testWidgets('Logout 버튼은 중복 입력을 막고 완료 뒤 Google login을 표시한다', (tester) async {

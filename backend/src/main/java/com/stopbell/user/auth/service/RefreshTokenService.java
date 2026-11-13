@@ -5,6 +5,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
@@ -16,6 +17,8 @@ import com.stopbell.user.entity.RefreshToken;
 import com.stopbell.user.entity.User;
 import com.stopbell.user.repository.RefreshTokenRepository;
 import com.stopbell.user.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,11 +27,13 @@ public class RefreshTokenService {
 
     private static final int TOKEN_BYTE_LENGTH = 32;
     private static final int EXPIRATION_DAYS = 30;
+    private static final Duration DEFAULT_ROTATION_GRACE = Duration.ofSeconds(30);
 
     private final RefreshTokenRepository refreshTokenRepository;
     private final JwtTokenService jwtTokenService;
     private final Clock clock;
     private final UserRepository users;
+    private final Duration rotationGrace;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public RefreshTokenService(
@@ -37,6 +42,21 @@ public class RefreshTokenService {
             Clock jwtClock,
             UserRepository users
     ) {
+        this(refreshTokenRepository, jwtTokenService, jwtClock, users, DEFAULT_ROTATION_GRACE);
+    }
+
+    @Autowired
+    public RefreshTokenService(
+            RefreshTokenRepository refreshTokenRepository,
+            JwtTokenService jwtTokenService,
+            Clock jwtClock,
+            UserRepository users,
+            @Value("${auth.refresh-token.rotation-grace:PT30S}") Duration rotationGrace
+    ) {
+        if (rotationGrace == null || rotationGrace.isNegative()) {
+            throw new IllegalArgumentException("Refresh token rotation grace must not be negative");
+        }
+        this.rotationGrace = rotationGrace;
         this.refreshTokenRepository = refreshTokenRepository;
         this.jwtTokenService = jwtTokenService;
         this.clock = jwtClock;
@@ -64,7 +84,8 @@ public class RefreshTokenService {
         RefreshToken storedRefreshToken = refreshTokenRepository.findByTokenHash(tokenHash)
                 .orElseThrow(InvalidRefreshTokenException::new);
 
-        if (!storedRefreshToken.getExpiresAt().isAfter(LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))) {
+        LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        if (!storedRefreshToken.getExpiresAt().isAfter(now)) {
             refreshTokenRepository.deleteByTokenHash(tokenHash);
             throw new InvalidRefreshTokenException();
         }
@@ -72,8 +93,18 @@ public class RefreshTokenService {
         User user = users.findByIdForUpdate(storedRefreshToken.getUser().getId())
                 .orElseThrow(InvalidRefreshTokenException::new);
         users.requireActive(user.getId());
-        if (refreshTokenRepository.deleteByTokenHash(tokenHash) != 1) {
-            throw new InvalidRefreshTokenException();
+        LocalDateTime rotatedAt = storedRefreshToken.getRotatedAt();
+        if (rotatedAt == null) {
+            // First use: keep the row so a retry within the grace window can recover a lost response.
+            if (refreshTokenRepository.markRotated(tokenHash, now) != 1) {
+                throw new InvalidRefreshTokenException();
+            }
+        } else {
+            // Reuse: allowed once inside the grace window, and the row is consumed either way.
+            boolean withinGrace = rotatedAt.plus(rotationGrace).isAfter(now);
+            if (refreshTokenRepository.deleteByTokenHash(tokenHash) != 1 || !withinGrace) {
+                throw new InvalidRefreshTokenException();
+            }
         }
 
         String rotatedRefreshToken = issue(user);
