@@ -233,6 +233,15 @@ void main() {
       ),
     );
     expect(find.text('노선번호를 입력해 검색하세요.'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('노선번호를 입력해 검색하세요.')).dy -
+          tester.getBottomLeft(find.text('검색')).dy,
+      greaterThan(50),
+    );
+    expect(
+      tester.getCenter(find.text('노선번호를 입력해 검색하세요.')).dy,
+      lessThan(tester.view.physicalSize.height / 2),
+    );
     await tester.tap(find.text('검색'));
     await tester.enterText(find.byType(TextField), '   ');
     await tester.testTextInput.receiveAction(TextInputAction.search);

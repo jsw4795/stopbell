@@ -865,12 +865,19 @@ void main() {
       await pump(tester);
       await tap(tester, '추적 취소');
       expect(api.cancellations, isEmpty);
+      expect(find.widgetWithText(TextButton, '추적 취소 확인'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('계속 추적')).dx,
+        lessThan(tester.getTopLeft(find.text('추적 취소 확인')).dx),
+      );
       await tap(tester, '계속 추적');
       expect(api.cancellations, isEmpty);
       await tap(tester, '추적 취소');
       await tap(tester, '추적 취소 확인');
       expect(api.cancellations, [(123, 8)]);
       expect(find.textContaining('사용자 취소로 종료'), findsOneWidget);
+      expect(find.text('새 차량 후보 찾기'), findsNothing);
+      expect(find.widgetWithText(OutlinedButton, '상태 새로고침'), findsNothing);
     },
   );
   testWidgets(

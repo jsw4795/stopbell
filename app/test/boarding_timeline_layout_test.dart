@@ -121,6 +121,18 @@ void main() {
     expect(find.text('최근 확인된 버스 위치'), findsNothing);
     expect(find.textContaining('부근 지나는 중'), findsNothing);
     expect(find.text('최근 위치 기준'), findsOneWidget);
+    final highlighted = find
+        .ancestor(
+          of: find.byKey(const ValueKey('tracking-bus-marker')),
+          matching: find.byType(DecoratedBox),
+        )
+        .first;
+    final textTop = tester.getTopLeft(find.text('경유')).dy;
+    final textBottom = tester.getBottomLeft(find.text('최근 위치 기준')).dy;
+    expect(
+      (textTop + textBottom) / 2,
+      closeTo(tester.getCenter(highlighted).dy, 1),
+    );
     expect(offset(tester), greaterThan(0));
     expectMarkerVisible(tester, const ValueKey('tracking-bus-marker'));
     final headerY = tester.getTopLeft(row).dy;

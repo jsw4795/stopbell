@@ -119,10 +119,12 @@ class _BoardingNotificationScreenState
         if (_error != null) Text(_error!),
         if (_session != null)
           BoardingSessionDetails(session: _session!, onBack: widget.onBack),
-        OutlinedButton(
-          onPressed: _busy ? null : _load,
-          child: Text(_error == null ? '상태 새로고침' : '다시 조회'),
-        ),
+        if (_session?.status != BoardingSessionStatus.cancelled ||
+            _error != null)
+          OutlinedButton(
+            onPressed: _busy ? null : _load,
+            child: Text(_error == null ? '상태 새로고침' : '다시 조회'),
+          ),
       ],
     );
   }

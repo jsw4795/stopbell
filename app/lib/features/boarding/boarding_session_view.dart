@@ -33,10 +33,9 @@ class BoardingSessionView extends StatelessWidget {
             onPressed: () => Navigator.pop(context, false),
             child: const Text('계속 추적'),
           ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
             ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('추적 취소 확인'),
@@ -63,7 +62,7 @@ class BoardingSessionView extends StatelessWidget {
           onPressed: c.busy || c.stateUncertain ? null : onReconfirm,
           child: const Text('동일 차량 다시 확인'),
         ),
-      if (s.isTerminal)
+      if (s.isTerminal && s.status != BoardingSessionStatus.cancelled)
         OutlinedButton(
           onPressed: c.canCreate ? onNew : null,
           child: const Text('새 차량 후보 찾기'),
@@ -810,8 +809,11 @@ class _TrackingRow extends StatelessWidget {
             ),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: bus
+                    ? const EdgeInsets.symmetric(vertical: 6)
+                    : const EdgeInsets.only(bottom: 12),
                 child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(

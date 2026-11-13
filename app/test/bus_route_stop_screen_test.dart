@@ -185,6 +185,10 @@ void main() {
     final pending = Completer<List<BusRouteStopOccurrence>>();
     await tester.pumpWidget(screen((_) => pending.future));
     expect(find.text('7000'), findsOneWidget);
+    expect(
+      tester.getCenter(find.byIcon(Icons.directions_bus_outlined)).dx,
+      lessThan(tester.getCenter(find.text('7000')).dx),
+    );
     expect(find.text('수원시'), findsOneWidget);
     expect(find.text('정류장 조회 중...'), findsOneWidget);
     pending.complete([]);
@@ -368,7 +372,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey(22)));
     await tester.pumpAndSettle();
     expect(find.byType(SwitchListTile), findsNWidgets(2));
-    expect(find.text('도착하면 알려드려요 (기본)'), findsOneWidget);
+    expect(find.text('도착하면 알려드려요'), findsOneWidget);
     final before = find.widgetWithText(SwitchListTile, '한 정류장 전 알림');
     final after = find.widgetWithText(SwitchListTile, '한 정류장 후 알림');
     expect(tester.getSize(before).height, greaterThanOrEqualTo(44));

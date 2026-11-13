@@ -44,19 +44,6 @@ class BusStopSelectionLayout extends StatelessWidget {
                   icon: const Icon(Icons.arrow_back),
                 ),
                 title: Text(title),
-                actions: [
-                  Padding(
-                    padding: const EdgeInsets.only(
-                      right: StopBellSpacing.screenPadding,
-                    ),
-                    child: ExcludeSemantics(
-                      child: Icon(
-                        Icons.directions_bus_outlined,
-                        color: iconColor ?? colors.primary,
-                      ),
-                    ),
-                  ),
-                ],
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(
@@ -64,6 +51,13 @@ class BusStopSelectionLayout extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
+                    ExcludeSemantics(
+                      child: Icon(
+                        Icons.directions_bus_outlined,
+                        color: iconColor ?? colors.primary,
+                      ),
+                    ),
+                    const SizedBox(width: StopBellSpacing.sm),
                     Text(
                       route.routeNumber,
                       style: theme.textTheme.headlineSmall,

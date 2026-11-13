@@ -153,11 +153,11 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
   Widget _buildResults() {
     switch (_state) {
       case _SearchState.idle:
-        return const SingleChildScrollView(
+        return const Align(
+          alignment: Alignment(0, -0.3),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(height: StopBellSpacing.lg),
               Icon(Icons.search),
               SizedBox(height: StopBellSpacing.sm),
               Text('노선번호를 입력해 검색하세요.'),
@@ -176,11 +176,11 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
           ),
         );
       case _SearchState.empty:
-        return const SingleChildScrollView(
+        return const Align(
+          alignment: Alignment(0, -0.3),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(height: StopBellSpacing.lg),
               Icon(Icons.search_off),
               SizedBox(height: StopBellSpacing.sm),
               Text('검색 결과가 없어요.'),
