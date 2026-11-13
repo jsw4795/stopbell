@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
 import 'package:http/http.dart' as http;
+import 'package:stopbell/shared/stopbell_skeleton.dart';
 import 'package:stopbell/core/theme/stopbell_colors.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/auth/auth_session.dart';
@@ -706,7 +707,8 @@ void main() {
       }
 
       await tester.pumpWidget(screen(stops: stops));
-      expect(find.text('정류장 조회 중...'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(StopBellSkeletonCard), findsWidgets);
       pending.complete([]);
       await tester.pumpAndSettle();
       expect(find.text('정류장 정보가 없어요.'), findsOneWidget);

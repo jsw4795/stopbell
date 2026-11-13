@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stopbell/shared/stopbell_skeleton.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_presentation.dart';
@@ -292,7 +293,8 @@ void main() {
       lessThan(tester.getCenter(find.text('7000')).dx),
     );
     expect(find.text('수원시'), findsOneWidget);
-    expect(find.text('정류장 조회 중...'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(StopBellSkeletonCard), findsWidgets);
     pending.complete([]);
     await tester.pumpAndSettle();
     expect(find.text('정류장 정보가 없어요.'), findsOneWidget);

@@ -505,7 +505,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('정류장 조회 중...'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(StopBellSkeletonCard), findsWidgets);
     await tapInSettings(tester, '로그아웃');
     await tester.pump();
     backend.logoutGate.complete();
@@ -754,7 +755,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey(15)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('알람 조회 중...'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(StopBellSkeletonCard), findsWidgets);
     await tester.pump();
     unawaited(auth.logout());
     await tester.pump();

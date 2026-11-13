@@ -1,3 +1,5 @@
+import '../../shared/stopbell_skeleton.dart';
+import '../../shared/stopbell_delayed_loading.dart';
 import '../../shared/stopbell_home_button.dart';
 
 import 'package:flutter/material.dart';
@@ -125,7 +127,15 @@ class _BoardingNotificationScreenState
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.all(StopBellSpacing.lg),
             children: [
-              if (_busy) const Text('서버 응답 확인 중...'),
+              if (_session == null)
+                StopBellDelayedLoading(
+                  loading: _busy,
+                  skeleton: const StopBellSkeletonList(count: 2),
+                  onRetry: _load,
+                  child: const SizedBox.shrink(),
+                )
+              else if (_busy)
+                const Text('서버 응답 확인 중...'),
               if (_error != null) ...[
                 Text(_error!),
                 OutlinedButton(
