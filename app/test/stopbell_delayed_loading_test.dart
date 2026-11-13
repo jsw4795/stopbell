@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:stopbell/shared/stopbell_button_label.dart';
 import 'package:stopbell/shared/stopbell_delayed_loading.dart';
 import 'package:stopbell/shared/stopbell_skeleton.dart';
 
@@ -87,5 +88,25 @@ void main() {
       ),
       findsOneWidget,
     );
+  });
+
+  testWidgets('버튼 라벨은 동작 중에만 작은 스피너를 보여 주고 중복 탭이 막힌다', (tester) async {
+    var taps = 0;
+    Widget button(bool busy) => MaterialApp(
+      home: Scaffold(
+        body: FilledButton(
+          onPressed: busy ? null : () => taps++,
+          child: StopBellButtonLabel('알람 시작', busy: busy),
+        ),
+      ),
+    );
+    await tester.pumpWidget(button(false));
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    await tester.tap(find.text('알람 시작'));
+    expect(taps, 1);
+    await tester.pumpWidget(button(true));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    await tester.tap(find.text('알람 시작'));
+    expect(taps, 1);
   });
 }

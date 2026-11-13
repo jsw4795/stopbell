@@ -1,3 +1,4 @@
+import '../../shared/stopbell_button_label.dart';
 import '../../shared/stopbell_skeleton.dart';
 import '../../shared/stopbell_delayed_loading.dart';
 import '../../shared/stopbell_home_button.dart';
@@ -570,7 +571,12 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
           ),
         ],
         if (_mutating || _loading)
-          const Center(child: CircularProgressIndicator()),
+          const Center(
+            child: SizedBox.square(
+              dimension: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
         if (_outcomeUnknown)
           OutlinedButton(
             onPressed: _mutating || _loading ? null : _load,
@@ -589,7 +595,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
             ),
           ),
           onPressed: _canMutate ? _confirmDelete : null,
-          child: const Text('삭제'),
+          child: StopBellButtonLabel('삭제', busy: _mutating),
         ),
       ],
     );

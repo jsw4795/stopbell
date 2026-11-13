@@ -1,3 +1,4 @@
+import '../../shared/stopbell_button_label.dart';
 import '../../shared/stopbell_skeleton.dart';
 import '../../shared/stopbell_delayed_loading.dart';
 
@@ -753,15 +754,12 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
               onPressed: !_validTarget(target) || _loadingCandidates
                   ? null
                   : _findCandidates,
-              child: Text(
+              child: StopBellButtonLabel(
                 _result == null && _error == null ? '차량 후보 조회' : '차량 후보 다시 조회',
-                textAlign: TextAlign.center,
+                busy: _loadingCandidates,
               ),
             ),
-          if (_loadingCandidates) ...[
-            const LinearProgressIndicator(),
-            const Text('차량 후보를 조회하고 있어요.'),
-          ],
+          if (_loadingCandidates) const Text('차량 후보를 조회하고 있어요.'),
           if (_error case final error?)
             StopSelectionNotice(error, icon: Icons.error_outline),
           if (_staleStops)

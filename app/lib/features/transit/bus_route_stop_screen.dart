@@ -1,3 +1,4 @@
+import '../../shared/stopbell_button_label.dart';
 import '../../shared/stopbell_skeleton.dart';
 import '../../shared/stopbell_delayed_loading.dart';
 
@@ -387,10 +388,9 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                   if (!_outcomeUnknown)
                     FilledButton(
                       onPressed: _creating ? null : _create,
-                      child: const Text('알람 시작'),
+                      child: StopBellButtonLabel('알람 시작', busy: _creating),
                     ),
                 ],
-                if (_creating) const Center(child: CircularProgressIndicator()),
                 if (_createMessage != null)
                   Text(_createMessage!, textAlign: TextAlign.center),
                 if (_outcomeUnknown)

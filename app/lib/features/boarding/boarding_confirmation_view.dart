@@ -1,3 +1,5 @@
+import '../../shared/stopbell_button_label.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
@@ -213,12 +215,13 @@ class _BoardingConfirmationViewState extends State<BoardingConfirmationView> {
             onPressed: _busy || !canConfirmBoardingCandidate(widget.candidate)
                 ? null
                 : _confirm,
-            child: Text(
+            child: StopBellButtonLabel(
               _busy
                   ? '확인 중…'
                   : widget.reconfirm
                   ? '동일 차량 재확인 요청'
                   : '하차 알람 등록',
+              busy: _busy,
             ),
           ),
         ],
