@@ -161,6 +161,16 @@ void main() {
       await tap(tester, '이 차량으로 하차 알람 설정');
       await tap(tester, '알림 없이 계속');
       expect(find.text('1개 정류장 전'), findsOneWidget);
+      final context = tester.element(find.byType(BoardingSessionView));
+      expect(ModalRoute.of(context), isA<MaterialPageRoute<void>>());
+      expect(await Navigator.of(context).maybePop(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('header-home')), findsOneWidget);
+      expect(
+        Navigator.of(tester.element(find.byKey(const ValueKey('header-home'))))
+            .canPop(),
+        isFalse,
+      );
     },
   );
 

@@ -3,31 +3,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stopbell/shared/stopbell_home_button.dart';
 
 void main() {
-  testWidgets('홈 버튼은 첫 경로로 돌아가고 내부 홈 상태를 복원한다', (tester) async {
-    var restored = false;
+  testWidgets('홈 버튼은 첫 경로까지 모든 하위 route를 정리한다', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: StopBellHomeScope(
-          onHome: () => restored = true,
-          child: Builder(
-            builder: (context) => Scaffold(
-              body: Column(
-                children: [
-                  const StopBellHomeButton(),
-                  TextButton(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const Scaffold(
-                          body: Column(
-                            children: [Text('다음 화면'), StopBellHomeButton()],
-                          ),
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Column(
+              children: [
+                const StopBellHomeButton(),
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const Scaffold(
+                        body: Column(
+                          children: [Text('다음 화면'), StopBellHomeButton()],
                         ),
                       ),
                     ),
-                    child: const Text('열기'),
                   ),
-                ],
-              ),
+                  child: const Text('열기'),
+                ),
+              ],
             ),
           ),
         ),
@@ -39,7 +35,7 @@ void main() {
     expect(find.byTooltip('홈으로'), findsOneWidget);
     await tester.tap(button);
     await tester.pumpAndSettle();
-    expect(restored, isTrue);
+    expect(find.text('열기'), findsOneWidget);
     await tester.tap(find.text('열기'));
     await tester.pumpAndSettle();
     expect(find.text('다음 화면'), findsOneWidget);

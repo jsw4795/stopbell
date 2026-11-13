@@ -1000,6 +1000,34 @@ void main() {
       expect(api.creations, hasLength(1));
     },
   );
+  testWidgets('재확인과 차량 확인 route의 maybePop은 이전 선택과 상세를 유지한다', (tester) async {
+    await pump(tester);
+    await candidates(tester);
+    await select(tester);
+    await confirm(tester);
+    api.onFind = () async => sessionFixture(
+      status: 'SUSPENDED',
+      evaluation: 'HELD',
+      revision: 6,
+      reason: 'CONTINUITY_GAP_EXCEEDED',
+    );
+    await tester.tap(find.byTooltip('상태 새로고침'));
+    await tester.pumpAndSettle();
+    await tap(tester, '동일 차량 다시 확인');
+    await tap(tester, '이 차량 선택');
+    final confirmation = tester.element(find.byType(BoardingConfirmationView));
+    expect(ModalRoute.of(confirmation), isA<MaterialPageRoute<void>>());
+    expect(await Navigator.of(confirmation).maybePop(), isTrue);
+    await tester.pumpAndSettle();
+    final back = tester.element(find.text('세션 상세로'));
+    expect(ModalRoute.of(back), isA<MaterialPageRoute<void>>());
+    expect(await Navigator.of(back).maybePop(), isTrue);
+    await tester.pumpAndSettle();
+    expect(find.byType(BoardingSessionView), findsOneWidget);
+    expect(api.reconfirmations, isEmpty);
+    expect(api.creations, hasLength(1));
+  });
+
   testWidgets(
     'late GET cannot revert cancelled screen and multiple refreshes are bounded by epoch',
     (tester) async {

@@ -45,21 +45,17 @@ class BoardingHome extends StatefulWidget {
 }
 
 class _BoardingHomeState extends State<BoardingHome> {
-  BusRoute? _route;
   late final int _generation;
   BoardingSessionController? _controller;
-  ({
-    BoardingCandidate candidate,
-    BoardingSelectionContext selection,
-    String route,
-    String target,
-    String? boarding,
-  })?
-  _draft;
-  bool _reconfirm = false, _newSelection = false;
   int? _boardingNameSessionId;
   String? _boardingName;
-  BoardingSelectionContext? _reconfirmContext;
+  final _notificationOffsetStops = ValueNotifier<int>(2);
+
+  bool get _current =>
+      mounted &&
+      widget.authSession.isCurrentGeneration(_generation) &&
+      !widget.authSession.isLoggingOut;
+
   @override
   void initState() {
     super.initState();
@@ -75,22 +71,8 @@ class _BoardingHomeState extends State<BoardingHome> {
     }
   }
 
-  bool get _current =>
-      mounted &&
-      widget.authSession.isCurrentGeneration(_generation) &&
-      !widget.authSession.isLoggingOut;
   void _changed() {
-    if (mounted) {
-      setState(() {
-        if (!_current) {
-          _route = null;
-          _draft = null;
-          _reconfirmContext = null;
-          _boardingNameSessionId = null;
-          _boardingName = null;
-        }
-      });
-    }
+    if (mounted) setState(() {});
   }
 
   @override
@@ -98,73 +80,203 @@ class _BoardingHomeState extends State<BoardingHome> {
     widget.authSession.removeListener(_changed);
     _controller?.removeListener(_changed);
     _controller?.dispose();
+    _notificationOffsetStops.dispose();
     super.dispose();
   }
 
-  void _select(
-    BoardingCandidate candidate,
-    BoardingSelectionContext selection,
-    String route,
-    String target, {
-    String? boarding,
-  }) {
-    if (!_current || _controller!.busy || _controller!.needsRecovery) return;
-    setState(
-      () => _draft = (
-        candidate: candidate,
-        selection: selection,
-        route: route,
-        target: target,
-        boarding: boarding,
+  void _back() => Navigator.of(context).maybePop();
+
+  void _showSession() {
+    if (!_current) return;
+    final route = ModalRoute.of(context);
+    Navigator.of(context).popUntil((candidate) => candidate == route);
+    setState(() {});
+  }
+
+  void _push(WidgetBuilder builder) {
+    if (!_current) return;
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => Scaffold(
+          body: SafeArea(
+            child: ListenableBuilder(
+              listenable: Listenable.merge([
+                widget.authSession,
+                ?_controller,
+                _notificationOffsetStops,
+              ]),
+              builder: (_, _) =>
+                  _current ? builder(context) : const SizedBox.shrink(),
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  int _notificationOffsetStops = 2;
+  void _openSearch({bool reconfirm = false}) =>
+      _push((context) => _search(context, reconfirm: reconfirm));
 
-  Future<void> _confirm(String number) async {
-    final draft = _draft;
-    if (!_current || draft == null) return;
-    final c = _controller!;
-    if (_reconfirm) {
-      await c.reconfirm(draft.candidate, number, draft.selection);
-    }
-    if (_current) {
-      setState(() {
-        _draft = null;
-        _reconfirm = false;
-        _reconfirmContext = null;
-        _newSelection = false;
-      });
-    }
+  Widget _search(BuildContext context, {bool reconfirm = false}) => Column(
+    children: [
+      AppBar(
+        primary: false,
+        leading: IconButton(
+          tooltip: '도착 알람으로',
+          onPressed: () => Navigator.of(context).maybePop(),
+          icon: const Icon(Icons.arrow_back),
+        ),
+        title: const Text('하차 알람 · 노선 선택'),
+        actions: const [StopBellHomeButton()],
+      ),
+      if (reconfirm)
+        const Padding(
+          padding: EdgeInsets.all(StopBellSpacing.lg),
+          child: Text(
+            '기존 선택 정보를 복원할 수 없어요. 원래 노선과 목적·승차 정류장을 다시 선택해 주세요. 기존 차량만 재확인할 수 있어요.',
+          ),
+        ),
+      Expanded(
+        child: BusRouteSearchScreen(
+          search: widget.searchRoutes,
+          onSelect: (route) => _openStops(route, reconfirm: reconfirm),
+        ),
+      ),
+    ],
+  );
+
+  void _openStops(BusRoute route, {required bool reconfirm}) {
+    _push(
+      (context) => BoardingStopScreen(
+        key: ValueKey(route.id),
+        route: route,
+        authSession: widget.authSession,
+        findStops: widget.findStops,
+        findCandidates: widget.findCandidates,
+        reconfirm: reconfirm,
+        creationBusy: _controller?.busy ?? false,
+        creationMessage: _controller?.message,
+        notificationOffsetStops: _notificationOffsetStops.value,
+        onNotificationOffsetChanged: (value) =>
+            _notificationOffsetStops.value = value,
+        onSelectCandidate: _controller == null
+            ? null
+            : (candidate, selection, {required boarding, required target}) {
+                if (reconfirm) {
+                  _openConfirmation(
+                    candidate,
+                    selection,
+                    route.routeNumber,
+                    target,
+                    route: route,
+                    boarding: boarding,
+                  );
+                } else {
+                  _create(candidate, selection, boarding, context);
+                }
+              },
+        onBack: () => Navigator.of(context).maybePop(),
+      ),
+    );
   }
 
   Future<void> _create(
     BoardingCandidate candidate,
     BoardingSelectionContext selection,
     String? boarding,
+    BuildContext pageContext,
   ) async {
     final c = _controller!;
+    final page = ModalRoute.of(pageContext);
+    if (!c.canCreate || !_current || page?.isActive != true) return;
     final previousSessionId = c.session?.id;
-    if (!c.canCreate) return;
     await c.create(
       candidate,
       candidate.vehicleNumber!,
       selection,
-      notificationOffsetStops: _notificationOffsetStops,
-      preparePush: () =>
-          widget.beforeCreate?.call(context) ??
-          prepareBoardingPush(context, null),
+      notificationOffsetStops: _notificationOffsetStops.value,
+      preparePush: () async {
+        final allowed =
+            await (widget.beforeCreate?.call(pageContext) ??
+                prepareBoardingPush(pageContext, null));
+        return _current && page?.isActive == true && allowed;
+      },
     );
-    if (_current && c.creationState == BoardingCreationState.resolved) {
-      setState(() {
-        _newSelection = false;
-        if (c.session != null && c.session!.id != previousSessionId) {
-          _boardingNameSessionId = c.session!.id;
-          _boardingName = boarding;
-        }
-      });
+    if (!_current || page?.isActive != true) return;
+    if (c.needsRecovery) {
+      _showSession();
+      return;
     }
+    if (c.creationState == BoardingCreationState.resolved) {
+      if (c.session != null && c.session!.id != previousSessionId) {
+        _boardingNameSessionId = c.session!.id;
+        _boardingName = boarding;
+      }
+      _showSession();
+    }
+  }
+
+  void _openConfirmation(
+    BoardingCandidate candidate,
+    BoardingSelectionContext selection,
+    String routeNumber,
+    String target, {
+    BusRoute? route,
+    String? boarding,
+  }) {
+    final c = _controller!;
+    if (!_current || c.busy || c.needsRecovery) return;
+    _push(
+      (context) => Column(
+        children: [
+          if (c.message != null) Text(c.message!),
+          Expanded(
+            child: BoardingConfirmationView(
+              candidate: candidate,
+              routeNumber: routeNumber,
+              route: route,
+              boardingName: boarding,
+              targetName: target,
+              onConfirm: (number) async {
+                final page = ModalRoute.of(context);
+                await c.reconfirm(candidate, number, selection);
+                if (_current && page?.isActive == true) _showSession();
+              },
+              initialNotificationOffsetStops: _notificationOffsetStops.value,
+              onNotificationOffsetChanged: (value) =>
+                  _notificationOffsetStops.value = value,
+              onBack: () => Navigator.of(context).maybePop(),
+              busy: c.busy,
+              reconfirm: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openReconfirmation() {
+    final c = _controller!;
+    final selection = c.selectionContext;
+    if (selection == null) {
+      _openSearch(reconfirm: true);
+      return;
+    }
+    _push(
+      (context) => BoardingReconfirmationScreen(
+        controller: c,
+        selectionContext: selection,
+        findCandidates: widget.findCandidates,
+        onBack: () => Navigator.of(context).maybePop(),
+        onReselect: () => _openSearch(reconfirm: true),
+        onSelect: (candidate) => _openConfirmation(
+          candidate,
+          selection,
+          c.session!.routeNumber,
+          c.session!.targetName,
+        ),
+      ),
+    );
   }
 
   @override
@@ -180,7 +292,7 @@ class _BoardingHomeState extends State<BoardingHome> {
           padding: const EdgeInsets.all(StopBellSpacing.lg),
           children: [
             TextButton(
-              onPressed: c.busy ? null : widget.onBack,
+              onPressed: c.busy ? null : _back,
               child: const Text('도착 알람으로'),
             ),
             Text(c.needsRecovery ? '원래 생성 요청 결과 확인' : '현재 하차 알람 확인'),
@@ -188,80 +300,18 @@ class _BoardingHomeState extends State<BoardingHome> {
             if (c.busy) const Text('서버 응답 확인 중...'),
             if (!c.busy)
               OutlinedButton(
-                onPressed: c.needsRecovery
-                    ? () async {
-                        await c.recover();
-                        if (_current &&
-                            c.creationState == BoardingCreationState.resolved) {
-                          setState(() => _newSelection = false);
-                        }
-                      }
-                    : c.initialize,
+                onPressed: c.needsRecovery ? c.recover : c.initialize,
                 child: const Text('결과 다시 조회'),
               ),
             if (c.needsRecovery)
               FilledButton(
-                onPressed: c.busy
-                    ? null
-                    : () async {
-                        await c.retryCreation();
-                        if (_current &&
-                            c.creationState == BoardingCreationState.resolved) {
-                          setState(() => _newSelection = false);
-                        }
-                      },
+                onPressed: c.busy ? null : c.retryCreation,
                 child: const Text('원래 생성 요청 그대로 재시도'),
               ),
           ],
         );
       }
-      final draft = _draft;
-      if (draft != null) {
-        return Column(
-          children: [
-            if (c.message != null) Text(c.message!),
-            Expanded(
-              child: BoardingConfirmationView(
-                key: ValueKey(draft.candidate.candidateRef),
-                candidate: draft.candidate,
-                routeNumber: draft.route,
-                route: _route,
-                boardingName: draft.boarding,
-                targetName: draft.target,
-                onConfirm: _confirm,
-                initialNotificationOffsetStops: _notificationOffsetStops,
-                onNotificationOffsetChanged: (value) =>
-                    _notificationOffsetStops = value,
-                onBack: () => setState(() => _draft = null),
-                busy: c.busy,
-                reconfirm: _reconfirm,
-              ),
-            ),
-          ],
-        );
-      }
-      if (_reconfirmContext != null) {
-        return BoardingReconfirmationScreen(
-          controller: c,
-          selectionContext: _reconfirmContext!,
-          findCandidates: widget.findCandidates,
-          onBack: () => setState(() {
-            _reconfirm = false;
-            _reconfirmContext = null;
-          }),
-          onReselect: () => setState(() {
-            _reconfirmContext = null;
-            _route = null;
-          }),
-          onSelect: (candidate) => _select(
-            candidate,
-            _reconfirmContext!,
-            c.session!.routeNumber,
-            c.session!.targetName,
-          ),
-        );
-      }
-      if (c.session != null && !_reconfirm && !_newSelection) {
+      if (c.session != null) {
         return BoardingSessionAutoRefresh(
           key: ValueKey(c.session!.id),
           controller: c,
@@ -270,112 +320,13 @@ class _BoardingHomeState extends State<BoardingHome> {
             boardingName: _boardingNameSessionId == c.session!.id
                 ? _boardingName
                 : null,
-            onBack: widget.onBack,
-            onNew: () => setState(() {
-              _newSelection = true;
-              _route = null;
-            }),
-            onReconfirm: () => setState(() {
-              _reconfirm = true;
-              _route = null;
-              _reconfirmContext = c.selectionContext;
-            }),
+            onBack: _back,
+            onNew: _openSearch,
+            onReconfirm: _openReconfirmation,
           ),
         );
       }
     }
-    final route = _route;
-    final stopScreen = route == null
-        ? null
-        : BoardingStopScreen(
-            key: ValueKey(route.id),
-            route: route,
-            authSession: widget.authSession,
-            findStops: widget.findStops,
-            findCandidates: widget.findCandidates,
-            reconfirm: _reconfirm,
-            creationBusy: c?.busy ?? false,
-            notificationOffsetStops: _notificationOffsetStops,
-            onNotificationOffsetChanged: (value) =>
-                setState(() => _notificationOffsetStops = value),
-            onSelectCandidate: c == null
-                ? null
-                : (candidate, selection, {required boarding, required target}) {
-                    if (_reconfirm) {
-                      _select(
-                        candidate,
-                        selection,
-                        route.routeNumber,
-                        target,
-                        boarding: boarding,
-                      );
-                    } else {
-                      _create(candidate, selection, boarding);
-                    }
-                  },
-            onBack: () {
-              if (_current) setState(() => _route = null);
-            },
-          );
-    final searchScreen = Column(
-      children: [
-        AppBar(
-          primary: false,
-          leading: IconButton(
-            tooltip: '도착 알람으로',
-            onPressed: widget.onBack,
-            icon: const Icon(Icons.arrow_back),
-          ),
-          title: const Text('하차 알람 · 노선 선택'),
-          actions: const [StopBellHomeButton()],
-        ),
-        Expanded(
-          child: BusRouteSearchScreen(
-            search: widget.searchRoutes,
-            onSelect: (route) {
-              if (_current) setState(() => _route = route);
-            },
-          ),
-        ),
-      ],
-    );
-    final body = Navigator(
-      pages: [
-        MaterialPage<void>(
-          key: const ValueKey('boarding-search'),
-          child: searchScreen,
-        ),
-        if (stopScreen != null)
-          MaterialPage<void>(
-            key: ValueKey('boarding-stop-${route!.id}'),
-            child: stopScreen,
-          ),
-      ],
-      onDidRemovePage: (page) {
-        if (page.key != const ValueKey('boarding-search') &&
-            _current &&
-            _route != null) {
-          setState(() => _route = null);
-        }
-      },
-    );
-    return Column(
-      children: [
-        if (c?.message != null) Text(c!.message!),
-        if (_reconfirm) ...[
-          const Text(
-            '기존 선택 정보를 복원할 수 없어요. 원래 노선과 목적·승차 정류장을 다시 선택해 주세요. 기존 차량만 재확인할 수 있어요.',
-          ),
-          TextButton(
-            onPressed: () => setState(() {
-              _reconfirm = false;
-              _route = null;
-            }),
-            child: const Text('세션 상세로'),
-          ),
-        ],
-        Expanded(child: body),
-      ],
-    );
+    return _search(context);
   }
 }

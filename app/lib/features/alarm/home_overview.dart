@@ -96,7 +96,7 @@ class _HomeOverviewState extends State<HomeOverview>
     // 알림 탭 이동은 상위 화면의 첫 post-frame에서 처리된다. 그 뒤에 조회해
     // 이미 다른 화면으로 이동한 경우 세션 조회가 현재 문맥 검사로 생략되게 한다.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) return;
       _loadAlarms();
       _loadSessions().catchError((Object _) {});
     });

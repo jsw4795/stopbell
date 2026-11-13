@@ -38,6 +38,7 @@ class BoardingStopScreen extends StatefulWidget {
     this.onSelectCandidate,
     this.reconfirm = false,
     this.creationBusy = false,
+    this.creationMessage,
     this.notificationOffsetStops = 2,
     this.onNotificationOffsetChanged,
     this.findVehicles,
@@ -48,6 +49,7 @@ class BoardingStopScreen extends StatefulWidget {
   final FindBoardingCandidates findCandidates;
   final VoidCallback onBack;
   final bool reconfirm, creationBusy;
+  final String? creationMessage;
   final int notificationOffsetStops;
   final ValueChanged<int>? onNotificationOffsetChanged;
 
@@ -243,9 +245,11 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     final epoch = _candidateEpoch;
     final routeId = widget.route.id;
     final boardingId = _boarding?.id;
+    final requestRoute = keepResult ? _candidateRoute : ModalRoute.of(context);
     bool current() =>
         _current &&
         epoch == _candidateEpoch &&
+        (requestRoute?.isActive ?? true) &&
         routeId == widget.route.id &&
         target.id == _target?.id &&
         boardingId == _boarding?.id;
@@ -367,9 +371,16 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
                 ),
             ],
       iconColor: routeTypeColor(context, widget.route),
-      body: _state == _StopsState.success
-          ? (candidate ? _candidateBody() : _timelineWithVehicles())
-          : _status(),
+      body: Column(
+        children: [
+          if (widget.creationMessage != null) Text(widget.creationMessage!),
+          Expanded(
+            child: _state == _StopsState.success
+                ? (candidate ? _candidateBody() : _timelineWithVehicles())
+                : _status(),
+          ),
+        ],
+      ),
       summary:
           _state == _StopsState.success &&
               !(candidate && _compactResults && _selectedCandidate == null)

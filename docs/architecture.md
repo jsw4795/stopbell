@@ -152,6 +152,14 @@ Logout은 기존 `beforeLogout` → generation 무효화 → 진행 중 Refresh 
 
 서버가 Refresh Token을 이미 회전시킨 뒤 응답이 유실되면 기존 Token이 무효화됐을 수 있다. Timeout 뒤 Pair 보존은 Token 유효성 보장이 아니며, 별도 복구 계약이 없으므로 Token 합성·추측·자동 재전송을 하지 않는다. 이후 Logout은 확인 가능한 기존 Token만 제시하며, Backend는 제시된 Hash의 Session 하나만 삭제하고 없는 Token도 204로 처리하므로 알 수 없는 새 Token의 서버 측 revocation을 보장할 수 없다. Logout 자체의 Timeout도 서버 정리 성공 또는 확실한 실패로 단정하지 않는다. 자동 재현·회귀 결과와 실환경 미검증 사항은 [TASK-816 처리 기록](task-list.md#task-816-감사-항목과-확인-수준)에 남긴다.
 
+### Flutter 화면 전환
+
+로그인과 홈은 앱 Navigator의 첫 route에서 인증 상태에 따라 표시한다. 도착 알람 검색 → 정류장 선택, 도착 상세, 하차 검색 → 정류장 선택 → 차량 후보, 하차 상세·차량 재확인·확인 화면, 설정은 앱의 단일 Navigator에 기본 `MaterialPageRoute`로 진입한다. 중첩 Navigator나 내부 페이지 상태로 하위 화면을 대체하지 않으며 새 routing Dependency를 추가하지 않는다. iOS 기본 Cupertino 전환과 가장자리 스와이프를 사용한다.
+
+헤더 뒤로 가기는 `Navigator.maybePop`, 홈 버튼은 `popUntil((route) => route.isFirst)`를 사용한다. 검색·정류장 화면을 스택에 유지해 검색 결과·선택·스크롤·차량 캐시를 보존한다. 도착 생성 완료는 생성 화면들을 제거하고 홈 위에 상세를 push하며, 하차 생성 완료는 하차 진입 route까지 정리해 추적 상세를 표시한다. 복구·오류·로딩은 해당 화면의 상태로 유지한다. 상세에서 홈으로 복귀하면 목록을 다시 조회하며, 가려진 홈이나 상세에서는 자동 갱신 요청을 진행하지 않는다. 활성·비활성별 수동 갱신 정책은 유지한다.
+
+알림 탭은 인증과 서버 응답을 확인한 뒤 홈 위에 해당 상세를 push하므로 뒤로 가면 홈으로 돌아온다. 로그아웃·인증 만료·계정 전환 시에는 하위 route를 모두 정리하고 첫 route의 인증 화면을 표시한다. Auth generation·User/login identity·navigation epoch와 각 route의 수명 검증으로 늦은 응답의 화면 복원이나 후속 요청을 차단한다. 확인 다이얼로그와 권한 안내는 기존 modal을 사용하며 로그인·탈퇴 진행 상태도 첫 route의 상태로 유지한다.
+
 ### Flutter 도착 Alarm 최초 생성과 Push 준비 (TASK-816 / AUD-01)
 
 `main.dart`의 기존 `prepareAlarmPush()` 콜백을 `AlarmHome`이 상세 화면과 `BusRouteStopScreen`에 전달한다. 최초 `알람 시작`은 중복 입력을 막은 뒤 Push 준비·사용자 선택 → Create → Activate 순서로 실행하며, 같은 동작의 Activate 직전에는 준비를 반복하지 않는다. 미결정 권한은 도착 알림 안내 뒤 사용자가 선택할 때만 요청하고, 취소·Dialog 닫기는 Create 전에 종료한다. 권한 거부·기기 등록 실패는 기존 설정 안내와 명시적 계속 진행/취소를 유지하며 Alarm 사용 자체를 강제 차단하지 않는다. 콜백이 없는 환경의 기존 생성 계약과 BoardingSession 준비 UX는 유지한다.
@@ -198,11 +206,11 @@ Flutter 구현은 사용자 확정 → Push 준비 → `Random.secure` UUID v4 �
 
 ### Flutter 하차 알림 후보 조회 (TASK-907 1단계)
 
-로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. 같은 home의 화면 전환을 사용해 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 승차 지점을 먼저 선택하고 그 이후의 필수 목적 occurrence를 선택한다. 선택 가능 여부는 occurrence의 order로 판단하며 두 정류장 선택 후 하차 화면에서만 선택을 잠근다. 재선택은 양쪽 선택과 후보 epoch를 초기화하고 승차 단계부터 시작한다. 후보 조회와 신규 생성은 서버에서 순서를 재검증한다. 기존 세션 재확인에서 이전 선택 조합이 순서 오류로 거부되면 승차를 생략해 후보를 다시 조회한다. 서버는 재확인 시 기존 차량·노선·목적 traversal을 계속 검증하며 신규 생성에서는 승차를 요구한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.
+로그인 뒤 기존 `AlarmHome` 목록에서 버스 도착 알림과 별도의 하차 알림 진입점을 제공한다. [화면 전환 구조](#flutter-화면-전환)에 따라 기존 Alarm detail/notification tap 진입점을 유지한다. `BoardingHome`은 기존 Route 검색 화면과 Client를 재사용하고, `BoardingStopScreen`은 기존 Stop Client의 occurrence 목록에서 필수 승차 지점을 먼저 선택하고 그 이후의 필수 목적 occurrence를 선택한다. 선택 가능 여부는 occurrence의 order로 판단하며 두 정류장 선택 후 하차 화면에서만 선택을 잠근다. 재선택은 양쪽 선택과 후보 epoch를 초기화하고 승차 단계부터 시작한다. 후보 조회와 신규 생성은 서버에서 순서를 재검증한다. 기존 세션 재확인에서 이전 선택 조합이 순서 오류로 거부되면 승차를 생략해 후보를 다시 조회한다. 서버는 재확인 시 기존 차량·노선·목적 traversal을 계속 검증하며 신규 생성에서는 승차를 요구한다. 도착 Alarm 전용 전후 알림 옵션은 공유하지 않는다.
 
 `BoardingCandidateClient`는 기존 `AuthenticatedApiClient`/Auth Session refresh와 generation을 사용한다. 화면의 Route ID·목적/승차 occurrence 변경, 재조회, 화면 폐기에는 요청 epoch를 무효화하며 logout 시작/계정 세대 변경에는 후보·선택 문맥을 제거한다. 미전송 후보 reference는 화면 메모리에만 두고 서버 추천 순서와 관측 시각을 보존한다. 생성 요청의 원래 본문 보존은 아래 pending intent 경계를 따른다. 후보 상태·불확실성의 의미는 [후보 API](api.md#후보-조회)를 따르며 unknown enum은 미확인 상태로 표시한다.
 
-정류장 선택과 후보 결과는 같은 `BoardingStopScreen`에 있으며 후보 결과를 표시하는 동안에도 노선도의 스크롤 상태를 유지한다. 상단 뒤로 가기와 Android 시스템 뒤로 가기는 진행 중 후보 요청 또는 표시 중인 후보를 무효화하고 기존 선택으로 복귀한다. iOS 가장자리 스와이프는 별도 Navigator Route가 없는 이 화면 전환에는 연결되지 않는다.
+`BoardingStopScreen`은 정류장 선택 상태와 후보 데이터를 소유하고, 후보 결과를 별도 `MaterialPageRoute`로 표시하는 동안에도 이전 노선도의 선택·스크롤·차량 캐시를 유지한다. 후보에서 뒤로 가기·시스템 pop·iOS 가장자리 스와이프를 하면 후보를 무효화하고 기존 정류장 선택으로 복귀한다.
 
 1단계의 후보 조회·비교와 2단계의 확정·세션 관리가 구현됐다. 차량 선택 접수와 진행 검증·추적 지원을 구분하고 실제 `BOARDING_TRACKING_UNSUPPORTED` 지원 제한을 안내한다. 3단계의 세션 FCM 수신/tap 구현과 검증 경계는 아래 별도 절을 따른다. 새 Dependency, GPS/위치 권한, 후보 목록의 영속 저장은 추가하지 않는다. 세션 화면의 표시 중 자동 조회는 아래 세션 상세 절을 따른다.
 

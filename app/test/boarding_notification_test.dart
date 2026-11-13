@@ -540,6 +540,19 @@ void main() {
         expect(requests.single.method, 'GET');
       },
     );
+    testWidgets('하차 알림 상세의 maybePop은 홈으로 돌아간다', (tester) async {
+      await pump(tester);
+      final context = tester.element(find.byType(BoardingNotificationScreen));
+      expect(ModalRoute.of(context), isA<MaterialPageRoute<void>>());
+      expect(await Navigator.of(context).maybePop(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('header-home')), findsOneWidget);
+      expect(
+        Navigator.of(tester.element(find.byKey(const ValueKey('header-home'))))
+            .canPop(),
+        isFalse,
+      );
+    });
     for (final (status, evaluation) in [
       ('TRACKING', 'READY'),
       ('TRACKING', 'RECOVERY_PENDING'),
@@ -721,6 +734,7 @@ void main() {
               });
               break;
             case 'home':
+              await tester.pump(const Duration(milliseconds: 400));
               await tester.tap(find.byTooltip('도착 알람으로'));
               break;
             case 'dispose':

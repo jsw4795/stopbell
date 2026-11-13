@@ -361,15 +361,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _homeRequests = ValueNotifier<int>(0);
   bool _isLoading = false;
   String? _message;
-
-  @override
-  void dispose() {
-    _homeRequests.dispose();
-    super.dispose();
-  }
 
   Future<void> _confirmDeletion() async {
     final confirmed = await showDialog<bool>(
@@ -548,7 +541,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: AlarmHome(
                       onOpenSettings: _isLoading ? null : _openSettings,
                       key: ValueKey(widget.authSession.generation),
-                      homeRequests: _homeRequests,
                       client: widget.alarmClient,
                       notifications: widget.notifications,
                       beforeBoardingCreate: (context) =>

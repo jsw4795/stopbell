@@ -193,6 +193,41 @@ void main() {
     },
   );
 
+  testWidgets('하차 검색 route의 maybePop과 후보 홈 버튼은 루트 홈으로 돌아간다', (tester) async {
+    await pump(tester);
+    await tester.tap(find.text('하차 알람'));
+    await tester.pumpAndSettle();
+    final context = tester.element(find.byType(TextField));
+    expect(ModalRoute.of(context), isA<MaterialPageRoute<void>>());
+    expect(await Navigator.of(context).maybePop(), isTrue);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('header-home')), findsOneWidget);
+    await start(tester);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('홈으로'));
+    await tester.pumpAndSettle();
+    final home = tester.element(find.byKey(const ValueKey('header-home')));
+    expect(Navigator.of(home).canPop(), isFalse);
+    expect(find.text('서울70사1234'), findsNothing);
+  });
+
+  testWidgets('정류장 route를 pop한 뒤 늦은 후보 응답은 새 route를 열지 않는다', (tester) async {
+    await pump(tester);
+    final pending = Completer<http.Response>();
+    candidateResponse = (_) => pending.future;
+    await start(tester);
+    final context = tester.element(find.byTooltip('노선 다시 선택'));
+    expect(await Navigator.of(context).maybePop(), isTrue);
+    pending.complete(boardingJson(candidatesJson()));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+    expect(find.text('서울70사1234'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('boarding-candidate-results')),
+      findsNothing,
+    );
+  });
+
   testWidgets(
     'existing alarm notification tap leaves candidate screen and opens authenticated alarm detail',
     (tester) async {
@@ -210,6 +245,18 @@ void main() {
       expect(find.textContaining('도착 알림 목적지'), findsOneWidget);
       expect(find.text('서울70사1234'), findsNothing);
       expect(requests.last.url.path, '/api/v1/alarms/15');
+      expect(
+        await Navigator.of(tester.element(find.text('알람 상세'))).maybePop(),
+        isTrue,
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('header-home')), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      expect(
+        Navigator.of(tester.element(find.byKey(const ValueKey('header-home'))))
+            .canPop(),
+        isFalse,
+      );
     },
   );
 

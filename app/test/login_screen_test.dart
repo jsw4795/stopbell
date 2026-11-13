@@ -226,6 +226,108 @@ void main() {
     expect(find.text('도착 알람'), findsOneWidget);
   });
 
+  for (final screen in ['도착 알람', '상세', '설정']) {
+    testWidgets('$screen route는 iOS 뒤로 가기를 지원하고 maybePop 뒤 홈을 갱신한다', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      var lists = 0;
+      final alarms = FlowAlarms()
+        ..list = (() async {
+          lists++;
+          return [createdAlarm];
+        });
+      await tester.pumpWidget(
+        app(
+          session(FakeAuthenticator(), FakeStorage(pair: pair)),
+          alarmClient: alarms,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        screen == '설정'
+            ? find.byTooltip('설정')
+            : screen == '상세'
+            ? find.byKey(const ValueKey(15))
+            : find.text(screen),
+      );
+      await tester.pumpAndSettle();
+      final target = screen == '설정'
+          ? find.widgetWithText(AppBar, '설정')
+          : screen == '상세'
+          ? find.text('알람 상세')
+          : find.byType(TextField);
+      final context = tester.element(target);
+      final route = ModalRoute.of(context)! as MaterialPageRoute<void>;
+      expect(route.isFirst, isFalse);
+      expect(route.popGestureEnabled, isTrue);
+      expect(await Navigator.of(context).maybePop(), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('header-home')), findsOneWidget);
+      expect(lists, 2);
+      expect(
+        Navigator.of(tester.element(find.byKey(const ValueKey('header-home'))))
+            .canPop(),
+        isFalse,
+      );
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
+
+  testWidgets('도착 정류장 maybePop은 검색 캐시를 유지하고 iOS 가장자리 스와이프는 홈으로 돌아간다', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    var searches = 0;
+    await tester.pumpWidget(
+      app(
+        session(FakeAuthenticator(), FakeStorage(pair: pair)),
+        searchRoutes: (_) async {
+          searches++;
+          return const [
+            BusRoute(id: 754, routeNumber: '7000', regionName: '수원시'),
+          ];
+        },
+        findStops: (_) async => const [
+          BusRouteStopOccurrence(
+            id: 11,
+            name: '첫 정류장',
+            order: 1,
+            canNotifyOneStopBefore: false,
+            canNotifyOneStopAfter: true,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('도착 알람'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '7000');
+    await tester.tap(find.byTooltip('검색'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey(754)));
+    await tester.pumpAndSettle();
+    final context = tester.element(find.byTooltip('노선 다시 선택'));
+    expect(
+      (ModalRoute.of(context)! as MaterialPageRoute<void>).popGestureEnabled,
+      isTrue,
+    );
+    expect(await Navigator.of(context).maybePop(), isTrue);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      '7000',
+    );
+    expect(find.byKey(const ValueKey(754)), findsOneWidget);
+    expect(searches, 1);
+    await tester.dragFrom(const Offset(1, 300), const Offset(600, 0));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('header-home')), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   testWidgets('기본 설정에서 iOS Apple 버튼을 표시한다', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);
@@ -365,7 +467,11 @@ void main() {
     expect(find.text('첫 정류장'), findsOneWidget);
     await tester.tap(find.byTooltip('노선 다시 선택'));
     await tester.pumpAndSettle();
-    expect(find.text('노선번호를 입력해 검색하세요.'), findsOneWidget);
+    expect(find.byKey(const ValueKey(754)), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      '7000',
+    );
   });
 
   testWidgets('logout during Stop fetch keeps Login even after late result', (
@@ -390,6 +496,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('정류장 조회 중...'), findsOneWidget);
     await tapInSettings(tester, '로그아웃');
     await tester.pump();
@@ -608,17 +715,19 @@ void main() {
     final alarms = FlowAlarms()
       ..list = (() async => [createdAlarm])
       ..detail = ((_) => pending.future);
-    await tester.pumpWidget(
-      app(
-        session(FakeAuthenticator(), FakeStorage(pair: pair), backend: backend),
-        alarmClient: alarms,
-      ),
+    final auth = session(
+      FakeAuthenticator(),
+      FakeStorage(pair: pair),
+      backend: backend,
     );
+    await tester.pumpWidget(app(auth, alarmClient: alarms));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey(15)));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('알람 조회 중...'), findsOneWidget);
-    await tapInSettings(tester, '로그아웃');
+    await tester.pump();
+    unawaited(auth.logout());
     await tester.pump();
     backend.logoutGate.complete();
     await tester.pumpAndSettle();
