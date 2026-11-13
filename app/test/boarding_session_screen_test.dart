@@ -324,10 +324,21 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);
-      expect(find.text('최근 위치 기준'), findsOneWidget);
+      expect(find.text('최근 위치 기준'), findsNothing);
       expect(find.text('추적 취소'), findsOneWidget);
     },
   );
+
+  testWidgets('pulling the timeline refreshes the session', (tester) async {
+    api.currentSession = BoardingSession.fromJson(timelineSessionJson());
+    await pump(tester);
+    await tester.drag(
+      find.byKey(const ValueKey('tracking-timeline-scroll')),
+      const Offset(0, 400),
+    );
+    await tester.pumpAndSettle();
+    expect(api.detailCalls, 2);
+  });
 
   testWidgets(
     'manual refresh shows loading and recenters an identical response',
@@ -338,7 +349,14 @@ void main() {
       await tester.pumpAndSettle();
       final scroll = find.byKey(const ValueKey('tracking-timeline-scroll'));
       final marker = find.byKey(const ValueKey('tracking-bus-marker'));
-      await tester.drag(scroll, const Offset(0, 3000));
+      tester
+          .state<ScrollableState>(
+            find
+                .descendant(of: scroll, matching: find.byType(Scrollable))
+                .first,
+          )
+          .position
+          .jumpTo(0);
       await tester.pumpAndSettle();
       expect(tester.getRect(scroll).overlaps(tester.getRect(marker)), isFalse);
       final reply = Completer<BoardingSession>();

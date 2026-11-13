@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../../shared/stopbell_home_button.dart';
 
 import 'package:flutter/material.dart';
@@ -180,7 +182,8 @@ class BoardingSessionDetails extends StatelessWidget {
     this.constrained = false,
     this.actions = const [],
   });
-  final VoidCallback? onRefresh, onBack;
+  final FutureOr<void> Function()? onRefresh;
+  final VoidCallback? onBack;
   final bool showRefresh, constrained, refreshing;
   final int refreshToken;
   final InitialReference? initialReference;
@@ -346,9 +349,14 @@ class BoardingSessionDetails extends StatelessWidget {
         child: Text('이동 경로', style: theme.textTheme.titleSmall),
       ),
     );
+    Widget refreshable(Widget child) => RefreshIndicator(
+      onRefresh: () async => onRefresh?.call(),
+      child: child,
+    );
+
     Widget route({required bool scrollable}) {
       if (s.timeline != null) {
-        return _TrackingTimeline(
+        final timeline = _TrackingTimeline(
           key: ValueKey('timeline-${s.id}'),
           session: s,
           stateUncertain: stateUncertain,
@@ -356,6 +364,7 @@ class BoardingSessionDetails extends StatelessWidget {
           refreshToken: refreshToken,
           initialReference: initialReference,
         );
+        return scrollable ? refreshable(timeline) : timeline;
       }
       final fallback = Padding(
         padding: const EdgeInsets.symmetric(horizontal: StopBellSpacing.lg),
@@ -370,7 +379,14 @@ class BoardingSessionDetails extends StatelessWidget {
           ],
         ),
       );
-      return scrollable ? SingleChildScrollView(child: fallback) : fallback;
+      return scrollable
+          ? refreshable(
+              SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: fallback,
+              ),
+            )
+          : fallback;
     }
 
     Widget panel({required bool bounded}) {
@@ -404,17 +420,20 @@ class BoardingSessionDetails extends StatelessWidget {
       );
     }
     if (s.isTerminal) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(
-          horizontal: StopBellSpacing.screenPadding,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            summary,
-            const SizedBox(height: StopBellSpacing.sm),
-            panel(bounded: false),
-          ],
+      return refreshable(
+        SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(
+            horizontal: StopBellSpacing.screenPadding,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              summary,
+              const SizedBox(height: StopBellSpacing.sm),
+              panel(bounded: false),
+            ],
+          ),
         ),
       );
     }
@@ -423,11 +442,14 @@ class BoardingSessionDetails extends StatelessWidget {
         children: [
           ConstrainedBox(
             constraints: BoxConstraints(maxHeight: constraints.maxHeight * .6),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(
-                horizontal: StopBellSpacing.lg,
+            child: refreshable(
+              SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: StopBellSpacing.lg,
+                ),
+                child: summary,
               ),
-              child: summary,
             ),
           ),
           const SizedBox(height: StopBellSpacing.sm),
@@ -705,7 +727,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          initialPosition ? '승차 전 참고 위치' : '승차 정류장으로 이동 중',
+                          initialPosition ? '등록 당시 차량 위치' : '승차 정류장으로 이동 중',
                           style: Theme.of(context).textTheme.titleSmall
                               ?.copyWith(color: accent),
                         ),
@@ -720,10 +742,6 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                           ),
                         Text(
                           '승차까지 ${timeline.boardingIndex - position}개 정류장',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        Text(
-                          initialPosition ? '참고용 위치예요' : '최근 위치 기준',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -767,6 +785,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
       },
       child: SingleChildScrollView(
         key: const ValueKey('tracking-timeline-scroll'),
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: StopBellSpacing.lg),
         child: content,
       ),
@@ -861,10 +880,6 @@ class _TrackingRow extends StatelessWidget {
                               '하차 준비 알림 정류장',
                               style: theme.textTheme.bodySmall,
                             ),
-                          Text(
-                            initial ? '참고용 위치예요' : '최근 위치 기준',
-                            style: theme.textTheme.bodySmall,
-                          ),
                           if (showOrder)
                             Text(
                               '노선 순서 ${stop.order}',
@@ -945,11 +960,6 @@ class _TrackingRow extends StatelessWidget {
                     if (last) Text('목표 정류장', style: theme.textTheme.bodySmall),
                     if (alert)
                       Text('하차 준비 알림 정류장', style: theme.textTheme.bodySmall),
-                    if (bus)
-                      Text(
-                        initial ? '참고용 위치예요' : '최근 위치 기준',
-                        style: theme.textTheme.bodySmall,
-                      ),
                     if (showOrder)
                       Text(
                         '노선 순서 ${stop.order}',

@@ -615,13 +615,13 @@ void main() {
           ),
         );
         expect(marker, findsOneWidget);
-        expect(find.text('참고용 위치예요'), findsOneWidget);
+        expect(find.text('참고용 위치예요'), findsNothing);
         expect(api.detailCalls, 1);
         await tester.pump(const Duration(seconds: 20));
         await tester.pump();
         expect(api.detailCalls, 2);
         expect(marker, findsOneWidget);
-        expect(find.text('참고용 위치예요'), findsOneWidget);
+        expect(find.text('참고용 위치예요'), findsNothing);
         await tester.pumpWidget(const SizedBox());
       },
     );

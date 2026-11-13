@@ -152,6 +152,31 @@ const stop = BusRouteStopOccurrence(
 );
 
 void main() {
+  testWidgets('detail refresh button appears only for active alarms', (
+    tester,
+  ) async {
+    final client = StubAlarms();
+    for (final status in AlarmStatus.values) {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(
+        detailScreen(client, created: withStatus(status)),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byTooltip('상태 새로고침'),
+        status == AlarmStatus.active ? findsOneWidget : findsNothing,
+      );
+    }
+  });
+
+  testWidgets('pulling inactive detail reloads alarm state', (tester) async {
+    final client = StubAlarms()..detail = (_) async => sample;
+    await tester.pumpWidget(detailScreen(client, created: sample));
+    await tester.drag(find.byType(ListView).first, const Offset(0, 400));
+    await tester.pumpAndSettle();
+    expect(client.detailIds, [sample.id]);
+  });
+
   testWidgets(
     'start creates then activates and blocks input throughout both requests',
     (tester) async {

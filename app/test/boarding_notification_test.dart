@@ -536,7 +536,7 @@ void main() {
           findsOneWidget,
         );
         expect(find.text('위치 정류장'), findsOneWidget);
-        expect(find.text('최근 위치 기준'), findsOneWidget);
+        expect(find.text('최근 위치 기준'), findsNothing);
         expect(requests.single.method, 'GET');
       },
     );

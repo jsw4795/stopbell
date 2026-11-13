@@ -120,7 +120,7 @@ void main() {
     expect(find.text('3개 정류장 남음'), findsOneWidget);
     expect(find.text('최근 확인된 버스 위치'), findsNothing);
     expect(find.textContaining('부근 지나는 중'), findsNothing);
-    expect(find.text('최근 위치 기준'), findsOneWidget);
+    expect(find.text('최근 위치 기준'), findsNothing);
     final highlighted = find
         .ancestor(
           of: find.byKey(const ValueKey('tracking-bus-marker')),
@@ -128,11 +128,9 @@ void main() {
         )
         .first;
     final textTop = tester.getTopLeft(find.text('경유')).dy;
-    final textBottom = tester.getBottomLeft(find.text('최근 위치 기준')).dy;
-    expect(
-      (textTop + textBottom) / 2,
-      closeTo(tester.getCenter(highlighted).dy, 1),
-    );
+    final textBottom = tester.getBottomLeft(find.text('경유')).dy;
+    expect(textTop, greaterThanOrEqualTo(tester.getTopLeft(highlighted).dy));
+    expect(textBottom, lessThanOrEqualTo(tester.getBottomLeft(highlighted).dy));
     expect(offset(tester), greaterThan(0));
     expectMarkerVisible(tester, const ValueKey('tracking-bus-marker'));
     final headerY = tester.getTopLeft(row).dy;
@@ -156,7 +154,7 @@ void main() {
       ),
     );
     expectMarkerVisible(tester, const ValueKey('tracking-bus-marker'));
-    expect(find.text('참고용 위치예요'), findsOneWidget);
+    expect(find.text('참고용 위치예요'), findsNothing);
     session.value = BoardingSession.fromJson(
       timelineSession(
         id: 456,
@@ -169,7 +167,7 @@ void main() {
     expectMarkerVisible(tester, const ValueKey('before-boarding-bus-marker'));
     expect(find.text('현재 정류장 부근'), findsOneWidget);
     expect(find.text('승차까지 2개 정류장'), findsOneWidget);
-    expect(find.text('참고용 위치예요'), findsOneWidget);
+    expect(find.text('참고용 위치예요'), findsNothing);
     final bus = find.byKey(const ValueKey('before-boarding-bus-marker'));
     final firstRow = find.byKey(const ValueKey(102));
     final firstIcon = find.descendant(

@@ -100,7 +100,7 @@ void main() {
         'initialObservation': {'stopName': '경유', 'remainingOccurrenceGap': 2},
         'timeline': timeline(3, 'INITIAL'),
       });
-      expect(find.text('참고용 위치예요'), findsOneWidget);
+      expect(find.text('참고용 위치예요'), findsNothing);
       expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);
       await show(tester, {
         ...sessionJson(evaluation: 'VERIFICATION_PENDING'),

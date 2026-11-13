@@ -16,9 +16,14 @@ class AlarmApproachLoader {
   final _inFlight =
       <int, Future<(List<BusRouteStopOccurrence>, BusRouteVehicles)>>{};
 
-  Future<(List<BusRouteStopOccurrence>, BusRouteVehicles)> _route(int id) async {
+  Future<(List<BusRouteStopOccurrence>, BusRouteVehicles)> _route(
+    int id,
+  ) async {
     try {
-      final results = await Future.wait<Object>([findStops(id), findVehicles(id)]);
+      final results = await Future.wait<Object>([
+        findStops(id),
+        findVehicles(id),
+      ]);
       return (
         results[0] as List<BusRouteStopOccurrence>,
         results[1] as BusRouteVehicles,
@@ -45,7 +50,9 @@ class AlarmApproachLoader {
       int? nearest;
       var partial = snapshot.status == BusRouteVehiclesStatus.partial;
       for (final vehicle in snapshot.vehicles) {
-        final position = stops.indexWhere((stop) => stop.id == vehicle.occurrenceId);
+        final position = stops.indexWhere(
+          (stop) => stop.id == vehicle.occurrenceId,
+        );
         if (position < 0) {
           partial = true;
           continue;
@@ -80,10 +87,10 @@ class AlarmApproachText extends StatefulWidget {
   final Object? refreshKey;
 
   @override
-  State<AlarmApproachText> createState() => _AlarmApproachTextState();
+  State<AlarmApproachText> createState() => AlarmApproachTextState();
 }
 
-class _AlarmApproachTextState extends State<AlarmApproachText> {
+class AlarmApproachTextState extends State<AlarmApproachText> {
   String _label = '버스 위치 확인 중…';
   int _generation = 0;
 
@@ -108,6 +115,12 @@ class _AlarmApproachTextState extends State<AlarmApproachText> {
     }
   }
 
+  Future<void> refresh() async {
+    if (widget.alarm.status != AlarmStatus.active) return;
+    setState(() => _label = '버스 위치 확인 중…');
+    await _load();
+  }
+
   Future<void> _load() async {
     final generation = ++_generation;
     if (widget.alarm.status != AlarmStatus.active) return;
@@ -125,13 +138,12 @@ class _AlarmApproachTextState extends State<AlarmApproachText> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.alarm.status != AlarmStatus.active) return const SizedBox.shrink();
+    if (widget.alarm.status != AlarmStatus.active) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: const EdgeInsets.only(top: StopBellSpacing.xs),
-      child: Text(
-        _label,
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
+      child: Text(_label, style: Theme.of(context).textTheme.bodySmall),
     );
   }
 }

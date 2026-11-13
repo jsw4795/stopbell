@@ -128,26 +128,30 @@ class _BoardingNotificationScreenState
             ],
           ),
         Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(StopBellSpacing.lg),
-            children: [
-              if (_busy) const Text('서버 응답 확인 중...'),
-              if (_error != null) ...[
-                Text(_error!),
-                OutlinedButton(
-                  onPressed: _busy ? null : _load,
-                  child: const Text('다시 조회'),
-                ),
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(StopBellSpacing.lg),
+              children: [
+                if (_busy) const Text('서버 응답 확인 중...'),
+                if (_error != null) ...[
+                  Text(_error!),
+                  OutlinedButton(
+                    onPressed: _busy ? null : _load,
+                    child: const Text('다시 조회'),
+                  ),
+                ],
+                if (_session != null)
+                  BoardingSessionDetails(
+                    session: _session!,
+                    onBack: widget.onBack,
+                    onRefresh: _busy ? null : _load,
+                    showRefresh:
+                        _session!.status != BoardingSessionStatus.cancelled,
+                  ),
               ],
-              if (_session != null)
-                BoardingSessionDetails(
-                  session: _session!,
-                  onBack: widget.onBack,
-                  onRefresh: _busy ? null : _load,
-                  showRefresh:
-                      _session!.status != BoardingSessionStatus.cancelled,
-                ),
-            ],
+            ),
           ),
         ),
       ],
