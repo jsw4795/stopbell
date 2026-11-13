@@ -97,8 +97,12 @@
    - 구현: `app/lib/shared/`의 `stopbell_skeleton.dart`, `stopbell_delayed_loading.dart`(`StopBellDelayedLoading`), `stopbell_button_label.dart`. 홈 알람 목록·노선 검색·정류장 선택·버스 후보·알람 상세·하차 상세에 적용했다.
 3. **데이터 정리 주기**: `DataCleanupService`의 실행 주기와 보존 기간을 확정한다. 현재는 스케줄을 붙이지 않았다.
 4. **출시 준비**: 개인정보처리방침·약관 URL을 준비하고, 운영 프록시 구조와 그 구조에서의 Apple challenge rate limit 키를 정한다.
-5. **서버 로그 운영**: 현재는 Spring Boot 기본 Logback의 콘솔 출력만 있다. 일 단위 파일 순환과 14~30일 보관, 요청 ID(MDC), ERROR 알림(Sentry 등 외부 서비스 도입은 결정 필요), 토큰·이메일·좌표 같은 민감정보 미기록 점검을 운영 서버 구조와 함께 정한다.
-6. **UI-8 통합 검증**: 실기기 E2E(TASK-908/710)와 모니터링 지연 개선을 진행한다.
+5. **서울 메타데이터 최신화**
+   - 2026-11-14 실측 결과, 서울시가 N61에 8번 정류장 '철산리버빌아파트'(213000118)를 추가해 정류장이 188개가 됐다. 개발 DB는 187개라 차량 후보가 `METADATA_MISMATCH`로 막힌다(회귀 테스트 `d0cdee9`).
+   - 공식 절차는 T-Data CSV 3종 → preview → Bootstrap이며, 최신 CSV는 개발자가 확보해야 한다.
+   - 서울 API 기반 정기 동기화(노선 변경 감지 포함)는 별도 설계가 필요하다.
+6. **서버 로그 운영**: 현재는 Spring Boot 기본 Logback의 콘솔 출력만 있다. 일 단위 파일 순환과 14~30일 보관, 요청 ID(MDC), ERROR 알림(Sentry 등 외부 서비스 도입은 결정 필요), 토큰·이메일·좌표 같은 민감정보 미기록 점검을 운영 서버 구조와 함께 정한다.
+7. **UI-8 통합 검증**: 실기기 E2E(TASK-908/710)와 모니터링 지연 개선을 진행한다.
 
 자동 갱신은 `app/lib/features/boarding/boarding_session_auto_refresh.dart`의 화면 생명주기 Timer가 `BoardingSessionController.refresh()`를 통해 기존 세션 GET을 호출한다. foreground의 표시 중 TRACKING 상세에서 20초마다 조회하고 복귀 시 즉시 조회하며, 화면 이탈·백그라운드·종료 시 중단한다. 수동 조회와 중복을 막고 자동 조회에서는 스크롤을 유지한다. Backend 추적 판정과 Provider 호출·수집 주기는 변경하지 않는다. UI-5 홈 및 알람 관리의 구현 범위는 [로드맵](roadmap.md#ui-5--홈-및-알람-관리-구현-완료)을 따른다.
 
