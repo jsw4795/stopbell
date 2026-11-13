@@ -492,7 +492,7 @@ TAGO Arrival의 `arrprevstationcnt`와 `arrtime`은 Route/Stop 수준의 auxilia
 | 미종료 + 사용자 취소 / 수명 종료 | CANCELLED / EXPIRED. 추적·pending 전달 종료 |
 | terminal + 늦은 결과·재요청 | terminal 유지. 재시작·Device 변경·FCM 결과로 되살리지 않음 |
 
-COMPLETED는 실제 정차·사용자 하차나 Push 성공을 뜻하지 않는다. PREPARE_ALIGHT와 DESTINATION_REACHED는 각각 세션당 최대 한 번 생성한다. V20 이전 세션(notificationOffsetStops=NULL)은 기존 준비 ON/OFF 설정을 보존한다. 차량·목적지를 바꾸려면 기존 세션 취소 후 새 세션을 생성한다. 재확인도 수명·Event 소비 여부를 초기화하지 않는다.
+COMPLETED는 실제 정차·사용자 하차나 Push 성공을 뜻하지 않는다. PREPARE_ALIGHT와 DESTINATION_REACHED는 각각 세션당 최대 한 번 생성한다. 단, PREPARE_ALIGHT는 기존 Event의 모든 Delivery가 만료·최종 실패했고(ACCEPTED·유효한 PENDING·의도적 종료 DISPATCH_NOT_ALLOWED가 없음) 더 새로운 검증 관측이 아직 준비 구간(0 < gap ≤ offset)이면 세션당 최대 3회까지 새 Event(`reissue_sequence` 1~3)로 재발행한다. V20 이전 세션(notificationOffsetStops=NULL)은 기존 준비 ON/OFF 설정을 보존한다. 차량·목적지를 바꾸려면 기존 세션 취소 후 새 세션을 생성한다. 재확인도 수명·Event 소비 여부를 초기화하지 않는다.
 
 `revision`은 checkpoint·상태 반영 때 증가하는 의미 값이다. API 의도·조회 결과·복구 gate의 오래된 snapshot을 거부하며 Event identity가 아니다. 회차·소실 등의 연속성 상실 사유는 마지막 정상 checkpoint와 함께 보존해 재시작으로 잊지 않는다.
 

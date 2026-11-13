@@ -45,6 +45,10 @@ public class NotificationEvent {
     @Column(name = "expires_at", updatable = false)
     private LocalDateTime expiresAt;
 
+    /** 0 is the original Event; a Boarding PREPARE_ALIGHT re-issue after expiry or final failure increments it. */
+    @Column(name = "reissue_sequence", nullable = false, updatable = false)
+    private int reissueSequence;
+
     @Column(name = "alarm_id", updatable = false)
     private Long alarmId;
 
@@ -135,7 +139,15 @@ public class NotificationEvent {
             Long boardingSessionId, User user, BoardingNotificationEventType eventType, BoardingCheckpoint checkpoint,
             LocalDateTime eventDetectedAt, LocalDateTime createdAt, LocalDateTime expiresAt
     ) {
-        if (boardingSessionId == null || boardingSessionId <= 0 || user == null
+        return forBoardingSession(boardingSessionId, user, eventType, checkpoint, eventDetectedAt, createdAt,
+                expiresAt, 0);
+    }
+
+    public static NotificationEvent forBoardingSession(
+            Long boardingSessionId, User user, BoardingNotificationEventType eventType, BoardingCheckpoint checkpoint,
+            LocalDateTime eventDetectedAt, LocalDateTime createdAt, LocalDateTime expiresAt, int reissueSequence
+    ) {
+        if (reissueSequence < 0 || boardingSessionId == null || boardingSessionId <= 0 || user == null
                 || eventType == null || checkpoint == null
                 || checkpoint.getEvidence() == BoardingCheckpoint.Evidence.UNVERIFIED_REFERENCE) {
             throw new IllegalArgumentException("Boarding Event identity, owner and evidence must be valid");
@@ -144,6 +156,7 @@ public class NotificationEvent {
         event.sourceType = NotificationSourceType.BOARDING_SESSION;
         event.boardingSessionId = boardingSessionId;
         event.boardingEventType = eventType;
+        event.reissueSequence = reissueSequence;
         event.user = user;
         event.observedAt = time(checkpoint.getObservedAt());
         event.eventDetectedAt = time(eventDetectedAt);
@@ -189,6 +202,10 @@ public class NotificationEvent {
 
     public BoardingNotificationEventType getBoardingEventType() {
         return boardingEventType;
+    }
+
+    public int getReissueSequence() {
+        return reissueSequence;
     }
 
     public LocalDateTime getExpiresAt() {

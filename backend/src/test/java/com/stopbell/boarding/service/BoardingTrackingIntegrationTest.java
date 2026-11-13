@@ -1219,6 +1219,54 @@ class BoardingTrackingIntegrationTest {
     }
 
     @Test
+    @DisplayName("준비 Event의 모든 Delivery가 최종 실패하면 다음 관측에서 재발행하고 성공·상한 이후에는 중복하지 않는다")
+    void reissue_preparation_after_final_failure() {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        // PENDING Delivery가 살아 있으면 같은 관측 흐름에서도 재발행하지 않는다.
+        time.set(time.get().plusSeconds(1));
+        expected = store.findOpen().getFirst();
+        store.apply(expected, decisionAt(expected, 2, 21));
+        assertThat(events.count()).isOne();
+        for (int round = 1; round <= 4; round++) {
+            new TransactionTemplate(manager).executeWithoutResult(status -> {
+                for (var delivery : deliveries.findAll()) {
+                    if (delivery.getStatus() == NotificationDeliveryStatus.PENDING) {
+                        delivery.beginAttempt(7, utc(), utc().plusSeconds(10));
+                        delivery.recordFailure(NotificationProviderResult.PERMANENT_REQUEST, "REJECTED");
+                        delivery.markFailed("REJECTED", utc());
+                    }
+                }
+            });
+            time.set(time.get().plusSeconds(1));
+            expected = store.findOpen().getFirst();
+            store.apply(expected, decisionAt(expected, 2, 21 + round));
+        }
+        // 최초 Event + 재발행 최대 3회, 각 Event는 서로 다른 sequence와 Delivery를 가진다.
+        assertThat(events.findAll()).extracting(NotificationEvent::getReissueSequence)
+                .containsExactlyInAnyOrder(0, 1, 2, 3);
+        assertThat(deliveries.count()).isEqualTo(4);
+    }
+
+    @Test
+    @DisplayName("ACCEPTED Delivery가 있는 준비 Event는 재발행하지 않는다")
+    void no_reissue_after_accepted_preparation() {
+        device(session.getUser());
+        var expected = store.findOpen().getFirst();
+        store.apply(expected, decision(expected, 1));
+        new TransactionTemplate(manager).executeWithoutResult(status -> {
+            var delivery = deliveries.findAll().getFirst();
+            delivery.beginAttempt(7, utc(), utc().plusSeconds(10));
+            delivery.markAccepted(utc(), utc());
+        });
+        time.set(time.get().plusSeconds(1));
+        expected = store.findOpen().getFirst();
+        store.apply(expected, decisionAt(expected, 2, 21));
+        assertThat(onlyEvent().getReissueSequence()).isZero();
+    }
+
+    @Test
     @DisplayName("Session 준비 Event는 Alarm LIMIT을 점유하지 않고 gate 미연결 attempt는 차단하며 만료는 전체 source에서 조회한다")
     void persisted_session_delivery_remains_unsendable() {
         device(session.getUser());
@@ -1794,6 +1842,10 @@ class BoardingTrackingIntegrationTest {
 
     private BoardingTrackingDecision decision(BoardingTrackingSnapshot expected, int index) {
         return evaluator.evaluate(expected, BoardingProgressEvaluatorTest.observation(expected, index, Meaning.VERIFIED_REFERENCE, 20), utc());
+    }
+
+    private BoardingTrackingDecision decisionAt(BoardingTrackingSnapshot expected, int index, int seconds) {
+        return evaluator.evaluate(expected, BoardingProgressEvaluatorTest.observation(expected, index, Meaning.VERIFIED_REFERENCE, seconds), utc());
     }
 
     private VehiclePollingCycle cycle() { return new VehiclePollingCycle(tago, seoul, detail, clock); }

@@ -1,6 +1,8 @@
 package com.stopbell.notification.repository;
 
+import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Limit;
 
 import com.stopbell.notification.entity.NotificationEvent;
 import com.stopbell.notification.entity.BoardingNotificationEventType;
@@ -28,8 +30,16 @@ public interface NotificationEventRepository extends JpaRepository<NotificationE
             select event from NotificationEvent event
             where event.sourceType = 'BOARDING_SESSION' and event.boardingSessionId = :boardingSessionId
               and event.boardingEventType = :boardingEventType
+            order by event.reissueSequence desc
             """)
-    Optional<NotificationEvent> findByBoardingSessionIdAndBoardingEventType(
-            Long boardingSessionId, BoardingNotificationEventType boardingEventType
+    List<NotificationEvent> findLatestBoardingEvents(
+            Long boardingSessionId, BoardingNotificationEventType boardingEventType, Limit limit
     );
+
+    /** Latest (highest re-issue sequence) Event of the identity. */
+    default Optional<NotificationEvent> findByBoardingSessionIdAndBoardingEventType(
+            Long boardingSessionId, BoardingNotificationEventType boardingEventType
+    ) {
+        return findLatestBoardingEvents(boardingSessionId, boardingEventType, Limit.of(1)).stream().findFirst();
+    }
 }

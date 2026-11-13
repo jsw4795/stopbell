@@ -679,3 +679,7 @@ V38 `transit_metadata_change_approvals`는 원본 실행 및 적용 실행 FK, P
 `APPROVED`만 만료 전 선점하거나 취소할 수 있다. 선점은 행 잠금과 새 `COLLECTED` 실행의 동일 근거 확인 후 `CLAIMED`를 commit한다. `CLAIMED` 이후 결과는 `APPLIED`, `FAILED`, `UNCERTAIN` 중 하나이며 승인 가능 상태로 되돌리지 않는다. 완료 이력 확인이 있을 때만 `APPLIED`다. 결과 기록의 commit이 불확실하면 남은 행과 수집 이력·실제 DB를 수동 확인한다. 재적용은 새 수집·검토·승인을 거친다.
 
 V38에서 분석 `fingerprint_version`은 기존 V36 행을 1, 당시 새 분석을 2로 표시했다. 버전 2는 공유 Stop 충돌의 Route·occurrence 처리 순서를 묶었다. 현재 새 분석은 노선 유형과 수집 여부도 지문에 포함하는 버전 3이다. 버전 1·2 근거로 새 승인을 발급하거나 기존 승인을 적용할 수 없으며, 새로 수집해 검토해야 한다. 기존 기록은 수정하지 않는다.
+
+### V41 Boarding 준비 알림 재발행
+
+`notification_events.reissue_sequence INT NOT NULL DEFAULT 0`을 추가하고 `uk_notification_events_boarding_identity`를 `UNIQUE(boarding_session_id, boarding_event_type, reissue_sequence)`로 재정의했다. CHECK로 범위를 0~3, Alarm Event는 0으로 제한한다. Boarding PREPARE_ALIGHT의 재발행 조건은 [Domain Model](domain-model.md)을 따르며 조회는 가장 큰 sequence의 Event를 최신으로 본다.

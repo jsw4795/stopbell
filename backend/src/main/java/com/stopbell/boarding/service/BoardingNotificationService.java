@@ -33,6 +33,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 @Transactional(propagation = Propagation.MANDATORY)
 public class BoardingNotificationService {
     private static final Logger log = LoggerFactory.getLogger(BoardingNotificationService.class);
+    /** Per Session, in addition to the original PREPARE_ALIGHT Event. */
+    private static final int MAX_PREPARATION_REISSUES = 3;
     private final NotificationEventRepository events;
     private final NotificationDeliveryRepository deliveries;
     private final DeviceRepository devices;
@@ -102,8 +104,13 @@ public class BoardingNotificationService {
             throw new IllegalArgumentException("Notification requires newly verified current progress");
         }
         var existing = events.findByBoardingSessionIdAndBoardingEventType(session.getId(), type);
+        int reissueSequence = 0;
         if (existing.isPresent()) {
-            return existing.orElseThrow().getId();
+            var previous = existing.orElseThrow();
+            if (destination || !canReissuePreparation(previous, checkpoint)) {
+                return previous.getId();
+            }
+            reissueSequence = previous.getReissueSequence() + 1;
         }
         LocalDateTime expiresAt = Duration.between(checkpoint.getObservedAt(), session.getExpiresAt()).compareTo(prepareTtl) <= 0
                 ? session.getExpiresAt() : checkpoint.getObservedAt().plus(prepareTtl);
@@ -117,7 +124,7 @@ public class BoardingNotificationService {
         }
         NotificationEvent event = events.saveAndFlush(NotificationEvent.forBoardingSession(session.getId(),
                 session.getUser(), type, checkpoint,
-                decision.eventDetectedAt(), createdAt, expiresAt));
+                decision.eventDetectedAt(), createdAt, expiresAt, reissueSequence));
         // Session -> Event -> current eligible Device rows in ascending ID order -> Delivery.
         var recipients = devices.findEligibleByUserIdForUpdate(session.getUser().getId());
         LocalDateTime deliveryCreatedAt = now();
@@ -134,6 +141,28 @@ public class BoardingNotificationService {
             });
         }
         return event.getId();
+    }
+
+    /**
+     * A preparation Event whose every Delivery expired or finally failed may be re-issued from a newer checkpoint
+     * that is still inside the preparation window. Any accepted or still-live Delivery blocks it to avoid duplicates.
+     */
+    private boolean canReissuePreparation(NotificationEvent previous, BoardingCheckpoint checkpoint) {
+        if (previous.getReissueSequence() >= MAX_PREPARATION_REISSUES
+                || !checkpoint.getObservedAt().isAfter(previous.getObservedAt())) {
+            return false;
+        }
+        var previousDeliveries = deliveries.findBoardingEventDeliveriesForRead(previous.getId());
+        if (previousDeliveries.isEmpty()) {
+            return false;
+        }
+        LocalDateTime now = now();
+        return previousDeliveries.stream().noneMatch(delivery ->
+                // DISPATCH_NOT_ALLOWED is an intentional termination (hold/cancel), not a delivery failure.
+                "DISPATCH_NOT_ALLOWED".equals(delivery.getLastFailureCode())
+                        || delivery.getStatus() == NotificationDeliveryStatus.ACCEPTED
+                        || (delivery.getStatus() == NotificationDeliveryStatus.PENDING
+                            && now.isBefore(delivery.getExpiresAt())));
     }
 
     public String preparationStatus(Long sessionId) {
