@@ -85,6 +85,7 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
               Expanded(
                 flex: 3,
                 child: TextField(
+                  autofocus: true,
                   controller: _queryController,
                   enabled: !loading,
                   decoration: InputDecoration(

@@ -510,6 +510,12 @@ void main() {
     await tester.tap(button);
     await tester.pumpAndSettle();
     expect(find.text('이 정류장에 버스가 도착하면 알림을 보내드려요'), findsOneWidget);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(find.text('이 정류장에 버스가 도착하면 알림을 보내드려요'), findsNothing);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+    expect(find.text('이 정류장에 버스가 도착하면 알림을 보내드려요'), findsOneWidget);
     await tester.tapAt(const Offset(5, 100));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));

@@ -166,15 +166,21 @@ void main() {
         find.byTooltip('상태 새로고침'),
         status == AlarmStatus.active ? findsOneWidget : findsNothing,
       );
+      expect(
+        find.byType(RefreshIndicator),
+        status == AlarmStatus.active ? findsOneWidget : findsNothing,
+      );
     }
   });
 
-  testWidgets('pulling inactive detail reloads alarm state', (tester) async {
+  testWidgets('pulling inactive detail does not reload alarm state', (
+    tester,
+  ) async {
     final client = StubAlarms()..detail = (_) async => sample;
     await tester.pumpWidget(detailScreen(client, created: sample));
     await tester.drag(find.byType(ListView).first, const Offset(0, 400));
     await tester.pumpAndSettle();
-    expect(client.detailIds, [sample.id]);
+    expect(client.detailIds, isEmpty);
   });
 
   testWidgets(

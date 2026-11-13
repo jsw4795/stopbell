@@ -145,6 +145,12 @@ void main() {
     await tester.tap(help);
     await tester.pumpAndSettle();
     expect(find.text(message), findsOneWidget);
+    await tester.tap(help);
+    await tester.pumpAndSettle();
+    expect(find.text(message), findsNothing);
+    await tester.tap(help);
+    await tester.pumpAndSettle();
+    expect(find.text(message), findsOneWidget);
     // 뒤로가기 대신 안내 제목을 눌러 말풍선만 닫는다.
     await tester.tap(find.text('차량 후보 선택'));
     await tester.pumpAndSettle();

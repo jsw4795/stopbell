@@ -7,6 +7,25 @@ import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_search_screen.dart';
 
 void main() {
+  testWidgets('검색 화면 진입 시 입력창에 포커스한다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: BusRouteSearchScreen(
+            search: (_) async => const [],
+            onSelect: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<EditableText>(find.byType(EditableText)).focusNode.hasFocus,
+      isTrue,
+    );
+    expect(tester.testTextInput.isVisible, isTrue);
+  });
+
   for (final theme in [StopBellTheme.light, StopBellTheme.dark]) {
     testWidgets(
       'small screen wraps long endpoints and keeps official colors in ${theme.brightness}',

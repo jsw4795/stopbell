@@ -419,168 +419,168 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
         : null;
     final active = alarm.status != AlarmStatus.inactive;
     final optionsEditable = _canMutate && alarm.status == AlarmStatus.active;
-    return RefreshIndicator(
-      onRefresh: _refreshApproach,
-      child: ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
-        children: [
-          Card(
-            margin: EdgeInsets.zero,
-            child: Padding(
-              padding: const EdgeInsets.all(StopBellSpacing.lg),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: StopBellSpacing.sm,
-                    runSpacing: StopBellSpacing.xs,
-                    crossAxisAlignment: WrapCrossAlignment.center,
+    final details = ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
+      children: [
+        Card(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(StopBellSpacing.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: StopBellSpacing.sm,
+                  runSpacing: StopBellSpacing.xs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.directions_bus_outlined,
+                      color: routeColor ?? colors.primary,
+                      size: 24,
+                    ),
+                    Text(
+                      alarm.routeNumber,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: routeColor,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: StopBellSpacing.sm,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: .14),
+                        borderRadius: BorderRadius.circular(
+                          StopBellRadius.button,
+                        ),
+                      ),
+                      child: Text(
+                        statusLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: StopBellSpacing.xs),
+                Text.rich(
+                  TextSpan(
                     children: [
-                      Icon(
-                        Icons.directions_bus_outlined,
-                        color: routeColor ?? colors.primary,
-                        size: 24,
-                      ),
-                      Text(
-                        alarm.routeNumber,
-                        style: theme.textTheme.headlineSmall?.copyWith(
+                      TextSpan(
+                        text: alarm.stopName,
+                        style: theme.textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w700,
-                          color: routeColor,
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: StopBellSpacing.sm,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: statusColor.withValues(alpha: .14),
-                          borderRadius: BorderRadius.circular(
-                            StopBellRadius.button,
-                          ),
-                        ),
-                        child: Text(
-                          statusLabel,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: statusColor,
-                          ),
+                      TextSpan(
+                        text: ' 도착',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: muted,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: StopBellSpacing.xs),
-                  Text.rich(
-                    TextSpan(
+                ),
+                AlarmApproachText(
+                  key: _approachKey,
+                  alarm: alarm,
+                  findApproach: _approachLoader?.find,
+                ),
+                if (endpoints != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: StopBellSpacing.xs),
+                    child: Row(
                       children: [
-                        TextSpan(
-                          text: alarm.stopName,
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        TextSpan(
-                          text: ' 도착',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: muted,
+                        Icon(Icons.swap_horiz, size: 16, color: muted),
+                        const SizedBox(width: StopBellSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            endpoints,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: muted,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  AlarmApproachText(
-                    key: _approachKey,
-                    alarm: alarm,
-                    findApproach: _approachLoader?.find,
-                  ),
-                  if (endpoints != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: StopBellSpacing.xs),
-                      child: Row(
-                        children: [
-                          Icon(Icons.swap_horiz, size: 16, color: muted),
-                          const SizedBox(width: StopBellSpacing.sm),
-                          Expanded(
-                            child: Text(
-                              endpoints,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: muted,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: StopBellSpacing.md),
-          Card(
-            margin: EdgeInsets.zero,
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                SwitchListTile(
-                  title: const Text('알람 사용'),
-                  value: active,
-                  onChanged: _canMutate
-                      ? (value) => _change(activating: value)
-                      : null,
-                ),
-                if (alarm.canNotifyOneStopBefore != false)
-                  _optionRow(
-                    '한 정류장 전 알림',
-                    alarm.notifyOneStopBefore,
-                    optionsEditable
-                        ? (value) => _changeOption(before: value)
-                        : null,
-                  ),
-                if (alarm.canNotifyOneStopAfter != false)
-                  _optionRow(
-                    '한 정류장 후 알림',
-                    alarm.notifyOneStopAfter,
-                    optionsEditable
-                        ? (value) => _changeOption(after: value)
-                        : null,
-                  ),
               ],
             ),
           ),
-          if (!_outcomeUnknown && alarm.status == AlarmStatus.followUp) ...[
-            const SizedBox(height: StopBellSpacing.md),
-            const Text('목표 정류장 도착 후 같은 차량을 한 정류장 뒤 알림까지 추적 중이에요.'),
-            const Text('다시 활성화하면 이전 후속 추적을 끝내고 새 감시를 시작해요.'),
-            const SizedBox(height: StopBellSpacing.sm),
-            FilledButton(
-              onPressed: _canMutate ? () => _change(activating: true) : null,
-              child: const Text('다시 활성화'),
-            ),
-          ],
-          if (_mutating || _loading)
-            const Center(child: CircularProgressIndicator()),
-          if (_outcomeUnknown)
-            OutlinedButton(
-              onPressed: _mutating || _loading ? null : _load,
-              child: const Text('현재 상태 다시 조회'),
-            ),
-          if (_message != null) ...[
-            const SizedBox(height: StopBellSpacing.md),
-            Text(_message!),
-          ],
-          const SizedBox(height: StopBellSpacing.xl),
-          TextButton(
-            style: TextButton.styleFrom(
-              foregroundColor: colors.error,
-              minimumSize: const Size.fromHeight(
-                StopBellSpacing.minimumTouchSize,
+        ),
+        const SizedBox(height: StopBellSpacing.md),
+        Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              SwitchListTile(
+                title: const Text('알람 사용'),
+                value: active,
+                onChanged: _canMutate
+                    ? (value) => _change(activating: value)
+                    : null,
               ),
-            ),
-            onPressed: _canMutate ? _confirmDelete : null,
-            child: const Text('삭제'),
+              if (alarm.canNotifyOneStopBefore != false)
+                _optionRow(
+                  '한 정류장 전 알림',
+                  alarm.notifyOneStopBefore,
+                  optionsEditable
+                      ? (value) => _changeOption(before: value)
+                      : null,
+                ),
+              if (alarm.canNotifyOneStopAfter != false)
+                _optionRow(
+                  '한 정류장 후 알림',
+                  alarm.notifyOneStopAfter,
+                  optionsEditable
+                      ? (value) => _changeOption(after: value)
+                      : null,
+                ),
+            ],
+          ),
+        ),
+        if (!_outcomeUnknown && alarm.status == AlarmStatus.followUp) ...[
+          const SizedBox(height: StopBellSpacing.md),
+          const Text('목표 정류장 도착 후 같은 차량을 한 정류장 뒤 알림까지 추적 중이에요.'),
+          const Text('다시 활성화하면 이전 후속 추적을 끝내고 새 감시를 시작해요.'),
+          const SizedBox(height: StopBellSpacing.sm),
+          FilledButton(
+            onPressed: _canMutate ? () => _change(activating: true) : null,
+            child: const Text('다시 활성화'),
           ),
         ],
-      ),
+        if (_mutating || _loading)
+          const Center(child: CircularProgressIndicator()),
+        if (_outcomeUnknown)
+          OutlinedButton(
+            onPressed: _mutating || _loading ? null : _load,
+            child: const Text('현재 상태 다시 조회'),
+          ),
+        if (_message != null) ...[
+          const SizedBox(height: StopBellSpacing.md),
+          Text(_message!),
+        ],
+        const SizedBox(height: StopBellSpacing.xl),
+        TextButton(
+          style: TextButton.styleFrom(
+            foregroundColor: colors.error,
+            minimumSize: const Size.fromHeight(
+              StopBellSpacing.minimumTouchSize,
+            ),
+          ),
+          onPressed: _canMutate ? _confirmDelete : null,
+          child: const Text('삭제'),
+        ),
+      ],
     );
+    return alarm.status == AlarmStatus.active
+        ? RefreshIndicator(onRefresh: _refreshApproach, child: details)
+        : details;
   }
 }

@@ -849,6 +849,7 @@ class _CandidateSectionHeader extends StatefulWidget {
 
 class _CandidateSectionHeaderState extends State<_CandidateSectionHeader> {
   final _helpKey = GlobalKey<TooltipState>();
+  bool _tooltipDismissedOnPointerDown = false;
   Timer? _timer;
   bool _outdated = false;
 
@@ -955,16 +956,26 @@ class _CandidateSectionHeaderState extends State<_CandidateSectionHeader> {
                 label: '차량 선택 도움말',
                 button: true,
                 child: ExcludeSemantics(
-                  child: IconButton(
-                    onPressed: () =>
-                        _helpKey.currentState?.ensureTooltipVisible(),
-                    icon: const Icon(Icons.info_outline),
-                    constraints: const BoxConstraints(
-                      minWidth: 44,
-                      minHeight: 44,
+                  child: Listener(
+                    onPointerDown: (_) {
+                      _tooltipDismissedOnPointerDown =
+                          Tooltip.dismissAllToolTips();
+                    },
+                    child: IconButton(
+                      onPressed: () {
+                        if (!_tooltipDismissedOnPointerDown) {
+                          _helpKey.currentState?.ensureTooltipVisible();
+                        }
+                        _tooltipDismissedOnPointerDown = false;
+                      },
+                      icon: const Icon(Icons.info_outline),
+                      constraints: const BoxConstraints(
+                        minWidth: 44,
+                        minHeight: 44,
+                      ),
+                      padding: EdgeInsets.zero,
+                      iconSize: 16,
                     ),
-                    padding: EdgeInsets.zero,
-                    iconSize: 16,
                   ),
                 ),
               ),

@@ -51,6 +51,7 @@ class BusRouteStopScreen extends StatefulWidget {
 
 class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
   final _arrivalTooltipKey = GlobalKey<TooltipState>();
+  bool _tooltipDismissedOnPointerDown = false;
   _StopState _state = _StopState.loading;
   List<BusRouteStopOccurrence> _stops = const [];
   int? _selectedOccurrenceId;
@@ -320,16 +321,27 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                           label: '도착 알림 안내',
                           button: true,
                           child: ExcludeSemantics(
-                            child: IconButton(
-                              onPressed: () => _arrivalTooltipKey.currentState
-                                  ?.ensureTooltipVisible(),
-                              icon: const Icon(Icons.info_outline),
-                              constraints: const BoxConstraints(
-                                minWidth: 44,
-                                minHeight: 44,
+                            child: Listener(
+                              onPointerDown: (_) {
+                                _tooltipDismissedOnPointerDown =
+                                    Tooltip.dismissAllToolTips();
+                              },
+                              child: IconButton(
+                                onPressed: () {
+                                  if (!_tooltipDismissedOnPointerDown) {
+                                    _arrivalTooltipKey.currentState
+                                        ?.ensureTooltipVisible();
+                                  }
+                                  _tooltipDismissedOnPointerDown = false;
+                                },
+                                icon: const Icon(Icons.info_outline),
+                                constraints: const BoxConstraints(
+                                  minWidth: 44,
+                                  minHeight: 44,
+                                ),
+                                padding: EdgeInsets.zero,
+                                iconSize: 20,
                               ),
-                              padding: EdgeInsets.zero,
-                              iconSize: 20,
                             ),
                           ),
                         ),
