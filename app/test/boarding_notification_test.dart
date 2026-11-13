@@ -581,8 +581,18 @@ void main() {
           expect(find.text('동일 차량 다시 확인'), findsNothing);
           expect(
             find.byTooltip('상태 새로고침'),
-            status == 'CANCELLED' ? findsNothing : findsOneWidget,
+            status == 'TRACKING' ? findsOneWidget : findsNothing,
           );
+          expect(find.byType(RefreshIndicator), findsNothing);
+          await tester.drag(find.byType(ListView).first, const Offset(0, 350));
+          await tester.pumpAndSettle();
+          expect(requests, hasLength(1));
+          if (status == 'TRACKING') {
+            await tester.tap(find.byTooltip('상태 새로고침'));
+            await tester.pumpAndSettle();
+            expect(requests, hasLength(2));
+          }
+
           expect(
             find.textContaining('개 정류장 남음'),
             status == 'TRACKING' && evaluation == 'READY'

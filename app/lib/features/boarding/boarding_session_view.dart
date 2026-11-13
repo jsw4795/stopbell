@@ -265,7 +265,7 @@ class BoardingSessionDetails extends StatelessWidget {
               : null,
           title: const Text('하차 알람'),
           actions: [
-            if (showRefresh)
+            if (showRefresh && s.status == BoardingSessionStatus.tracking)
               IconButton(
                 onPressed: onRefresh,
                 tooltip: '상태 새로고침',
@@ -317,23 +317,57 @@ class BoardingSessionDetails extends StatelessWidget {
             padding: const EdgeInsets.only(top: StopBellSpacing.sm),
             child: Text(notice, style: theme.textTheme.bodySmall),
           ),
-        if (progress || initial)
-          Padding(
-            padding: const EdgeInsets.only(top: StopBellSpacing.sm),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('${s.targetName}까지', style: theme.textTheme.bodyMedium),
-                Text(
-                  '${initial ? (s.initialRemainingGap ?? initialReference?.gap) : s.remainingOccurrenceGap}개 정류장 남음',
-                  style: theme.textTheme.titleMedium!.copyWith(
-                    fontWeight: FontWeight.bold,
+        Padding(
+          padding: const EdgeInsets.only(top: StopBellSpacing.md),
+          child: Row(
+            key: const ValueKey('boarding-journey-summary'),
+            children: [
+              Expanded(
+                child: Text(
+                  s.timeline?.stops.first.name ?? '승차 정류장 정보 없음',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: StopBellSpacing.sm,
+                ),
+                child: SizedBox(
+                  width: 110,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (progress || initial)
+                        FittedBox(
+                          child: Text(
+                            '${initial ? (s.initialRemainingGap ?? initialReference?.gap) : s.remainingOccurrenceGap}개 정류장 남음',
+                            style: theme.textTheme.labelSmall!.copyWith(
+                              color: routeColor ?? scheme.primary,
+                            ),
+                          ),
+                        ),
+                      Icon(
+                        Icons.arrow_forward,
+                        color: routeColor ?? scheme.primary,
+                      ),
+                    ],
                   ),
                 ),
-                Text('노선 순서 기준 · 미정차 정류장 포함', style: theme.textTheme.bodySmall),
-              ],
-            ),
+              ),
+              Expanded(
+                child: Text(
+                  s.targetName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ),
+            ],
           ),
+        ),
         ...actions,
       ],
     );

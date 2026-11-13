@@ -44,7 +44,7 @@ void main() {
     (tester) async {
       final base = {...sessionJson(), 'notificationOffsetStops': 1};
       await show(tester, {...base, 'timeline': timeline(3, 'READY')});
-      expect(find.text('반복 정류장'), findsNWidgets(2));
+      expect(find.text('반복 정류장'), findsNWidgets(3));
       expect(find.text('미정차'), findsOneWidget);
       expect(find.text('하차 준비 알림 정류장'), findsOneWidget);
       expect(find.byKey(const ValueKey('tracking-bus-marker')), findsOneWidget);

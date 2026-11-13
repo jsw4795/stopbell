@@ -95,6 +95,39 @@ void main() {
     expect(viewport.overlaps(marker), isTrue);
   }
 
+  testWidgets('긴 정류장 이름과 큰 글씨에서도 양쪽 이름을 한 줄로 표시한다', (tester) async {
+    final json = timelineSession();
+    json['targetName'] = '아주 긴 목적 정류장 이름과 환승센터';
+    final timeline = json['timeline'] as Map<String, dynamic>;
+    final stops = timeline['stops'] as List;
+    (stops.first as Map<String, dynamic>)['name'] = '아주 긴 승차 정류장 이름과 환승센터';
+    await setup(tester, json, scale: 2);
+    final summary = find.byKey(const ValueKey('boarding-journey-summary'));
+    final names = tester
+        .widgetList<Text>(
+          find.descendant(of: summary, matching: find.byType(Text)),
+        )
+        .where((t) => t.data?.contains('아주 긴') == true)
+        .toList();
+    expect(names, hasLength(2));
+    for (final name in names) {
+      expect(name.maxLines, 1);
+      expect(name.overflow, TextOverflow.ellipsis);
+    }
+    expect(find.text('노선 순서 기준 · 미정차 정류장 포함'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('추적하지 않는 상태에서는 새로고침과 남은 정류장을 숨긴다', (tester) async {
+    await setup(tester, sessionJson(status: 'COMPLETED', evaluation: 'ENDED'));
+    expect(find.byTooltip('상태 새로고침'), findsNothing);
+    expect(find.textContaining('정류장 남음'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('boarding-journey-summary')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('compact header and independently scrolled READY timeline', (
     tester,
   ) async {

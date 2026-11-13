@@ -42,7 +42,7 @@ void main() {
             ),
           ),
         );
-        expect(find.text('목적 정류장'), findsOneWidget);
+        expect(find.text('목적 정류장'), findsNWidgets(2));
         expect(find.text('1개 정류장 전'), findsOneWidget);
         expect(find.text('상세 정보'), findsNothing);
         expect(find.textContaining('목적지 알림: ON'), findsNothing);
@@ -200,7 +200,7 @@ void main() {
       ),
     );
     expect(find.text('선택한 승차 정류장'), findsNothing);
-    expect(find.text('아주 긴 목표 정류장 이름과 환승센터 방면'), findsOneWidget);
+    expect(find.text('아주 긴 목표 정류장 이름과 환승센터 방면'), findsNWidgets(2));
     expect(find.textContaining('전체 노선 구간을 표시할 수 없어요'), findsOneWidget);
     expect(find.textContaining('분 후'), findsNothing);
     await tester.pumpWidget(
@@ -587,7 +587,7 @@ void main() {
       expect(find.byType(BoardingSessionView), findsOneWidget);
       expect(find.text('3개 정류장 남음'), findsOneWidget);
       expect(find.text('상세 정보'), findsNothing);
-      expect(find.textContaining('승차 정류장 정보 없음'), findsNothing);
+      expect(find.text('승차 정류장 정보 없음'), findsOneWidget);
     },
   );
   testWidgets('notification offset is selected before direct registration', (
