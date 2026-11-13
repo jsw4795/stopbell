@@ -195,6 +195,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('한 정류장 전 알림'));
       await tester.pump();
+      await tester.ensureVisible(find.text('알람 시작'));
       await tester.tap(find.text('알람 시작'));
       await tester.pump();
       void expectInputBlocked() {
@@ -222,12 +223,17 @@ void main() {
           isNull,
         );
         expect(
-          tester.widget<IconButton>(find.byType(IconButton)).onPressed,
+          tester
+              .widget<IconButton>(
+                find.widgetWithIcon(IconButton, Icons.arrow_back),
+              )
+              .onPressed,
           isNull,
         );
       }
 
       expectInputBlocked();
+      await tester.ensureVisible(find.text('알람 시작'));
       await tester.tap(find.text('알람 시작'));
       await tester.tap(find.byKey(const ValueKey(54321)));
       await tester.pump();
@@ -237,6 +243,7 @@ void main() {
       pending.complete(sample);
       await tester.pump();
       expectInputBlocked();
+      await tester.ensureVisible(find.text('알람 시작'));
       await tester.tap(find.text('알람 시작'));
       await tester.tap(find.byKey(const ValueKey(54321)));
       await tester.pump();
@@ -273,6 +280,7 @@ void main() {
       await tester.pump();
       await tester.tap(find.text('한 정류장 전 알림'));
       await tester.pump();
+      await tester.ensureVisible(find.text('알람 시작'));
       await tester.tap(find.text('알람 시작'));
       await tester.pumpAndSettle();
       expect(ids, [754, 754]);
@@ -332,6 +340,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const ValueKey(12345)));
         await tester.pump();
+        await tester.ensureVisible(find.text('알람 시작'));
         await tester.tap(find.text('알람 시작'));
         await tester.pumpAndSettle();
         expect(find.textContaining('중복 생성을 피하려면 알람 목록에서'), findsOneWidget);
@@ -360,6 +369,7 @@ void main() {
               .onTap,
           isNull,
         );
+        await tester.ensureVisible(find.text('알람 목록 보기'));
         await tester.tap(find.text('알람 목록 보기'));
         expect(showList, 1);
       },
@@ -384,6 +394,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey(12345)));
       await tester.pump();
+      await tester.ensureVisible(find.text('알람 시작'));
       await tester.tap(find.text('알람 시작'));
       await tester.pumpAndSettle();
       expect(find.textContaining('선택한 알람을 만들 수 없어요.'), findsOneWidget);
@@ -436,6 +447,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const ValueKey(12345)));
         await tester.pump();
+        await tester.ensureVisible(find.text('알람 시작'));
         await tester.tap(find.text('알람 시작'));
         await tester.pumpAndSettle();
         expect(client.createCalls, 1);
@@ -609,6 +621,7 @@ void main() {
     await tester.pumpWidget(detailScreen(client, onBack: () => back++));
     await tester.pumpAndSettle();
     expect(find.text('알람을 찾을 수 없어요.'), findsOneWidget);
+    await tester.ensureVisible(find.text('알람 목록 보기'));
     await tester.tap(find.text('알람 목록 보기'));
     expect(back, 1);
   });
@@ -707,6 +720,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('알람을 찾을 수 없어요.'), findsOneWidget);
       expect(find.text('감시 중'), findsNothing);
+      await tester.ensureVisible(find.text('알람 목록 보기'));
       await tester.tap(find.text('알람 목록 보기'));
       expect(back, 1);
     },
@@ -915,6 +929,7 @@ void main() {
         } else {
           expect(find.text('삭제되었거나 현재 계정에서 접근할 수 없는 알람이에요.'), findsOneWidget);
           expect(find.text('현재 상태 다시 조회'), findsOneWidget);
+          await tester.ensureVisible(find.text('알람 목록 보기'));
           await tester.tap(find.text('알람 목록 보기'));
           expect(back, 1);
         }

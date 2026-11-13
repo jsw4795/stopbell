@@ -505,6 +505,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey(12345)));
       await tester.pump();
+      await tester.ensureVisible(find.text('알람 시작'));
       await tester.tap(find.text('알람 시작'));
       await tester.pump();
       await tester.pump(_deadline);
@@ -517,6 +518,7 @@ void main() {
       expect(created, 0);
       expect(f.requests, hasLength(1));
       expect(f.refreshes, 0);
+      await tester.ensureVisible(find.text('알람 목록 보기'));
       await tester.tap(find.text('알람 목록 보기'));
       expect(showList, 1);
     },
@@ -596,6 +598,7 @@ void main() {
       expect(f.requests, hasLength(1));
       expect(f.refreshes, 0);
       expect(created, 0);
+      await tester.ensureVisible(find.text('알람 목록 보기'));
       await tester.tap(find.text('알람 목록 보기'));
       expect(lists, 1);
     });

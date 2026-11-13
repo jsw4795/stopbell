@@ -80,6 +80,7 @@ void main() {
   }
 
   Future<void> start(WidgetTester tester) async {
+    await tester.ensureVisible(find.text('알람 시작'));
     await tester.tap(find.text('알람 시작'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
@@ -114,6 +115,7 @@ void main() {
         return true;
       },
     );
+    await tester.ensureVisible(find.text('알람 시작'));
     await tester.tap(find.text('알람 시작'));
     await tester.pumpAndSettle();
     expect(client.createCalls, 1);
@@ -143,6 +145,7 @@ void main() {
       final requestId = client.creationRequestId;
       expect(requestId, isNotNull);
       expect(client.activateCalls, 0);
+      await tester.ensureVisible(find.text('알람 목록 보기'));
       await tester.tap(find.text('알람 목록 보기'));
       await tester.pumpAndSettle();
       client.findCreationResult = (id) async {
@@ -247,9 +250,11 @@ void main() {
       final press = tester
           .widget<FilledButton>(find.widgetWithText(FilledButton, '알람 시작'))
           .onPressed!;
+      await tester.ensureVisible(find.text('알람 시작'));
       await tester.tap(find.text('알람 시작'));
       press();
       await tester.pump();
+      await tester.ensureVisible(find.text('알람 시작'));
       await tester.tap(find.text('알람 시작'));
       expect(preparations, 1);
       expectNoMutation();
@@ -265,7 +270,11 @@ void main() {
         isNull,
       );
       expect(
-        tester.widget<IconButton>(find.byType(IconButton)).onPressed,
+        tester
+            .widget<IconButton>(
+              find.widgetWithIcon(IconButton, Icons.arrow_back),
+            )
+            .onPressed,
         isNull,
       );
       expect(

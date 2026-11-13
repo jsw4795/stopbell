@@ -153,8 +153,7 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
   Widget _buildResults() {
     switch (_state) {
       case _SearchState.idle:
-        return const Align(
-          alignment: Alignment(0, -0.3),
+        return _emptyState(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -176,8 +175,7 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
           ),
         );
       case _SearchState.empty:
-        return const Align(
-          alignment: Alignment(0, -0.3),
+        return _emptyState(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -205,6 +203,15 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
         return _buildRouteList();
     }
   }
+
+  Widget _emptyState({required Widget child}) => LayoutBuilder(
+    builder: (context, constraints) => SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: constraints.maxHeight),
+        child: Align(alignment: const Alignment(0, -0.3), child: child),
+      ),
+    ),
+  );
 
   Widget _buildRouteList() {
     final visibleRoutes = _selectedCategory == null
