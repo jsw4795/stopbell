@@ -2,6 +2,9 @@ package com.stopbell.transit.service;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.queryParam;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -22,6 +25,12 @@ import com.stopbell.transit.repository.BusStopRepository;
 import com.stopbell.user.auth.service.JwtTokenService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -37,6 +46,44 @@ class BusRouteVehicleApiIntegrationTest extends LatestSchemaIntegrationTest {
     @Autowired private MockMvc mockMvc;
     @MockitoBean private SeoulBusVehicleLocationClient seoulClient;
     @MockitoBean private GbisBusLocationClient gbisClient;
+
+    @ParameterizedTest
+    @CsvSource({"single-object, 1, AVAILABLE", "array, 2, AVAILABLE", "empty-array, 0, EMPTY",
+            "missing-list, 0, EMPTY", "null-list, 0, EMPTY", "missing-body, 0, EMPTY", "no-data, 0, EMPTY",
+            "missing-optional-fields, 1, PARTIAL"})
+    @DisplayName("GBIS fixture를 실제 HTTP 파서·DB 메타데이터·차량 위치 API 경로로 처리한다")
+    void returns_vehicles_from_response_fixtures(String fixture, int count, String expectedStatus) throws Exception {
+        var route = routes.saveAndFlush(new BusRoute(TransitProvider.TAGO, "GGB229000013", "17", "31200"));
+        route.updateRouteType(com.stopbell.transit.domain.BusRouteType.CITY_SEAT);
+        var stop = stops.saveAndFlush(new BusStop(TransitProvider.TAGO, "gbis-fixture-s1", "정류장", null, null));
+        var first = occurrences.saveAndFlush(new BusRouteStopOccurrence(route, stop, 1));
+        occurrences.saveAndFlush(new BusRouteStopOccurrence(route, stop, 2));
+        RestClient.Builder builder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(builder).build();
+        var fixtureClient = new GbisBusLocationClient(builder.build(), "https://provider.test/gbis", "test-key");
+        server.expect(requestTo(org.hamcrest.Matchers.startsWith("https://provider.test/gbis")))
+                .andExpect(queryParam("routeId", "229000013"))
+                .andRespond(withSuccess(new ClassPathResource("transit/gbis-vehicle-location/" + fixture + ".json"),
+                        MediaType.APPLICATION_JSON));
+        when(gbisClient.fetch("229000013")).thenAnswer(invocation -> fixtureClient.fetch("229000013"));
+
+        var result = mockMvc.perform(get("/api/v1/bus-routes/{id}/vehicles", route.getId())
+                        .header("Authorization", authorization()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(expectedStatus))
+                .andExpect(jsonPath("$.vehicles.length()").value(count));
+        if (fixture.equals("single-object") || fixture.equals("array")) {
+            result.andExpect(jsonPath("$.vehicles[0].vehicleNumber").value("경기00가1001"))
+                    .andExpect(jsonPath("$.vehicles[0].occurrenceId").value(first.getId()))
+                    .andExpect(jsonPath("$.vehicles[0].seat.remaining").value(7));
+        }
+        if (fixture.equals("missing-optional-fields")) {
+            result.andExpect(jsonPath("$.vehicles[0].vehicleNumber").value("경기00가1003"))
+                    .andExpect(jsonPath("$.vehicles[0].occurrenceId").doesNotExist())
+                    .andExpect(jsonPath("$.vehicles[0].seat.status").value("UNAVAILABLE"));
+        }
+        server.verify();
+    }
 
     @Test
     @DisplayName("차량 위치 API는 인증을 요구하고 Provider 원본 ID 없이 위치를 반환한다")

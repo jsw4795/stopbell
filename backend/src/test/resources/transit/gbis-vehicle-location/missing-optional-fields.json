@@ -1,0 +1,13 @@
+{
+  "response": {
+    "msgHeader": {
+      "resultCode": 0
+    },
+    "msgBody": {
+      "busLocationList": {
+        "plateNo": "경기00가1003",
+        "routeId": 229000013
+      }
+    }
+  }
+}

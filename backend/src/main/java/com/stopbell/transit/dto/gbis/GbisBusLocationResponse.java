@@ -2,6 +2,7 @@ package com.stopbell.transit.dto.gbis;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -17,6 +18,8 @@ public record GbisBusLocationResponse(Response response) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record MsgBody(List<GbisBusLocationItem> busLocationList) {
+    public record MsgBody(
+            @JsonFormat(with = JsonFormat.Feature.ACCEPT_SINGLE_VALUE_AS_ARRAY)
+            List<GbisBusLocationItem> busLocationList) {
     }
 }

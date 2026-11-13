@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import java.time.Duration;
 import java.util.List;
@@ -30,6 +32,10 @@ import com.stopbell.transit.service.BusRouteVehicleMetadataReader.Occurrence;
 import com.stopbell.transit.service.BusRouteVehicleMetadataReader.RouteMeta;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.client.MockRestServiceServer;
+import org.springframework.web.client.RestClient;
 
 class BusRouteVehicleServiceTest {
     private final BusRouteVehicleMetadataReader metadata = mock(BusRouteVehicleMetadataReader.class);
@@ -209,6 +215,43 @@ class BusRouteVehicleServiceTest {
         clock.now = clock.now.plusSeconds(10);
         service.find(1L);
         verify(gbis, times(2)).fetch(any());
+    }
+
+    @Test
+    @DisplayName("단일 객체 1대 캐시는 TTL 경계에서 배열 2대로 갱신하고 이후 빈 응답도 반영한다")
+    void fixture_cache_refreshes_vehicle_count() {
+        when(metadata.read(1L)).thenReturn(new RouteMeta(1L, TransitProvider.TAGO, "GGB229000013", "31200",
+                BusRouteType.CITY_SEAT, stops()));
+        var builder = RestClient.builder();
+        var server = MockRestServiceServer.bindTo(builder).build();
+        var client = new GbisBusLocationClient(builder.build(), "https://provider.test/gbis", "test-key");
+        for (String fixture : List.of("single-object", "array", "empty-array")) {
+            server.expect(requestTo(org.hamcrest.Matchers.startsWith("https://provider.test/gbis")))
+                    .andRespond(withSuccess(
+                            new ClassPathResource(
+                                    "transit/gbis-vehicle-location/" + fixture + ".json"),
+                            MediaType.APPLICATION_JSON));
+        }
+        var service = new BusRouteVehicleService(metadata, seoul, client,
+                new ProviderDailyCallBudget(clock, 100, 100, 100), clock,
+                Duration.ofSeconds(15), Duration.ofMinutes(5));
+
+        var single = service.find(1L);
+        assertThat(single.status()).isEqualTo(Status.AVAILABLE);
+        assertThat(single.vehicles()).hasSize(1);
+        clock.now = clock.now.plusSeconds(14);
+        assertThat(service.find(1L)).isSameAs(single);
+        clock.now = clock.now.plusSeconds(1);
+        var multiple = service.find(1L);
+        assertThat(multiple.status()).isEqualTo(Status.AVAILABLE);
+        assertThat(multiple.vehicles()).hasSize(2);
+        assertThat(multiple.observedAt()).isEqualTo(clock.now);
+        assertThat(service.find(1L)).isSameAs(multiple);
+        clock.now = clock.now.plusSeconds(15);
+        var empty = service.find(1L);
+        assertThat(empty.status()).isEqualTo(Status.EMPTY);
+        assertThat(empty.vehicles()).isEmpty();
+        server.verify();
     }
 
     @Test

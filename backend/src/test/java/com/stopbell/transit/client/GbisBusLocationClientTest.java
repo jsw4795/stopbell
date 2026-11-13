@@ -10,6 +10,9 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
@@ -32,6 +35,35 @@ class GbisBusLocationClientTest {
                 .andExpect(queryParam("routeId", "222000209"))
                 .andExpect(queryParam("format", "json"))
                 .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"single-object, 1", "array, 2", "empty-array, 0", "missing-list, 0", "null-list, 0",
+            "missing-body, 0", "no-data, 0", "missing-optional-fields, 1"})
+    @DisplayName("GBIS 단일 객체·배열·빈 응답·누락 필드 fixture를 HTTP 응답에서 파싱한다")
+    void parses_response_fixtures(String fixture, int count) {
+        server.expect(requestTo(org.hamcrest.Matchers.startsWith("https://provider.test/gbis")))
+                .andExpect(queryParam("routeId", "229000013"))
+                .andRespond(withSuccess(new ClassPathResource("transit/gbis-vehicle-location/" + fixture + ".json"),
+                        MediaType.APPLICATION_JSON));
+
+        var vehicles = GbisBusLocationClient.vehicles(client.fetch("229000013"));
+
+        assertThat(vehicles).hasSize(count);
+        if (fixture.equals("single-object")) {
+            assertThat(vehicles.getFirst().plateNo()).isEqualTo("경기00가1001");
+            assertThat(vehicles.getFirst().stationSeq()).isEqualTo(1);
+            assertThat(vehicles.getFirst().remainSeats()).isEqualTo(7);
+        }
+        if (fixture.equals("array")) {
+            assertThat(vehicles).extracting(v -> v.plateNo()).containsExactly("경기00가1001", "경기00가1002");
+        }
+        if (fixture.equals("missing-optional-fields")) {
+            assertThat(vehicles.getFirst().stationSeq()).isNull();
+            assertThat(vehicles.getFirst().remainSeats()).isNull();
+            assertThat(vehicles.getFirst().crowded()).isNull();
+        }
+        server.verify();
     }
 
     @Test

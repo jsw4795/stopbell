@@ -1,0 +1,10 @@
+{
+  "response": {
+    "msgHeader": {
+      "resultCode": 0
+    },
+    "msgBody": {
+      "busLocationList": []
+    }
+  }
+}
