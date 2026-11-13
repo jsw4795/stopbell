@@ -638,7 +638,7 @@ String boardingSessionError(
   BoardingSessionException error,
 ) => switch (error.code) {
   'BOARDING_CANDIDATE_CHANGED' => '차량 후보가 변경되었거나 오래됐어요. 새 후보를 조회해 다시 선택해 주세요.',
-  'BOARDING_SESSION_CONFLICT' => '이미 진행 중인 세션이 있어요. 현재 세션을 확인해 주세요.',
+  'BOARDING_SESSION_CONFLICT' => '이미 진행 중인 하차 알람이 있어요. 기존 하차 알람을 취소한 뒤 다시 시도해 주세요.',
   'BOARDING_REQUEST_CONFLICT' =>
     '원래 생성 요청과 내용이 일치하지 않아요. 요청을 바꾸지 않고 원래 결과를 확인해 주세요.',
   'BOARDING_REVISION_CONFLICT' => '세션 상태가 변경되어 현재 상태를 다시 조회했어요.',

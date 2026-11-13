@@ -20,6 +20,7 @@ class AlarmDetailScreen extends StatefulWidget {
     this.createdAlarm,
     this.beforeActivate,
     this.activationUnverified = false,
+    this.initialMessage,
     this.isRequestCurrent,
   });
 
@@ -28,6 +29,7 @@ class AlarmDetailScreen extends StatefulWidget {
   final VoidCallback onBack;
   final Alarm? createdAlarm;
   final bool activationUnverified;
+  final String? initialMessage;
   final bool Function()? isRequestCurrent;
   final Future<bool> Function(BuildContext context)? beforeActivate;
 
@@ -77,7 +79,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
         ? widget.createdAlarm
         : null;
     _outcomeUnknown = widget.activationUnverified;
-    _message = null;
+    _message = widget.initialMessage;
     _state = _DetailState.loading;
     if (_alarm != null && !_outcomeUnknown) {
       _state = _DetailState.success;
@@ -203,7 +205,12 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
       } catch (error) {
         if (!_isCurrent(request, id, client)) return;
         if (error is AlarmApiException && error.isMutationRejected) {
-          _rejected(error, '알람 상태를 바꾸지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.');
+          _rejected(
+            error,
+            error.isActiveLimitExceeded
+                ? alarmActiveLimitMessage
+                : '알람 상태를 바꾸지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.',
+          );
         } else {
           await _recover(request, id, client);
         }

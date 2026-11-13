@@ -1027,16 +1027,48 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         AlarmResponse first = alarmService.create(user.getId(), new CreateAlarmRequest(route.firstId(), false, false));
         AlarmResponse last = alarmService.create(user.getId(), new CreateAlarmRequest(route.lastId(), false, false));
         alarmService.activate(user.getId(), first.id());
-        alarmService.activate(user.getId(), last.id());
 
         assertThatThrownBy(() -> alarmService.updateOptions(user.getId(), first.id(),
                 new UpdateAlarmOptionsRequest(true, false)))
                 .isInstanceOfSatisfying(ApiException.class, exception ->
                         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_ALARM_REQUEST));
+        alarmService.deactivate(user.getId(), first.id());
+        alarmService.activate(user.getId(), last.id());
         assertThatThrownBy(() -> alarmService.updateOptions(user.getId(), last.id(),
                 new UpdateAlarmOptionsRequest(false, true)))
                 .isInstanceOfSatisfying(ApiException.class, exception ->
                         assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_ALARM_REQUEST));
+    }
+
+    @Test
+    @DisplayName("사용자당 활성 도착 알람은 1개이며 중복 활성화는 멱등이고 다른 사용자와 독립이다")
+    void limit_one_active_alarm_per_user() {
+        User user = user();
+        User other = user();
+        RouteFixture route = route();
+        AlarmResponse first = alarmService.create(user.getId(), new CreateAlarmRequest(route.middleId(), false, false));
+        AlarmResponse second = alarmService.create(user.getId(), new CreateAlarmRequest(route.middleId(), false, true));
+        AlarmResponse third = alarmService.create(user.getId(), new CreateAlarmRequest(route.middleId(), true, false));
+        AlarmResponse others = alarmService.create(other.getId(), new CreateAlarmRequest(route.middleId(), false, false));
+
+        alarmService.activate(user.getId(), first.id());
+        assertThat(alarmService.activate(user.getId(), first.id()).status()).isEqualTo(AlarmStatus.ACTIVE);
+        assertThatThrownBy(() -> alarmService.activate(user.getId(), second.id()))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ALARM_ACTIVE_LIMIT_EXCEEDED));
+        assertThat(alarmService.activate(other.getId(), others.id()).status()).isEqualTo(AlarmStatus.ACTIVE);
+        assertThat(alarmService.findById(user.getId(), second.id()).status()).isEqualTo(AlarmStatus.INACTIVE);
+
+        // 기존 알람을 끄면 다른 알람을 켤 수 있고, FOLLOW_UP도 활성 슬롯을 점유한다.
+        alarmService.deactivate(user.getId(), first.id());
+        alarmService.activate(user.getId(), second.id());
+        LocalDateTime startedAt = LocalDateTime.of(2026, 1, 1, 12, 0);
+        alarmRepository.findById(second.id()).orElseThrow()
+                .startFollowUp("vehicle-1", TRACKING_CYCLE_ID, startedAt, startedAt.plus(10, ChronoUnit.MINUTES));
+        entityManager.flush();
+        assertThatThrownBy(() -> alarmService.activate(user.getId(), third.id()))
+                .isInstanceOfSatisfying(ApiException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ALARM_ACTIVE_LIMIT_EXCEEDED));
     }
 
     @Test

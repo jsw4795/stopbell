@@ -209,6 +209,7 @@ class _AlarmHomeState extends State<AlarmHome> {
     int id, {
     Alarm? createdAlarm,
     bool activationUnverified = false,
+    String? message,
   }) {
     final epoch = _navigationEpoch + 1;
     _push(
@@ -218,6 +219,7 @@ class _AlarmHomeState extends State<AlarmHome> {
         client: widget.client,
         beforeActivate: widget.beforeActivate,
         activationUnverified: activationUnverified,
+        initialMessage: message,
         isRequestCurrent: () =>
             _current &&
             epoch == _navigationEpoch &&
@@ -284,6 +286,15 @@ class _AlarmHomeState extends State<AlarmHome> {
             (ModalRoute.of(context)?.isActive ?? false),
         onBack: _back,
         onShowAlarms: _showList,
+        onActivationLimited: (alarm) {
+          if (!_current || epoch != _navigationEpoch) return;
+          _showList();
+          _openAlarm(
+            alarm.id,
+            createdAlarm: alarm,
+            message: alarmActiveLimitMessage,
+          );
+        },
         onCreated: (alarm, {bool activationUnverified = false}) {
           if (!_current || epoch != _navigationEpoch) return;
           _showList();
