@@ -9,16 +9,12 @@ import '../boarding/boarding_session_auto_refresh.dart';
 import '../boarding/boarding_session_client.dart';
 import '../transit/bus_route.dart';
 import '../transit/bus_route_presentation.dart';
+import '../../shared/stopbell_inline_message.dart';
+import '../../shared/stopbell_section_title.dart';
+import '../../shared/stopbell_status_chip.dart';
 import 'alarm.dart';
 
 enum _LoadState { loading, ready, error }
-
-/// 하차 알람 생성 카드 전용 보라 계열 강조색(시안 기준). 의미색 `busLocation`
-/// (차량 위치 표시용)과 섞지 않도록 홈 생성 카드에만 사용한다.
-Color _boardingCreateAccent(Brightness brightness) =>
-    brightness == Brightness.dark
-    ? const Color(0xffb4a5ff)
-    : const Color(0xff5b47c8);
 
 /// 검증된 공식 노선 유형색. 미분류면 null이며 기본 색을 유지한다.
 Color? alarmRouteTypeColor(
@@ -241,7 +237,7 @@ class _HomeOverviewState extends State<HomeOverview>
           _createCards(context),
           if (widget.findSessions != null) ..._sessionSections(context),
           const SizedBox(height: StopBellSpacing.xl),
-          _SectionTitle(
+          StopBellSectionTitle(
             '내 도착 알람',
             icon: Icons.notifications_none_outlined,
             count: _alarmCount,
@@ -273,7 +269,7 @@ class _HomeOverviewState extends State<HomeOverview>
       icon: Icons.directions_bus_outlined,
       title: '하차 알람',
       subtitle: '내릴 정류장 전에 알려드려요',
-      accent: _boardingCreateAccent(Theme.of(context).brightness),
+      accent: StopBellColors.of(context).busLocation,
       onTap: boarding,
     );
     return LayoutBuilder(
@@ -309,19 +305,28 @@ class _HomeOverviewState extends State<HomeOverview>
       case _LoadState.loading:
         return const [
           SizedBox(height: StopBellSpacing.xl),
-          _SectionTitle('진행 중인 하차 알람', icon: Icons.directions_bus_outlined),
+          StopBellSectionTitle(
+            '진행 중인 하차 알람',
+            icon: Icons.directions_bus_outlined,
+          ),
           SizedBox(height: StopBellSpacing.sm),
           _InlineProgress('하차 알람 확인 중...'),
         ];
       case _LoadState.error:
         return [
           const SizedBox(height: StopBellSpacing.xl),
-          const _SectionTitle(
+          const StopBellSectionTitle(
             '진행 중인 하차 알람',
             icon: Icons.directions_bus_outlined,
           ),
           const SizedBox(height: StopBellSpacing.sm),
-          _InlineError(message: '하차 알람 상태를 불러오지 못했어요.', onRetry: _loadSessions),
+          StopBellInlineMessage(
+            '하차 알람 상태를 불러오지 못했어요.',
+            action: TextButton(
+              onPressed: _loadSessions,
+              child: const Text('다시 시도'),
+            ),
+          ),
         ];
       case _LoadState.ready:
         // 진행 중 세션만 위쪽에 둔다. 종료 세션은 도착 알람 목록 아래에 컴팩트하게 보여준다.
@@ -329,7 +334,7 @@ class _HomeOverviewState extends State<HomeOverview>
         if (session == null) return const [];
         return [
           const SizedBox(height: StopBellSpacing.xl),
-          const _SectionTitle(
+          const StopBellSectionTitle(
             '진행 중인 하차 알람',
             icon: Icons.directions_bus_outlined,
           ),
@@ -355,7 +360,10 @@ class _HomeOverviewState extends State<HomeOverview>
     final open = widget.onOpenEndedSession;
     return [
       const SizedBox(height: StopBellSpacing.xl),
-      const _SectionTitle('최근 종료된 하차 알람', icon: Icons.directions_bus_outlined),
+      const StopBellSectionTitle(
+        '최근 종료된 하차 알람',
+        icon: Icons.directions_bus_outlined,
+      ),
       const SizedBox(height: StopBellSpacing.sm),
       _EndedSessionTile(
         key: ValueKey(('session', ended.id)),
@@ -372,7 +380,13 @@ class _HomeOverviewState extends State<HomeOverview>
         return const [_InlineProgress('알람 목록 조회 중...')];
       case _LoadState.error:
         return [
-          _InlineError(message: '알람 목록을 불러오지 못했어요.', onRetry: _loadAlarms),
+          StopBellInlineMessage(
+            '알람 목록을 불러오지 못했어요.',
+            action: TextButton(
+              onPressed: _loadAlarms,
+              child: const Text('다시 시도'),
+            ),
+          ),
         ];
       case _LoadState.ready:
         if (_alarms.isEmpty) {
@@ -398,47 +412,6 @@ class _HomeOverviewState extends State<HomeOverview>
             ),
         ];
     }
-  }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.title, {required this.icon, this.count});
-  final String title;
-  final IconData icon;
-  final int? count;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Semantics(
-      header: true,
-      child: Row(
-        children: [
-          Icon(icon, size: 22, color: theme.colorScheme.primary),
-          const SizedBox(width: StopBellSpacing.sm),
-          Flexible(child: Text(title, style: theme.textTheme.titleLarge)),
-          if (count != null) ...[
-            const SizedBox(width: StopBellSpacing.sm),
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: StopBellSpacing.sm,
-                vertical: 2,
-              ),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(StopBellSpacing.sm),
-              ),
-              child: Text(
-                '$count개',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
   }
 }
 
@@ -646,47 +619,6 @@ class _InfoLine extends StatelessWidget {
   );
 }
 
-class _StatusChip extends StatelessWidget {
-  const _StatusChip(this.label, this.color, {this.icon, this.dot = false});
-  final String label;
-  final Color color;
-  final IconData? icon;
-  final bool dot;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(
-      horizontal: StopBellSpacing.sm,
-      vertical: 3,
-    ),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: .14),
-      borderRadius: BorderRadius.circular(StopBellRadius.button),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (dot)
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          )
-        else if (icon != null)
-          Icon(icon, size: 14, color: color),
-        if (dot || icon != null) const SizedBox(width: 6),
-        Flexible(
-          child: Text(
-            label,
-            style: Theme.of(context).textTheme.labelSmall
-                ?.copyWith(color: color),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
 class _AlarmCard extends StatelessWidget {
   const _AlarmCard({super.key, required this.alarm, required this.onTap});
   final Alarm alarm;
@@ -725,7 +657,7 @@ class _AlarmCard extends StatelessWidget {
           // 비활성은 칩 대신 카드 전체를 흐리게 구분한다.
           status: inactive
               ? null
-              : _StatusChip(
+              : StopBellStatusChip(
                   alarm.status.shortLabel,
                   statusColor,
                   icon: statusIcon,
@@ -888,7 +820,7 @@ class _SessionCard extends StatelessWidget {
         _CardHeader(
           routeNumber: session.routeNumber,
           routeColor: routeColor,
-          status: _StatusChip(label, color, dot: session.isOpen),
+          status: StopBellStatusChip(label, color, dot: session.isOpen),
         ),
         const SizedBox(height: StopBellSpacing.xs),
         _InfoLine(
@@ -957,32 +889,6 @@ class _InlineProgress extends StatelessWidget {
       ],
     ),
   );
-}
-
-class _InlineError extends StatelessWidget {
-  const _InlineError({required this.message, required this.onRetry});
-  final String message;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(StopBellSpacing.lg),
-      decoration: BoxDecoration(
-        color: colors.errorContainer,
-        borderRadius: BorderRadius.circular(StopBellRadius.card),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.error_outline, color: colors.onErrorContainer),
-          const SizedBox(width: StopBellSpacing.md),
-          Expanded(child: Text(message)),
-          TextButton(onPressed: onRetry, child: const Text('다시 시도')),
-        ],
-      ),
-    );
-  }
 }
 
 class _EmptyNotice extends StatelessWidget {

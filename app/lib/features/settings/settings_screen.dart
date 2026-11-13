@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
 import '../../core/theme/stopbell_spacing.dart';
+import '../../shared/stopbell_section_title.dart';
 import '../notification/push_permission_service.dart';
 
 /// 계정·알림·정책 설정 화면. 로그아웃과 탈퇴는 기존 흐름을 콜백으로 재사용한다.
@@ -138,7 +139,7 @@ class _SettingsScreenState extends State<SettingsScreen>
       body: ListView(
         padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
         children: [
-          const _SectionTitle('알림'),
+          const StopBellSectionTitle.label('알림'),
           _SettingsCard(
             children: [
               if (widget.pushProvider == null)
@@ -160,7 +161,7 @@ class _SettingsScreenState extends State<SettingsScreen>
               ],
             ],
           ),
-          const _SectionTitle('정보'),
+          const StopBellSectionTitle.label('정보'),
           const _SettingsCard(
             children: [
               ListTile(
@@ -177,7 +178,7 @@ class _SettingsScreenState extends State<SettingsScreen>
               ),
             ],
           ),
-          const _SectionTitle('계정'),
+          const StopBellSectionTitle.label('계정'),
           _SettingsCard(
             children: [
               ListTile(
@@ -234,27 +235,6 @@ class _PreparingChip extends StatelessWidget {
       ),
     );
   }
-}
-
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(
-      StopBellSpacing.xs,
-      StopBellSpacing.lg,
-      StopBellSpacing.xs,
-      StopBellSpacing.sm,
-    ),
-    child: Text(
-      text,
-      style: Theme.of(context).textTheme.labelLarge
-          ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-    ),
-  );
 }
 
 class _SettingsCard extends StatelessWidget {

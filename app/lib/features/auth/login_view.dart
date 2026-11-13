@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_spacing.dart';
+import '../../shared/stopbell_inline_message.dart';
 
 /// 로그인 화면 본문. 인증 흐름은 호출자가 소유하고 이 위젯은 표시만 담당한다.
 class LoginView extends StatelessWidget {
@@ -138,7 +139,7 @@ class LoginView extends StatelessWidget {
                       ],
                       for (final message in messages) ...[
                         const SizedBox(height: StopBellSpacing.lg),
-                        _ErrorNotice(message: message),
+                        StopBellInlineMessage(message, compact: true),
                       ],
                     ],
                   ],
@@ -177,40 +178,6 @@ class LoginView extends StatelessWidget {
       Text(text, textAlign: TextAlign.center),
     ],
   );
-}
-
-class _ErrorNotice extends StatelessWidget {
-  const _ErrorNotice({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Semantics(
-      liveRegion: true,
-      child: Container(
-        padding: const EdgeInsets.all(StopBellSpacing.md),
-        decoration: BoxDecoration(
-          color: colors.errorContainer,
-          borderRadius: BorderRadius.circular(StopBellRadius.card),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.error_outline, color: colors.onErrorContainer, size: 20),
-            const SizedBox(width: StopBellSpacing.sm),
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(color: colors.onErrorContainer),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 /// Google·Apple 공용 로그인 버튼. 같은 모양·글자 규칙을 써서 두 버튼을 통일한다.
