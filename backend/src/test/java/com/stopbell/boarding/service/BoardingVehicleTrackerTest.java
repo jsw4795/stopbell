@@ -236,6 +236,42 @@ class BoardingVehicleTrackerTest {
         verifyNoInteractions(detail);
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2})
+    @DisplayName("서울 roster의 header·body·itemList가 비면 NPE 없이 일시 장애로 보류한다")
+    void seoul_roster_missing_structure(int scenario) {
+        when(seoul.fetchVehicleLocations(any())).thenReturn(switch (scenario) {
+            case 0 -> new SeoulBusVehicleLocationResponse(null, null);
+            case 1 -> new SeoulBusVehicleLocationResponse(new SeoulBusVehicleLocationResponse.Header("0", null), null);
+            default -> new SeoulBusVehicleLocationResponse(new SeoulBusVehicleLocationResponse.Header("0", null),
+                    new SeoulBusVehicleLocationResponse.Body(null));
+        });
+        assertThat(tracker.observe(session, cycle()).reason()).isEqualTo(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
+        verifyNoInteractions(detail);
+    }
+
+    @Test
+    @DisplayName("서울 detail의 header가 없으면 NPE 없이 일시 장애로 보류한다")
+    void seoul_detail_missing_header() {
+        when(detail.fetchVehicleDetail(any())).thenReturn(new SeoulBusVehicleDetailResponse(null, null));
+        assertThat(tracker.observe(session, cycle()).reason()).isEqualTo(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
+    }
+
+    @Test
+    @DisplayName("TAGO body가 없으면 일시 장애, items가 없으면 빈 목록으로 차량 소실 처리한다")
+    void tago_missing_structure() {
+        var tagoSession = new BoardingTrackingSnapshot(1L, 0, session.status(), session.reason(), TransitProvider.TAGO,
+                session.routeId(), "31010", session.vehicleId(), session.vehicleNumber(), session.traversal(),
+                session.checkpoint(), session.expiresAt());
+        when(tago.fetchVehicleLocations(any())).thenReturn(new TagoVehicleLocationResponse(
+                new TagoVehicleLocationResponse.Response(new TagoVehicleLocationResponse.Header("00", null), null)));
+        assertThat(tracker.observe(tagoSession, cycle()).reason()).isEqualTo(BoardingStateReason.TEMPORARY_PROVIDER_FAILURE);
+        when(tago.fetchVehicleLocations(any())).thenReturn(new TagoVehicleLocationResponse(
+                new TagoVehicleLocationResponse.Response(new TagoVehicleLocationResponse.Header("00", null),
+                        new TagoVehicleLocationResponse.Body(null, 0, 1, 1000))));
+        assertThat(tracker.observe(tagoSession, cycle()).reason()).isEqualTo(BoardingStateReason.VEHICLE_MISSING);
+    }
+
     @Test
     @DisplayName("Provider 실패도 cycle 안에서 공유하며 다음 cycle에서만 다시 요청한다")
     void failure_is_shared_not_amplified() {
