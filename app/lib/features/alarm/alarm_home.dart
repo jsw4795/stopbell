@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_spacing.dart';
+
 import '../transit/bus_route.dart';
 import '../transit/bus_route_search_screen.dart';
 import '../transit/bus_route_stop_occurrence.dart';
@@ -406,7 +408,7 @@ class _AlarmHomeState extends State<AlarmHome> {
   Widget _creationRecovery() => Card(
     margin: EdgeInsets.zero,
     child: Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(StopBellSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

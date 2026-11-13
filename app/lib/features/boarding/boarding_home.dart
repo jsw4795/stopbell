@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_spacing.dart';
+
 import '../auth/auth_session.dart';
 import '../notification/push_activation_prompt.dart';
 import '../transit/bus_route.dart';
@@ -173,7 +175,7 @@ class _BoardingHomeState extends State<BoardingHome> {
           (c.needsRecovery &&
               c.creationState != BoardingCreationState.submitting)) {
         return ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(StopBellSpacing.lg),
           children: [
             TextButton(
               onPressed: c.busy ? null : widget.onBack,

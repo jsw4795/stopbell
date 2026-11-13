@@ -130,7 +130,9 @@ class BoardingSessionView extends StatelessWidget {
           SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(
+                horizontal: StopBellSpacing.lg,
+              ),
               child: SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
@@ -265,10 +267,13 @@ class BoardingSessionDetails extends StatelessWidget {
         ),
         Container(
           key: const ValueKey('boarding-route-summary'),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: StopBellSpacing.md,
+            vertical: StopBellSpacing.sm,
+          ),
           decoration: BoxDecoration(
             color: scheme.primaryContainer.withValues(alpha: .55),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(StopBellRadius.card),
           ),
           child: Row(
             children: [
@@ -277,7 +282,7 @@ class BoardingSessionDetails extends StatelessWidget {
                 color: routeColor ?? scheme.primary,
                 size: 22,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: StopBellSpacing.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -293,19 +298,19 @@ class BoardingSessionDetails extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: StopBellSpacing.sm),
               _Badge(label: label, color: badgeColor),
             ],
           ),
         ),
         if (notice != null)
           Padding(
-            padding: const EdgeInsets.only(top: 6),
+            padding: const EdgeInsets.only(top: StopBellSpacing.sm),
             child: Text(notice, style: theme.textTheme.bodySmall),
           ),
         if (progress || initial)
           Padding(
-            padding: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.only(top: StopBellSpacing.sm),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -324,7 +329,12 @@ class BoardingSessionDetails extends StatelessWidget {
       ],
     );
     final routeHeader = Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+      padding: const EdgeInsets.fromLTRB(
+        StopBellSpacing.lg,
+        StopBellSpacing.md,
+        StopBellSpacing.lg,
+        StopBellSpacing.sm,
+      ),
       child: Align(
         alignment: Alignment.centerLeft,
         child: Text('이동 경로', style: theme.textTheme.titleSmall),
@@ -342,7 +352,7 @@ class BoardingSessionDetails extends StatelessWidget {
         );
       }
       final fallback = Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: StopBellSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -364,7 +374,7 @@ class BoardingSessionDetails extends StatelessWidget {
         decoration: BoxDecoration(
           color: scheme.surfaceContainerLow,
           border: Border.all(color: scheme.outlineVariant),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(StopBellRadius.dialog),
         ),
         clipBehavior: Clip.antiAlias,
         child: Column(
@@ -380,7 +390,11 @@ class BoardingSessionDetails extends StatelessWidget {
     if (!constrained) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [summary, const SizedBox(height: 8), panel(bounded: false)],
+        children: [
+          summary,
+          const SizedBox(height: StopBellSpacing.sm),
+          panel(bounded: false),
+        ],
       );
     }
     if (s.isTerminal) {
@@ -404,14 +418,21 @@ class BoardingSessionDetails extends StatelessWidget {
           ConstrainedBox(
             constraints: BoxConstraints(maxHeight: constraints.maxHeight * .6),
             child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(
+                horizontal: StopBellSpacing.lg,
+              ),
               child: summary,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: StopBellSpacing.sm),
           Flexible(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.fromLTRB(
+                StopBellSpacing.lg,
+                0,
+                StopBellSpacing.lg,
+                StopBellSpacing.sm,
+              ),
               child: panel(bounded: true),
             ),
           ),
@@ -472,10 +493,13 @@ class _Badge extends StatelessWidget {
   final Color color;
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    padding: const EdgeInsets.symmetric(
+      horizontal: StopBellSpacing.sm,
+      vertical: StopBellSpacing.xs,
+    ),
     decoration: BoxDecoration(
       color: color,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(StopBellSpacing.sm),
     ),
     child: Text(
       label,
@@ -670,7 +694,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
                 ),
                 Expanded(
                   child: Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.only(bottom: StopBellSpacing.md),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -737,7 +761,7 @@ class _TrackingTimelineState extends State<_TrackingTimeline> {
       },
       child: SingleChildScrollView(
         key: const ValueKey('tracking-timeline-scroll'),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: StopBellSpacing.lg),
         child: content,
       ),
     );
@@ -785,7 +809,9 @@ class _TrackingRow extends StatelessWidget {
                   ),
                 ),
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  vertical: StopBellSpacing.sm,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -812,7 +838,9 @@ class _TrackingRow extends StatelessWidget {
                       ],
                     ),
                     Padding(
-                      padding: const EdgeInsets.only(left: 36),
+                      padding: const EdgeInsets.only(
+                        left: StopBellSpacing.xl + StopBellSpacing.md,
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -891,8 +919,8 @@ class _TrackingRow extends StatelessWidget {
             Expanded(
               child: Padding(
                 padding: bus
-                    ? const EdgeInsets.symmetric(vertical: 6)
-                    : const EdgeInsets.only(bottom: 12),
+                    ? const EdgeInsets.symmetric(vertical: StopBellSpacing.sm)
+                    : const EdgeInsets.only(bottom: StopBellSpacing.md),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,

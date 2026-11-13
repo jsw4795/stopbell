@@ -23,7 +23,7 @@ class LoginView extends StatelessWidget {
   final List<String> messages;
 
   static const _buttonHeight = 56.0;
-  static const _buttonRadius = 16.0;
+  static const _buttonRadius = StopBellRadius.dialog;
 
   @override
   Widget build(BuildContext context) {
@@ -228,7 +228,7 @@ class _AuthButton extends StatelessWidget {
                   style: TextStyle(
                     inherit: false,
                     // iOS 기본 버튼 글자 크기. 한글은 시스템 폰트(Apple SD Gothic Neo)로 대체된다.
-                    fontSize: 17,
+                    fontSize: Theme.of(context).textTheme.titleMedium!.fontSize,
                     fontWeight: FontWeight.w500,
                     fontFamily: '.SF Pro Text',
                     letterSpacing: -0.41,

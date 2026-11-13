@@ -8,6 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'core/theme/stopbell_spacing.dart';
+
 /// TASK-701 only: `flutter run --debug -t lib/firebase_smoke.dart -d <iphone>`
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -140,16 +142,16 @@ class _FirebaseSmokeScreenState extends State<FirebaseSmokeScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('TASK-701 Firebase iOS smoke')),
       body: ListView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(StopBellSpacing.xl),
         children: [
           Text(_status),
-          const SizedBox(height: 24),
+          const SizedBox(height: StopBellSpacing.xl),
           ElevatedButton(
             onPressed: _preparing ? null : _prepare,
             child: Text(_preparing ? '준비 중...' : 'Firebase / APNs / FID 준비'),
           ),
           if (_fid != null) ...[
-            const SizedBox(height: 24),
+            const SizedBox(height: StopBellSpacing.xl),
             Text('Firebase project: $_projectId'),
             const Text('Push target: FCM 등록 FID'),
             SelectableText(_fid!),

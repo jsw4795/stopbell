@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_spacing.dart';
+
 import '../auth/auth_session.dart';
 import 'boarding_session.dart';
 import 'boarding_session_client.dart';
@@ -104,7 +106,7 @@ class _BoardingNotificationScreenState
   Widget build(BuildContext context) {
     if (!_current) return const SizedBox.shrink();
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(StopBellSpacing.lg),
       children: [
         if (_session == null)
           Align(

@@ -38,7 +38,7 @@ class StopBellStatusChip extends StatelessWidget {
           )
         else if (icon != null)
           Icon(icon, size: 14, color: color),
-        if (dot || icon != null) const SizedBox(width: 6),
+        if (dot || icon != null) const SizedBox(width: StopBellSpacing.sm),
         Flexible(
           child: Text(
             label,

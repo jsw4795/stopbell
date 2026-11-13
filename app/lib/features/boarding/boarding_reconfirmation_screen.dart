@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/theme/stopbell_spacing.dart';
+
 import 'boarding_candidate_client.dart';
 import 'boarding_candidates.dart';
 import 'boarding_candidates_view.dart';
@@ -90,7 +92,7 @@ class _BoardingReconfirmationScreenState
 
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(16),
+    padding: const EdgeInsets.all(StopBellSpacing.lg),
     children: [
       TextButton(onPressed: widget.onBack, child: const Text('세션 상세로')),
       TextButton(
