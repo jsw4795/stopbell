@@ -840,6 +840,45 @@ void main() {
       },
     );
   }
+  test('cancel revision conflict retries once with fresh revision', () async {
+    api.currentSession = sessionFixture();
+    await start();
+    var calls = 0;
+    api.onCancel = () async {
+      if (calls++ == 0) {
+        throw const BoardingSessionException(
+          SessionFailure.http,
+          statusCode: 409,
+          code: 'BOARDING_REVISION_CONFLICT',
+        );
+      }
+      return sessionFixture(
+        status: 'CANCELLED',
+        evaluation: 'ENDED',
+        revision: 9,
+        reason: 'USER_CANCELLED',
+        gap: null,
+      );
+    };
+    api.currentSession = sessionFixture(revision: 8);
+    await c.cancel();
+    expect(api.cancellations.length, 2);
+    expect(api.cancellations.last.$2, 8);
+    expect(c.session!.status, BoardingSessionStatus.cancelled);
+  });
+  test('cancel conflict retries only once when it conflicts again', () async {
+    api.currentSession = sessionFixture();
+    await start();
+    api.onCancel = () async => throw const BoardingSessionException(
+      SessionFailure.http,
+      statusCode: 409,
+      code: 'BOARDING_REVISION_CONFLICT',
+    );
+    api.currentSession = sessionFixture(revision: 8);
+    await c.cancel();
+    expect(api.cancellations.length, 2);
+    expect(c.message, isNotNull);
+  });
   test(
     'unknown mutation plus failed GET hides trust and blocks another mutation',
     () async {

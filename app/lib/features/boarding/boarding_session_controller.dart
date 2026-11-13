@@ -548,6 +548,12 @@ class BoardingSessionController extends ChangeNotifier {
       if (current) _accept(result);
     } on BoardingSessionException catch (error) {
       if (!current) return;
+      if (candidate == null &&
+          error.code == 'BOARDING_REVISION_CONFLICT' &&
+          await _retryCancelWithFreshRevision(original.id)) {
+        return;
+      }
+      if (!current) return;
       message = boardingSessionError(error);
       inaccessible = error.statusCode == 404;
       if (error.uncertain ||
@@ -568,6 +574,38 @@ class BoardingSessionController extends ChangeNotifier {
         busy = false;
         _emit();
       }
+    }
+  }
+
+  /// poll마다 revision이 오르므로 취소가 409면 재조회한 revision으로 한 번만 재시도한다.
+  /// 재조회 결과가 이미 종료 상태이면 재시도 없이 그 상태를 반영한다.
+  Future<bool> _retryCancelWithFreshRevision(int id) async {
+    try {
+      final fresh = await client.find(
+        id,
+        generation: generation,
+        current: () => current,
+      );
+      if (!current) return true;
+      if (!fresh.isOpen) {
+        _accept(fresh);
+        stateUncertain = false;
+        message = null;
+        return true;
+      }
+      final result = await client.cancel(
+        id,
+        fresh.revision,
+        generation: generation,
+        current: () => current,
+      );
+      if (current) {
+        _accept(result);
+        message = null;
+      }
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
