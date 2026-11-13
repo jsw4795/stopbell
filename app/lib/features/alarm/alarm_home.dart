@@ -15,6 +15,7 @@ import '../boarding/boarding_session_client.dart';
 import '../boarding/boarding_creation_intent.dart';
 import '../notification/notification_lifecycle.dart';
 import 'alarm.dart';
+import 'alarm_approach.dart';
 import 'alarm_api_client.dart';
 import 'alarm_creation_controller.dart';
 import 'alarm_creation_intent.dart';
@@ -73,6 +74,19 @@ class _AlarmHomeState extends State<AlarmHome> {
   late final String? _userIdentity, _loginIdentity;
   ScaffoldMessengerState? _messenger;
   Alarm? _createdAlarm;
+  AlarmClient? _approachClient;
+  AlarmApproachLoader? _approachLoader;
+
+  FindAlarmApproach? get _findApproach {
+    final client = widget.client;
+    if (!identical(client, _approachClient)) {
+      _approachClient = client;
+      _approachLoader = client is AlarmApiClient
+          ? client.createApproachLoader()
+          : null;
+    }
+    return _approachLoader?.find;
+  }
   bool _activationUnverified = false;
   late final int _sessionGeneration;
   late final AlarmCreationController _creation;
@@ -261,6 +275,7 @@ class _AlarmHomeState extends State<AlarmHome> {
                   ? _creationRecovery()
                   : null,
               findAlarms: widget.client.findAll,
+              findApproach: _findApproach,
               findSessions: widget.boardingSessionClient == null
                   ? null
                   : () => widget.boardingSessionClient!.findOverview(

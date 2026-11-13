@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
+import 'package:stopbell/features/transit/bus_route_presentation.dart';
 import 'package:stopbell/features/transit/bus_route_stop_occurrence.dart';
 import 'package:stopbell/features/transit/bus_route_stop_screen.dart';
 import 'package:stopbell/features/transit/bus_route_timeline.dart';
@@ -45,12 +46,14 @@ const last = BusRouteStopOccurrence(
 Widget screen(
   Future<List<BusRouteStopOccurrence>> Function(int) findStops, {
   TransitionBuilder? builder,
+  BusRoute selectedRoute = route,
+  ThemeData? theme,
 }) => MaterialApp(
-  theme: StopBellTheme.light,
+  theme: theme ?? StopBellTheme.light,
   builder: builder,
   home: Scaffold(
     body: BusRouteStopScreen(
-      route: route,
+      route: selectedRoute,
       findStops: findStops,
       onBack: () {},
       alarmClient: EmptyAlarmClient(),
@@ -62,6 +65,86 @@ Widget screen(
 );
 
 void main() {
+  for (final theme in [StopBellTheme.light, StopBellTheme.dark]) {
+    for (final selectedRoute in [
+      const BusRoute(
+        id: 1,
+        routeNumber: '143',
+        regionName: '서울',
+        provider: 'SEOUL_BUS',
+        routeType: 'TRUNK',
+      ),
+      const BusRoute(
+        id: 2,
+        routeNumber: 'N13',
+        regionName: '서울',
+        provider: 'SEOUL_BUS',
+      ),
+      route,
+    ]) {
+      testWidgets(
+        '${theme.brightness} ${selectedRoute.routeNumber} header uses route color and top spacing',
+        (tester) async {
+          await tester.pumpWidget(
+            screen(
+              (_) async => [],
+              selectedRoute: selectedRoute,
+              theme: theme,
+            ),
+          );
+          await tester.pumpAndSettle();
+          final number = find.text(selectedRoute.routeNumber);
+          final context = tester.element(number);
+          expect(
+            tester.widget<Text>(number).style?.color,
+            routeTypeColor(context, selectedRoute) ??
+                theme.textTheme.headlineSmall?.color,
+          );
+          expect(
+            tester.getTopLeft(number).dy -
+                tester.getBottomLeft(find.byType(AppBar)).dy,
+            greaterThanOrEqualTo(16),
+          );
+        },
+      );
+    }
+  }
+
+  testWidgets('repeated names use a distinct destination as one helper line', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      screen(
+        (_) async => const [
+          BusRouteStopOccurrence(
+            id: 1,
+            name: '중앙역',
+            order: 1,
+            destinationName: '회차',
+            canNotifyOneStopBefore: false,
+            canNotifyOneStopAfter: true,
+          ),
+          BusRouteStopOccurrence(
+            id: 2,
+            name: '중앙역',
+            order: 2,
+            destinationName: '종착',
+            canNotifyOneStopBefore: true,
+            canNotifyOneStopAfter: false,
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('회차 방면'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey(1)));
+    await tester.pumpAndSettle();
+    expect(find.text('회차 방면'), findsOneWidget);
+    expect(tester.widget<Text>(find.text('회차 방면')).maxLines, 1);
+    expect(find.textContaining('노선 순서'), findsNothing);
+    expect(find.textContaining('이전:'), findsNothing);
+  });
+
   testWidgets(
     'direction buttons preserve a selected pass-through occurrence without reloading',
     (tester) async {
@@ -238,7 +321,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey(22)));
     await tester.pump();
-    expect(find.textContaining('종점 방면'), findsOneWidget);
+    expect(find.textContaining('종점 방면'), findsNothing);
     var switches = tester
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))
         .toList();
@@ -289,7 +372,19 @@ void main() {
       isFalse,
     );
 
-    expect(find.textContaining('이전: 없음 · 다음: 중간 정류장'), findsOneWidget);
+    expect(find.text('중간 정류장 방면'), findsOneWidget);
+    expect(find.textContaining('이전:'), findsNothing);
+    final direction = tester.widget<Text>(find.text('중간 정류장 방면'));
+    expect(direction.maxLines, 1);
+    expect(direction.overflow, TextOverflow.ellipsis);
+    expect(
+      direction.style?.color,
+      StopBellTheme.light.colorScheme.onSurfaceVariant,
+    );
+    expect(
+      tester.getTopLeft(find.text('중간 정류장 방면')).dy,
+      greaterThan(tester.getTopLeft(find.textContaining('선택한 정류장:')).dy),
+    );
     await tester.ensureVisible(find.byKey(const ValueKey(33)));
     await tester.tap(find.byKey(const ValueKey(33)));
     await tester.pump();
@@ -298,7 +393,8 @@ void main() {
         .toList();
     expect(find.text('한 정류장 후 알림'), findsNothing);
     expect(switches.map((item) => item.value), [false]);
-    expect(find.textContaining('이전: 중간 정류장 · 다음: 없음'), findsOneWidget);
+    expect(find.text('노선 순서 7'), findsOneWidget);
+    expect(find.textContaining('이전:'), findsNothing);
     expect(
       tester
           .widget<Semantics>(
@@ -316,7 +412,7 @@ void main() {
   });
 
   testWidgets(
-    'same destination and adjacent names use order only for unresolved duplicates',
+    'unresolved duplicates show only order in a single helper line',
     (tester) async {
       const repeatedA = BusRouteStopOccurrence(
         id: 41,
@@ -344,12 +440,10 @@ void main() {
       expect(find.textContaining('노선 순서 34'), findsNothing);
       await tester.tap(find.byKey(const ValueKey(42)));
       await tester.pump();
-      expect(
-        find.textContaining(
-          '선택한 정류장: 순환 정류장\n종점 방면\n이전: 이전 · 다음: 다음\n노선 순서 34',
-        ),
-        findsOneWidget,
-      );
+      expect(find.textContaining('선택한 정류장: 순환 정류장'), findsOneWidget);
+      expect(find.text('노선 순서 34'), findsOneWidget);
+      expect(find.textContaining('종점 방면'), findsNothing);
+      expect(find.textContaining('이전:'), findsNothing);
     },
   );
 

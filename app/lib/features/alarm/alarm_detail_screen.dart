@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/stopbell_colors.dart';
 import '../../core/theme/stopbell_spacing.dart';
 import 'alarm.dart';
+import 'alarm_approach.dart';
 import 'alarm_api_client.dart';
 import 'home_overview.dart' show alarmRouteTypeColor;
 
@@ -35,6 +36,7 @@ class AlarmDetailScreen extends StatefulWidget {
 class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
   _DetailState _state = _DetailState.loading;
   Alarm? _alarm;
+  AlarmApproachLoader? _approachLoader;
   bool _mutating = false;
   bool _confirmingDelete = false;
   bool _loading = false;
@@ -64,6 +66,10 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
   }
 
   void _initialize() {
+    final client = widget.client;
+    _approachLoader = client is AlarmApiClient
+        ? client.createApproachLoader()
+        : null;
     _alarm = widget.createdAlarm?.id == widget.alarmId
         ? widget.createdAlarm
         : null;
@@ -457,6 +463,10 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
                       ),
                     ],
                   ),
+                ),
+                AlarmApproachText(
+                  alarm: alarm,
+                  findApproach: _approachLoader?.find,
                 ),
                 if (endpoints != null)
                   Padding(

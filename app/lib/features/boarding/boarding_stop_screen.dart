@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
@@ -288,7 +290,9 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
 
   String get _backLabel {
     if (_showingCandidates) return '정류장 선택으로';
-    if (_picker == _Picker.target) return '승차 정류장 선택으로';
+    if (_picker == _Picker.target || _picker == _Picker.review) {
+      return '승차 정류장 선택으로';
+    }
     return '노선 다시 선택';
   }
 
@@ -296,8 +300,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     if (!_current || widget.creationBusy) return;
     if (_showingCandidates) {
       setState(_invalidateCandidates);
-    } else if (_picker == _Picker.target) {
-      setState(() => _picker = _Picker.boarding);
+    } else if (_picker == _Picker.target || _picker == _Picker.review) {
+      _reselectStops();
     } else {
       widget.onBack();
     }
@@ -316,6 +320,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         title: _compactResults ? '차량 후보' : '하차 알람',
         onBack: _back,
         backLabel: _backLabel,
+        actions: _compactResults ? [_candidateRefreshAction()] : null,
         iconColor: routeTypeColor(context, widget.route),
         body: _state == _StopsState.success ? _routeAndCandidates() : _status(),
         summary:
@@ -325,6 +330,30 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
             : null,
       ),
     );
+  }
+
+  Widget _candidateRefreshAction() {
+    Widget button() {
+      final busy = _loadingCandidates || (_vehicles?.loading ?? false);
+      return IconButton(
+        key: const ValueKey('find-candidates'),
+        tooltip: '차량 위치 새로고침',
+        onPressed: busy || widget.creationBusy
+            ? null
+            : () => _findCandidates(keepResult: true),
+        icon: busy
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.refresh, size: 20),
+      );
+    }
+
+    final vehicles = _vehicles;
+    if (vehicles == null) return button();
+    return ListenableBuilder(listenable: vehicles, builder: (_, _) => button());
   }
 
   Widget _status() => Center(
@@ -457,29 +486,31 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       _summaryCard(
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _stopSummary(boarding, target: false, compact: true),
-            _stopSummary(target, target: true, compact: true),
-            OutlinedButton.icon(
-              key: const ValueKey('reselect-stops'),
-              onPressed: widget.creationBusy ? null : _reselectStops,
-              icon: const Icon(Icons.edit_location_alt_outlined),
-              label: const Text('정류장 다시 선택'),
-            ),
-          ],
+        Padding(
+          padding: const EdgeInsets.all(StopBellSpacing.sm),
+          child: Row(
+            children: [
+              Expanded(
+                child: _stopSummary(boarding, target: false, compact: true),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: StopBellSpacing.sm,
+                ),
+                child: Icon(
+                  Icons.arrow_forward,
+                  color:
+                      routeTypeColor(context, widget.route) ??
+                      StopBellColors.of(context).busLocation,
+                ),
+              ),
+              Expanded(
+                child: _stopSummary(target, target: true, compact: true),
+              ),
+            ],
+          ),
         ),
       ),
-      if (_vehicles == null)
-        OutlinedButton.icon(
-          key: const ValueKey('find-candidates'),
-          onPressed: widget.creationBusy || _loadingCandidates
-              ? null
-              : () => _findCandidates(keepResult: true),
-          icon: const Icon(Icons.refresh),
-          label: const Text('차량 후보 다시 조회'),
-        ),
       if (_error case final error?)
         Padding(
           padding: const EdgeInsets.only(top: StopBellSpacing.xs),
@@ -518,23 +549,21 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       }
     }
 
-    BoardingCandidatesView list({
-      List<BoardingCandidate>? visible,
-      bool showIntro = true,
-    }) => BoardingCandidatesView.compact(
-      result: result,
-      receivedAt: _receivedAt!,
-      progressLabel: (candidate) => boardingCandidateProgressLabel(
-        candidate,
-        _stops,
-        boardingId: boarding.id,
-        targetId: target.id,
-      ),
-      selected: _selectedCandidate,
-      visible: visible,
-      showIntro: showIntro,
-      onSelect: widget.onSelectCandidate == null ? null : select,
-    );
+    BoardingCandidatesView list({List<BoardingCandidate>? visible}) =>
+        BoardingCandidatesView.compact(
+          result: result,
+          receivedAt: _receivedAt!,
+          progressLabel: (candidate) => boardingCandidateProgressLabel(
+            candidate,
+            _stops,
+            boardingId: boarding.id,
+            targetId: target.id,
+          ),
+          selected: _selectedCandidate,
+          visible: visible,
+          showIntro: false,
+          onSelect: widget.onSelectCandidate == null ? null : select,
+        );
 
     Widget build(List<BusRouteVehicle> located) {
       final split = splitBoardingBuses(
@@ -564,13 +593,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         spacing: StopBellSpacing.md,
         children: [
+          _CandidateSectionHeader(result: result, controller: vehicles),
           list(visible: vehicles == null ? split.others : const []),
-          if (vehicles != null)
-            BusRouteVehicleBar(
-              controller: vehicles,
-              onRefresh: () => _findCandidates(keepResult: true),
-              refreshing: _loadingCandidates,
-            ),
           if (split.drawn.isNotEmpty)
             BoardingBusTimeline(
               stops: _stops,
@@ -591,7 +615,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
             Text('현재 확인 가능한 차량 후보가 없어요.', style: theme.textTheme.bodyMedium),
           if (vehicles != null && split.others.isNotEmpty) ...[
             Text('위치 확인 불가', style: theme.textTheme.titleSmall),
-            list(visible: split.others, showIntro: false),
+            list(visible: split.others),
           ],
         ],
       );
@@ -683,23 +707,14 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
             ),
           ),
           if (!_staleStops)
-            StopSelectionPair(
-              first: OutlinedButton(
-                key: const ValueKey('reselect-stops'),
-                onPressed: widget.creationBusy ? null : _reselectStops,
-                child: const Text('정류장 다시 선택', textAlign: TextAlign.center),
-              ),
-              second: FilledButton(
-                key: const ValueKey('find-candidates'),
-                onPressed: !_validTarget(target) || _loadingCandidates
-                    ? null
-                    : _findCandidates,
-                child: Text(
-                  _result == null && _error == null
-                      ? '차량 후보 조회'
-                      : '차량 후보 다시 조회',
-                  textAlign: TextAlign.center,
-                ),
+            FilledButton(
+              key: const ValueKey('find-candidates'),
+              onPressed: !_validTarget(target) || _loadingCandidates
+                  ? null
+                  : _findCandidates,
+              child: Text(
+                _result == null && _error == null ? '차량 후보 조회' : '차량 후보 다시 조회',
+                textAlign: TextAlign.center,
               ),
             ),
           if (_loadingCandidates) ...[
@@ -787,6 +802,166 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 후보 화면 전용 헤더. 위치 안내의 시간 경과만 갱신하며 자동 조회하지 않는다.
+class _CandidateSectionHeader extends StatefulWidget {
+  const _CandidateSectionHeader({
+    required this.result,
+    required this.controller,
+  });
+
+  final BoardingCandidates result;
+  final BusRouteVehicleController? controller;
+
+  @override
+  State<_CandidateSectionHeader> createState() =>
+      _CandidateSectionHeaderState();
+}
+
+class _CandidateSectionHeaderState extends State<_CandidateSectionHeader> {
+  final _helpKey = GlobalKey<TooltipState>();
+  Timer? _timer;
+  bool _outdated = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller?.addListener(_changed);
+    _syncTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _CandidateSectionHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?.removeListener(_changed);
+      widget.controller?.addListener(_changed);
+    }
+    _syncTimer();
+  }
+
+  void _syncTimer() {
+    _timer?.cancel();
+    _outdated = widget.controller?.isOutdated(DateTime.now()) ?? false;
+    final fetched = widget.controller?.fetchedAt;
+    if (fetched == null) return;
+    final left =
+        BusRouteVehicleController.staleAfter -
+        DateTime.now().difference(fetched);
+    if (left > Duration.zero) {
+      _timer = Timer(left, () {
+        if (mounted) setState(() => _outdated = true);
+      });
+    }
+  }
+
+  void _changed() {
+    _syncTimer();
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    widget.controller?.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final caption = theme.textTheme.labelMedium?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final controller = widget.controller;
+    final data = controller?.data;
+    final time = MaterialLocalizations.of(context).formatTimeOfDay(
+      TimeOfDay.fromDateTime(
+        (data?.observedAt ?? widget.result.observedAt).toLocal(),
+      ),
+      alwaysUse24HourFormat: true,
+    );
+    final unplaced =
+        data?.vehicles.where((v) => v.occurrenceId == null).length ?? 0;
+    final notes = <String>[
+      if (widget.result.candidateSetStatus == CandidateSetStatus.unknown)
+        '후보 목록의 상태를 확인할 수 없어요. 다시 조회해 주세요.',
+      if (controller?.failed ?? false)
+        '차량 정보를 불러오지 못했어요'
+      else if (_outdated)
+        '위치가 오래됐어요. 새로고침해 주세요',
+      if (data?.status == BusRouteVehiclesStatus.stale)
+        '최신 위치를 받지 못해 이전 위치를 보여드려요',
+      if (data?.status == BusRouteVehiclesStatus.partial)
+        '일부 차량의 위치·좌석을 확인하지 못했어요',
+      if (data?.status == BusRouteVehiclesStatus.empty &&
+          data!.vehicles.isEmpty)
+        '지금 위치를 확인할 수 있는 차량이 없어요',
+      if (unplaced > 0) '위치 확인 불가 $unplaced대',
+      if (widget.result.candidateSetStatus == CandidateSetStatus.empty)
+        '현재 확인 가능한 차량 후보가 없어요.',
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: StopBellSpacing.xs,
+      children: [
+        Row(
+          key: const ValueKey('candidate-section-heading'),
+          children: [
+            Expanded(
+              child: Text('차량 후보 선택', style: theme.textTheme.titleLarge),
+            ),
+            const SizedBox(width: StopBellSpacing.xs),
+            Flexible(
+              child: Text(
+                controller != null && data == null
+                    ? '차량 위치 확인 중'
+                    : '$time 기준 위치',
+                style: caption,
+                textAlign: TextAlign.end,
+              ),
+            ),
+          ],
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '차량번호를 확인하고 선택해 주세요.',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+            Tooltip(
+              key: _helpKey,
+              ignorePointer: true,
+              message: '전체 차량번호를 확인해 주세요. 시각은 서버 조회 기준이에요. 최근 위치는 진행 참고 정류장이며 간격에는 미정차·경유가 포함될 수 있어요.',
+              triggerMode: TooltipTriggerMode.manual,
+              exitDuration: Duration.zero,
+              child: Semantics(
+                label: '차량 선택 도움말',
+                button: true,
+                child: ExcludeSemantics(
+                  child: IconButton(
+                    onPressed: () =>
+                        _helpKey.currentState?.ensureTooltipVisible(),
+                    icon: const Icon(Icons.info_outline),
+                    constraints: const BoxConstraints(
+                      minWidth: 44,
+                      minHeight: 44,
+                    ),
+                    padding: EdgeInsets.zero,
+                    iconSize: 20,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        for (final note in notes) Text(note, style: caption),
+      ],
     );
   }
 }

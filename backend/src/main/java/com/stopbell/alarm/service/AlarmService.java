@@ -225,6 +225,7 @@ public class AlarmService {
             BusAlarmTarget busTarget = targets.get(index);
             RouteDisplay display = displays.getOrDefault(
                     routeKey(busTarget.getProvider(), busTarget.getExternalRouteId()), RouteDisplay.UNKNOWN);
+            Long targetOccurrenceId = targetOccurrenceId(busTarget, display.route(), traversals);
             responses.add(new AlarmResponse(
                     alarm.getId(),
                     alarm.getTransitType(),
@@ -238,10 +239,24 @@ public class AlarmService {
                     display.provider(),
                     display.routeType(),
                     canNotify(busTarget, display.route(), true, traversals),
-                    canNotify(busTarget, display.route(), false, traversals)
+                    canNotify(busTarget, display.route(), false, traversals),
+                    targetOccurrenceId == null ? null : display.route().getId(),
+                    targetOccurrenceId
             ));
         }
         return responses;
+    }
+
+    private Long targetOccurrenceId(BusAlarmTarget target, BusRoute route,
+                                    Map<Long, List<BusRouteStopOccurrence>> traversals) {
+        if (!matches(route, target)) return null;
+        return traversals.computeIfAbsent(route.getId(),
+                        id -> occurrenceRepository.findAllByRouteOrderByStopOrderAsc(route)).stream()
+                .filter(occurrence -> occurrence.getStopOrder() == target.getTargetStopOrder()
+                        && occurrence.getStop().getProvider() == target.getProvider()
+                        && Objects.equals(occurrence.getStop().getExternalStopId(), target.getExternalStopId()))
+                .map(BusRouteStopOccurrence::getId)
+                .findFirst().orElse(null);
     }
 
     /** 생성·옵션 수정 검증과 같은 기준: 대상 정류장이 노선 첫(전)/마지막(후) occurrence가 아니면 가능. 노선을 못 찾으면 저장된 옵션 상태로 대체한다. */

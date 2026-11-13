@@ -632,10 +632,14 @@ class _BoardingBusTimelineState extends State<BoardingBusTimeline> {
                           children: [
                             Icon(Icons.directions_bus, size: 18, color: route),
                             const SizedBox(width: StopBellSpacing.xs),
-                            Text(
-                              vehicle.shortNumber,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
+                            Flexible(
+                              child: Text(
+                                vehicle.shortNumber,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                             if (detail.isNotEmpty) ...[

@@ -11,6 +11,8 @@ class Alarm {
     required this.stopName,
     required this.notifyOneStopBefore,
     required this.notifyOneStopAfter,
+    this.routeId,
+    this.targetStopOccurrenceId,
     this.startStopName,
     this.endStopName,
     this.provider,
@@ -20,6 +22,10 @@ class Alarm {
   });
 
   final int id;
+
+  /// 현재 metadata와 snapshot이 일치할 때만 제공되는 조회용 reference.
+  final int? routeId;
+  final int? targetStopOccurrenceId;
   final AlarmTransitType transitType;
   final AlarmStatus status;
   final String routeNumber;
@@ -72,6 +78,8 @@ class Alarm {
     final hasEndpoints = start != null && end != null;
     return Alarm(
       id: id,
+      routeId: _optionalId(value['routeId']),
+      targetStopOccurrenceId: _optionalId(value['targetStopOccurrenceId']),
       transitType: transitType,
       status: status,
       routeNumber: routeNumber,
@@ -86,6 +94,9 @@ class Alarm {
       canNotifyOneStopAfter: _optionalBool(value['canNotifyOneStopAfter']),
     );
   }
+
+  static int? _optionalId(Object? value) =>
+      value is int && value > 0 ? value : null;
 
   static bool? _optionalBool(Object? value) => value is bool ? value : null;
 

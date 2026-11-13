@@ -4,7 +4,10 @@ import 'package:http/http.dart' as http;
 
 import '../../core/authenticated_api_client.dart';
 import '../auth/auth_session.dart';
+import '../transit/bus_route_stop_occurrence.dart';
+import '../transit/bus_route_vehicle.dart';
 import 'alarm.dart';
+import 'alarm_approach.dart';
 
 abstract class AlarmClient {
   Future<Alarm> create({
@@ -30,6 +33,21 @@ class AlarmApiClient implements AlarmClient {
   const AlarmApiClient(this.apiClient);
 
   final AuthenticatedApiClient apiClient;
+
+  AlarmApproachLoader createApproachLoader() => AlarmApproachLoader(
+    findStops: (id) async {
+      final response = await _request('GET', '/api/v1/bus-routes/$id/stops');
+      _checkStatus(response.statusCode, response.bodyBytes, 200);
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      if (decoded is! List) throw const FormatException();
+      return decoded.map(BusRouteStopOccurrence.fromJson).toList();
+    },
+    findVehicles: (id) async {
+      final response = await _request('GET', '/api/v1/bus-routes/$id/vehicles');
+      _checkStatus(response.statusCode, response.bodyBytes, 200);
+      return BusRouteVehicles.fromJson(jsonDecode(utf8.decode(response.bodyBytes)));
+    },
+  );
 
   @override
   Future<Alarm> create({

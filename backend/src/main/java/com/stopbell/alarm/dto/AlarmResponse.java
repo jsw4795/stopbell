@@ -18,6 +18,8 @@ public record AlarmResponse(
         TransitProvider provider,
         BusRouteType routeType,
         boolean canNotifyOneStopBefore,
-        boolean canNotifyOneStopAfter
+        boolean canNotifyOneStopAfter,
+        Long routeId,
+        Long targetStopOccurrenceId
 ) {
 }

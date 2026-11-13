@@ -124,7 +124,7 @@ Stop selection response에는 `provider`, `externalRouteId`, `externalStopId`, `
 GET /api/v1/bus-routes/{routeId}/vehicles
 ```
 
-JWT Access Token이 필요한 읽기 전용 API다. 노선 선택 화면의 차량 위치·잔여 좌석·혼잡도 표시용이며 후보 API, 하차 추적, TRACKING 계약과 분리된다. `{routeId}`는 stops API와 같은 `BusRoute.id`다. 자동 polling 없이 화면 진입 시 1회와 수동 새로고침으로 호출한다.
+JWT Access Token이 필요한 읽기 전용 API다. 노선 선택 화면의 차량 위치·잔여 좌석·혼잡도와 활성 도착 알람 홈·상세의 직전 버스 간격 표시용이며 후보 API, 하차 추적, TRACKING 계약과 분리된다. `{routeId}`는 stops API와 같은 `BusRoute.id`다. 자동 polling 없이 화면 진입 시 1회와 수동 새로고침으로 호출한다.
 
 ```json
 {
@@ -190,17 +190,23 @@ Request body:
   "startStopName": "수원역",
   "endStopName": "사색의광장",
   "provider": "TAGO",
-  "routeType": "CITY_LOCAL"
+  "routeType": "CITY_LOCAL",
+  "routeId": 42,
+  "targetStopOccurrenceId": 12345
 }
 ```
 
 `startStopName`·`endStopName`(UI-5)은 nullable 표시 전용 노선 기·종점이며, `provider`·`routeType`은 같은 일치 조건에서만 제공하는 nullable 현재 노선 Provider와 공식 노선 유형(검색 응답과 같은 값)이다. 기·종점과 유형은 모든 Alarm response(생성·생성 결과 조회·목록·상세·활성화·비활성화)에 포함된다. Alarm snapshot의 Provider·외부 노선 ID로 현재 노선을 찾고 노선번호와 `cityCode`가 snapshot과 같을 때만 [버스 노선 검색](#버스-노선-검색)과 같은 공식 원본 기·종점 규칙(TAGO 노선 원본, 서울 TOPIS 기종점)을 적용한다. 노선이 없거나 달라졌거나 원본이 없거나 두 이름이 같으면 둘 다 null이며 추측하지 않는다. 기존 Client는 이 필드를 무시해도 되고 Alarm 판정·알림에는 사용하지 않는다. 모든 Alarm response는 `canNotifyOneStopBefore`·`canNotifyOneStopAfter`(boolean)도 포함한다. 대상 정류장이 노선 첫 occurrence가 아니면 before, 마지막 occurrence가 아니면 after가 true이며 생성·옵션 수정 검증과 같은 기준이다. 노선을 찾을 수 없으면 저장된 이전·다음 정류장 snapshot 존재 여부로 대체한다. Client는 false인 옵션의 스위치를 숨길 수 있고, 필드가 없는 응답이면 표시한다.
 
+모든 Alarm response는 nullable `routeId`·`targetStopOccurrenceId`도 포함한다. 차량 위치 표시를 위한 현재 내부 selection reference이며, 위 노선 일치 조건과 함께 현재 traversal의 대상 occurrence 순번·정류장 외부 ID·Provider가 snapshot과 일치할 때만 둘 다 제공하고 그 외에는 둘 다 null이다. 생성 요청의 원래 occurrence ID를 보존하거나 생성 멱등성 결과를 추측하는 근거가 아니다. Alarm 조회 자체는 Provider를 호출하지 않는다.
+
+활성(`ACTIVE`) Alarm 홈·상세는 이 reference로 기존 stops·vehicles API를 화면 진입과 명시적 새로고침에만 조회하며 같은 홈 조회의 동일 노선 동시 요청은 공유한다. 서버의 기존 15초 캐시·동시 요청 합치기·Provider별 일일 상한을 유지하며 자동 polling은 없다. 대상 occurrence 이전에 위치한 차량 중 traversal 배열 index 간격이 가장 작은 값을 `직전 버스 N정류장 전`으로 표시한다. 대상 도착·통과 차량은 제외하고 다음 회차를 추측하지 않는다. 간격은 조회 시점의 마지막 통과·도착 occurrence 기준 참고 정보이며 실제 정차 수나 ETA를 보장하지 않는다. 완전한 조회에서 접근 차량이 없으면 `다가오는 버스 없음`을 표시한다. PARTIAL은 확인된 차량 기준 간격과 일부 위치 미확인을 함께 표시하고, 확인된 접근 차량도 없으면 확인 불가로 표시한다. STALE·오류·metadata 불일치는 버스 없음과 구분한다. 활성화 직후에는 자동 추가 조회 없이 명시적 새로고침을 안내한다.
+
 `targetStopOccurrenceId`가 존재하지 않으면 `404 Not Found`다. 첫 occurrence에 `notifyOneStopBefore: true` 또는 마지막 occurrence에 `notifyOneStopAfter: true`를 요청하면 `400 Bad Request`다. Backend는 해당 option을 `false`로 변경해 생성하지 않는다. first/last 판정은 `stopOrder`가 1 또는 최대값인지가 아니라 predecessor/successor occurrence의 실제 존재 여부를 사용한다.
 
 Flutter가 stale `targetStopOccurrenceId`로 `404 Not Found`를 받으면 old ID를 현재 Stop에 추측 매칭하거나 POST를 자동 재시도하지 않는다. 사용자가 Stop 목록에서 다시 선택하는 흐름으로 복구한다. Flutter는 올바른 `201` Alarm response를 받은 경우에만 생성 성공으로 처리한다. HTTP 5xx(500/502/503/504 포함), 408, Timeout·Transport/연결 단절·응답 유실, 잘못된 성공 JSON과 그 밖의 판단 불가 오류는 생성 결과 불확실이다. 계약상 생성 전 거부가 확인되는 400 `INVALID_REQUEST`/`INVALID_ALARM_REQUEST`, 404 `TARGET_STOP_OCCURRENCE_NOT_FOUND`, 명확한 인증·권한 거부만 기존 거부 의미를 유지하며 모든 4xx를 안전한 재시도로 취급하지 않는다. 불확실한 생성은 원래 요청을 보존하고 자동 재전송·활성화하지 않는다. 사용자는 원래 결과를 조회하거나 허용된 경우 같은 요청을 명시적으로 재전송할 수 있다.
 
-Flutter는 생성 전 원본 UUID와 body를 영속 저장하고 결과 조회에 같은 UUID를 사용한다. Alarm response에는 원래 `targetStopOccurrenceId`가 없으므로 목록의 유사 Alarm을 특정 생성 요청의 결과로 자동 연결하지 않는다.
+Flutter는 생성 전 원본 UUID와 body를 영속 저장하고 결과 조회에 같은 UUID를 사용한다. Alarm response의 `targetStopOccurrenceId`는 현재 metadata의 표시용 reference이므로 목록의 유사 Alarm을 특정 생성 요청의 결과로 자동 연결하지 않는다.
 
 <a id="alarm-생성-멱등성-확정-계약-task-802-2단계-미구현"></a>
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_spacing.dart';
 import 'bus_route.dart';
+import 'bus_route_presentation.dart';
 
 class BusStopSelectionLayout extends StatelessWidget {
   const BusStopSelectionLayout({
@@ -11,6 +12,7 @@ class BusStopSelectionLayout extends StatelessWidget {
     required this.onBack,
     required this.body,
     this.summary,
+    this.actions,
     this.backLabel = '노선 다시 선택',
     this.iconColor,
   });
@@ -20,6 +22,7 @@ class BusStopSelectionLayout extends StatelessWidget {
   final VoidCallback? onBack;
   final Widget body;
   final Widget? summary;
+  final List<Widget>? actions;
   final String backLabel;
 
   /// 노선 유형색. 없으면 기본색을 쓴다.
@@ -29,6 +32,7 @@ class BusStopSelectionLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final routeColor = iconColor ?? routeTypeColor(context, route);
     return SafeArea(
       child: Material(
         color: colors.surface,
@@ -44,23 +48,28 @@ class BusStopSelectionLayout extends StatelessWidget {
                   icon: const Icon(Icons.arrow_back),
                 ),
                 title: Text(title),
+                actions: actions,
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: StopBellSpacing.screenPadding,
+                padding: const EdgeInsets.only(
+                  top: StopBellSpacing.lg,
+                  left: StopBellSpacing.screenPadding,
+                  right: StopBellSpacing.screenPadding,
                 ),
                 child: Row(
                   children: [
                     ExcludeSemantics(
                       child: Icon(
                         Icons.directions_bus_outlined,
-                        color: iconColor ?? colors.primary,
+                        color: routeColor ?? colors.primary,
                       ),
                     ),
                     const SizedBox(width: StopBellSpacing.sm),
                     Text(
                       route.routeNumber,
-                      style: theme.textTheme.headlineSmall,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        color: routeColor,
+                      ),
                     ),
                     const SizedBox(width: StopBellSpacing.sm),
                     Expanded(

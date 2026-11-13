@@ -207,7 +207,17 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
     final details = [
       if (index == _turn?.index) '회차지점',
       if ((stop.id == widget.targetId || stop.id == widget.boardingId) &&
-          (_counts[stopDisplayName(stop.name).name] ?? 0) > 1)
+          (_counts[stopDisplayName(stop.name).name] ?? 0) > 1 &&
+          (stop.destinationName == null ||
+              widget.stops
+                      .where(
+                        (other) =>
+                            stopDisplayName(other.name).name ==
+                                stopDisplayName(stop.name).name &&
+                            other.destinationName == stop.destinationName,
+                      )
+                      .length >
+                  1))
         '노선 순서 ${stop.order}',
     ];
     return details.isEmpty ? null : details.join(' · ');
@@ -548,7 +558,7 @@ class _StopRow extends StatelessWidget {
       selected: selected,
       enabled: !unavailable,
       hint: selectionLocked
-          ? '정류장 선택 완료. 다시 선택하려면 정류장 다시 선택 버튼을 누르세요.'
+          ? '정류장 선택 완료. 선택한 구간을 확인해 주세요.'
           : unavailable
           ? '승차 정류장 이후의 정류장을 선택해 주세요.'
           : null,

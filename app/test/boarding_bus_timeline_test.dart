@@ -431,6 +431,13 @@ void main() {
         find.byKey(const ValueKey('continue-boarding-candidate')),
         findsOneWidget,
       );
+      await tester.pump(const Duration(minutes: 2));
+      expect(find.text('위치가 오래됐어요. 새로고침해 주세요'), findsOneWidget);
+      tester.view.physicalSize = const Size(320, 568);
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
       final candidatesBefore = candidateCalls, vehiclesBefore = vehicleCalls;
       await tap(find.byTooltip('차량 위치 새로고침'));
       expect(candidateCalls, candidatesBefore + 1);
@@ -441,7 +448,7 @@ void main() {
       );
       // 새로고침 후에도 후보 화면에 머물고 '차량 후보 다시 조회' 버튼은 없다.
       expect(find.byKey(const ValueKey('candidate-3')), findsOneWidget);
-      expect(find.text('정류장 다시 선택'), findsOneWidget);
+      expect(find.text('정류장 다시 선택'), findsNothing);
       expect(find.text('차량 후보 다시 조회'), findsNothing);
     });
 

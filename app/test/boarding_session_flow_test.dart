@@ -129,7 +129,8 @@ void main() {
   Future<void> prepare(WidgetTester tester) async {
     await tap(tester, '하차 알람');
     await tester.enterText(find.byType(TextField), '7000');
-    await tap(tester, '검색');
+    await tester.tap(find.byTooltip('검색'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('occurrence-11')));

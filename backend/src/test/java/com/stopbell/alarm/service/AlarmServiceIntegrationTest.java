@@ -123,8 +123,24 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
         assertThat(target.getSuccessorStopOrder()).isEqualTo(7);
         assertThat(response).isEqualTo(new AlarmResponse(
                 alarm.getId(), TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", true, true, null, null,
-                TransitProvider.TAGO, null, true, true
+                TransitProvider.TAGO, null, true, true, route.routeId(), route.middleId()
         ));
+    }
+
+    @Test
+    @DisplayName("대상 occurrence가 현재 traversal에 없으면 차량 조회용 reference를 제공하지 않는다")
+    void omit_vehicle_references_when_target_occurrence_is_missing() {
+        User owner = user();
+        RouteFixture route = route();
+        Long alarmId = alarmService.create(owner.getId(),
+                new CreateAlarmRequest(route.middleId(), false, false)).id();
+        occurrenceRepository.deleteById(route.middleId());
+        entityManager.flush();
+        entityManager.clear();
+
+        AlarmResponse response = alarmService.findById(owner.getId(), alarmId);
+        assertThat(response.routeId()).isNull();
+        assertThat(response.targetStopOccurrenceId()).isNull();
     }
 
     @Test
@@ -889,7 +905,7 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
             statistics.clear();
             assertThat(alarmService.findById(owner.getId(), alarmId)).isEqualTo(new AlarmResponse(
                     alarmId, TransitType.BUS, AlarmStatus.INACTIVE, "7000", "Stop B", false, false, null, null,
-                    TransitProvider.TAGO, null, true, true
+                    TransitProvider.TAGO, null, true, true, route.routeId(), route.middleId()
             ));
             // Alarm·BusAlarmTarget 1회 + 표시용 현재 노선 1회 + TAGO 노선 원본 1회
             assertThat(statistics.getPrepareStatementCount()).isEqualTo(4);
@@ -949,6 +965,8 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
                     .satisfies(alarm -> {
                         assertThat(alarm.provider()).isNull();
                         assertThat(alarm.routeType()).isNull();
+                        assertThat(alarm.routeId()).isNull();
+                        assertThat(alarm.targetStopOccurrenceId()).isNull();
                     });
         } finally {
             statistics.setStatisticsEnabled(originallyEnabled);
@@ -1095,13 +1113,14 @@ class AlarmServiceIntegrationTest extends LatestSchemaIntegrationTest {
                 new BusRouteStopOccurrence(route, last, 7)
         );
         return new RouteFixture(
-                externalRouteId,
+                route.getId(), externalRouteId,
                 firstOccurrence.getId(), middleOccurrence.getId(), lastOccurrence.getId(),
                 first.getExternalStopId(), middle.getExternalStopId(), last.getExternalStopId()
         );
     }
 
     private record RouteFixture(
+            Long routeId,
             String externalRouteId,
             Long firstId,
             Long middleId,

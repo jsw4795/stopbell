@@ -13,6 +13,7 @@ import 'bus_route_vehicle_bar.dart';
 import 'bus_route_vehicle_client.dart';
 import 'bus_route_vehicle_controller.dart';
 import 'bus_stop_selection_layout.dart';
+import 'stop_display_name.dart';
 
 enum _StopState { loading, success, empty, error }
 
@@ -243,7 +244,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
     final target = _stops
         .where((stop) => stop.id == _selectedOccurrenceId)
         .firstOrNull;
-    final details = target == null ? null : selectedStopContext(target, _stops);
+    final details = target == null ? null : _stopDirection(target);
     final canChange = !_creating && !_outcomeUnknown;
     final theme = Theme.of(context);
     return BusStopSelectionLayout(
@@ -268,20 +269,35 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
-                        child: Text.rich(
-                          TextSpan(
-                            text: '선택한 정류장: ',
-                            children: [
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text.rich(
                               TextSpan(
-                                text: target.name,
-                                style: theme.textTheme.titleMedium?.copyWith(
-                                  color: StopBellColors.of(context).targetStop,
+                                text: '선택한 정류장: ',
+                                children: [
+                                  TextSpan(
+                                    text: target.name,
+                                    style: theme.textTheme.titleMedium?.copyWith(
+                                      color: StopBellColors.of(
+                                        context,
+                                      ).targetStop,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              style: theme.textTheme.bodySmall,
+                            ),
+                            if (details != null)
+                              Text(
+                                details,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
                                 ),
                               ),
-                              if (details != null) TextSpan(text: '\n$details'),
-                            ],
-                          ),
-                          style: theme.textTheme.bodySmall,
+                          ],
                         ),
                       ),
                       Tooltip(
@@ -353,6 +369,28 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
               ],
             ),
     );
+  }
+
+  String? _stopDirection(BusRouteStopOccurrence stop) {
+    final sameName = _stops
+        .where(
+          (item) =>
+              stopDisplayName(item.name).name == stopDisplayName(stop.name).name,
+        )
+        .toList();
+    if (sameName.length < 2) return null;
+    final destination = stop.destinationName;
+    if (destination != null &&
+        sameName.where((item) => item.destinationName == destination).length ==
+            1) {
+      return '$destination 방면';
+    }
+    final next = stop.nextStopName;
+    if (next != null &&
+        sameName.where((item) => item.nextStopName == next).length == 1) {
+      return '$next 방면';
+    }
+    return '노선 순서 ${stop.order}';
   }
 
   Widget _buildStops() {

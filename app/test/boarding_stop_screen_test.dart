@@ -114,6 +114,96 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('후보 헤더 새로고침과 제목 줄 시각은 좁은 화면과 큰 글씨에서도 표시된다', (tester) async {
+    await setup(tester);
+    tester.view.physicalSize = const Size(320, 568);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final semantics = tester.ensureSemantics();
+
+    await tester.pumpWidget(screen(stops: (_) async => _longNameStops));
+    await tester.pumpAndSettle();
+    await query(tester);
+    expect(find.text('정류장 다시 선택'), findsNothing);
+    expect(find.byType(ExpansionTile), findsNothing);
+    expect(find.byIcon(Icons.arrow_forward), findsOneWidget);
+    final help = find.bySemanticsLabel('차량 선택 도움말');
+    await tester.ensureVisible(help);
+    await tester.pumpAndSettle();
+    final helpSize = tester.getSize(help);
+    expect(helpSize.width, greaterThanOrEqualTo(44));
+    expect(helpSize.height, greaterThanOrEqualTo(44));
+    const message =
+        '전체 차량번호를 확인해 주세요. 시각은 서버 조회 기준이에요. 최근 위치는 진행 참고 정류장이며 간격에는 미정차·경유가 포함될 수 있어요.';
+    expect(find.text(message), findsNothing);
+    await tester.tap(help);
+    await tester.pumpAndSettle();
+    expect(find.text(message), findsOneWidget);
+    // 뒤로가기 대신 안내 제목을 눌러 말풍선만 닫는다.
+    await tester.tap(find.text('차량 후보 선택'));
+    await tester.pumpAndSettle();
+    expect(find.text(message), findsNothing);
+    final heading = find.byKey(const ValueKey('candidate-section-heading'));
+    expect(
+      find.descendant(of: heading, matching: find.text('차량 후보 선택')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: heading, matching: find.textContaining('기준 위치')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: heading, matching: find.byIcon(Icons.refresh)),
+      findsNothing,
+    );
+    final header = find.byType(AppBar);
+    final refresh = find.byKey(const ValueKey('find-candidates'));
+    expect(find.descendant(of: header, matching: refresh), findsOneWidget);
+    final back = find.byTooltip('정류장 선택으로');
+    final refreshRect = tester.getRect(refresh);
+    expect(refreshRect.center.dy, closeTo(tester.getCenter(back).dy, 1));
+    expect(refreshRect.left, greaterThan(tester.getRect(back).right));
+    expect(refreshRect.right, lessThanOrEqualTo(320));
+    expect(refreshRect.width, greaterThanOrEqualTo(44));
+    expect(refreshRect.height, greaterThanOrEqualTo(44));
+    expect(refresh.hitTestable(), findsOneWidget);
+    semantics.dispose();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('헤더 새로고침은 후보를 유지하고 조회 중 중복 요청을 막는다', (tester) async {
+    await setup(tester);
+    await tester.pumpWidget(screen());
+    await tester.pumpAndSettle();
+    await query(tester);
+    final pending = Completer<BoardingCandidates>();
+    respond = () => pending.future;
+    final refresh = find.byKey(const ValueKey('find-candidates'));
+    await tester.tap(refresh);
+    await tester.pump();
+    expect(queries, hasLength(2));
+    expect(find.text('차량 후보 선택'), findsOneWidget);
+    expect(tester.widget<IconButton>(refresh).onPressed, isNull);
+    expect(
+      find.descendant(
+        of: refresh,
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(refresh);
+    await tester.pump();
+    expect(queries, hasLength(2));
+    pending.complete(BoardingCandidates.fromJson(candidatesJson()));
+    await tester.pumpAndSettle();
+    expect(tester.widget<IconButton>(refresh).onPressed, isNotNull);
+    expect(
+      find.descendant(of: refresh, matching: find.byIcon(Icons.refresh)),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'selected notification controls fit above safe area on a small screen',
     (tester) async {
@@ -275,7 +365,10 @@ void main() {
         await tester.pumpAndSettle();
         expect(next, findsNothing);
         await tap(tester, 'candidate-0');
-        await tap(tester, 'reselect-stops');
+        await tester.tap(find.byTooltip('정류장 선택으로'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('승차 정류장 선택으로'));
+        await tester.pumpAndSettle();
         await query(tester);
         expect(next, findsNothing);
       },
@@ -312,7 +405,7 @@ void main() {
     await tap(tester, 'occurrence-11');
     expect(find.byKey(const ValueKey('find-candidates')), findsNothing);
     await tap(tester, 'occurrence-22');
-    expect(find.byKey(const ValueKey('reselect-stops')), findsOneWidget);
+    expect(find.byKey(const ValueKey('reselect-stops')), findsNothing);
     for (final id in [11, 22]) {
       await tap(tester, 'occurrence-$id');
     }
@@ -330,7 +423,11 @@ void main() {
     await tap(tester, 'find-candidates');
     await tester.pumpAndSettle();
     expect(queries.single, (754, 22, 11));
-    await tap(tester, 'reselect-stops');
+    expect(find.text('정류장 다시 선택'), findsNothing);
+    await tester.tap(find.byTooltip('정류장 선택으로'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('승차 정류장 선택으로'));
+    await tester.pumpAndSettle();
     expect(find.byType(BoardingCandidatesView), findsNothing);
     expect(find.byKey(const ValueKey('summary-boarding')), findsNothing);
     expect(find.byKey(const ValueKey('summary-target')), findsNothing);
@@ -381,11 +478,8 @@ void main() {
       );
       expect(boxes.map((box) => box.top).toSet(), hasLength(1));
     }
-    final reselect = find.byKey(const ValueKey('reselect-stops'));
     final candidates = find.byKey(const ValueKey('find-candidates'));
-    expect(reselect.hitTestable(), findsOneWidget);
     expect(candidates.hitTestable(), findsOneWidget);
-    expect(tester.getCenter(reselect).dy, tester.getCenter(candidates).dy);
     expect(tester.takeException(), isNull);
   });
 
@@ -422,7 +516,10 @@ void main() {
       await tap(tester, 'find-candidates');
       await tester.pumpAndSettle();
       expect(queries.single, (754, 3, 2));
-      await tap(tester, 'reselect-stops');
+      await tester.tap(find.byTooltip('정류장 선택으로'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('승차 정류장 선택으로'));
+      await tester.pumpAndSettle();
       await tap(tester, 'occurrence-1');
       await tap(tester, 'occurrence-3');
       expect(find.textContaining('목표 정류장 · 반복'), findsOneWidget);
@@ -463,7 +560,7 @@ void main() {
       );
       expect(restricted.any((s) => s.properties.enabled == false), isTrue);
       await tap(tester, 'occurrence-2');
-      expect(find.byKey(const ValueKey('reselect-stops')), findsOneWidget);
+      expect(find.byKey(const ValueKey('reselect-stops')), findsNothing);
       await tester.tap(find.text('회차 방면'));
       await tester.pumpAndSettle();
       final locked = tester.widgetList<Semantics>(
@@ -579,7 +676,7 @@ void main() {
         selectedOffset,
       );
       expect(loads, 1);
-      expect(find.byKey(const ValueKey('reselect-stops')), findsOneWidget);
+      expect(find.byKey(const ValueKey('reselect-stops')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('occurrence-6')));
       await tester.pump();
       expect(find.text('승차 정류장 · 정류장 6'), findsOneWidget);
@@ -671,7 +768,10 @@ void main() {
       await tap(tester, 'find-candidates');
       expect(queries, hasLength(1));
       expect(find.text('차량 후보를 조회하고 있어요.'), findsOneWidget);
-      await tap(tester, 'reselect-stops');
+      await tester.tap(find.byTooltip('정류장 선택으로'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('승차 정류장 선택으로'));
+      await tester.pumpAndSettle();
       await tap(tester, 'occurrence-22');
       await tap(tester, 'occurrence-33');
       expect(requestChecks.first(), isFalse);
@@ -708,7 +808,10 @@ void main() {
       await tap(tester, 'occurrence-11');
       await tap(tester, 'occurrence-22');
       await tap(tester, 'find-candidates');
-      await tap(tester, 'reselect-stops');
+      await tester.tap(find.byTooltip('정류장 선택으로'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('승차 정류장 선택으로'));
+      await tester.pumpAndSettle();
       await tap(tester, 'occurrence-11');
       await tap(tester, 'occurrence-22');
       expect(requestChecks.first(), isFalse);

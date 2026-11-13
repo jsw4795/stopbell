@@ -106,7 +106,7 @@ void main() {
 
   Future<void> search(WidgetTester tester, int id) async {
     await tester.enterText(find.byType(TextField), '7000');
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.byTooltip('검색'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(ValueKey(id)));
     await tester.pumpAndSettle();
@@ -151,7 +151,9 @@ void main() {
       expect(find.text('차량 후보 선택'), findsOneWidget);
       final next = find.byKey(const ValueKey('continue-boarding-candidate'));
       expect(next, findsNothing);
-      expect(find.textContaining('원하는 차량을 직접 선택'), findsOneWidget);
+      expect(find.text('차량번호를 확인하고 선택해 주세요.'), findsOneWidget);
+      expect(find.byIcon(Icons.info_outline), findsOneWidget);
+      expect(find.byIcon(Icons.arrow_forward), findsOneWidget);
       expect(find.textContaining('승차 · 반복 정류장'), findsOneWidget);
       expect(find.textContaining('목표 · 반복 정류장'), findsOneWidget);
       expect(
@@ -175,6 +177,8 @@ void main() {
         requests.where((r) => r.url.path == '/api/v1/bus-routes/1390/stops'),
         hasLength(1),
       );
+      await tester.tap(find.byTooltip('승차 정류장 선택으로'));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.byTooltip('노선 다시 선택'));
       await tester.tap(find.byTooltip('노선 다시 선택'));
       await tester.pumpAndSettle();

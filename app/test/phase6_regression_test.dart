@@ -97,7 +97,7 @@ Future<void> startAlarm(WidgetTester tester) async {
   await tester.pumpAndSettle();
   expect(find.text('도착 알람 · 노선 선택'), findsOneWidget);
   await tester.enterText(find.byType(TextField), '7000');
-  await tester.tap(find.text('검색'));
+  await tester.tap(find.byTooltip('검색'));
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(const ValueKey(1390)));
   await tester.pumpAndSettle();
@@ -198,7 +198,8 @@ void main() {
       await tester.pump();
       expect(requests.last, 'POST /api/v1/alarms/15/activate');
       expect(session.generation, generation);
-      expect(find.textContaining('선택한 정류장: 재방문 정류장\n수원역 방면'), findsOneWidget);
+      expect(find.textContaining('선택한 정류장: 재방문 정류장'), findsOneWidget);
+      expect(find.text('수원역 방면'), findsOneWidget);
       expect(
         tester
             .widget<Switch>(

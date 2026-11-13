@@ -355,7 +355,7 @@ void main() {
     await tester.tap(find.text('도착 알람'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '7000');
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.byTooltip('검색'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pumpAndSettle();
@@ -386,7 +386,7 @@ void main() {
     await tester.tap(find.text('도착 알람'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '7000');
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.byTooltip('검색'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pump();
@@ -487,7 +487,7 @@ void main() {
     await tester.tap(find.text('도착 알람'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '7000');
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.byTooltip('검색'));
     await tester.pump();
     expect(find.text('노선 검색 중...'), findsOneWidget);
 
@@ -544,7 +544,7 @@ void main() {
         await tester.tap(find.text('도착 알람'));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField), '7000');
-        await tester.tap(find.text('검색'));
+        await tester.tap(find.byTooltip('검색'));
         await tester.pumpAndSettle();
         await tester.tap(find.byKey(const ValueKey(754)));
         await tester.pumpAndSettle();
@@ -656,7 +656,7 @@ void main() {
     await tester.tap(find.text('도착 알람'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '7000');
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.byTooltip('검색'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey(754)));
     await tester.pumpAndSettle();

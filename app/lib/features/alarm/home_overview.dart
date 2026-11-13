@@ -13,6 +13,7 @@ import '../../shared/stopbell_inline_message.dart';
 import '../../shared/stopbell_section_title.dart';
 import '../../shared/stopbell_status_chip.dart';
 import 'alarm.dart';
+import 'alarm_approach.dart';
 
 enum _LoadState { loading, ready, error }
 
@@ -48,6 +49,7 @@ class HomeOverview extends StatefulWidget {
     required this.findAlarms,
     required this.onCreateArrival,
     required this.onOpenAlarm,
+    this.findApproach,
     this.findSessions,
     this.refreshSession,
     this.onCreateBoarding,
@@ -58,6 +60,7 @@ class HomeOverview extends StatefulWidget {
   });
 
   final Future<List<Alarm>> Function() findAlarms;
+  final FindAlarmApproach? findApproach;
   final Future<BoardingSessionOverview> Function()? findSessions;
 
   /// 진행 중 세션의 정확한 ID 조회. 상세 화면 자동 갱신과 같은 주기로 사용한다.
@@ -407,6 +410,8 @@ class _HomeOverviewState extends State<HomeOverview>
               child: _AlarmCard(
                 key: ValueKey(alarm.id),
                 alarm: alarm,
+                findApproach: widget.findApproach,
+                refreshKey: _alarmEpoch,
                 onTap: () => widget.onOpenAlarm(alarm.id),
               ),
             ),
@@ -620,7 +625,15 @@ class _InfoLine extends StatelessWidget {
 }
 
 class _AlarmCard extends StatelessWidget {
-  const _AlarmCard({super.key, required this.alarm, required this.onTap});
+  const _AlarmCard({
+    super.key,
+    required this.alarm,
+    required this.onTap,
+    this.findApproach,
+    this.refreshKey,
+  });
+  final FindAlarmApproach? findApproach;
+  final Object? refreshKey;
   final Alarm alarm;
   final VoidCallback onTap;
 
@@ -679,6 +692,11 @@ class _AlarmCard extends StatelessWidget {
               ),
             ],
           ),
+        ),
+        AlarmApproachText(
+          alarm: alarm,
+          findApproach: findApproach,
+          refreshKey: refreshKey,
         ),
         if (endpoints != null)
           _InfoLine(
