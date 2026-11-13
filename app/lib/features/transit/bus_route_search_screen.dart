@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_spacing.dart';
+import '../../shared/stopbell_delayed_loading.dart';
+import '../../shared/stopbell_skeleton.dart';
 import 'bus_route.dart';
 import 'bus_route_presentation.dart';
 
@@ -46,11 +48,15 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
     super.dispose();
   }
 
-  Future<void> _search([String? retryQuery]) async {
-    if (_state == _SearchState.loading) return;
+  int _requestId = 0;
+
+  /// [force]는 응답이 오지 않는 요청을 버리고 다시 조회하는 15초 재시도 경로다.
+  Future<void> _search([String? retryQuery, bool force = false]) async {
+    if (_state == _SearchState.loading && !force) return;
     final query = (retryQuery ?? _queryController.text).trim();
     if (query.isEmpty) return;
 
+    final id = ++_requestId;
     FocusScope.of(context).unfocus();
     setState(() {
       _lastQuery = query;
@@ -60,13 +66,15 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
     });
     try {
       final routes = await widget.search(query);
-      if (!mounted) return;
+      if (!mounted || id != _requestId) return;
       setState(() {
         _routes = routes;
         _state = routes.isEmpty ? _SearchState.empty : _SearchState.success;
       });
     } catch (_) {
-      if (mounted) setState(() => _state = _SearchState.error);
+      if (mounted && id == _requestId) {
+        setState(() => _state = _SearchState.error);
+      }
     }
   }
 
@@ -156,7 +164,18 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
     );
   }
 
-  Widget _buildResults() {
+  Widget _buildResults() => StopBellDelayedLoading(
+    key: ValueKey(('search-loading', _requestId)),
+    loading: _state == _SearchState.loading,
+    skeleton: const SingleChildScrollView(
+      physics: NeverScrollableScrollPhysics(),
+      child: StopBellSkeletonList(count: 4),
+    ),
+    onRetry: () => _search(_lastQuery, true),
+    child: _resultsBody(),
+  );
+
+  Widget _resultsBody() {
     switch (_state) {
       case _SearchState.idle:
         return _emptyState(
@@ -170,16 +189,7 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
           ),
         );
       case _SearchState.loading:
-        return const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: StopBellSpacing.md),
-              Text('노선 검색 중...'),
-            ],
-          ),
-        );
+        return const SizedBox.shrink();
       case _SearchState.empty:
         return _emptyState(
           child: Column(

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:stopbell/core/theme/stopbell_theme.dart';
 import 'package:stopbell/features/transit/bus_route.dart';
 import 'package:stopbell/features/transit/bus_route_search_screen.dart';
+import 'package:stopbell/shared/stopbell_skeleton.dart';
 
 void main() {
   testWidgets('검색 화면 진입 시 입력창에 포커스한다', (tester) async {
@@ -305,7 +306,8 @@ void main() {
       await tester.enterText(find.byType(TextField), ' 7000 ');
       await tester.tap(find.byTooltip('검색'));
       await tester.pump();
-      expect(find.text('노선 검색 중...'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(StopBellSkeletonCard), findsNWidgets(4));
       expect(find.byType(ChoiceChip), findsNothing);
       expect(
         tester

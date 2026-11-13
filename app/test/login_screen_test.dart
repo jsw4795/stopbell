@@ -23,6 +23,8 @@ import 'package:stopbell/main.dart';
 
 import 'alarm_test_fakes.dart';
 
+import 'package:stopbell/shared/stopbell_skeleton.dart';
+
 const pair = TokenPair(
   accessToken: 'header.eyJzdWIiOiIxIn0.fixture',
   refreshToken: 'fixture-refresh',
@@ -621,7 +623,8 @@ void main() {
     await tester.enterText(find.byType(TextField), '7000');
     await tester.tap(find.byTooltip('검색'));
     await tester.pump();
-    expect(find.text('노선 검색 중...'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(StopBellSkeletonCard), findsNWidgets(4));
 
     await tapInSettings(tester, '로그아웃');
     await tester.pump();
@@ -715,7 +718,8 @@ void main() {
       };
       await tester.pumpWidget(app(sessionForTest, alarmClient: alarms));
       await tester.pump();
-      expect(find.text('알람 목록 조회 중...'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(StopBellSkeletonCard), findsNWidgets(3));
       await tapInSettings(tester, '로그아웃');
       await tester.pump();
       backend.logoutGate.complete();

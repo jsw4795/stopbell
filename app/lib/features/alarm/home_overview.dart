@@ -9,8 +9,10 @@ import '../boarding/boarding_session_auto_refresh.dart';
 import '../boarding/boarding_session_client.dart';
 import '../transit/bus_route.dart';
 import '../transit/bus_route_presentation.dart';
+import '../../shared/stopbell_delayed_loading.dart';
 import '../../shared/stopbell_inline_message.dart';
 import '../../shared/stopbell_section_title.dart';
+import '../../shared/stopbell_skeleton.dart';
 import '../../shared/stopbell_status_chip.dart';
 import 'alarm.dart';
 import 'alarm_approach.dart';
@@ -377,10 +379,19 @@ class _HomeOverviewState extends State<HomeOverview>
     ];
   }
 
-  List<Widget> _alarmSection(BuildContext context) {
+  List<Widget> _alarmSection(BuildContext context) => [
+    StopBellDelayedLoading(
+      loading: _alarmState == _LoadState.loading,
+      skeleton: const StopBellSkeletonList(),
+      onRetry: _loadAlarms,
+      child: Column(children: _alarmContent(context)),
+    ),
+  ];
+
+  List<Widget> _alarmContent(BuildContext context) {
     switch (_alarmState) {
       case _LoadState.loading:
-        return const [_InlineProgress('알람 목록 조회 중...')];
+        return const [];
       case _LoadState.error:
         return [
           StopBellInlineMessage(

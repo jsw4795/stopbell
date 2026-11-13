@@ -13,6 +13,8 @@ import 'package:stopbell/features/transit/bus_route.dart';
 
 import 'boarding_session_test_fakes.dart';
 
+import 'package:stopbell/shared/stopbell_skeleton.dart';
+
 Alarm alarm(int id, AlarmStatus status, {String? start, String? end}) => Alarm(
   id: id,
   transitType: AlarmTransitType.bus,
@@ -74,7 +76,8 @@ void main() {
         onCreateArrival: () => create++,
       ),
     );
-    expect(find.text('알람 목록 조회 중...'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(StopBellSkeletonCard), findsNWidgets(3));
     first.completeError(Exception('private failure'));
     await tester.pumpAndSettle();
     expect(find.text('알람 목록을 불러오지 못했어요.'), findsOneWidget);
