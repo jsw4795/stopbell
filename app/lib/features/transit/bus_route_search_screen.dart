@@ -70,15 +70,7 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
     }
   }
 
-  void _clearSearch() {
-    _queryController.clear();
-    setState(() {
-      _lastQuery = null;
-      _routes = const [];
-      _selectedCategory = null;
-      _state = _SearchState.idle;
-    });
-  }
+  void _clearSearch() => _queryController.clear();
 
   @override
   Widget build(BuildContext context) {
@@ -90,47 +82,6 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
         children: [
           Row(
             children: [
-              if (_state == _SearchState.success) ...[
-                Expanded(
-                  flex: 2,
-                  child: Semantics(
-                    label: '지역 필터',
-                    child: DropdownButton<String>(
-                      value: _selectedCategory,
-                      hint: const Text('전체', overflow: TextOverflow.ellipsis),
-                      isExpanded: true,
-                      itemHeight: null,
-                      items: [
-                        for (final category in _categories)
-                          DropdownMenuItem(
-                            value: category,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: StopBellSpacing.sm,
-                              ),
-                              child: Text(category ?? '전체'),
-                            ),
-                          ),
-                      ],
-                      selectedItemBuilder: (context) => [
-                        for (final category in _categories)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              category ?? '전체',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      onChanged: (category) => setState(() {
-                        _selectedCategory = category;
-                      }),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: StopBellSpacing.sm),
-              ],
               Expanded(
                 flex: 3,
                 child: TextField(
@@ -158,11 +109,46 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
               IconButton.filled(
                 tooltip: '검색',
                 onPressed: loading ? null : _search,
-                icon: const Icon(Icons.search),
+                icon: Icon(
+                  Icons.search,
+                  color: loading
+                      ? null
+                      : Theme.of(context).colorScheme.onPrimary,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: StopBellSpacing.xs),
+          const SizedBox(height: StopBellSpacing.md),
+          if (_state == _SearchState.success) ...[
+            const SizedBox(height: StopBellSpacing.xs),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final category in _categories)
+                    Padding(
+                      padding: const EdgeInsets.only(right: StopBellSpacing.sm),
+                      child: ChoiceChip(
+                        key: ValueKey(category),
+                        label: Text(category ?? '전체'),
+                        selected: category == _selectedCategory,
+                        selectedColor: Theme.of(context).colorScheme.primary,
+                        labelStyle: TextStyle(
+                          color: category == _selectedCategory
+                              ? Theme.of(context).colorScheme.onPrimary
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                        showCheckmark: false,
+                        onSelected: (_) => setState(() {
+                          _selectedCategory = category;
+                        }),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: StopBellSpacing.xs),
+          ],
           Expanded(child: _buildResults()),
         ],
       ),
