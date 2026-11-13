@@ -52,12 +52,20 @@ void main() {
           ),
         );
         await tester.enterText(find.byType(TextField), '7000');
-        await tester.tap(find.text('검색'));
+        await tester.tap(find.byTooltip('검색'));
         await tester.pumpAndSettle();
         expect(find.text('간선'), findsOneWidget);
         expect(find.text('운행 구간 정보 없음'), findsOneWidget);
         expect(find.text('김포시'), findsNothing);
         expect(find.text('구래리차고지(미정차) ↔ 당산역광역환승센터(1번승강장)'), findsOneWidget);
+        final fieldRect = tester.getRect(find.byType(TextField));
+        final regionRect = tester.getRect(find.byType(DropdownButton<String>));
+        final searchRect = tester.getRect(find.byTooltip('검색'));
+        expect(regionRect.right, lessThan(fieldRect.left));
+        expect(fieldRect.right, lessThan(searchRect.left));
+        expect(regionRect.center.dy, closeTo(fieldRect.center.dy, 1));
+        expect(searchRect.center.dy, closeTo(fieldRect.center.dy, 1));
+        expect(searchRect.right, lessThanOrEqualTo(320));
         final villageCard = find.byKey(const ValueKey(2));
         final villageLabel = tester.widget<Text>(
           find.descendant(of: villageCard, matching: find.text('마을')),
@@ -126,62 +134,59 @@ void main() {
           ),
         ),
       );
-      Finder tab(String label) => find.widgetWithText(ChoiceChip, label);
-      expect(find.byType(ChoiceChip), findsNothing);
+      DropdownButton<String> regionFilter() =>
+          tester.widget(find.byType(DropdownButton<String>));
+      List<String?> regions() =>
+          regionFilter().items!.map((item) => item.value).toList();
+      Future<void> selectRegion(String label) async {
+        await tester.tap(find.byType(DropdownButton<String>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(label).last);
+        await tester.pumpAndSettle();
+      }
+
+      expect(find.byType(DropdownButton<String>), findsNothing);
       await tester.enterText(find.byType(TextField), '165');
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await tester.pumpAndSettle();
-      expect(tester.widget<ChoiceChip>(tab('전체')).selected, isTrue);
-      final colors = Theme.of(tester.element(tab('전체'))).colorScheme;
-      expect(
-        tester.widget<ChoiceChip>(tab('전체')).selectedColor,
-        colors.primary,
-      );
-      expect(tab('서울'), findsOneWidget);
-      expect(tab('경기'), findsOneWidget);
-      expect(tab('인천'), findsNothing);
-      expect(tab('김포시'), findsNothing);
-      expect(
-        tester
-            .widgetList<ChoiceChip>(find.byType(ChoiceChip))
-            .map((chip) => (chip.label as Text).data),
-        ['전체', '서울', '경기'],
-      );
+      expect(regionFilter().value, isNull);
+      expect(regions(), [null, '서울', '경기']);
       expect(find.text('남양주시'), findsOneWidget);
       expect(find.text('김포시'), findsOneWidget);
 
-      await tester.tap(tab('서울'));
+      await selectRegion('서울');
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey(1)), findsOneWidget);
       expect(find.byKey(const ValueKey(2)), findsNothing);
-      await tester.tap(tab('경기'));
+      await selectRegion('경기');
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey(1)), findsNothing);
       expect(find.byKey(const ValueKey(2)), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey(3)));
       expect(selected, 3);
+      await selectRegion('전체');
+      expect(regionFilter().value, isNull);
+      expect(find.byKey(const ValueKey(1)), findsOneWidget);
+      expect(find.byKey(const ValueKey(2)), findsOneWidget);
       expect(queries, ['165']);
 
       await tester.enterText(find.byType(TextField), '16');
-      await tester.tap(find.text('검색'));
+      await tester.tap(find.byTooltip('검색'));
       await tester.pumpAndSettle();
-      expect(tester.widget<ChoiceChip>(tab('전체')).selected, isTrue);
-      expect(tab('서울'), findsOneWidget);
-      expect(tab('경기'), findsNothing);
+      expect(regionFilter().value, isNull);
+      expect(regions(), [null, '서울']);
 
       await tester.tap(find.byTooltip('검색어 지우기'));
       await tester.pumpAndSettle();
       expect(find.byTooltip('검색어 지우기'), findsNothing);
       expect(find.text('노선번호를 입력해 검색하세요.'), findsOneWidget);
-      expect(find.byType(ChoiceChip), findsNothing);
+      expect(find.byType(DropdownButton<String>), findsNothing);
       expect(queries, ['165', '16']);
 
       await tester.enterText(find.byType(TextField), '999');
-      await tester.tap(find.text('검색'));
+      await tester.tap(find.byTooltip('검색'));
       await tester.pumpAndSettle();
-      expect(tab('인천'), findsOneWidget);
-      expect(tab('서울'), findsNothing);
-      expect(tab('경기'), findsNothing);
+      expect(regions(), [null, '인천']);
     },
   );
 
@@ -209,7 +214,7 @@ void main() {
         ),
       );
       await tester.enterText(find.byType(TextField), '300');
-      await tester.tap(find.text('검색'));
+      await tester.tap(find.byTooltip('검색'));
       await tester.pumpAndSettle();
       expect(find.text('기점 ↔ 종점'), findsNWidgets(2));
       expect(find.text('수원시 · 노선 ID 1'), findsOneWidget);
@@ -235,14 +240,14 @@ void main() {
     expect(find.text('노선번호를 입력해 검색하세요.'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('노선번호를 입력해 검색하세요.')).dy -
-          tester.getBottomLeft(find.text('검색')).dy,
+          tester.getBottomLeft(find.byTooltip('검색')).dy,
       greaterThan(50),
     );
     expect(
       tester.getCenter(find.text('노선번호를 입력해 검색하세요.')).dy,
       lessThan(tester.view.physicalSize.height / 2),
     );
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.byTooltip('검색'));
     await tester.enterText(find.byType(TextField), '   ');
     await tester.testTextInput.receiveAction(TextInputAction.search);
     await tester.pump();
@@ -269,22 +274,49 @@ void main() {
         ),
       );
       await tester.enterText(find.byType(TextField), ' 7000 ');
-      await tester.tap(find.text('검색'));
+      await tester.tap(find.byTooltip('검색'));
       await tester.pump();
       expect(find.text('노선 검색 중...'), findsOneWidget);
-      expect(find.byType(ChoiceChip), findsNothing);
+      expect(find.byType(DropdownButton<String>), findsNothing);
       expect(
-        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        tester
+            .widget<IconButton>(
+              find
+                  .ancestor(
+                    of: find.byTooltip('검색'),
+                    matching: find.byType(IconButton),
+                  )
+                  .first,
+            )
+            .onPressed,
         isNull,
       );
       expect(tester.widget<TextField>(find.byType(TextField)).enabled, isFalse);
+      await tester.tap(find.byTooltip('검색'));
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
       expect(queries, ['7000']);
 
       pending.complete(const [
-        BusRoute(id: 754, routeNumber: '7000', regionName: '수원시'),
-        BusRoute(id: 1390, routeNumber: '7000', regionName: '김포시'),
+        BusRoute(
+          id: 754,
+          routeNumber: '7000',
+          regionName: '수원시',
+          regionCategory: '경기',
+        ),
+        BusRoute(
+          id: 1390,
+          routeNumber: '7000',
+          regionName: '김포시',
+          regionCategory: '경기',
+        ),
       ]);
       await tester.pumpAndSettle();
+      final regionFilter = tester.widget<DropdownButton<String>>(
+        find.byType(DropdownButton<String>),
+      );
+      expect(regionFilter.value, isNull);
+      expect(regionFilter.items!.map((item) => item.value), [null, '경기']);
       expect(find.text('7000'), findsNWidgets(2));
       expect(find.text('수원시'), findsOneWidget);
       expect(find.text('김포시'), findsOneWidget);
@@ -292,6 +324,46 @@ void main() {
       expect(find.byKey(const ValueKey(1390)), findsOneWidget);
     },
   );
+
+  testWidgets('large empty guidance remains scrollable on a short screen', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 240);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: StopBellTheme.light,
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(textScaler: const TextScaler.linear(3)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: BusRouteSearchScreen(search: (_) async => [], onSelect: (_) {}),
+        ),
+      ),
+    );
+    final guidanceScroll = find.byType(SingleChildScrollView);
+    expect(find.text('노선번호를 입력해 검색하세요.'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.enterText(find.byType(TextField), '999');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+    expect(find.text('검색 결과가 없어요.'), findsOneWidget);
+    final scrollable = find.descendant(
+      of: guidanceScroll,
+      matching: find.byType(Scrollable),
+    );
+    expect(
+      tester.state<ScrollableState>(scrollable).position.maxScrollExtent,
+      greaterThan(0),
+    );
+    await tester.drag(guidanceScroll, const Offset(0, -100));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('empty response has a distinct empty state', (tester) async {
     await tester.pumpWidget(
@@ -302,11 +374,11 @@ void main() {
       ),
     );
     await tester.enterText(find.byType(TextField), 'ZZZ');
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.byTooltip('검색'));
     await tester.pumpAndSettle();
     expect(find.text('검색 결과가 없어요.'), findsOneWidget);
     expect(find.text('노선 검색에 실패했어요.'), findsNothing);
-    expect(find.byType(ChoiceChip), findsNothing);
+    expect(find.byType(DropdownButton<String>), findsNothing);
   });
 
   testWidgets('network failure shows retry with the last normalized query', (
@@ -336,10 +408,10 @@ void main() {
       ),
     );
     await tester.enterText(find.byType(TextField), ' 7000 ');
-    await tester.tap(find.text('검색'));
+    await tester.tap(find.byTooltip('검색'));
     await tester.pumpAndSettle();
     expect(find.text('노선 검색에 실패했어요.'), findsOneWidget);
-    expect(find.byType(ChoiceChip), findsNothing);
+    expect(find.byType(DropdownButton<String>), findsNothing);
     expect(find.textContaining('internal detail'), findsNothing);
 
     await tester.enterText(find.byType(TextField), 'N26');
@@ -347,6 +419,31 @@ void main() {
     await tester.tap(find.text('다시 시도'));
     await tester.pumpAndSettle();
     expect(queries, ['7000', '7000']);
+    expect(find.text('노선 검색에 실패했어요.'), findsNothing);
+    expect(find.text('다시 시도'), findsNothing);
+    final routeCard = find.byKey(const ValueKey(1));
+    expect(routeCard, findsOneWidget);
+    expect(
+      find.descendant(of: routeCard, matching: find.text('7000')),
+      findsOneWidget,
+    );
+    final regionFilter = tester.widget<DropdownButton<String>>(
+      find.byType(DropdownButton<String>),
+    );
+    expect(regionFilter.value, isNull);
+    expect(regionFilter.items!.map((item) => item.value), [null, '서울']);
+    await tester.tap(find.byType(DropdownButton<String>));
+    await tester.pumpAndSettle();
     expect(find.text('서울'), findsOneWidget);
+    await tester.tap(find.text('서울'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<DropdownButton<String>>(find.byType(DropdownButton<String>))
+          .value,
+      '서울',
+    );
+    expect(routeCard, findsOneWidget);
+    expect(queries, ['7000', '7000']);
   });
 }

@@ -88,62 +88,81 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            controller: _queryController,
-            enabled: !loading,
-            decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.search),
-              labelText: '노선번호',
-              hintText: '노선번호를 입력하세요',
-              suffixIcon: ValueListenableBuilder(
-                valueListenable: _queryController,
-                builder: (context, value, _) => value.text.isEmpty
-                    ? const SizedBox.shrink()
-                    : IconButton(
-                        tooltip: '검색어 지우기',
-                        onPressed: loading ? null : _clearSearch,
-                        icon: const Icon(Icons.close),
-                      ),
-              ),
-            ),
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _search(),
-          ),
-          const SizedBox(height: StopBellSpacing.md),
-          FilledButton(
-            onPressed: loading ? null : _search,
-            child: const Text('검색'),
-          ),
-          if (_state == _SearchState.success) ...[
-            const SizedBox(height: StopBellSpacing.xs),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (final category in _categories)
-                    Padding(
-                      padding: const EdgeInsets.only(right: StopBellSpacing.sm),
-                      child: ChoiceChip(
-                        key: ValueKey(category),
-                        label: Text(category ?? '전체'),
-                        selected: category == _selectedCategory,
-                        selectedColor: Theme.of(context).colorScheme.primary,
-                        labelStyle: TextStyle(
-                          color: category == _selectedCategory
-                              ? Theme.of(context).colorScheme.onPrimary
-                              : Theme.of(context).colorScheme.onSurface,
-                        ),
-                        showCheckmark: false,
-                        onSelected: (_) => setState(() {
-                          _selectedCategory = category;
-                        }),
-                      ),
+          Row(
+            children: [
+              if (_state == _SearchState.success) ...[
+                Expanded(
+                  flex: 2,
+                  child: Semantics(
+                    label: '지역 필터',
+                    child: DropdownButton<String>(
+                      value: _selectedCategory,
+                      hint: const Text('전체', overflow: TextOverflow.ellipsis),
+                      isExpanded: true,
+                      itemHeight: null,
+                      items: [
+                        for (final category in _categories)
+                          DropdownMenuItem(
+                            value: category,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                vertical: StopBellSpacing.sm,
+                              ),
+                              child: Text(category ?? '전체'),
+                            ),
+                          ),
+                      ],
+                      selectedItemBuilder: (context) => [
+                        for (final category in _categories)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              category ?? '전체',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (category) => setState(() {
+                        _selectedCategory = category;
+                      }),
                     ),
-                ],
+                  ),
+                ),
+                const SizedBox(width: StopBellSpacing.sm),
+              ],
+              Expanded(
+                flex: 3,
+                child: TextField(
+                  controller: _queryController,
+                  enabled: !loading,
+                  decoration: InputDecoration(
+                    labelText: '노선번호',
+                    hintText: '노선번호를 입력하세요',
+                    suffixIcon: ValueListenableBuilder(
+                      valueListenable: _queryController,
+                      builder: (context, value, _) => value.text.isEmpty
+                          ? const SizedBox.shrink()
+                          : IconButton(
+                              tooltip: '검색어 지우기',
+                              onPressed: loading ? null : _clearSearch,
+                              icon: const Icon(Icons.close),
+                            ),
+                    ),
+                  ),
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: (_) => _search(),
+                ),
               ),
-            ),
-            const SizedBox(height: StopBellSpacing.xs),
-          ],
+              const SizedBox(width: StopBellSpacing.sm),
+              IconButton.filled(
+                tooltip: '검색',
+                onPressed: loading ? null : _search,
+                icon: const Icon(Icons.search),
+              ),
+            ],
+          ),
+          const SizedBox(height: StopBellSpacing.xs),
           Expanded(child: _buildResults()),
         ],
       ),
