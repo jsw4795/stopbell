@@ -634,6 +634,18 @@ Session due JPQL은 Event·Session·Delivery를 join하고 위 두 Event 분기�
 
 지원하는 쿼리를 특정하지 않은 추측성 인덱스는 추가하지 않는다.
 
+## 8-1. 데이터 정리 (보존 기간)
+
+`DataCleanupService.cleanup()`은 쌓이기만 하는 데이터를 삭제하는 실행 진입점이다. `@Scheduled`는 붙이지 않았으며 호출 주기와 실행 주체는 개발자와 별도로 정한다. 보존 기간은 임시 기본값이며 최종 운영 정책이 아니다. 모든 삭제는 `cleanup.batch-size`(기본 500) 단위로 반복한다.
+
+| 대상 | 삭제 조건 | 설정 키 (기본값) |
+| --- | --- | --- |
+| `refresh_tokens` | `expires_at` 경과, 또는 `rotated_at`이 보존 기간 초과 | `cleanup.rotated-refresh-token-retention` (`PT24H`) |
+| `notification_events` + `notification_deliveries` | `created_at`이 보존 기간 초과, PENDING Delivery 없음, 연결된 Alarm이 INACTIVE(또는 없음)이거나 Boarding Session이 종료됨 | `cleanup.notification-retention` (`P30D`) |
+| `boarding_sessions` | `ended_at`이 보존 기간 초과이고 연결된 Notification Event가 모두 삭제된 뒤 | `cleanup.boarding-session-retention` (`P30D`) |
+
+삭제 순서는 Delivery → Event → Boarding Session이다. ACTIVE·FOLLOW_UP Alarm과 진행 중(`ended_at IS NULL`) Boarding Session의 Event, PENDING Delivery가 남은 Event, 종료되지 않은 Session은 보존한다. `alarms`, `devices`, `users`와 교통 metadata는 정리 대상이 아니다.
+
 ## 9. 트랜잭션 고려 사항
 
 동일 logical Notification의 중복은 lifecycle transaction 안의 generation 검증과 NotificationEvent atomic uniqueness로 막는다. TASK-510은 API lifecycle mutation과 Scheduler 결과 반영에 `PESSIMISTIC_WRITE` 하나를 사용한다. Provider I/O 뒤 결과 적용 직전에 짧은 row-lock transaction에서 current generation/status를 검증하며 `@Version`, CAS, optimistic locking을 병행하지 않는다.
