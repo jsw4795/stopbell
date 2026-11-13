@@ -379,8 +379,6 @@ void main() {
         await tap(tester, 'candidate-0');
         await tester.tap(find.byTooltip('정류장 선택으로'));
         await tester.pumpAndSettle();
-        await tester.tap(find.byTooltip('승차 정류장 선택으로'));
-        await tester.pumpAndSettle();
         await query(tester);
         expect(next, findsNothing);
       },
@@ -445,12 +443,7 @@ void main() {
     expect(find.text('정류장 다시 선택'), findsNothing);
     await tester.tap(find.byTooltip('정류장 선택으로'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('승차 정류장 선택으로'));
-    await tester.pumpAndSettle();
     expect(find.byType(BoardingCandidatesView), findsNothing);
-    expect(find.byKey(const ValueKey('summary-boarding')), findsNothing);
-    expect(find.byKey(const ValueKey('summary-target')), findsNothing);
-    expect(find.text('노선도에서 승차 정류장을 선택해 주세요.'), findsOneWidget);
     await tap(tester, 'occurrence-11');
     await tap(tester, 'occurrence-22');
     await tap(tester, 'find-candidates');
@@ -536,8 +529,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(queries.single, (754, 3, 2));
       await tester.tap(find.byTooltip('정류장 선택으로'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('승차 정류장 선택으로'));
       await tester.pumpAndSettle();
       await tap(tester, 'occurrence-1');
       await tap(tester, 'occurrence-3');
@@ -690,8 +681,8 @@ void main() {
       final pending = Completer<BoardingCandidates>();
       respond = () => pending.future;
       await tap(tester, 'find-candidates');
-      await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('occurrence-6')));
+      await tester.pump();
       expect(requestChecks.last(), isFalse);
       pending.complete(BoardingCandidates.fromJson(candidatesJson()));
       await tester.pumpAndSettle();
@@ -773,10 +764,6 @@ void main() {
       await tap(tester, 'find-candidates');
       expect(queries, hasLength(1));
       expect(find.text('차량 후보를 조회하고 있어요.'), findsOneWidget);
-      await tester.tap(find.byTooltip('정류장 선택으로'));
-      await tester.pump();
-      await tester.tap(find.byTooltip('승차 정류장 선택으로'));
-      await tester.pumpAndSettle();
       await tap(tester, 'occurrence-22');
       await tap(tester, 'occurrence-33');
       expect(requestChecks.first(), isFalse);
@@ -813,10 +800,6 @@ void main() {
       await tap(tester, 'occurrence-11');
       await tap(tester, 'occurrence-22');
       await tap(tester, 'find-candidates');
-      await tester.tap(find.byTooltip('정류장 선택으로'));
-      await tester.pump();
-      await tester.tap(find.byTooltip('승차 정류장 선택으로'));
-      await tester.pumpAndSettle();
       await tap(tester, 'occurrence-11');
       await tap(tester, 'occurrence-22');
       expect(requestChecks.first(), isFalse);

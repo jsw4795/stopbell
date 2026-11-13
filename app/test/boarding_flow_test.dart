@@ -167,7 +167,11 @@ void main() {
         ),
         isEmpty,
       );
-      await tester.tap(find.byTooltip('정류장 선택으로'));
+      expect(
+        await Navigator.of(tester.element(find.byTooltip('정류장 선택으로')))
+            .maybePop(),
+        isTrue,
+      );
       await tester.pumpAndSettle();
       expect(find.text('서울70사1234'), findsNothing);
       expect(find.byKey(const ValueKey('occurrence-22')), findsOneWidget);
@@ -176,10 +180,12 @@ void main() {
         requests.where((r) => r.url.path == '/api/v1/bus-routes/1390/stops'),
         hasLength(1),
       );
-      await tester.tap(find.byTooltip('승차 정류장 선택으로'));
-      await tester.pumpAndSettle();
       await tester.ensureVisible(find.byTooltip('노선 다시 선택'));
-      await tester.tap(find.byTooltip('노선 다시 선택'));
+      expect(
+        await Navigator.of(tester.element(find.byTooltip('노선 다시 선택')))
+            .maybePop(),
+        isTrue,
+      );
       await tester.pumpAndSettle();
       await search(tester, 754);
       expect(find.text('서울70사1234'), findsNothing);

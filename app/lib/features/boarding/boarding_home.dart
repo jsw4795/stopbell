@@ -285,8 +285,9 @@ class _BoardingHomeState extends State<BoardingHome> {
       }
     }
     final route = _route;
-    final body = route != null
-        ? BoardingStopScreen(
+    final stopScreen = route == null
+        ? null
+        : BoardingStopScreen(
             key: ValueKey(route.id),
             route: route,
             authSession: widget.authSession,
@@ -315,29 +316,49 @@ class _BoardingHomeState extends State<BoardingHome> {
             onBack: () {
               if (_current) setState(() => _route = null);
             },
-          )
-        : Column(
-            children: [
-              AppBar(
-                primary: false,
-                leading: IconButton(
-                  tooltip: '도착 알람으로',
-                  onPressed: widget.onBack,
-                  icon: const Icon(Icons.arrow_back),
-                ),
-                title: const Text('하차 알람 · 노선 선택'),
-                actions: const [StopBellHomeButton()],
-              ),
-              Expanded(
-                child: BusRouteSearchScreen(
-                  search: widget.searchRoutes,
-                  onSelect: (route) {
-                    if (_current) setState(() => _route = route);
-                  },
-                ),
-              ),
-            ],
           );
+    final searchScreen = Column(
+      children: [
+        AppBar(
+          primary: false,
+          leading: IconButton(
+            tooltip: '도착 알람으로',
+            onPressed: widget.onBack,
+            icon: const Icon(Icons.arrow_back),
+          ),
+          title: const Text('하차 알람 · 노선 선택'),
+          actions: const [StopBellHomeButton()],
+        ),
+        Expanded(
+          child: BusRouteSearchScreen(
+            search: widget.searchRoutes,
+            onSelect: (route) {
+              if (_current) setState(() => _route = route);
+            },
+          ),
+        ),
+      ],
+    );
+    final body = Navigator(
+      pages: [
+        MaterialPage<void>(
+          key: const ValueKey('boarding-search'),
+          child: searchScreen,
+        ),
+        if (stopScreen != null)
+          MaterialPage<void>(
+            key: ValueKey('boarding-stop-${route!.id}'),
+            child: stopScreen,
+          ),
+      ],
+      onDidRemovePage: (page) {
+        if (page.key != const ValueKey('boarding-search') &&
+            _current &&
+            _route != null) {
+          setState(() => _route = null);
+        }
+      },
+    );
     return Column(
       children: [
         if (c?.message != null) Text(c!.message!),

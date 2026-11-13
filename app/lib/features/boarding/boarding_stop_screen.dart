@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../../core/theme/stopbell_colors.dart';
 import '../../core/theme/stopbell_spacing.dart';
@@ -80,6 +81,22 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   String? _error;
   bool _staleStops = false;
   BusRouteVehicleController? _vehicles;
+  final _candidateChanges = ValueNotifier<int>(0);
+  Route<void>? _candidateRoute;
+  NavigatorState? _candidateNavigator;
+
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _candidateChanges.value++;
+      });
+    } else {
+      _candidateChanges.value++;
+    }
+  }
 
   BusRouteVehicleController? _newVehicles() {
     final find =
@@ -106,7 +123,13 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   @override
   void didUpdateWidget(covariant BoardingStopScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (_candidateRoute != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _candidateChanges.value++;
+      });
+    }
     if (oldWidget.route.id != widget.route.id) {
+      _removeCandidateRoute();
       _vehicles?.dispose();
       _vehicles = _newVehicles();
       _loadStops();
@@ -125,6 +148,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
 
   void _authChanged() {
     if (_current || !mounted) return;
+    _removeCandidateRoute();
     setState(() {
       _stopsEpoch++;
       _stops = const [];
@@ -139,6 +163,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     _stopsEpoch++;
     _candidateEpoch++;
     _vehicles?.dispose();
+    _candidateChanges.dispose();
     widget.authSession.removeListener(_authChanged);
     super.dispose();
   }
@@ -174,7 +199,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       _boarding != null && stop.order > _boarding!.order;
 
   void _select(BusRouteStopOccurrence stop) {
-    if (!_current || _staleStops || _result != null) {
+    if (!_current || _staleStops) {
       return;
     }
     final earlier =
@@ -243,6 +268,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         // 새 응답이 오면 선택은 해제한다.
         _selectedCandidate = null;
       });
+      if (!keepResult) _openCandidateRoute();
     } on BoardingCandidateException catch (error) {
       if (!current()) return;
       setState(() {
@@ -264,7 +290,9 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     } catch (_) {
       if (current()) setState(() => _error = '차량 후보를 불러오지 못했어요. 다시 조회해 주세요.');
     } finally {
-      if (current()) setState(() => _loadingCandidates = false);
+      if (current()) {
+        setState(() => _loadingCandidates = false);
+      }
     }
   }
 
@@ -273,71 +301,99 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     return details == null ? stop.name : '${stop.name}\n$details';
   }
 
-  void _reselectStops() {
-    if (!_current || widget.creationBusy || _staleStops) return;
-    setState(() {
-      _boarding = null;
-      _target = null;
-      _picker = _Picker.boarding;
-      _invalidateCandidates();
-    });
-  }
-
-  bool get _showingCandidates => _result != null || _loadingCandidates;
-
-  String get _backLabel {
-    if (_showingCandidates) return '정류장 선택으로';
-    if (_picker == _Picker.target || _picker == _Picker.review) {
-      return '승차 정류장 선택으로';
+  void _removeCandidateRoute() {
+    final route = _candidateRoute;
+    final navigator = _candidateNavigator;
+    _candidateRoute = null;
+    void remove() {
+      if (route != null && route.isActive && (navigator?.mounted ?? false)) {
+        navigator!.removeRoute(route);
+      }
     }
-    return '노선 다시 선택';
-  }
 
-  void _back() {
-    if (!_current || widget.creationBusy) return;
-    if (_showingCandidates) {
-      setState(_invalidateCandidates);
-    } else if (_picker == _Picker.target || _picker == _Picker.review) {
-      _reselectStops();
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => remove());
     } else {
-      widget.onBack();
+      remove();
     }
+  }
+
+  void _openCandidateRoute() {
+    final navigator = Navigator.of(context);
+    final route = MaterialPageRoute<void>(
+      builder: (routeContext) => ListenableBuilder(
+        listenable: _candidateChanges,
+        builder: (_, _) => _current
+            ? _layout(candidate: true, context: routeContext)
+            : const SizedBox.shrink(),
+      ),
+    );
+    _candidateNavigator = navigator;
+    _candidateRoute = route;
+    navigator.push(route).then((_) {
+      if (_candidateRoute == route) {
+        _candidateRoute = null;
+        if (mounted) setState(_invalidateCandidates);
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     if (!_current) return const SizedBox.shrink();
-    return PopScope<Object?>(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _back();
-      },
-      child: BusStopSelectionLayout(
-        route: widget.route,
-        title: _compactResults ? '차량 후보' : '하차 알람',
-        onBack: _back,
-        backLabel: _backLabel,
-        actions: _compactResults
-            ? [_candidateRefreshAction()]
-            : [
-                if (_vehicles != null)
-                  ListenableBuilder(
-                    listenable: _vehicles!,
-                    builder: (_, _) => IconButton(
-                      tooltip: '차량 위치 새로고침',
-                      onPressed: _vehicles!.loading ? null : _vehicles!.refresh,
-                      icon: const Icon(Icons.refresh),
-                    ),
+    return _layout(candidate: false, context: context);
+  }
+
+  Widget _layout({required bool candidate, required BuildContext context}) {
+    return BusStopSelectionLayout(
+      route: widget.route,
+      title: candidate && _compactResults ? '차량 후보' : '하차 알람',
+      onBack: candidate
+          ? () => Navigator.of(context).maybePop()
+          : widget.onBack,
+      backLabel: candidate ? '정류장 선택으로' : '노선 다시 선택',
+      actions: candidate
+          ? [_candidateRefreshAction()]
+          : [
+              if (_vehicles != null)
+                ListenableBuilder(
+                  listenable: _vehicles!,
+                  builder: (_, _) => IconButton(
+                    tooltip: '차량 위치 새로고침',
+                    onPressed: _vehicles!.loading ? null : _vehicles!.refresh,
+                    icon: const Icon(Icons.refresh),
                   ),
-              ],
-        iconColor: routeTypeColor(context, widget.route),
-        body: _state == _StopsState.success ? _routeAndCandidates() : _status(),
-        summary:
-            _state == _StopsState.success &&
-                !(_compactResults && _selectedCandidate == null)
-            ? _summary()
-            : null,
-      ),
+                ),
+            ],
+      iconColor: routeTypeColor(context, widget.route),
+      body: _state == _StopsState.success
+          ? (candidate ? _candidateBody() : _timelineWithVehicles())
+          : _status(),
+      summary:
+          _state == _StopsState.success &&
+              !(candidate && _compactResults && _selectedCandidate == null)
+          ? _summary(candidate: candidate)
+          : null,
+    );
+  }
+
+  Widget _candidateBody() {
+    final result = _result;
+    if (result == null) return const Center(child: CircularProgressIndicator());
+    return SingleChildScrollView(
+      key: const ValueKey('boarding-candidate-results'),
+      primary: false,
+      padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
+      child: _compactResults
+          ? _compactCandidateList(result, _boarding!, _target!)
+          : BoardingCandidatesView(
+              result: result,
+              receivedAt: _receivedAt!,
+              onSelect: widget.onSelectCandidate == null
+                  ? null
+                  : _openConfirmation,
+            ),
     );
   }
 
@@ -458,31 +514,6 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
       ],
     );
   }
-
-  Widget _routeAndCandidates() => IndexedStack(
-    index: _result == null ? 0 : 1,
-    sizing: StackFit.expand,
-    children: [
-      _timelineWithVehicles(),
-      if (_result case final result?)
-        SingleChildScrollView(
-          key: const ValueKey('boarding-candidate-results'),
-          primary: false,
-          padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
-          child: _compactResults
-              ? _compactCandidateList(result, _boarding!, _target!)
-              : BoardingCandidatesView(
-                  result: result,
-                  receivedAt: _receivedAt!,
-                  onSelect: widget.onSelectCandidate == null
-                      ? null
-                      : _openConfirmation,
-                ),
-        )
-      else
-        const SizedBox.shrink(),
-    ],
-  );
 
   Widget _compactCandidateList(
     BoardingCandidates result,
@@ -609,8 +640,8 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     );
   }
 
-  Widget _summary() {
-    if (_compactResults) {
+  Widget _summary({required bool candidate}) {
+    if (candidate && _compactResults) {
       final selected = _selectedCandidate;
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
