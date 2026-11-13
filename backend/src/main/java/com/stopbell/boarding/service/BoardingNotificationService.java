@@ -122,9 +122,23 @@ public class BoardingNotificationService {
         if (!createdAt.isBefore(expiresAt)) {
             return null;
         }
+        if (destination && !initial && session.isPrepareNotificationEnabled()
+                && events.findByBoardingSessionIdAndBoardingEventType(
+                        session.getId(), BoardingNotificationEventType.PREPARE_ALIGHT).isEmpty()) {
+            // 준비 구간을 건너뛰고 곧바로 도착·통과가 관측된 경우, 준비 알림을 먼저 발행한다.
+            // 같은 관측의 checkpoint·TTL을 쓰며 reissue_sequence는 0이라 재발행 상한과 충돌하지 않는다.
+            createEvent(session, BoardingNotificationEventType.PREPARE_ALIGHT, checkpoint, decision.eventDetectedAt(),
+                    createdAt, expiresAt, 0);
+            createdAt = now();
+        }
+        return createEvent(session, type, checkpoint, decision.eventDetectedAt(), createdAt, expiresAt,
+                reissueSequence);
+    }
+
+    private Long createEvent(BoardingSession session, BoardingNotificationEventType type, BoardingCheckpoint checkpoint,
+            LocalDateTime detectedAt, LocalDateTime createdAt, LocalDateTime expiresAt, int reissueSequence) {
         NotificationEvent event = events.saveAndFlush(NotificationEvent.forBoardingSession(session.getId(),
-                session.getUser(), type, checkpoint,
-                decision.eventDetectedAt(), createdAt, expiresAt, reissueSequence));
+                session.getUser(), type, checkpoint, detectedAt, createdAt, expiresAt, reissueSequence));
         // Session -> Event -> current eligible Device rows in ascending ID order -> Delivery.
         var recipients = devices.findEligibleByUserIdForUpdate(session.getUser().getId());
         LocalDateTime deliveryCreatedAt = now();
@@ -212,6 +226,12 @@ public class BoardingNotificationService {
             // Session -> exact Event -> PENDING Delivery current locks, without a stale joined snapshot.
             var event = events.findByBoardingSessionIdAndBoardingEventType(session.getId(), type);
             if (event.isEmpty()) {
+                continue;
+            }
+            // 도착 관측과 같은 checkpoint로 함께 발행된 준비 알림은 목적지 알림과 한 쌍이므로 보존한다.
+            if (session.getStatus() == BoardingSessionStatus.COMPLETED
+                    && type == BoardingNotificationEventType.PREPARE_ALIGHT
+                    && event.orElseThrow().getObservedAt().equals(session.getCheckpoint().getObservedAt())) {
                 continue;
             }
             for (var delivery : deliveries.findPendingByBoardingEventIdForUpdate(event.orElseThrow().getId())) {
