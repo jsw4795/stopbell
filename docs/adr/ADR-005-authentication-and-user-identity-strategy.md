@@ -46,6 +46,7 @@ StopBell은 Flutter Mobile Application과 분리된 Spring Boot REST API로 구�
 단점:
 
 - Refresh Token 저장, Rotation, 무효화 구현이 필요함
+- 응답 유실로 앱이 로그아웃되지 않도록 회전된 직전 Token을 짧은 유예(기본 30초, 설정값) 안에서 한 번만 재사용할 수 있다(2026-11-13 결정, V43 `rotated_at`). 유예 안 재사용 시 새 Token Pair가 추가로 발급되며 유예 초과·2회 이상 재사용은 거절한다
 - Google ID Token의 유효성과 대상 Application 검증이 필요함
 
 ## 결정

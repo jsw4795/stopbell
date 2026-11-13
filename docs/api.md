@@ -775,7 +775,7 @@ Content-Type: application/json
 }
 ```
 
-이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. Backend는 Refresh Token 원문을 SHA-256 Hash로 변환해 저장된 Session을 찾고, 유효한 Token이면 기존 row를 삭제한 뒤 새 30일 Refresh Token과 새 Access Token을 발급한다. 유효하지 않거나 만료된 Refresh Token 및 Rotation 뒤 기존 Hash 재사용은 `401 Unauthorized`와 `UNAUTHENTICATED`의 고정 JSON을 반환하며 Backend는 Flutter Login 화면으로 redirect하지 않는다. 한 User의 다른 Refresh Token Session은 Rotation으로 삭제하지 않는다.
+이 Endpoint의 `POST` 요청만 Access Token 없이 호출할 수 있다. Backend는 Refresh Token 원문을 SHA-256 Hash로 변환해 저장된 Session을 찾고, 유효한 Token이면 기존 row에 `rotated_at`을 기록하고 새 30일 Refresh Token과 새 Access Token을 발급한다. 회전된 직전 Token은 `auth.refresh-token.rotation-grace`(기본 `PT30S`) 안에서 응답 유실 복구를 위해 정확히 한 번만 다시 사용할 수 있으며, 이때 새 Token Pair를 정상 발급하고 해당 row를 삭제한다. 유효하지 않거나 만료된 Refresh Token, 유예가 지났거나 이미 유예로 사용한 직전 Token의 재사용은 `401 Unauthorized`와 `UNAUTHENTICATED`의 고정 JSON을 반환하며 Backend는 Flutter Login 화면으로 redirect하지 않는다. 한 User의 다른 Refresh Token Session은 Rotation으로 삭제하지 않는다.
 
 Flutter는 refresh `401`을 현재 Token Pair가 더 이상 유효하지 않다는 신호로 처리해 Token을 제거하고 unauthenticated로 전환한다. network/offline/5xx는 이 `401` 의미와 구분하며 저장된 장기 session을 즉시 삭제하지 않는다. `/auth/refresh` 자체는 refresh interceptor나 자동 재시도 대상이 아니다.
 

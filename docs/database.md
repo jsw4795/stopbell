@@ -117,12 +117,13 @@ user_id BIGINT NOT NULL REFERENCES users(id)
 token_hash CHAR(64) NOT NULL
 expires_at DATETIME(6) NOT NULL
 created_at DATETIME(6) NOT NULL
+rotated_at DATETIME(6) NULL
 UNIQUE(token_hash)
 ```
 
 `token_hash`에는 서버가 SecureRandom으로 생성한 256-bit URL-safe Base64 opaque Refresh Token 원문의 SHA-256 Hash를 64-char lowercase hex로 저장한다. Refresh Token 원문은 저장하지 않으며, Password용 BCryptPasswordEncoder를 Refresh Token Hash에 사용하지 않는다. 서로 다른 RefreshToken row가 같은 `token_hash`를 가지는 것은 정상 상태가 아니므로 Database Unique Constraint로 강제한다.
 
-한 User가 여러 Refresh Token을 가질 수 있어 여러 Login Session을 허용한다. Rotation 또는 Logout으로 Token을 무효화할 때는 `token_hash`로 해당 행 하나만 삭제한다. Logout은 만료 여부를 검증하거나 User를 먼저 조회하지 않으며, 삭제 대상이 없어도 성공으로 처리한다. `updated_at`, `revoked_at`, `device_id`, `last_used_at`, `token_family`는 현재 추가하지 않는다.
+한 User가 여러 Refresh Token을 가질 수 있어 여러 Login Session을 허용한다. V43의 `rotated_at`은 Rotation 시각이며 NULL이면 아직 회전되지 않은 Token이다. Rotation은 행을 바로 삭제하지 않고 `rotated_at`만 기록하며, 유예(`auth.refresh-token.rotation-grace`, 기본 30초) 안의 첫 재사용은 새 Pair를 발급하면서 행을 삭제하고 그 외 재사용은 거절하며 행을 삭제한다. Logout으로 Token을 무효화할 때는 `token_hash`로 해당 행 하나만 삭제한다. Logout은 만료 여부를 검증하거나 User를 먼저 조회하지 않으며, 삭제 대상이 없어도 성공으로 처리한다. `updated_at`, `revoked_at`, `device_id`, `last_used_at`, `token_family`는 현재 추가하지 않는다.
 
 ### apple_credentials
 
