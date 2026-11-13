@@ -498,6 +498,31 @@ class BoardingCandidateServiceTest {
         assertThat(find(12L).candidates()).extracting(Candidate::vehicleNumber).containsExactly("A", "B");
     }
 
+    @Test
+    @DisplayName("N61 실측 ID/order 모순은 sectOrd 일치나 유일 Stop ID로 해소하지 않는다")
+    void n61_live_detail_mismatch_remains_held() throws Exception {
+        var visits = N61ProviderFixtures.occurrences();
+        assertThat(visits).hasSize(187);
+        var detail = N61ProviderFixtures.detail();
+        var item = detail.body().itemList().getFirst();
+        var roster = N61ProviderFixtures.selectedRoster();
+        var rosterItem = roster.body().itemList().getFirst();
+        assertThat(rosterItem.vehId()).isEqualTo(item.vehId());
+        assertThat(rosterItem.plainNo()).isEqualTo(item.plainNo());
+        assertThat(rosterItem.dataTm()).isEqualTo(item.dataTm());
+        assertThat(rosterItem.sectOrd()).isEqualTo(item.stOrd()).isEqualTo(9);
+        assertThat(visits.get(7).externalStopId()).isEqualTo(item.stId());
+        assertThat(visits.get(8).externalStopId()).isNotEqualTo(item.stId());
+        assertThat(visits.stream().filter(v -> v.externalStopId().equals(item.stId()))).hasSize(1);
+        var route = new BoardingRouteSnapshot(1L, TransitProvider.SEOUL_BUS, "100100589", null,
+                47L, 16L, visits, "N61");
+        when(metadata.read(1L, 47L, 16L)).thenReturn(route);
+        when(seoul.fetchVehicleLocations(any())).thenReturn(roster);
+        when(detailClient.fetchVehicleDetail(N61ProviderFixtures.VEHICLE_ID)).thenReturn(detail);
+        assertHeld(service.find(7L, 1L, 47L, 16L).candidates().getFirst(), ReasonCode.METADATA_MISMATCH);
+        verifyNoInteractions(tago);
+    }
+
     private void useRoute(TransitProvider provider, Long boardingId) {
         when(metadata.read(1L, 14L, boardingId)).thenReturn(route(provider, boardingId));
     }

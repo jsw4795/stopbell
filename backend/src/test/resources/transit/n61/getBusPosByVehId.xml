@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='utf-8'?>
+<ServiceResult>
+  <msgHeader>
+    <headerCd>0</headerCd>
+    <headerMsg>정상적으로 처리되었습니다.</headerMsg>
+  </msgHeader>
+  <msgBody>
+    <itemList>
+      <dataTm>20261114000925</dataTm>
+      <plainNo>서울74사4601</plainNo>
+      <stId>116000147</stId>
+      <stOrd>9</stOrd>
+      <stopFlag>0</stopFlag>
+      <vehId>120003281</vehId>
+    </itemList>
+  </msgBody>
+</ServiceResult>
