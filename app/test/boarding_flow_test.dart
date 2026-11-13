@@ -151,11 +151,10 @@ void main() {
       expect(find.text('차량 후보 선택'), findsOneWidget);
       final next = find.byKey(const ValueKey('continue-boarding-candidate'));
       expect(next, findsNothing);
-      expect(find.text('차량번호를 확인하고 선택해 주세요.'), findsOneWidget);
+      expect(find.text('차량번호를 확인하고 선택해 주세요.'), findsNothing);
       expect(find.byIcon(Icons.info_outline), findsOneWidget);
-      expect(find.byIcon(Icons.arrow_forward), findsOneWidget);
-      expect(find.textContaining('승차 · 반복 정류장'), findsOneWidget);
-      expect(find.textContaining('목표 · 반복 정류장'), findsOneWidget);
+      expect(find.text('승차'), findsOneWidget);
+      expect(find.text('목표'), findsOneWidget);
       expect(
         requests.where((r) => r.url.path == '/auth/refresh'),
         hasLength(1),

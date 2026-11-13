@@ -126,7 +126,13 @@ void main() {
     await query(tester);
     expect(find.text('정류장 다시 선택'), findsNothing);
     expect(find.byType(ExpansionTile), findsNothing);
-    expect(find.byIcon(Icons.arrow_forward), findsOneWidget);
+    expect(find.text('승차'), findsOneWidget);
+    expect(find.text('목표'), findsOneWidget);
+    for (final stop in _longNameStops.take(2)) {
+      final name = tester.widget<Text>(find.text(stop.name));
+      expect(name.maxLines, 1);
+      expect(name.overflow, TextOverflow.ellipsis);
+    }
     final help = find.bySemanticsLabel('차량 선택 도움말');
     await tester.ensureVisible(help);
     await tester.pumpAndSettle();
@@ -134,7 +140,7 @@ void main() {
     expect(helpSize.width, greaterThanOrEqualTo(44));
     expect(helpSize.height, greaterThanOrEqualTo(44));
     const message =
-        '전체 차량번호를 확인해 주세요. 시각은 서버 조회 기준이에요. 최근 위치는 진행 참고 정류장이며 간격에는 미정차·경유가 포함될 수 있어요.';
+        '차량번호를 확인하고 선택해 주세요. 전체 차량번호를 확인해 주세요. 시각은 서버 조회 기준이에요. 최근 위치는 진행 참고 정류장이며 간격에는 미정차·경유가 포함될 수 있어요.';
     expect(find.text(message), findsNothing);
     await tester.tap(help);
     await tester.pumpAndSettle();
@@ -149,7 +155,7 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: heading, matching: find.textContaining('기준 위치')),
+      find.descendant(of: heading, matching: find.textContaining('기준')),
       findsOneWidget,
     );
     expect(
@@ -788,7 +794,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('새 차량'), findsOneWidget);
       expect(find.text('이전 차량'), findsNothing);
-      expect(find.textContaining('목표 · 새 목표'), findsOneWidget);
+      expect(find.text('새 목표'), findsOneWidget);
       expect(queries[1], (754, 33, 22));
       await tap(tester, 'find-candidates');
       expect(requestChecks[1](), isFalse);

@@ -497,38 +497,13 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
   ) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      _summaryCard(
-        Padding(
-          padding: const EdgeInsets.all(StopBellSpacing.sm),
-          child: Row(
-            children: [
-              Expanded(
-                child: _stopSummary(boarding, target: false, compact: true),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: StopBellSpacing.sm,
-                ),
-                child: Icon(
-                  Icons.arrow_forward,
-                  color:
-                      routeTypeColor(context, widget.route) ??
-                      StopBellColors.of(context).busLocation,
-                ),
-              ),
-              Expanded(
-                child: _stopSummary(target, target: true, compact: true),
-              ),
-            ],
-          ),
-        ),
-      ),
+      _miniRoute(boarding, target),
       if (_error case final error?)
         Padding(
           padding: const EdgeInsets.only(top: StopBellSpacing.xs),
           child: StopSelectionNotice(error, icon: Icons.error_outline),
         ),
-      const Divider(height: StopBellSpacing.lg),
+      const SizedBox(height: StopBellSpacing.lg),
       _candidateBuses(result, boarding, target),
     ],
   );
@@ -745,6 +720,51 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
     );
   }
 
+  Widget _miniRoute(
+    BusRouteStopOccurrence boarding,
+    BusRouteStopOccurrence target,
+  ) {
+    final theme = Theme.of(context);
+    final color =
+        routeTypeColor(context, widget.route) ??
+        StopBellColors.of(context).busLocation;
+    Widget row(BusRouteStopOccurrence stop, String label, IconData icon) => Row(
+      children: [
+        SizedBox(
+          width: 18,
+          child: Icon(icon, size: label == '승차' ? 10 : 18, color: color),
+        ),
+        const SizedBox(width: StopBellSpacing.sm),
+        Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(width: StopBellSpacing.sm),
+        Expanded(
+          child: Text(
+            stop.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall,
+          ),
+        ),
+      ],
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        row(boarding, '승차', Icons.circle),
+        Padding(
+          padding: const EdgeInsets.only(left: 8),
+          child: Container(width: 1, height: 8, color: color),
+        ),
+        row(target, '목표', Icons.flag_outlined),
+      ],
+    );
+  }
+
   Widget _summaryCard(Widget child) {
     final colors = Theme.of(context).colorScheme;
     return DecoratedBox(
@@ -923,33 +943,18 @@ class _CandidateSectionHeaderState extends State<_CandidateSectionHeader> {
         Row(
           key: const ValueKey('candidate-section-heading'),
           children: [
-            Expanded(
-              child: Text('차량 후보 선택', style: theme.textTheme.titleLarge),
-            ),
-            const SizedBox(width: StopBellSpacing.xs),
             Flexible(
               child: Text(
-                controller != null && data == null
-                    ? '차량 위치 확인 중'
-                    : '$time 기준 위치',
-                style: caption,
-                textAlign: TextAlign.end,
-              ),
-            ),
-          ],
-        ),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                '차량번호를 확인하고 선택해 주세요.',
-                style: theme.textTheme.bodySmall,
+                '차량 후보 선택',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.titleLarge,
               ),
             ),
             Tooltip(
               key: _helpKey,
               ignorePointer: true,
-              message: '전체 차량번호를 확인해 주세요. 시각은 서버 조회 기준이에요. 최근 위치는 진행 참고 정류장이며 간격에는 미정차·경유가 포함될 수 있어요.',
+              message: '차량번호를 확인하고 선택해 주세요. 전체 차량번호를 확인해 주세요. 시각은 서버 조회 기준이에요. 최근 위치는 진행 참고 정류장이며 간격에는 미정차·경유가 포함될 수 있어요.',
               triggerMode: TooltipTriggerMode.manual,
               exitDuration: Duration.zero,
               child: Semantics(
@@ -965,9 +970,21 @@ class _CandidateSectionHeaderState extends State<_CandidateSectionHeader> {
                       minHeight: 44,
                     ),
                     padding: EdgeInsets.zero,
-                    iconSize: 20,
+                    iconSize: 16,
                   ),
                 ),
+              ),
+            ),
+            const Spacer(),
+            Flexible(
+              child: Text(
+                controller != null && data == null ? '차량 위치 확인 중' : '$time 기준',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.end,
               ),
             ),
           ],
