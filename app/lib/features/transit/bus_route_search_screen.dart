@@ -1,8 +1,9 @@
+import 'transit_skeletons.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_spacing.dart';
 import '../../shared/stopbell_delayed_loading.dart';
-import '../../shared/stopbell_skeleton.dart';
 import 'bus_route.dart';
 import 'bus_route_presentation.dart';
 
@@ -169,7 +170,7 @@ class _BusRouteSearchScreenState extends State<BusRouteSearchScreen> {
     loading: _state == _SearchState.loading,
     skeleton: const SingleChildScrollView(
       physics: NeverScrollableScrollPhysics(),
-      child: StopBellSkeletonList(count: 4),
+      child: RouteSearchSkeleton(),
     ),
     onRetry: () => _search(_lastQuery, true),
     child: _resultsBody(),

@@ -1,4 +1,4 @@
-import '../../shared/stopbell_skeleton.dart';
+import 'boarding_skeletons.dart';
 import '../../shared/stopbell_delayed_loading.dart';
 import '../../shared/stopbell_home_button.dart';
 
@@ -130,7 +130,7 @@ class _BoardingNotificationScreenState
               if (_session == null)
                 StopBellDelayedLoading(
                   loading: _busy,
-                  skeleton: const StopBellSkeletonList(count: 2),
+                  skeleton: const BoardingDetailSkeleton(),
                   onRetry: _load,
                   child: const SizedBox.shrink(),
                 )

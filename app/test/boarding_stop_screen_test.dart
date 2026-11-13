@@ -708,7 +708,7 @@ void main() {
 
       await tester.pumpWidget(screen(stops: stops));
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.byType(StopBellSkeletonCard), findsWidgets);
+      expect(find.byType(StopBellSkeleton), findsWidgets);
       pending.complete([]);
       await tester.pumpAndSettle();
       expect(find.text('정류장 정보가 없어요.'), findsOneWidget);

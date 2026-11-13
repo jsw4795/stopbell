@@ -307,7 +307,7 @@ void main() {
       await tester.tap(find.byTooltip('검색'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.byType(StopBellSkeletonCard), findsNWidgets(4));
+      expect(find.byType(StopBellSkeleton), findsWidgets);
       expect(find.byType(ChoiceChip), findsNothing);
       expect(
         tester

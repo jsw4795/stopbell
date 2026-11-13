@@ -77,7 +77,7 @@ void main() {
       ),
     );
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byType(StopBellSkeletonCard), findsNWidgets(3));
+    expect(find.byType(StopBellSkeleton), findsWidgets);
     first.completeError(Exception('private failure'));
     await tester.pumpAndSettle();
     expect(find.text('알람 목록을 불러오지 못했어요.'), findsOneWidget);

@@ -506,7 +506,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byType(StopBellSkeletonCard), findsWidgets);
+    expect(find.byType(StopBellSkeleton), findsWidgets);
     await tapInSettings(tester, '로그아웃');
     await tester.pump();
     backend.logoutGate.complete();
@@ -625,7 +625,7 @@ void main() {
     await tester.tap(find.byTooltip('검색'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byType(StopBellSkeletonCard), findsNWidgets(4));
+    expect(find.byType(StopBellSkeleton), findsWidgets);
 
     await tapInSettings(tester, '로그아웃');
     await tester.pump();
@@ -720,7 +720,7 @@ void main() {
       await tester.pumpWidget(app(sessionForTest, alarmClient: alarms));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.byType(StopBellSkeletonCard), findsNWidgets(3));
+      expect(find.byType(StopBellSkeleton), findsWidgets);
       await tapInSettings(tester, '로그아웃');
       await tester.pump();
       backend.logoutGate.complete();
@@ -756,7 +756,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byType(StopBellSkeletonCard), findsWidgets);
+    expect(find.byType(StopBellSkeleton), findsWidgets);
     await tester.pump();
     unawaited(auth.logout());
     await tester.pump();

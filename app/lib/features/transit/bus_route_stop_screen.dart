@@ -1,5 +1,5 @@
+import 'transit_skeletons.dart';
 import '../../shared/stopbell_button_label.dart';
-import '../../shared/stopbell_skeleton.dart';
 import '../../shared/stopbell_delayed_loading.dart';
 
 import 'package:flutter/material.dart';
@@ -427,8 +427,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
     loading: _state == _StopState.loading,
     skeleton: const SingleChildScrollView(
       physics: NeverScrollableScrollPhysics(),
-      padding: EdgeInsets.all(StopBellSpacing.screenPadding),
-      child: StopBellSkeletonList(count: 5),
+      child: StopTimelineSkeleton(),
     ),
     onRetry: _load,
     child: _stopsBody(),

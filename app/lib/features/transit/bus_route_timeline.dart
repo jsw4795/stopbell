@@ -83,6 +83,9 @@ String? selectedStopContext(
   return details.isEmpty ? null : details.join('\n');
 }
 
+const busRouteTimelineRailWidth = 56.0;
+const busRouteTimelineMinimumRowHeight = 52.0;
+
 class BusRouteTimeline extends StatefulWidget {
   const BusRouteTimeline({
     super.key,
@@ -433,7 +436,7 @@ class _TimelineLayout {
       painter.text = span;
       painter.layout(maxWidth: metrics.width);
       final extent = math.max(
-        52.0,
+        busRouteTimelineMinimumRowHeight,
         painter.height.ceilToDouble() + 2 * StopBellSpacing.sm,
       );
       labels.add(span);
@@ -522,7 +525,7 @@ class _StopRow extends StatelessWidget {
     required this.vehicleColor,
   });
 
-  static const railWidth = 56.0;
+  static const railWidth = busRouteTimelineRailWidth;
   final TextSpan label;
   final bool nonstop;
   final bool selectionLocked;

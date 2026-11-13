@@ -1,3 +1,5 @@
+import 'alarm_skeletons.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -12,7 +14,6 @@ import '../transit/bus_route_presentation.dart';
 import '../../shared/stopbell_delayed_loading.dart';
 import '../../shared/stopbell_inline_message.dart';
 import '../../shared/stopbell_section_title.dart';
-import '../../shared/stopbell_skeleton.dart';
 import '../../shared/stopbell_status_chip.dart';
 import 'alarm.dart';
 import 'alarm_approach.dart';
@@ -382,7 +383,7 @@ class _HomeOverviewState extends State<HomeOverview>
   List<Widget> _alarmSection(BuildContext context) => [
     StopBellDelayedLoading(
       loading: _alarmState == _LoadState.loading,
-      skeleton: const StopBellSkeletonList(),
+      skeleton: const AlarmListSkeleton(),
       onRetry: _loadAlarms,
       child: Column(children: _alarmContent(context)),
     ),

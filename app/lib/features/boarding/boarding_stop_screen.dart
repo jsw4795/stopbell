@@ -1,5 +1,6 @@
+import '../transit/transit_skeletons.dart';
+import 'boarding_skeletons.dart';
 import '../../shared/stopbell_button_label.dart';
-import '../../shared/stopbell_skeleton.dart';
 import '../../shared/stopbell_delayed_loading.dart';
 
 import 'dart:async';
@@ -383,8 +384,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
               loading: _state == _StopsState.loading,
               skeleton: const SingleChildScrollView(
                 physics: NeverScrollableScrollPhysics(),
-                padding: EdgeInsets.all(StopBellSpacing.screenPadding),
-                child: StopBellSkeletonList(count: 5),
+                child: StopTimelineSkeleton(),
               ),
               onRetry: _loadStops,
               child: _state == _StopsState.success
@@ -410,7 +410,7 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         skeleton: SingleChildScrollView(
           physics: NeverScrollableScrollPhysics(),
           padding: EdgeInsets.all(StopBellSpacing.screenPadding),
-          child: StopBellSkeletonList(count: 3),
+          child: BoardingCandidateSkeleton(),
         ),
         child: SizedBox.shrink(),
       );

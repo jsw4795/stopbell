@@ -1,5 +1,5 @@
+import 'alarm_skeletons.dart';
 import '../../shared/stopbell_button_label.dart';
-import '../../shared/stopbell_skeleton.dart';
 import '../../shared/stopbell_delayed_loading.dart';
 import '../../shared/stopbell_home_button.dart';
 
@@ -359,7 +359,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
             skeleton: const SingleChildScrollView(
               physics: NeverScrollableScrollPhysics(),
               padding: EdgeInsets.all(StopBellSpacing.screenPadding),
-              child: StopBellSkeletonList(count: 2),
+              child: AlarmDetailSkeleton(),
             ),
             onRetry: () => _load(force: true),
             child: switch (_state) {

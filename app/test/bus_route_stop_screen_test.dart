@@ -66,6 +66,23 @@ Widget screen(
 );
 
 void main() {
+  testWidgets('two-line skeleton row matches a loaded stop row', (
+    tester,
+  ) async {
+    final pending = Completer<List<BusRouteStopOccurrence>>();
+    await tester.pumpWidget(screen((_) => pending.future));
+    await tester.pump(const Duration(milliseconds: 300));
+    final skeletonHeight = tester
+        .getSize(find.byKey(const ValueKey('skeleton-stop-row-0')))
+        .height;
+    pending.complete([middle]);
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byKey(const ValueKey(22))).height,
+      skeletonHeight,
+    );
+  });
+
   for (final theme in [StopBellTheme.light, StopBellTheme.dark]) {
     for (final selectedRoute in [
       const BusRoute(
@@ -294,7 +311,7 @@ void main() {
     );
     expect(find.text('수원시'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.byType(StopBellSkeletonCard), findsWidgets);
+    expect(find.byType(StopBellSkeleton), findsWidgets);
     pending.complete([]);
     await tester.pumpAndSettle();
     expect(find.text('정류장 정보가 없어요.'), findsOneWidget);
