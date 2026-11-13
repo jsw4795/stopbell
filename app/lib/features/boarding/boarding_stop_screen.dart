@@ -320,7 +320,19 @@ class _BoardingStopScreenState extends State<BoardingStopScreen> {
         title: _compactResults ? '차량 후보' : '하차 알람',
         onBack: _back,
         backLabel: _backLabel,
-        actions: _compactResults ? [_candidateRefreshAction()] : null,
+        actions: _compactResults
+            ? [_candidateRefreshAction()]
+            : [
+                if (_vehicles != null)
+                  ListenableBuilder(
+                    listenable: _vehicles!,
+                    builder: (_, _) => IconButton(
+                      tooltip: '차량 위치 새로고침',
+                      onPressed: _vehicles!.loading ? null : _vehicles!.refresh,
+                      icon: const Icon(Icons.refresh),
+                    ),
+                  ),
+              ],
         iconColor: routeTypeColor(context, widget.route),
         body: _state == _StopsState.success ? _routeAndCandidates() : _status(),
         summary:

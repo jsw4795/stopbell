@@ -1,3 +1,5 @@
+import '../../shared/stopbell_home_button.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_spacing.dart';
@@ -105,28 +107,49 @@ class _BoardingNotificationScreenState
   @override
   Widget build(BuildContext context) {
     if (!_current) return const SizedBox.shrink();
-    return ListView(
-      padding: const EdgeInsets.all(StopBellSpacing.lg),
+    return Column(
       children: [
         if (_session == null)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: IconButton(
+          AppBar(
+            primary: false,
+            leading: IconButton(
               onPressed: widget.onBack,
               tooltip: '도착 알람으로',
               icon: const Icon(Icons.arrow_back),
             ),
+            title: const Text('하차 알람'),
+            actions: [
+              IconButton(
+                onPressed: _busy ? null : _load,
+                tooltip: '상태 새로고침',
+                icon: const Icon(Icons.refresh),
+              ),
+              const StopBellHomeButton(),
+            ],
           ),
-        if (_busy) const Text('서버 응답 확인 중...'),
-        if (_error != null) Text(_error!),
-        if (_session != null)
-          BoardingSessionDetails(session: _session!, onBack: widget.onBack),
-        if (_session?.status != BoardingSessionStatus.cancelled ||
-            _error != null)
-          OutlinedButton(
-            onPressed: _busy ? null : _load,
-            child: Text(_error == null ? '상태 새로고침' : '다시 조회'),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(StopBellSpacing.lg),
+            children: [
+              if (_busy) const Text('서버 응답 확인 중...'),
+              if (_error != null) ...[
+                Text(_error!),
+                OutlinedButton(
+                  onPressed: _busy ? null : _load,
+                  child: const Text('다시 조회'),
+                ),
+              ],
+              if (_session != null)
+                BoardingSessionDetails(
+                  session: _session!,
+                  onBack: widget.onBack,
+                  onRefresh: _busy ? null : _load,
+                  showRefresh:
+                      _session!.status != BoardingSessionStatus.cancelled,
+                ),
+            ],
           ),
+        ),
       ],
     );
   }

@@ -580,7 +580,7 @@ void main() {
           expect(find.text('추적 취소'), findsNothing);
           expect(find.text('동일 차량 다시 확인'), findsNothing);
           expect(
-            find.text('상태 새로고침'),
+            find.byTooltip('상태 새로고침'),
             status == 'CANCELLED' ? findsNothing : findsOneWidget,
           );
           expect(

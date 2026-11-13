@@ -250,6 +250,17 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
     return BusStopSelectionLayout(
       route: widget.route,
       title: '도착 알람',
+      actions: [
+        IconButton(
+          tooltip: _createMessage != null ? '정류장 목록 새로고침' : '차량 위치 새로고침',
+          onPressed: !canChange
+              ? null
+              : _createMessage != null
+              ? _load
+              : _vehicles?.refresh,
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
       iconColor: routeTypeColor(context, widget.route),
       onBack: _creating ? null : widget.onBack,
       body: _buildStops(),
@@ -278,11 +289,11 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                                 children: [
                                   TextSpan(
                                     text: target.name,
-                                    style: theme.textTheme.titleMedium?.copyWith(
-                                      color: StopBellColors.of(
-                                        context,
-                                      ).targetStop,
-                                    ),
+                                    style: theme.textTheme.titleMedium
+                                        ?.copyWith(
+                                          color: StopBellColors.of(context)
+                                              .targetStop,
+                                        ),
                                   ),
                                 ],
                               ),
@@ -359,13 +370,6 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                     onPressed: widget.onShowAlarms,
                     child: const Text('알람 목록 보기'),
                   ),
-                if (canChange &&
-                    _createMessage != null &&
-                    _state == _StopState.success)
-                  OutlinedButton(
-                    onPressed: _load,
-                    child: const Text('정류장 목록 새로고침'),
-                  ),
               ],
             ),
     );
@@ -375,7 +379,8 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
     final sameName = _stops
         .where(
           (item) =>
-              stopDisplayName(item.name).name == stopDisplayName(stop.name).name,
+              stopDisplayName(item.name).name ==
+              stopDisplayName(stop.name).name,
         )
         .toList();
     if (sameName.length < 2) return null;

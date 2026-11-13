@@ -1,3 +1,5 @@
+import '../../shared/stopbell_home_button.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_spacing.dart';
@@ -48,7 +50,7 @@ class BusStopSelectionLayout extends StatelessWidget {
                   icon: const Icon(Icons.arrow_back),
                 ),
                 title: Text(title),
-                actions: actions,
+                actions: [...?actions, const StopBellHomeButton()],
               ),
               Padding(
                 padding: const EdgeInsets.only(

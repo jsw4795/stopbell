@@ -1,3 +1,5 @@
+import '../../shared/stopbell_home_button.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
@@ -83,23 +85,26 @@ class BoardingSessionView extends StatelessWidget {
               ? SingleChildScrollView(
                   child: Column(
                     children: [
-                      Row(
-                        children: [
+                      AppBar(
+                        primary: false,
+                        leading: IconButton(
+                          onPressed: c.busy ? null : onBack,
+                          tooltip: '도착 알람으로',
+                          icon: const Icon(Icons.arrow_back),
+                        ),
+                        title: const Text('하차 알람'),
+                        actions: [
                           IconButton(
-                            onPressed: c.busy ? null : onBack,
-                            tooltip: '도착 알람으로',
-                            icon: const Icon(Icons.arrow_back),
+                            onPressed: c.busy || c.refreshing
+                                ? null
+                                : c.refreshManually,
+                            tooltip: '상태 새로고침',
+                            icon: const Icon(Icons.refresh),
                           ),
-                          const Expanded(child: Text('하차 알람')),
+                          const StopBellHomeButton(),
                         ],
                       ),
                       const Text('세션이 없거나 접근할 수 없어요.'),
-                      OutlinedButton(
-                        onPressed: c.busy || c.refreshing
-                            ? null
-                            : c.refreshManually,
-                        child: const Text('상태 새로고침'),
-                      ),
                       if (c.message != null) Text(c.message!),
                       if (c.pending != null)
                         OutlinedButton(
@@ -263,6 +268,7 @@ class BoardingSessionDetails extends StatelessWidget {
                 tooltip: '상태 새로고침',
                 icon: _RefreshIcon(active: refreshing),
               ),
+            const StopBellHomeButton(),
           ],
         ),
         Container(

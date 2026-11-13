@@ -400,8 +400,7 @@ void main() {
       expect(find.textContaining('선택한 알람을 만들 수 없어요.'), findsOneWidget);
       expect(client.createCalls, 1);
       expect(client.activateCalls, 0);
-      await tester.ensureVisible(find.text('정류장 목록 새로고침'));
-      await tester.tap(find.text('정류장 목록 새로고침'));
+      await tester.tap(find.byTooltip('정류장 목록 새로고침'));
       await tester.pumpAndSettle();
       expect(routes, [754, 754]);
       expect(find.text('알람 시작'), findsNothing);

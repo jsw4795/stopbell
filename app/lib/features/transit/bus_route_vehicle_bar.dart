@@ -155,28 +155,10 @@ class _BusRouteVehicleBarState extends State<BusRouteVehicleBar> {
               ],
             ),
           ),
-          if (controller.loading || widget.refreshing)
-            const SizedBox(
-              width: StopBellSpacing.minimumTouchSize,
-              height: StopBellSpacing.minimumTouchSize,
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            )
-          else if (controller.failed)
+          if (controller.failed)
             TextButton(
               onPressed: widget.onRefresh ?? controller.refresh,
               child: const Text('다시 시도'),
-            )
-          else
-            IconButton(
-              tooltip: '차량 위치 새로고침',
-              onPressed: widget.onRefresh ?? controller.refresh,
-              icon: const Icon(Icons.refresh),
             ),
         ],
       ),

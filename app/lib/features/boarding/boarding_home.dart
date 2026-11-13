@@ -1,3 +1,5 @@
+import '../../shared/stopbell_home_button.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_spacing.dart';
@@ -324,6 +326,7 @@ class _BoardingHomeState extends State<BoardingHome> {
                   icon: const Icon(Icons.arrow_back),
                 ),
                 title: const Text('하차 알람 · 노선 선택'),
+                actions: const [StopBellHomeButton()],
               ),
               Expanded(
                 child: BusRouteSearchScreen(

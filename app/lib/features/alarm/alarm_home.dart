@@ -1,3 +1,5 @@
+import '../../shared/stopbell_home_button.dart';
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 
@@ -87,6 +89,7 @@ class _AlarmHomeState extends State<AlarmHome> {
     }
     return _approachLoader?.find;
   }
+
   bool _activationUnverified = false;
   late final int _sessionGeneration;
   late final AlarmCreationController _creation;
@@ -236,6 +239,10 @@ class _AlarmHomeState extends State<AlarmHome> {
   @override
   Widget build(BuildContext context) {
     if (!_current) return const SizedBox.shrink();
+    return StopBellHomeScope(onHome: _showList, child: _buildPage());
+  }
+
+  Widget _buildPage() {
     final epoch = _navigationEpoch;
     return switch (_page) {
       _Page.boardingNotification => BoardingNotificationScreen(
@@ -353,6 +360,7 @@ class _AlarmHomeState extends State<AlarmHome> {
               icon: const Icon(Icons.arrow_back),
             ),
             title: const Text('도착 알람 · 노선 선택'),
+            actions: const [StopBellHomeButton()],
           ),
           Expanded(
             child: BusRouteSearchScreen(

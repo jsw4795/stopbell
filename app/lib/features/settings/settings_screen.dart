@@ -1,3 +1,5 @@
+import '../../shared/stopbell_home_button.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
@@ -135,7 +137,10 @@ class _SettingsScreenState extends State<SettingsScreen>
     final colors = theme.colorScheme;
     final (label, icon, color) = _permissionLabel(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('설정')),
+      appBar: AppBar(
+        title: const Text('설정'),
+        actions: const [StopBellHomeButton()],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(StopBellSpacing.screenPadding),
         children: [

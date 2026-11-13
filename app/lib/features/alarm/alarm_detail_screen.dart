@@ -1,3 +1,5 @@
+import '../../shared/stopbell_home_button.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/stopbell_colors.dart';
@@ -328,6 +330,7 @@ class _AlarmDetailScreenState extends State<AlarmDetailScreen> {
             onPressed: _mutating ? null : widget.onBack,
           ),
           title: const Text('알람 상세'),
+          actions: const [StopBellHomeButton()],
         ),
         Expanded(
           child: switch (_state) {
