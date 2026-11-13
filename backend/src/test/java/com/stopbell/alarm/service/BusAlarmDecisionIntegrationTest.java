@@ -234,6 +234,7 @@ class BusAlarmDecisionIntegrationTest {
     }
 
     @Test
+    @Tag("process-restart")
     @DisplayName("실제 Backend JVM SIGTERM 후 재시작은 predecessor Event와 Delivery를 중복 생성하지 않는다")
     void process_restart_keeps_baseline_and_pending_delivery() throws Exception {
         Alarm alarm = alarm(false);
@@ -265,6 +266,7 @@ class BusAlarmDecisionIntegrationTest {
     }
 
     @Test
+    @Tag("process-restart")
     @DisplayName("별도 Backend 프로세스는 FOLLOW_UP의 기존 cycle UUID를 복구한다")
     void process_restart_restores_follow_up() throws Exception {
         Instant now = Instant.now();
@@ -288,6 +290,7 @@ class BusAlarmDecisionIntegrationTest {
     }
 
     @Test
+    @Tag("process-restart")
     @DisplayName("SIGTERM 시 미완료 transaction은 rollback되고 재시작 뒤 최초 baseline이 평가된다")
     void process_shutdown_rolls_back_inflight_baseline() throws Exception {
         Alarm alarm = alarm(false);

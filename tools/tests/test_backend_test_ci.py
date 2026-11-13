@@ -87,11 +87,12 @@ class BackendCiTests(unittest.TestCase):
             root = Path(directory)
             tests = root / 'backend/src/test/java'; tests.mkdir(parents=True)
             (tests / 'MigrationTest.java').write_text('@Tag("migration") class MigrationTest { @Test void old() {} }')
+            (tests / 'RestartTest.java').write_text('class RestartTest { @Test @Tag("process-restart") void a() {} @Test @Tag("process-restart") void b() {} }')
             with self.assertRaises(ValueError): ci.report(root, 'full')
             result = root / 'TEST-example.xml'
             result.write_text('<testsuite tests="10" failures="0" errors="0" skipped="0"/>')
             ci.report(root, 'regular', root=root)
-            self.assertIn('intentionally excluded migration cases=1', output.getvalue())
+            self.assertIn('intentionally excluded migration cases=1, process-restart cases=2', output.getvalue())
             self.assertNotIn('db-tagged', output.getvalue())
             ci.report(root, 'fast', root=root)
             self.assertIn('db-tagged tests intentionally excluded', output.getvalue())

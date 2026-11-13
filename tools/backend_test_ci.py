@@ -42,6 +42,12 @@ def migration_cases(root=ROOT):
     return total
 
 
+def restart_cases(root=ROOT):
+    """Method-level child-JVM restart probes that only the full suite runs."""
+    return sum(path.read_text().count('@Tag("process-restart")')
+               for path in (root / 'backend/src/test/java').rglob('*.java'))
+
+
 def database_related(path, diff=''):
     if path in {'docker-compose.yml', 'compose.yml', 'compose.yaml', '.env.example'}:
         return True
@@ -99,10 +105,11 @@ def report(result_dir, suite, root=ROOT):
     if totals['tests'] == 0:
         raise ValueError('No tests were executed')
     excluded = migration_cases(root) if suite != 'full' else 0
+    restarts = restart_cases(root) if suite != 'full' else 0
     message = (f"Backend {suite}: executed={totals['tests']}, "
                f"passed={totals['tests'] - totals['failures'] - totals['errors'] - totals['skipped']}, "
                f"failures={totals['failures']}, errors={totals['errors']}, skipped={totals['skipped']}, "
-               f"intentionally excluded migration cases={excluded}"
+               f"intentionally excluded migration cases={excluded}, process-restart cases={restarts}"
                + (', db-tagged tests intentionally excluded (no Backend changes)' if suite == 'fast' else '') + '\n')
     print(message, end='')
     summary = os.environ.get('GITHUB_STEP_SUMMARY')

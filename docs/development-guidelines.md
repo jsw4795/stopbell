@@ -277,16 +277,16 @@ Backend와 Flutter는 변경한 클래스·기능의 직접 관련 테스트를 
 ### Backend 테스트 그룹과 DB 격리
 
 - `./gradlew test`와 `./gradlew build`는 과거 Migration·실패·백업 복원을 포함한 전체 검증이다.
-- `./gradlew fastTest`는 DB 비의존 테스트, `./gradlew dbTest`는 현재 스키마 DB 회귀, `./gradlew ciTest`는 둘을 합친 일반 CI 검증이다. 이 세 경로는 `migration` 태그를 제외한다.
+- `./gradlew fastTest`는 DB 비의존 테스트, `./gradlew dbTest`는 현재 스키마 DB 회귀, `./gradlew ciTest`는 둘을 합친 일반 CI 검증이다. 이 세 경로는 `migration` 태그와 child JVM 재시작 검증인 `process-restart` 태그를 제외한다. `process-restart`는 `test`/`build`에서만 실행하며 로컬 선택 실행은 `./gradlew test --tests '*클래스명'`을 사용한다.
 - `./gradlew migrationTest`는 과거 스키마·업그레이드·실패 이력·복원 검증만 실행한다. 각 task에 `--tests '*클래스명'`을 추가해 변경 기능을 선택한다. 필터가 일치하지 않으면 실패하며 Skip으로 대체하지 않는다.
 
 DB 테스트는 `db`, 독립 DB가 필요한 일반 테스트는 `isolated-db`, 과거 Migration/복원은 `migration` 태그를 명시한다. Migration과 현재 기능 검증이 섞인 클래스는 해당 메서드만 `migration`으로 지정한다. CI의 제외 사례 수 집계를 위해 `@Tag("migration")`을 literal로 사용하고, 새로운 파라미터 형식은 `tools/backend_test_ci.py`의 집계 지원을 함께 검증한다. 지원하지 않는 형식이나 변경 감지 실패는 전체 검증으로 전환한다.
 
 `LatestSchemaIntegrationTest`는 호환되는 설정·Bean 상태를 사용하는 테스트만 상속한다. 동일 최신 DB와 Context 캐시를 사용하고 Flyway 최신 적용·validation 및 Hibernate mapping 검증을 유지한다. 클래스 경계에서는 FK를 활성화한 `reset-latest-schema.sql`을 별도 트랜잭션으로 실행한다. 일반적인 메서드는 기존 rollback을 유지하며 commit하는 메서드는 전후 정리가 추가로 필요하다. AUTO_INCREMENT를 초기화하지 않고 특정 ID나 순서에 의존하지 않는다. Migration으로 테이블을 추가·삭제하면 정리 SQL도 맞춰야 하며 실제 테이블 목록과 정리 대상 일치를 setup에서 검사한다.
 
-DDL·실패 주입·비동기 경쟁·프로세스 재시작, 다른 설정/Mock 조합을 사용하는 테스트는 격리 필요성을 먼저 검토한다. 공유를 위해 이 검증을 약화하거나 전역 rollback으로 바꾸지 않는다. 공유 DB 실행은 하나의 worker에서 순차 수행하며 Cached Context의 pool을 닫은 뒤 공유 MySQL을 종료한다. 공유 대상을 늘리면 해당 클래스들의 반복·무작위 클래스/메서드 순서를 검증한다.
+DDL·실패 주입·비동기 경쟁·프로세스 재시작, 다른 설정/Mock 조합을 사용하는 테스트는 격리 필요성을 먼저 검토한다. 공유를 위해 이 검증을 약화하거나 전역 rollback으로 바꾸지 않는다. 공유 DB 실행은 worker JVM 안에서 순차 수행한다. `ciTest`만 worker 2개(`-PciTestForks=N`으로 조정)를 사용하고 각 worker는 자신의 MySQL 서버와 DB를 소유한다. 나머지 Test task는 worker 1개를 유지하며 Cached Context의 pool을 닫은 뒤 공유 MySQL을 종료한다. 공유 대상을 늘리면 해당 클래스들의 반복·무작위 클래스/메서드 순서를 검증한다.
 
-일반 Push/PR CI는 안전한 변경 감지 후 범위를 고른다. `backend/` 변경이 없으면 `assemble fastTest`만 실행하고 DB 회귀(`db` 태그)는 생략한다. DB와 무관한 Backend 변경은 `assemble ciTest`를 사용한다. DB·설정·매핑·테스트 인프라 변경, 판단 불가 또는 수동 실행은 `build`로 전체 검증한다. 실행 및 의도적 Migration·DB 제외와 실패·Skip은 GitHub Step Summary에 보고한다. 배포 전에는 전체 `build`를 실행한다. 구체적인 변경 감지 범위와 실행 명령은 [Local Development](local-development.md#task-809-ci-검증), 전후 측정은 [분석 보고서](research/backend-test-performance-analysis.md)를 따른다.
+일반 Push/PR CI는 안전한 변경 감지 후 범위를 고른다. `backend/` 변경이 없으면 `assemble fastTest`만 실행하고 DB 회귀(`db` 태그)는 생략한다. DB와 무관한 Backend 변경은 `assemble ciTest`를 사용한다. DB·설정·매핑·테스트 인프라 변경, 판단 불가 또는 수동 실행은 `build`로 전체 검증한다. 실행 및 의도적 Migration·`process-restart`·DB 제외와 실패·Skip은 GitHub Step Summary에 보고한다. 배포 전에는 전체 `build`를 실행한다. 구체적인 변경 감지 범위와 실행 명령은 [Local Development](local-development.md#task-809-ci-검증), 전후 측정은 [분석 보고서](research/backend-test-performance-analysis.md)를 따른다.
 
 ### Flyway Migration 추가 시 필수 회귀 검증
 

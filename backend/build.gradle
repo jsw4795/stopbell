@@ -66,11 +66,16 @@ tasks.withType(Test).configureEach {
         group = 'verification'
         testClassesDirs = sourceSets.test.output.classesDirs
         classpath = sourceSets.test.runtimeClasspath
+        if (taskName == 'ciTest') {
+            // Each worker JVM owns its own MySQL server and runs its classes sequentially.
+            maxParallelForks = (providers.gradleProperty('ciTestForks').getOrElse('2')) as int
+        }
         useJUnitPlatform {
             if (taskName == 'migrationTest') {
                 includeTags 'migration'
             } else {
-                excludeTags 'migration'
+                // Child-JVM restart probes take tens of seconds; only test/build run them.
+                excludeTags 'migration', 'process-restart'
                 if (taskName == 'fastTest') excludeTags 'db'
                 if (taskName == 'dbTest') includeTags 'db'
             }
