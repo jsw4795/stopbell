@@ -372,7 +372,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey(22)));
     await tester.pumpAndSettle();
     expect(find.byType(SwitchListTile), findsNWidgets(2));
-    expect(find.text('도착하면 알려드려요'), findsOneWidget);
+    expect(find.text('도착하면 알려드려요'), findsNothing);
     final before = find.widgetWithText(SwitchListTile, '한 정류장 전 알림');
     final after = find.widgetWithText(SwitchListTile, '한 정류장 후 알림');
     expect(tester.getSize(before).height, greaterThanOrEqualTo(44));

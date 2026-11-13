@@ -309,7 +309,6 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
                       ),
                     ],
                   ),
-                  const Text('도착하면 알려드려요'),
                   if (target.canNotifyOneStopBefore)
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
