@@ -376,14 +376,10 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
   }
 
   String? _stopDirection(BusRouteStopOccurrence stop) {
-    final sameName = _stops
-        .where(
-          (item) =>
-              stopDisplayName(item.name).name ==
-              stopDisplayName(stop.name).name,
-        )
-        .toList();
-    if (sameName.length < 2) return null;
+    final sameName = _stops.where(
+      (item) =>
+          stopDisplayName(item.name).name == stopDisplayName(stop.name).name,
+    );
     final destination = stop.destinationName;
     if (destination != null &&
         sameName.where((item) => item.destinationName == destination).length ==
@@ -395,7 +391,8 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
         sameName.where((item) => item.nextStopName == next).length == 1) {
       return '$next 방면';
     }
-    return '노선 순서 ${stop.order}';
+    final direction = stop.destinationName ?? stop.nextStopName;
+    return direction == null ? null : '$direction 방면';
   }
 
   Widget _buildStops() {
@@ -435,6 +432,7 @@ class _BusRouteStopScreenState extends State<BusRouteStopScreen> {
           onSelect: _creating || _outcomeUnknown ? null : _select,
           vehicles: vehicles?.data?.vehicles,
           vehicleColor: routeTypeColor(context, widget.route),
+          stopDirection: _stopDirection,
         );
         if (vehicles == null) return timeline();
         return Column(

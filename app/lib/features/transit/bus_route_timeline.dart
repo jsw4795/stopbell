@@ -95,6 +95,7 @@ class BusRouteTimeline extends StatefulWidget {
     this.selectionLocked = false,
     this.vehicles,
     this.vehicleColor,
+    this.stopDirection,
   });
 
   final List<BusRouteStopOccurrence> stops;
@@ -104,6 +105,7 @@ class BusRouteTimeline extends StatefulWidget {
   final Key Function(int id)? rowKey;
   final bool Function(BusRouteStopOccurrence)? isSelectable;
   final bool selectionLocked;
+  final String? Function(BusRouteStopOccurrence)? stopDirection;
 
   /// 선택 입력. null이면 기존과 동일하게 그린다. occurrenceId가 없는 차량은
   /// 노선도에 찍지 않는다.
@@ -129,7 +131,8 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
   void didUpdateWidget(covariant BusRouteTimeline oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.targetId != oldWidget.targetId ||
-        widget.boardingId != oldWidget.boardingId) {
+        widget.boardingId != oldWidget.boardingId ||
+        widget.stopDirection != oldWidget.stopDirection) {
       _layout = null;
     }
     if (!identical(widget.vehicles, oldWidget.vehicles)) {
@@ -206,7 +209,10 @@ class _BusRouteTimelineState extends State<BusRouteTimeline> {
     final stop = widget.stops[index];
     final details = [
       if (index == _turn?.index) '회차지점',
-      if ((stop.id == widget.targetId || stop.id == widget.boardingId) &&
+      if (widget.stopDirection != null && widget.stopDirection!(stop) != null)
+        widget.stopDirection!(stop)!,
+      if (widget.stopDirection == null &&
+          (stop.id == widget.targetId || stop.id == widget.boardingId) &&
           (_counts[stopDisplayName(stop.name).name] ?? 0) > 1 &&
           (stop.destinationName == null ||
               widget.stops

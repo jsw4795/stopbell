@@ -34,7 +34,7 @@ V1은 기존 버스 도착·통과 Alarm과 선택한 특정 차량의 하차 �
 
 정류장 선택 UI는 Backend가 전달한 `canNotifyOneStopBefore`와 `canNotifyOneStopAfter`를 사용해 각각 사용할 수 없는 before/after option을 비활성화한다. Stop order를 산술적으로 증감해 인접 정류장을 추측하지 않는다.
 
-사용자는 Route traversal 안에서 선택할 Stop occurrence를 충분히 구분할 수 있어야 하며, 동일 정류장명이나 왕복·순환·회차로 방향 구분이 필요한 경우 UI는 Backend가 제공하는 검증된 metadata/계약을 사용해야 한다. TASK-608A의 표시 계약은 검증된 경기 GBIS traversal의 `destinationName`(서울·검증 실패 경기 Route는 null), 실제 인접 occurrence의 `previousStopName`/`nextStopName`, 마지막 구분값인 `order`를 사용한다. 반복 occurrence는 각각의 `id`로 선택한다. 이 표시 정보로 실제 차량의 실시간 운행 방향을 증명하거나 추측하지 않는다. 필드와 nullable 조건은 [Stop API](api.md#버스-노선의-정류장-조회)를 따른다.
+사용자는 Route traversal 안에서 선택할 Stop occurrence를 충분히 구분할 수 있어야 하며, 동일 정류장명이나 왕복·순환·회차로 방향 구분이 필요한 경우 UI는 Backend가 제공하는 검증된 metadata/계약을 사용해야 한다. TASK-608A의 표시 계약은 검증된 경기 GBIS traversal의 `destinationName`(서울·검증 실패 경기 Route는 null), 실제 인접 occurrence의 `previousStopName`/`nextStopName`, `order`를 제공한다. 도착 알람 정류장 선택 UI는 모든 occurrence에 `destinationName` 기반 'OO 방면' 한 줄만 표시하고, 이전·다음 정류장과 노선 순서는 표시하지 않는다. `destinationName`이 null이면 보조 표시를 생략한다. 반복 occurrence는 각각의 `id`로 선택한다. 이 표시 정보로 실제 차량의 실시간 운행 방향을 증명하거나 추측하지 않는다. 필드와 nullable 조건은 [Stop API](api.md#버스-노선의-정류장-조회)를 따른다.
 
 도착 알람과 하차 알림의 정류장 선택은 첫 occurrence부터 마지막 occurrence까지 하나의 세로 노선도로 표시한다. 회차 경계를 검증할 수 있는 노선은 고정 헤더 아래 첫 표시 정류장에 따라 방향이 바뀌며, 방향 버튼은 선택을 유지한 채 노선도 안에서 출발 또는 회차 occurrence로 이동한다. 방향을 검증할 수 없어도 전체 노선도에서 정류장을 선택할 수 있다. 선택한 승차와 목표 정류장은 노선도 스크롤과 독립된 하단 요약에서 확인한다. 노선도는 정류장명 끝의 `(미정차)` 표기를 회색 보조 텍스트로 분리해 표시하며, 표기가 없다는 사실은 실제 정차를 보장하지 않는다. 해당 표기는 선택이나 알림 판단을 제한하지 않는다.
 

@@ -86,11 +86,7 @@ void main() {
         '${theme.brightness} ${selectedRoute.routeNumber} header uses route color and top spacing',
         (tester) async {
           await tester.pumpWidget(
-            screen(
-              (_) async => [],
-              selectedRoute: selectedRoute,
-              theme: theme,
-            ),
+            screen((_) async => [], selectedRoute: selectedRoute, theme: theme),
           );
           await tester.pumpAndSettle();
           final number = find.text(selectedRoute.routeNumber);
@@ -144,6 +140,29 @@ void main() {
     expect(find.textContaining('노선 순서'), findsNothing);
     expect(find.textContaining('이전:'), findsNothing);
   });
+
+  testWidgets(
+    'each row shows available direction and omits unknown direction',
+    (tester) async {
+      await tester.pumpWidget(screen((_) async => [first, middle, last]));
+      await tester.pumpAndSettle();
+      Finder rowText(int id) => find.descendant(
+        of: find.byKey(ValueKey(id)),
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Text && widget.textSpan != null,
+        ),
+      );
+      String label(int id) =>
+          tester.widget<Text>(rowText(id).first).textSpan!.toPlainText();
+      expect(label(11), contains('중간 정류장 방면'));
+      expect(label(22), contains('종점 방면'));
+      expect(label(33), isNot(contains('방면')));
+      await tester.tap(find.byKey(const ValueKey(33)));
+      await tester.pump();
+      expect(find.textContaining('노선 순서'), findsNothing);
+      expect(label(33), isNot(contains('방면')));
+    },
+  );
 
   testWidgets(
     'direction buttons preserve a selected pass-through occurrence without reloading',
@@ -205,7 +224,7 @@ void main() {
             .value,
         isTrue,
       );
-      await tester.tap(find.text('회차 방면'));
+      await tester.tap(find.text('회차 방면').first);
       await tester.pumpAndSettle();
       expect(find.byIcon(Icons.flag_outlined).hitTestable(), findsOneWidget);
       expect(requests, 1);
@@ -321,7 +340,7 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey(22)));
     await tester.pump();
-    expect(find.textContaining('종점 방면'), findsNothing);
+    expect(find.text('종점 방면'), findsOneWidget);
     var switches = tester
         .widgetList<SwitchListTile>(find.byType(SwitchListTile))
         .toList();
@@ -393,7 +412,7 @@ void main() {
         .toList();
     expect(find.text('한 정류장 후 알림'), findsNothing);
     expect(switches.map((item) => item.value), [false]);
-    expect(find.text('노선 순서 7'), findsOneWidget);
+    expect(find.textContaining('노선 순서'), findsNothing);
     expect(find.textContaining('이전:'), findsNothing);
     expect(
       tester
@@ -412,7 +431,7 @@ void main() {
   });
 
   testWidgets(
-    'unresolved duplicates show only order in a single helper line',
+    'duplicates with the same destination retain direction without order',
     (tester) async {
       const repeatedA = BusRouteStopOccurrence(
         id: 41,
@@ -441,8 +460,8 @@ void main() {
       await tester.tap(find.byKey(const ValueKey(42)));
       await tester.pump();
       expect(find.textContaining('선택한 정류장: 순환 정류장'), findsOneWidget);
-      expect(find.text('노선 순서 34'), findsOneWidget);
-      expect(find.textContaining('종점 방면'), findsNothing);
+      expect(find.textContaining('노선 순서'), findsNothing);
+      expect(find.text('종점 방면'), findsOneWidget);
       expect(find.textContaining('이전:'), findsNothing);
     },
   );
